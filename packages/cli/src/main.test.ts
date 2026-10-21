@@ -245,6 +245,7 @@ describe("CLI main", () => {
       "servers",
       "store",
       "healthcheck",
+      "worker",
     ]);
     expect(code).toBe(ExitCode.ok);
     expect(stdout.join("")).toContain("Usage: harness");

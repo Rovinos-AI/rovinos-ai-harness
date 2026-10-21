@@ -488,6 +488,7 @@ store: {}`,
 
     expect(config).toEqual({
       controlPlane: {
+        allowAgentStartedRuns: false,
         allowReveal: false,
         auth: { tokens: [] },
         listen: { host: "127.0.0.1", port: 3_000 },
@@ -497,6 +498,7 @@ store: {}`,
       run: {
         checkpointEveryEvents: 20,
         shutdownGraceMs: 20_000,
+        autoResume: true,
         continuations: {
           allowFromFailed: false,
           maxChainLength: 50,

@@ -191,7 +191,7 @@ class HarnessClient implements Harness {
       goal: input.goal,
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     });
-    const result = await this.runtime.continueRun(parsedRunId, runInput);
+    const result = await this.runtime.continueRun(parsedRunId, runInput).completion;
     const created = result.events.find((event) => event.type === "run_created");
     if (created?.type !== "run_created") {
       throw new SdkError("sdk_run_not_found");

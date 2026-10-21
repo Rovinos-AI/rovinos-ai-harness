@@ -19,6 +19,7 @@ import {
   isSafeAttr,
   listSpanDefinitions,
   lookupSpanDefinition,
+  safeRecordError,
   setActiveSpanAttribute,
   SpanRegistryError,
   withSpan,
@@ -398,15 +399,31 @@ describe("span registry", () => {
     expect(spans[1]?.status.message).toBeUndefined();
     expect(spans[1]?.attributes["harness.error.code"]).toBe("x_failed");
     expect(spans[2]?.status.code).toBe(SpanStatusCode.ERROR);
-    expect(spans[2]?.attributes["harness.error.code"]).toBeUndefined();
+    expect(spans[2]?.attributes["harness.error.code"]).toBe("unknown_error");
     expect(spans[3]?.status.code).toBe(SpanStatusCode.ERROR);
-    expect(spans[3]?.attributes["harness.error.code"]).toBeUndefined();
+    expect(spans[3]?.attributes["harness.error.code"]).toBe("unknown_error");
     const exportedFields = JSON.stringify(
       spans.map(({ attributes, events, status }) => ({ attributes, events, status })),
     );
     expect(exportedFields).not.toContain("sensitive error message");
     expect(exportedFields).not.toContain("untyped sensitive message");
     expect(exportedFields).not.toContain("forged sensitive message");
+  });
+
+  it("records only a stable code and error status for registered spans", () => {
+    const definition = defineTestSpan();
+    const span = definition.start({
+      "harness.request.id": testId,
+      "harness.test.count": 1,
+      "harness.test.mode": "safe",
+    });
+
+    safeRecordError(span, new X());
+    span.end();
+
+    const [exported] = exporter.getFinishedSpans();
+    expect(exported?.status).toEqual({ code: SpanStatusCode.ERROR });
+    expect(exported?.attributes["harness.error.code"]).toBe("x_failed");
   });
 
   it("exposes the registered tracer used by span starts", () => {

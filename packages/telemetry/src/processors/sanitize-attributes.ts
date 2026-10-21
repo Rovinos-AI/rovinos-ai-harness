@@ -15,8 +15,32 @@ const resourceAttributeNames = [
   "telemetry.sdk.version",
 ] as const;
 
+const deniedAttributeNames = new Set([
+  "exception.message",
+  "exception.stacktrace",
+  "http.url",
+  "url.full",
+  "url.query",
+  "http.target",
+  "db.statement",
+]);
+const deniedAttributePrefixes = [
+  "gen_ai.prompt",
+  "gen_ai.completion",
+  "gen_ai.input",
+  "gen_ai.output",
+  "gen_ai.system_instructions",
+] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDeniedAttributeName(name: string): boolean {
+  return (
+    deniedAttributeNames.has(name) ||
+    deniedAttributePrefixes.some((prefix) => name.startsWith(prefix))
+  );
 }
 
 function isAttributeValue(value: unknown): value is string | number | boolean {
@@ -66,6 +90,10 @@ export function sanitizeAttributes(
 
   const sanitized: Attributes = {};
   for (const [key, value] of Object.entries(attrs)) {
+    if (isDeniedAttributeName(key)) {
+      continue;
+    }
+
     if (
       [
         "harness.user.pseudonym",

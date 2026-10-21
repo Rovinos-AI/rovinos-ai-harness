@@ -95,6 +95,13 @@ receives SIGINT or SIGTERM. HTTP mode also accepts `--json`, which writes the va
 `{"status":"serving"}` result to stdout and the endpoint to stderr. JSON mode is not available with
 stdio because stdout carries the MCP protocol.
 
+## `harness worker`
+
+`harness worker [--concurrency <n>]` drains the run queue stored alongside the configured event
+store. Concurrency defaults to `1` and is limited to `1` through `1000`. Workers stop claiming on
+SIGINT or SIGTERM, allow active runs to suspend, and return suspended jobs to the queue. `--json`
+prints one `{"status":"worker_started"}` document when the worker begins.
+
 HTTP mode requires at least one configured bearer token and rejects unauthenticated requests before
 MCP dispatch. Configure token scopes and secret references as described in
 [Control-plane security](control-plane-security.md); stdio remains the trusted local transport.
@@ -269,7 +276,7 @@ never included in CLI error output.
 | Error code | Exit code |
 | --- | --- |
 | `usage`, `confirmation_required`, `edit_not_allowed`, `edit_invalid` | `2` |
-| `serve_options_invalid`, `serve_port_invalid`, `stdio_json_unsupported` | `2` |
+| `serve_options_invalid`, `serve_port_invalid`, `stdio_json_unsupported`, `worker_concurrency_invalid` | `2` |
 | `doctor_failed`, `approval_sweep_partial`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
 | `approval_edit_unavailable`, `reveal_unavailable` | `1` |
 | `migration_checksum_mismatch`, `schema_newer_than_code`, `migration_set_invalid`, `schema_migration_pending`, `retention_not_configured`, `retention_hook_failed` | `1` |

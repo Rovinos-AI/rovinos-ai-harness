@@ -31,6 +31,7 @@ export const RunConfigSchema = z
   .object({
     checkpointEveryEvents: z.coerce.number().int().positive().default(20),
     shutdownGraceMs: z.coerce.number().int().positive().default(20_000),
+    autoResume: z.boolean().default(true),
     continuations: RunContinuationsSchema,
     resume: z
       .object({

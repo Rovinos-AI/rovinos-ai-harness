@@ -51,6 +51,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         run: z.ZodPrefault<z.ZodObject<{
             checkpointEveryEvents: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
             shutdownGraceMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            autoResume: z.ZodDefault<z.ZodBoolean>;
             continuations: z.ZodPrefault<z.ZodObject<{
                 allowFromFailed: z.ZodDefault<z.ZodBoolean>;
                 maxChainLength: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
@@ -463,6 +464,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }, z.core.$strict>>;
         controlPlane: z.ZodOptional<z.ZodDefault<z.ZodObject<{
             allowReveal: z.ZodDefault<z.ZodBoolean>;
+            allowAgentStartedRuns: z.ZodDefault<z.ZodBoolean>;
             auth: z.ZodDefault<z.ZodObject<{
                 tokens: z.ZodDefault<z.ZodArray<z.ZodObject<{
                     id: z.ZodString;

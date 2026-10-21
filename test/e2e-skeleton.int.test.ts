@@ -6,10 +6,10 @@
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
 // Not wired yet: Vertex AI provider registration in runtime configuration (14.20 -> #161)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
+// Not wired yet: automatic resume after a durable human-input answer (25.5 -> #243)
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
 // Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
-// Not wired yet: control-plane start_run requester attribution (18.5 -> #178)
 // Not wired yet: simulated eval approver identity (16.6 -> #172)
 // Not wired yet: worker claim-time concurrency quota enforcement (24.3 -> #232)
 import { Command } from "commander";
@@ -31,12 +31,17 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   createDefaultContext,
+  createControlPlaneOperations,
   createOutput,
   ExitCode,
   main,
   type CliContext,
 } from "@harness/cli/programmatic";
-import { createControlPlaneServer, startControlPlaneHttp } from "@harness/control-plane";
+import {
+  createControlPlaneServer,
+  startControlPlaneHttp,
+  startRunOutputSchema,
+} from "@harness/control-plane";
 import { createHarness } from "@harness/sdk";
 import {
   CompositeSecretResolver,
@@ -50,9 +55,11 @@ import {
   createRuntime,
   foldRunState,
   NaiveContext,
+  openConfiguredRunQueue,
   requestApproval,
   RunRecorder,
   RUN_SPAN,
+  Worker,
   type ModelPort,
   type ModelCompletion,
   type PolicyPort,
@@ -1521,18 +1528,60 @@ describe("approval", () => {
 });
 
 describe("resume", () => {
-  it("executes the ask tool only after recording approval and completes the run", async () => {
+  it("worker executes an approved ask only after recording approval and completes the run", async () => {
     const current = fixture();
     const runId = current.runId;
     if (runId === undefined) {
       throw new Error("The run id is not available.");
     }
     current.sentinelProbe.enabled = true;
-    const fakeModelPath = join(current.directory, "resume-model.json");
-    await writeFile(fakeModelPath, '[{"content":"completed"}]', "utf8");
-    const result = await invokeCli(["--json", "resume", runId, "--fake-model", fakeModelPath]);
-    expect(result.code).toBe(ExitCode.ok);
-    expect(jsonResult(RunResultSchema, result.stdout).status).toBe("completed");
+    const config = await current.context.loadConfig();
+    const queue = await openConfiguredRunQueue(config, {
+      dataDir: current.dataDirectory,
+      clock: current.clock,
+      ids: current.ids,
+    });
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    try {
+      runtime = await createRuntime(config, {
+        queue,
+        dataDir: current.dataDirectory,
+        clock: current.clock,
+        ids: current.ids,
+        model: current.model,
+        roleConfigDirectory: current.directory,
+        secretResolver: new CompositeSecretResolver(),
+        sandboxBackend: unusedSandboxBackend,
+        tool: syntheticTools(
+          current.callsBeforeApproval,
+          current.callsAfterApproval,
+          current.argsAfterApproval,
+        ),
+      });
+      const control: { worker?: Worker } = {};
+      const worker = new Worker({
+        queue,
+        ids: current.ids,
+        clock: current.clock,
+        execute: async (job, signal) => {
+          const resumed = await runtime?.resume(job.runId, { signal });
+          control.worker?.stop();
+          if (resumed === undefined) {
+            throw new Error("The worker runtime was not initialized.");
+          }
+          return resumed;
+        },
+      });
+      control.worker = worker;
+      await worker.run();
+      expect(await queue.claim("worker.verify", 1, 30_000)).toEqual([]);
+    } finally {
+      try {
+        await runtime?.close();
+      } finally {
+        await queue.close();
+      }
+    }
     expect(current.callsAfterApproval).toEqual([ASK_TOOL]);
     expect(current.argsAfterApproval).toEqual([{ email: current.canary, foreign: "<PHONE_1>" }]);
 
@@ -2390,6 +2439,59 @@ describe("control plane", () => {
       await clientTransport.close();
       await serverTransport.close();
       await store.close();
+    }
+  });
+
+  it("starts a tokenized run through MCP with requester attribution and a metadata-only result", async () => {
+    const store = new InMemoryEventStore();
+    const model = new FakeModelPort([completion([], "Synthetic completion")]);
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({ defaultAction: "tokenize" }),
+      },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(1_000),
+        ids: new SequentialIdGenerator(),
+        model,
+      },
+    );
+    const server = createControlPlaneServer(runtime.store, {
+      controlPlane: ControlPlaneConfigSchema.parse({ allowAgentStartedRuns: true }),
+      isAppContext: () => true,
+      operations: createControlPlaneOperations(runtime),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "control-plane-start-e2e", version: "1.0.0" });
+    const contentCanary = "control-plane-e2e@example.test";
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = await client.callTool({
+        name: "start_run",
+        arguments: { goal: `Contact ${contentCanary}` },
+      });
+      const output = JSON.stringify(result);
+      const structured = startRunOutputSchema.parse(result.structuredContent);
+      expect(structured).toMatchObject({ status: "pending" });
+      expect(output).not.toContain(contentCanary);
+      if ("code" in structured) {
+        throw new Error("The start_run tool returned a coded failure.");
+      }
+      const events = await readEvents(runtime.store, structured.runId);
+      const created = events[0];
+      const input = events.find((event) => event.type === "run_input");
+      expect(created).toMatchObject({ type: "run_created", requestedBy: "token.local" });
+      expect(JSON.stringify(input)).not.toContain(contentCanary);
+      expect(JSON.stringify(input)).toContain("<");
+    } finally {
+      await client.close();
+      await server.close();
+      await clientTransport.close();
+      await serverTransport.close();
+      await runtime.close();
     }
   });
 });

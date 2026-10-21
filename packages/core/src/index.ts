@@ -121,6 +121,7 @@ export {
   type RuntimeConfig,
   type RuntimeOverrides,
   type RuntimeResumeOptions,
+  type RuntimeRunHandle,
 } from "./runtime.js";
 export {
   BUILTIN_ROLE_DEFAULTS,
@@ -146,6 +147,7 @@ export {
   openConfiguredKeyRotation,
   openConfiguredVaultAdmin,
   openConfiguredStore,
+  openConfiguredRunQueue,
   type ConfiguredKeyRotation,
   type ConfiguredKeyRotationOptions,
   type ConfiguredVaultAdmin,
@@ -155,6 +157,12 @@ export {
 export { RunScopeConflictError, RunScopeRegistry } from "./subagent/scope.js";
 export { ChildBudgetExceededError, deriveChildBudgets } from "./subagent/budgets.js";
 export { finalizeChild, SubagentResultSchema, type SubagentResult } from "./subagent/result.js";
+export {
+  Worker,
+  type WorkerJobExecutor,
+  type WorkerJobOutcome,
+  type WorkerOptions,
+} from "./worker.js";
 export { AgentSpawnInputSchema, AgentSpawnTool } from "./subagent/spawn-tool.js";
 export {
   restrictToolPort,

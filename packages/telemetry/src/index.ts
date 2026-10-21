@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 export { attr, getAttrMeta, isSafeAttr, type AttrMeta } from "./attr.js";
-export { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
+export { SpanRegistryError, TelemetrySdkError, type SpanRegistryIssue } from "./errors.js";
 export { LogRegistryError } from "./log-registry.js";
 export {
   SafeEvent,
@@ -38,10 +38,14 @@ export {
   countPiiDetectorDegraded,
   countPolicyDecision,
   countQuotaRejection,
+  countWorkerJob,
   METRIC_ALLOWLIST,
+  recordWorkerQueueLag,
   type HostAppRejectedReason,
   type PolicyDecision,
   POLICY_DECISIONS,
+  type WorkerJobOutcome,
+  WORKER_JOB_OUTCOMES,
   type TelemetryDropReason,
 } from "./metrics.js";
 export {
@@ -52,6 +56,7 @@ export {
   listSpanDefinitions,
   lookupSpanDefinition,
   setActiveSpanAttribute,
+  safeRecordError,
   withSpan,
   type SpanDefinition,
   type SpanDefinitionShape,

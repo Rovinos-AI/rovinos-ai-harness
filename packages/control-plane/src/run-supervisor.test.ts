@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@harness/schemas";
+import type { RunQueue, RunQueueJob } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { describe, expect, it, vi } from "vitest";
 import { RunSupervisor } from "./run-supervisor.js";
@@ -114,5 +115,39 @@ describe("RunSupervisor", () => {
 
   it("rejects invalid concurrency limits", () => {
     expect(() => new RunSupervisor({ maxConcurrentRuns: 0 })).toThrow();
+  });
+
+  it("delegates resume requests to the durable queue when configured", async () => {
+    const runId = Id.parse("00000000000000000000000003");
+    const job: RunQueueJob = {
+      jobId: Id.parse("00000000000000000000000004"),
+      kind: "resume",
+      runId,
+      priority: 0,
+      availableAt: 100,
+      attempts: 0,
+      maxAttempts: 5,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const enqueue = vi.fn(() => Promise.resolve(job));
+    const queue: RunQueue = {
+      enqueue,
+      claim: () => Promise.resolve([]),
+      heartbeat: () => Promise.resolve(true),
+      complete: () => Promise.resolve(true),
+      fail: () => Promise.resolve("retry"),
+      release: () => Promise.resolve(true),
+      getDeadLetter: () => Promise.resolve(undefined),
+      close: () => Promise.resolve(),
+    };
+    const resumeRun = vi.fn();
+    const supervisor = new RunSupervisor({ queue, resumeRun });
+
+    await expect(supervisor.start(runId)).resolves.toEqual({ started: true });
+
+    expect(enqueue).toHaveBeenCalledWith({ kind: "resume", runId });
+    expect(resumeRun).not.toHaveBeenCalled();
+    expect(supervisor.isActive(runId)).toBe(false);
   });
 });

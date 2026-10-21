@@ -27,6 +27,7 @@ const authTokenSchema = z
 export const ControlPlaneConfigSchema = z
   .object({
     allowReveal: z.boolean().default(false),
+    allowAgentStartedRuns: z.boolean().default(false),
     auth: z
       .object({ tokens: z.array(authTokenSchema).default([]) })
       .strict()
@@ -64,6 +65,7 @@ export const ControlPlaneConfigSchema = z
   .strict()
   .default({
     allowReveal: false,
+    allowAgentStartedRuns: false,
     auth: { tokens: [] },
     listen: { host: "127.0.0.1", port: 3_000 },
     allowedHosts: ["127.0.0.1", "localhost", "::1"],

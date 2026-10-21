@@ -26,6 +26,7 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   edit_not_allowed: ExitCode.usage,
   serve_options_invalid: ExitCode.usage,
   serve_port_invalid: ExitCode.usage,
+  worker_concurrency_invalid: ExitCode.usage,
   stdio_json_unsupported: ExitCode.usage,
   approval_edit_unavailable: ExitCode.failure,
   key_rotation_incomplete: ExitCode.failure,
