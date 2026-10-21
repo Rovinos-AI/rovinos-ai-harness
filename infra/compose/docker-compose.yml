@@ -44,9 +44,11 @@ services:
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=2).read()"
       interval: 5s
       timeout: 3s
-      # Measured on the CI agent (2026-10-20): cold start healthy in 7 s idle and 9-12 s while the
-      # unit suite runs. 120 s (about 10x) absorbs parallel Compose stacks starting at once.
-      start_period: 120s
+      # Measured on the CI agent (2026-10-21): healthy in 2-7 s, 4 s with a cold page cache, under the
+      # full prod-like hardening. Starts slowed to minutes only when the Docker VM was starved (just
+      # after a reboot, or with many Compose stacks at once), so Compose suites now run one at a
+      # time and this keeps a wide margin.
+      start_period: 300s
       retries: 20
     networks:
       - internal
