@@ -11,6 +11,7 @@ import {
   BatchSpanProcessor,
   type SpanExporter,
 } from "@opentelemetry/sdk-trace-base";
+import { TelemetrySdkError } from "./errors.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
 import { AllowlistSpanProcessor } from "./processors/allowlist-span-processor.js";
 import { assertSentinelGate, type SentinelGate } from "./sentinel/gate.js";
@@ -37,10 +38,19 @@ export interface TelemetrySdk {
 
 /**
  * Build trace and log providers with the allowlist and sentinel as the final export gate.
+ * No auto-instrumentations or resource detectors are enabled. HTTP/undici instrumentation
+ * added later produces unregistered spans, which the span processor drops.
  *
  * @param options Exporters and sentinel configuration.
  */
 export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
+  const contentCapture = env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT;
+  if (contentCapture === undefined) {
+    env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "false";
+  } else if (contentCapture !== "false") {
+    throw new TelemetrySdkError();
+  }
+
   assertSentinelGate(options.gate, options.telemetry);
   // Default to stable HTTP conventions without overriding an operator's setting.
   env.OTEL_SEMCONV_STABILITY_OPT_IN ??= SEMCONV_STABILITY_OPT_IN;
