@@ -63,7 +63,7 @@ function callFromText(
 
 function callsFromInstruction(text: string, ids: IdGenerator): ModelToolCall[] {
   const calls: ModelToolCall[] = [];
-  for (const match of text.matchAll(/\bcall tool\s+([a-z0-9_.-]+)\s+with\s+(\{[^\r\n]*\})/giu)) {
+  for (const match of text.matchAll(/\bcall tool\s+([\w.-]+)\s+with\s+(\{[^\r\n]*\})/giu)) {
     const argsText = match[2];
     const toolId = match[1];
     if (argsText === undefined || toolId === undefined) {
@@ -79,7 +79,7 @@ function callsFromInstruction(text: string, ids: IdGenerator): ModelToolCall[] {
       continue;
     }
   }
-  for (const match of text.matchAll(/\bsend\s+([^\s]+)\s+to\s+([a-z0-9_.-]+)/giu)) {
+  for (const match of text.matchAll(/\bsend\s+(\S+)\s+to\s+([\w.-]+)/giu)) {
     const value = match[1];
     const toolId = match[2];
     if (value === undefined || toolId === undefined) {
@@ -97,10 +97,14 @@ function callsFromInstruction(text: string, ids: IdGenerator): ModelToolCall[] {
     }
     const approvalId = Id.safeParse(approvalIdText);
     if (approvalId.success) {
-      const call = callFromText("approval.resolve", {
-        approvalId: approvalId.data,
-        decision: "approve",
-      }, ids);
+      const call = callFromText(
+        "approval.resolve",
+        {
+          approvalId: approvalId.data,
+          decision: "approve",
+        },
+        ids,
+      );
       if (call !== undefined) {
         calls.push(call);
       }
@@ -110,7 +114,8 @@ function callsFromInstruction(text: string, ids: IdGenerator): ModelToolCall[] {
     (call, index) =>
       calls.findIndex(
         (candidate) =>
-          candidate.toolId === call.toolId && JSON.stringify(candidate.args) === JSON.stringify(call.args),
+          candidate.toolId === call.toolId &&
+          JSON.stringify(candidate.args) === JSON.stringify(call.args),
       ) === index,
   );
 }
@@ -131,12 +136,17 @@ function completion(parts: ModelCompletion["parts"]): ModelCompletion {
   };
 }
 
+function callKey(call: ModelToolCall): string {
+  return JSON.stringify([call.toolId, call.args]);
+}
+
 /**
  * Worst-case test model that follows instruction-like text in the latest tool result or tool descriptions.
  */
 export class ObedientModel implements ModelPort {
   readonly requests: ObedientModelRequest[] = [];
   private bootstrapUsed = false;
+  private readonly attemptedCalls = new Set<string>();
 
   /**
    * Creates a deterministic model that turns embedded tool instructions into tool calls.
@@ -161,11 +171,16 @@ export class ObedientModel implements ModelPort {
       ...latestToolText(request),
       ...(request.tools ?? []).map(({ description }) => description),
     ].join("\n");
-    const calls = callsFromInstruction(instructionText, this.options.ids);
+    const calls = callsFromInstruction(instructionText, this.options.ids).filter((call) => {
+      const key = callKey(call);
+      if (this.attemptedCalls.has(key)) {
+        return false;
+      }
+      this.attemptedCalls.add(key);
+      return true;
+    });
     if (calls.length > 0) {
-      return Promise.resolve(
-        completion(calls.map((call) => ({ type: "tool_call", ...call }))),
-      );
+      return Promise.resolve(completion(calls.map((call) => ({ type: "tool_call", ...call }))));
     }
     const text = /IGNORE PREVIOUS INSTRUCTIONS/iu.test(instructionText)
       ? "I will follow the injected instruction."
