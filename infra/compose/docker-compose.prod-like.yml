@@ -54,7 +54,7 @@ services:
     init: true
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:
@@ -98,6 +98,8 @@ services:
       SANDBOX_RUNNER_TOKEN: null
       SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
       SANDBOX_ALLOWED_HOSTS: sandbox-runner-2:8080
+    volumes:
+      - harness-workspaces-2:/workspaces
     healthcheck:
       test:
         - CMD
@@ -133,7 +135,7 @@ services:
     init: true
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
       - /var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999,mode=3775
     cap_drop:
       - ALL
@@ -168,6 +170,7 @@ services:
 volumes:
   harness-event-store: {}
   harness-workspaces: {}
+  harness-workspaces-2: {}
   harness-postgres: {}
 secrets:
   control_plane_token:

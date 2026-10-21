@@ -184,7 +184,7 @@ export interface RuntimeComposition {
   readonly keys: LocalKeyProvider;
   readonly sandboxBackend: SandboxBackend;
   readonly workspaceSnapshotter: WorkspaceSnapshotPort;
-  readonly instanceHeartbeat?: { close(): Promise<void> };
+  readonly instanceHeartbeat?: { readonly signal: AbortSignal; close(): Promise<void> };
   readonly vault: RuntimeVault;
   readonly vaultResolver: AuditingVaultResolver;
   readonly pii:

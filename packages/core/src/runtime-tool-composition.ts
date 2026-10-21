@@ -26,6 +26,7 @@ export function createRuntimeToolPort(
     parentTool: options.tool,
     policy: options.policy,
     policyVersion: options.policyVersion,
+    sandboxBackend: options.sandboxBackend,
     workspaceSnapshotter: options.workspaceSnapshotter,
     roles: options.roles,
     scopes: options.scopes,

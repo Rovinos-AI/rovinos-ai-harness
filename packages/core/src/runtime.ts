@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id } from "@harness/schemas";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
-import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
+import {
+  closeRuntimeResources,
+  markTerminalBestEffort,
+  withSandboxLease,
+} from "./runtime-lifecycle.js";
 import {
   composeAbortSignals,
   inspectCancellationTail,
@@ -32,6 +36,7 @@ import {
 } from "./runtime-runs.js";
 import { QuotaService } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
+import { DeploymentStartupError } from "./runtime-deployment.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
@@ -116,6 +121,13 @@ interface RunControlOptions {
   readonly processLike: ShutdownProcessLike;
   readonly graceMs: number;
   readonly operation: (signal: AbortSignal) => Promise<RunLoopResult>;
+  readonly ownershipSignal?: AbortSignal;
+}
+
+function assertRuntimeOwnership(signal: AbortSignal | undefined): void {
+  if (signal?.aborted && signal.reason === "deployment_single_instance_violation") {
+    throw new DeploymentStartupError("deployment_single_instance_violation");
+  }
 }
 
 async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
@@ -135,6 +147,10 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       await running;
     },
   });
+  const operationSignal =
+    options.ownershipSignal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, options.ownershipSignal]);
   const watcher = watchCancellation({
     store: options.store,
     runId: options.runId,
@@ -150,10 +166,13 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
   });
 
   try {
-    running = options.operation(controller.signal);
+    assertRuntimeOwnership(options.ownershipSignal);
+    running = options.operation(operationSignal);
     try {
       result = await running;
+      assertRuntimeOwnership(options.ownershipSignal);
     } catch (error) {
+      assertRuntimeOwnership(options.ownershipSignal);
       if (error instanceof LeaseLostError) {
         await inspectCancellationTail({
           store: options.store,
@@ -168,6 +187,7 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
           },
         });
       }
+      assertRuntimeOwnership(options.ownershipSignal);
       if (cancellation.observed) {
         const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
         if (cancelled !== undefined) {
@@ -201,19 +221,26 @@ function createTerminalAwareRunControl({
   clock,
   store,
   vault,
+  sandboxBackend,
+  instanceHeartbeat,
 }: RuntimeComposition): RunControl {
   const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   return async (runId, operation, firstNewSeq = 0) => {
-    const result = await withRunControl({
-      store,
-      runId,
-      firstNewSeq,
-      clock,
-      flushTelemetry,
-      processLike: overrides.processLike ?? defaultProcessLike,
-      graceMs: config.run.shutdownGraceMs,
-      operation,
-    });
+    const result = await withSandboxLease(sandboxBackend, runId, () =>
+      withRunControl({
+        store,
+        runId,
+        firstNewSeq,
+        clock,
+        flushTelemetry,
+        processLike: overrides.processLike ?? defaultProcessLike,
+        graceMs: config.run.shutdownGraceMs,
+        ...(instanceHeartbeat === undefined
+          ? {}
+          : { ownershipSignal: instanceHeartbeat.signal }),
+        operation,
+      }),
+    );
     if (
       result.status === "completed" ||
       result.status === "failed" ||

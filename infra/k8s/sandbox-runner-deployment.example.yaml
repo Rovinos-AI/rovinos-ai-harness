@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Example only: replace the local image and provide a ReadWriteMany workspace claim.
+# Example only: replace the local image and provide a distinct workspace claim for each runner.
 apiVersion: v1
 kind: Service
 metadata:
@@ -27,6 +27,8 @@ metadata:
     app.kubernetes.io/instance: runner-a
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: harness
@@ -42,7 +44,16 @@ spec:
       containers:
         - name: sandbox-runner
           image: harness:local
-          command: ["node", "packages/sandbox/dist/runner/src/server.js"]
+          command:
+            - setpriv
+            - --reuid=10002
+            - --regid=10003
+            - --clear-groups
+            - --inh-caps=+setuid,+setgid,+setpcap
+            - --ambient-caps=+setuid,+setgid,+setpcap
+            - --
+            - node
+            - packages/sandbox/dist/runner/src/server.js
           env:
             - name: SANDBOX_ALLOWED_HOSTS
               value: sandbox-runner:8080
@@ -57,15 +68,18 @@ spec:
             httpGet:
               path: /healthz
               port: runner
+              httpHeaders:
+                - name: Host
+                  value: sandbox-runner:8080
             periodSeconds: 5
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 10002
-            runAsGroup: 10003
+            runAsUser: 0
+            runAsGroup: 0
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+              add: ["SETUID", "SETGID", "SETPCAP"]
           resources:
             requests:
               cpu: 500m
@@ -84,7 +98,7 @@ spec:
       volumes:
         - name: workspaces
           persistentVolumeClaim:
-            claimName: harness-workspaces
+            claimName: harness-runner-a-workspaces
         - name: runner-token
           secret:
             secretName: sandbox-runner-token
@@ -120,6 +134,8 @@ metadata:
     app.kubernetes.io/instance: runner-b
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: harness
@@ -135,7 +151,16 @@ spec:
       containers:
         - name: sandbox-runner
           image: harness:local
-          command: ["node", "packages/sandbox/dist/runner/src/server.js"]
+          command:
+            - setpriv
+            - --reuid=10002
+            - --regid=10003
+            - --clear-groups
+            - --inh-caps=+setuid,+setgid,+setpcap
+            - --ambient-caps=+setuid,+setgid,+setpcap
+            - --
+            - node
+            - packages/sandbox/dist/runner/src/server.js
           env:
             - name: SANDBOX_ALLOWED_HOSTS
               value: sandbox-runner-2:8080
@@ -150,15 +175,18 @@ spec:
             httpGet:
               path: /healthz
               port: runner
+              httpHeaders:
+                - name: Host
+                  value: sandbox-runner-2:8080
             periodSeconds: 5
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 10002
-            runAsGroup: 10003
+            runAsUser: 0
+            runAsGroup: 0
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+              add: ["SETUID", "SETGID", "SETPCAP"]
           resources:
             requests:
               cpu: 500m
@@ -177,7 +205,7 @@ spec:
       volumes:
         - name: workspaces
           persistentVolumeClaim:
-            claimName: harness-workspaces
+            claimName: harness-runner-b-workspaces
         - name: runner-token
           secret:
             secretName: sandbox-runner-token

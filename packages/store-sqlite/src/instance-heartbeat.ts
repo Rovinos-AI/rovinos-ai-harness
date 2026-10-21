@@ -27,6 +27,7 @@ interface SharedHeartbeat {
   readonly database: Database.Database;
   readonly instanceId: string;
   readonly now: () => number;
+  readonly ownershipController: AbortController;
   readonly timer: NodeJS.Timeout;
   references: number;
 }
@@ -36,6 +37,8 @@ const openingInstances = new Map<string, Promise<SharedHeartbeat | undefined>>()
 
 /** A runtime's reference to the process-wide SQLite instance heartbeat. */
 export interface SqliteInstanceHeartbeat {
+  /** Aborted when this process can no longer prove ownership of the SQLite file. */
+  readonly signal: AbortSignal;
   /** Refreshes this process's lease in the instances table. */
   heartbeat(): void;
   /** Releases this runtime's reference to the heartbeat. */
@@ -48,12 +51,14 @@ class HeartbeatHandle implements SqliteInstanceHeartbeat {
   constructor(private readonly shared: SharedHeartbeat) {}
 
   heartbeat(): void {
-    if (this.#closed) {
+    if (this.#closed || this.shared.ownershipController.signal.aborted) {
       throw new StoreUnavailableError();
     }
-    this.shared.database
-      .prepare("UPDATE instances SET heartbeat = ? WHERE id = ?")
-      .run(this.shared.now(), this.shared.instanceId);
+    renewHeartbeat(this.shared);
+  }
+
+  get signal(): AbortSignal {
+    return this.shared.ownershipController.signal;
   }
 
   async close(): Promise<void> {
@@ -77,10 +82,33 @@ class HeartbeatHandle implements SqliteInstanceHeartbeat {
   }
 }
 
+function loseOwnership(shared: SharedHeartbeat): void {
+  if (!shared.ownershipController.signal.aborted) {
+    shared.ownershipController.abort("deployment_single_instance_violation");
+    clearInterval(shared.timer);
+  }
+}
+
+function renewHeartbeat(shared: SharedHeartbeat): void {
+  try {
+    const result = shared.database
+      .prepare("UPDATE instances SET heartbeat = ? WHERE id = ?")
+      .run(shared.now(), shared.instanceId);
+    if (result.changes !== 1) {
+      loseOwnership(shared);
+      throw new StoreUnavailableError();
+    }
+  } catch (error) {
+    loseOwnership(shared);
+    throw error;
+  }
+}
+
 async function createSharedHeartbeat(options: InstanceOptions): Promise<SharedHeartbeat | undefined> {
   const databasePath = resolve(options.databasePath);
-  migrateSqliteFile(databasePath, { appliedAt: options.now() });
-  const database = new Database(databasePath);
+  const heartbeatPath = `${databasePath}.instances`;
+  migrateSqliteFile(heartbeatPath, { appliedAt: options.now() });
+  const database = new Database(heartbeatPath);
   database.pragma("busy_timeout = 5000");
   const cutoff = options.now() - options.staleAfterMs;
   const register = database.transaction(() => {
@@ -105,13 +133,12 @@ async function createSharedHeartbeat(options: InstanceOptions): Promise<SharedHe
     database,
     instanceId: options.instanceId,
     now: options.now,
+    ownershipController: new AbortController(),
     timer: setInterval(() => {
       try {
-        database
-          .prepare("UPDATE instances SET heartbeat = ? WHERE id = ?")
-          .run(options.now(), options.instanceId);
+        renewHeartbeat(shared);
       } catch {
-        // A later startup will reclaim the row once it exceeds the stale window.
+        // The ownership signal fences subsequent runtime writes.
       }
     }, options.heartbeatIntervalMs),
     references: 0,

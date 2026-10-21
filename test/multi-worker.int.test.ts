@@ -34,6 +34,7 @@ const runId = "00000000000000000000000001";
 const rawCanary = `multi-worker-${String(process.pid)}@example.test`;
 const firstWorkerContainer = `${projectName}-worker-1`;
 const secondWorkerContainer = `${projectName}-worker-2`;
+let scriptContainerSequence = 0;
 let secretDirectory = "";
 let runnerTokenFile = "";
 let controlPlaneTokenFile = "";
@@ -64,10 +65,12 @@ function runHarnessScript(
   script: string,
   options: { readonly name?: string; readonly detach?: boolean } = {},
 ): string {
+  const containerName =
+    options.name ?? `${projectName}-script-${String(process.pid)}-${String(++scriptContainerSequence)}`;
   const args = [
-    "run",
-    ...(options.detach === true ? ["--detach"] : ["--rm"]),
-    ...(options.name === undefined ? [] : ["--name", options.name]),
+    "create",
+    "--name",
+    containerName,
     "--network",
     `${projectName}_internal`,
     "--read-only",
@@ -91,8 +94,17 @@ function runHarnessScript(
     "HARNESS_DATA_DIR=/var/lib/harness/event-store",
     "--mount",
     `type=bind,source=${join(root, "test/fixtures/prod-like-multi.yaml")},target=/run/prod-like.yaml,readonly`,
-    "--mount",
-    `type=bind,source=${secretDirectory},target=/run/secrets,readonly`,
+    ...[
+      ["sandbox_runner_token", runnerTokenFile],
+      ["control_plane_token", controlPlaneTokenFile],
+      ["harness_master_key", masterKeyFile],
+      ["store_database_url", storeUrlFile],
+      ["vault_database_url", vaultUrlFile],
+      ["postgres_password", postgresPasswordFile],
+    ].flatMap(([name, path]) => [
+      "--mount",
+      `type=bind,source=${path},target=/run/secrets/${name},readonly`,
+    ]),
     "--entrypoint",
     "node",
     "harness:local",
@@ -100,11 +112,23 @@ function runHarnessScript(
     "-e",
     script,
   ];
-  return execFileSync("docker", args, {
+  execFileSync("docker", args, { encoding: "utf8" });
+  execFileSync("docker", ["network", "connect", `${projectName}_sandbox`, containerName], {
     encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: 120_000,
   });
+  if (options.detach === true) {
+    execFileSync("docker", ["start", containerName], { encoding: "utf8" });
+    return containerName;
+  }
+  try {
+    return execFileSync("docker", ["start", "--attach", containerName], {
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 120_000,
+    });
+  } finally {
+    execFileSync("docker", ["rm", "-f", containerName], { encoding: "utf8" });
+  }
 }
 
 function workerScript(mode: "block" | "complete"): string {
@@ -121,7 +145,7 @@ function workerScript(mode: "block" | "complete"): string {
     "const sql = new Pool({ connectionString: readFileSync('/run/secrets/store_database_url', 'utf8').trim() });",
     "let modelCalls = 0;",
     "const completion = (parts, finishReason) => ({ provider: 'synthetic', model: 'multi-worker', parts, providerBlobs: null, usage: { inputTokens: 1, outputTokens: 1 }, finishReason, latencyMs: 0, schemaValid: true, repairAttempts: 0, fallbackDepth: 0 });",
-    `const model = { complete: async (_request, runContext) => { if (${JSON.stringify(mode)} === 'block') { process.stdout.write('WORKER_BLOCKED ' + runContext.runId + '\\n'); return new Promise(() => undefined); } modelCalls += 1; return modelCalls === 1 ? completion([{ type: 'tool_call', callId: '00000000000000000000000002', toolId: 'test.multi_worker', args: { email: ${JSON.stringify(rawCanary)} } }], 'tool_calls') : completion([{ type: 'text', text: 'finished' }], 'stop'); } };`,
+    `const model = { complete: async (_request, runContext) => { modelCalls += 1; if (${JSON.stringify(mode)} === 'block' && modelCalls === 1) return completion([{ type: 'tool_call', callId: '00000000000000000000000002', toolId: 'test.multi_worker', args: { email: ${JSON.stringify(rawCanary)} } }], 'tool_calls'); if (${JSON.stringify(mode)} === 'block' && modelCalls === 2) { const events = []; for await (const event of runtime.store.read(runContext.runId)) events.push(event); if (!events.some((event) => event.type === 'tool_result' && event.toolId === 'test.multi_worker')) throw new Error('multi_worker_tool_result_not_durable'); process.stdout.write('WORKER_TOOL_RESULT_DURABLE\\n'); process.stdout.write('WORKER_BLOCKED ' + runContext.runId + '\\n'); return new Promise(() => undefined); } return completion([{ type: 'text', text: 'finished' }], 'stop'); } };`,
     "const tool = { describe: () => ({ idempotent: false, timeoutMs: 10000 }), execute: async (_call, runContext) => { await sql.query('INSERT INTO multi_worker_side_effects (run_id, executions) VALUES ($1, 1) ON CONFLICT (run_id) DO UPDATE SET executions = multi_worker_side_effects.executions + 1', [runContext.runId]); return { outcome: 'ok', result: { ok: true } }; } };",
     "const runtime = await createRuntime(config, { queue, clock: context.clock, secretResolver: context.secretResolver, policy: allowAllPolicy, model, tool });",
     "const worker = new Worker({ queue, ids: runtime.ids, clock: runtime.clock, leaseMs: 3000, pollIntervalMs: 100, execute: async (job, signal) => { const result = await runtime.resume(job.runId, { signal }); process.stdout.write('WORKER_RESULT ' + result.status + '\\n'); return result; } });",

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { chmod, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { PiiConfig } from "@harness/schemas";
 import { openSqliteInstanceHeartbeat } from "@harness/store-sqlite";
+import type { SqliteInstanceHeartbeat } from "@harness/store-sqlite";
 import { PiiToolPort } from "@harness/pii";
 import type { McpToolPort } from "@harness/mcp";
 import type { LocalKeyProvider } from "@harness/vault";
@@ -19,7 +20,7 @@ import { createRuntimeStore } from "./runtime-store.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
-import { resolveDataDir } from "./runtime-data-dir.js";
+import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
 import { createRuntimeVault } from "./runtime-vault.js";
 import { createConfiguredMcpToolPort } from "./runtime-mcp.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
@@ -249,19 +250,38 @@ export async function setupRuntime(
   let instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
   try {
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    if (
-      config.deployment?.mode !== "multi" &&
-      config.store?.dialect !== "postgres" &&
-      overrides.readOnlyStore !== true &&
-      overrides.store === undefined
-    ) {
-      instanceHeartbeat = await openSqliteInstanceHeartbeat({
-        databasePath: join(dataDir, "harness.db"),
-        instanceId: ids.next(),
-        now: () => clock.now(),
-      });
-      if (instanceHeartbeat === undefined) {
-        throw new DeploymentStartupError("deployment_single_instance_violation");
+    if (config.deployment?.mode !== "multi" && overrides.readOnlyStore !== true) {
+      const sqlitePaths = new Set<string>();
+      if (config.store?.dialect !== "postgres" && overrides.store === undefined) {
+        sqlitePaths.add(resolve(join(dataDir, "harness.db")));
+      }
+      if (config.vault?.backend !== "postgres" && overrides.transientVault !== true) {
+        sqlitePaths.add(resolve(join(resolveVaultDataDir(process.env, dataDir), "vault.db")));
+      }
+      const heartbeats: SqliteInstanceHeartbeat[] = [];
+      try {
+        for (const databasePath of sqlitePaths) {
+          const heartbeat = await openSqliteInstanceHeartbeat({
+            databasePath,
+            instanceId: ids.next(),
+            now: () => clock.now(),
+          });
+          if (heartbeat === undefined) {
+            throw new DeploymentStartupError("deployment_single_instance_violation");
+          }
+          heartbeats.push(heartbeat);
+        }
+      } catch (error) {
+        await Promise.all(heartbeats.map((heartbeat) => heartbeat.close().catch(() => undefined)));
+        throw error;
+      }
+      if (heartbeats.length > 0) {
+        instanceHeartbeat = {
+          signal: AbortSignal.any(heartbeats.map(({ signal }) => signal)),
+          close: async () => {
+            await Promise.all(heartbeats.map((heartbeat) => heartbeat.close()));
+          },
+        };
       }
     }
     const runtimeVault = await createRuntimeVault({

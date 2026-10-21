@@ -5,7 +5,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, resolve as resolvePath } from "node:path";
 import {
-  ControlPlaneConfigSchema,
   InspectResultSchema,
   RunResultSchema,
   parseJson,
@@ -18,7 +17,11 @@ const controlPlaneToken = randomBytes(32).toString("base64url");
 let secretDirectory = "";
 let runnerTokenFile = "";
 let controlPlaneTokenFile = "";
-let controlPlaneConfigFile = "";
+let masterKeyFile = "";
+let storeUrlFile = "";
+let vaultUrlFile = "";
+let postgresPasswordFile = "";
+let prodLikeConfigFile = "";
 const composeArgs = [
   "compose",
   "--env-file",
@@ -46,8 +49,12 @@ function compose(args: readonly string[], timeout = 300_000): string {
   const environment = { ...composeEnvironment };
   delete environment.SANDBOX_RUNNER_TOKEN;
   environment.SANDBOX_RUNNER_TOKEN_SECRET_FILE = runnerTokenFile;
-  environment.CONTROL_PLANE_CONFIG_FILE = controlPlaneConfigFile;
   environment.CONTROL_PLANE_TOKEN_SECRET_FILE = controlPlaneTokenFile;
+  environment.HARNESS_MASTER_KEY_SECRET_FILE = masterKeyFile;
+  environment.HARNESS_STORE_DATABASE_URL_SECRET_FILE = storeUrlFile;
+  environment.HARNESS_VAULT_DATABASE_URL_SECRET_FILE = vaultUrlFile;
+  environment.POSTGRES_PASSWORD_SECRET_FILE = postgresPasswordFile;
+  environment.PROD_LIKE_CONFIG_FILE = prodLikeConfigFile;
   return execFileSync("docker", [...composeArgs, ...args], {
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
@@ -92,22 +99,25 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
     await writeFile(runnerTokenFile, runnerToken, { encoding: "utf8", mode: 0o444 });
     controlPlaneTokenFile = resolvePath(secretDirectory, "control-plane-token");
     await writeFile(controlPlaneTokenFile, controlPlaneToken, { encoding: "utf8", mode: 0o444 });
-    controlPlaneConfigFile = resolvePath(secretDirectory, "control-plane.json");
-    const controlPlane = ControlPlaneConfigSchema.parse({
-      auth: {
-        tokens: [
-          {
-            id: "token.prod-like-test",
-            secret: "file:/run/secrets/control_plane_token",
-            scopes: ["admin"],
-          },
-        ],
-      },
-    });
-    await writeFile(controlPlaneConfigFile, `${JSON.stringify({ controlPlane })}\n`, {
-      encoding: "utf8",
-      mode: 0o444,
-    });
+    masterKeyFile = resolvePath(secretDirectory, "harness-master-key");
+    const masterKey = randomBytes(32).toString("base64");
+    storeUrlFile = resolvePath(secretDirectory, "store-database-url");
+    vaultUrlFile = resolvePath(secretDirectory, "vault-database-url");
+    postgresPasswordFile = resolvePath(secretDirectory, "postgres-password");
+    const postgresPassword = randomBytes(32).toString("base64url");
+    prodLikeConfigFile = resolvePath(process.cwd(), "test/fixtures/prod-like-multi.yaml");
+    await Promise.all([
+      writeFile(masterKeyFile, masterKey, { encoding: "utf8", mode: 0o444 }),
+      writeFile(storeUrlFile, `postgresql://harness:${postgresPassword}@postgres/harness`, {
+        encoding: "utf8",
+        mode: 0o444,
+      }),
+      writeFile(vaultUrlFile, `postgresql://harness:${postgresPassword}@postgres/harness_vault`, {
+        encoding: "utf8",
+        mode: 0o444,
+      }),
+      writeFile(postgresPasswordFile, postgresPassword, { encoding: "utf8", mode: 0o444 }),
+    ]);
     compose(["up", "--detach", "--wait", "--wait-timeout", "450"], 460_000);
   }, 480_000);
 

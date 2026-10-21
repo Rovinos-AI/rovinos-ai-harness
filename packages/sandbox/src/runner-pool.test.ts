@@ -92,7 +92,7 @@ describe("RunnerPool", () => {
     expect(availableRunner.fileOperation).toHaveBeenCalledOnce();
     expect(availableRunner.createArchive).toHaveBeenCalledOnce();
     expect(availableRunner.restoreArchive).toHaveBeenCalledOnce();
-    expect(availableRunner.hasWorkspace).toHaveBeenCalledExactlyOnceWith(runId);
+    expect(availableRunner.hasWorkspace).toHaveBeenCalledTimes(2);
 
     await pool.releaseLease(runId);
     expect(availableRunner.releaseLease).toHaveBeenCalledExactlyOnceWith(runId);
@@ -155,6 +155,25 @@ describe("RunnerPool", () => {
     await expect(new RunnerPool({ runners: [down] }).acquireLease(runId)).rejects.toMatchObject({
       code: "sandbox_unavailable",
     });
+  });
+
+  it("reports a newly leased runner's workspace as missing until its snapshot is restored", async () => {
+    const runnerWithoutWorkspace = runner();
+    let workspaceExists = false;
+    vi.mocked(runnerWithoutWorkspace.hasWorkspace).mockImplementation(() =>
+      Promise.resolve(workspaceExists),
+    );
+    vi.mocked(runnerWithoutWorkspace.restoreArchive).mockImplementation(() => {
+      workspaceExists = true;
+      return Promise.resolve();
+    });
+    const pool = new RunnerPool({ runners: [runnerWithoutWorkspace] });
+
+    await pool.acquireLease(runId);
+    await expect(pool.hasWorkspace(runId)).resolves.toBe(false);
+    await pool.restoreArchive(runId, Readable.from([]), 1024, 2048);
+    await expect(pool.hasWorkspace(runId)).resolves.toBe(true);
+    await pool.releaseLease(runId);
   });
 
   it("releases runner leases when the pool closes and safely ignores an unleased run", async () => {

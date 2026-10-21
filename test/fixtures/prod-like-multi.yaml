@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 deployment:
   mode: multi
+run:
+  checkpointEveryEvents: 1
 store:
   dialect: postgres
   connectionString: file:/run/secrets/store_database_url

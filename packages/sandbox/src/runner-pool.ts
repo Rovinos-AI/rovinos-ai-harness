@@ -45,6 +45,7 @@ export class RunnerPool
   readonly #random: () => number;
   readonly #healthCooldownMs: number;
   readonly #leases = new Map<Id, RunnerPoolRunner>();
+  readonly #workspaceExistedBeforeLease = new Map<Id, boolean>();
   readonly #unavailableUntil = new Map<RunnerPoolRunner, number>();
 
   constructor(private readonly options: RunnerPoolOptions) {
@@ -83,10 +84,18 @@ export class RunnerPool
         this.#evict(runner);
         continue;
       }
+      let workspaceExisted: boolean;
+      try {
+        workspaceExisted = await runner.hasWorkspace(runId);
+      } catch {
+        this.#evict(runner);
+        continue;
+      }
       try {
         await runner.acquireLease(runId, ttlMs);
         this.#unavailableUntil.delete(runner);
         this.#leases.set(runId, runner);
+        this.#workspaceExistedBeforeLease.set(runId, workspaceExisted);
         return;
       } catch (error) {
         if (error instanceof RemoteSandboxError && error.code === "sandbox_busy") {
@@ -110,6 +119,7 @@ export class RunnerPool
     } finally {
       if (this.#leases.get(runId) === runner) {
         this.#leases.delete(runId);
+        this.#workspaceExistedBeforeLease.delete(runId);
       }
     }
   }
@@ -150,11 +160,15 @@ export class RunnerPool
     maxFileBytes: number,
     maxSnapshotBytes: number,
   ): Promise<void> {
-    return this.#runnerFor(runId).restoreArchive(runId, archive, maxFileBytes, maxSnapshotBytes);
+    await this.#runnerFor(runId).restoreArchive(runId, archive, maxFileBytes, maxSnapshotBytes);
+    this.#workspaceExistedBeforeLease.set(runId, true);
   }
 
   /** Checks for a workspace on the runner currently assigned to the run. */
   async hasWorkspace(runId: Id): Promise<boolean> {
+    if (this.#workspaceExistedBeforeLease.get(runId) === false) {
+      return false;
+    }
     return this.#runnerFor(runId).hasWorkspace(runId);
   }
 

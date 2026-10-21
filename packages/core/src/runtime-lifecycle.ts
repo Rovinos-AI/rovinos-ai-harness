@@ -8,16 +8,16 @@ import type { RuntimeComposition, RuntimeOverrides } from "./runtime-config.js";
 
 /** Runs an operation while holding the backend's optional run-scoped lease. */
 export async function withSandboxLease<T>(
-  backend: SandboxBackend,
+  backend: SandboxBackend | undefined,
   runId: Id,
   operation: () => Promise<T>,
 ): Promise<T> {
-  await backend.acquireLease?.(runId);
+  await backend?.acquireLease?.(runId);
   try {
     return await operation();
   } finally {
     try {
-      await backend.releaseLease?.(runId);
+      await backend?.releaseLease?.(runId);
     } catch {
       // Lease cleanup must not replace a durable run outcome.
     }
