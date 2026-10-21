@@ -71,7 +71,7 @@ export function registerGetRunTool(
       inputSchema: getRunInputSchema,
       outputSchema: getRunOutputSchema,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-      ...(options.appOnly
+      ...(options.appOnly === true
         ? {
             _meta: {
               ui: { visibility: ["app" as const], resourceUri: RUNS_CONSOLE_RESOURCE_URI },

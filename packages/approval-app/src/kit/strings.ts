@@ -89,6 +89,7 @@ export const stringCatalog = {
     runDetailOutputTokens: "Output tokens",
     runDetailCost: "Cost (micros)",
     runDetailApprovals: "Pending approvals",
+    runsLoading: "Loading runs.",
     runsUpdated: "Run list updated.",
     runsUnavailable: "Run metadata is temporarily unavailable.",
     emptyTitle: "Nothing to show",

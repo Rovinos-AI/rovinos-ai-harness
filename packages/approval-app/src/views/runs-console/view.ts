@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { AppTelemetry } from "@harness/app-telemetry";
 import {
   RunConsoleDetailSchema,
   RunConsoleListSchema,
-  RunStatus,
   type RunConsoleDetail,
   type RunConsoleRun,
 } from "@harness/schemas/browser";
-import type { AppTelemetry } from "@harness/app-telemetry";
-import { createEmptyState, createStatusBadge } from "../../kit/components.js";
-import { formatMessage, formatNumber, getStrings } from "../../kit/strings.js";
+import { createEmptyState } from "../../kit/components.js";
+import { getStrings } from "../../kit/strings.js";
+import {
+  createRunsConsoleLayout,
+  renderRunDetail,
+  renderRuns,
+  type RunsConsoleLayout,
+} from "./render.js";
 
 const listTool = "harness.runs.list";
 const detailTool = "harness.runs.get";
-const approvalResource = "ui://harness/approval/v1";
 const pollIntervalMs = 5_000;
 const maxPollIntervalMs = 60_000;
 
@@ -43,56 +47,6 @@ export interface RunsConsoleView {
   dispose(): void;
 }
 
-function element<K extends keyof HTMLElementTagNameMap>(
-  document: Document,
-  tag: K,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (text !== undefined) {
-    node.textContent = text;
-  }
-  return node;
-}
-
-function relativeAge(createdAt: number, now: number, locale: string): string {
-  const seconds = Math.floor(Math.max(0, now - createdAt) / 1000);
-  const unit =
-    seconds < 60
-      ? { amount: seconds, unit: "second" as const }
-      : seconds < 3600
-        ? { amount: Math.floor(seconds / 60), unit: "minute" as const }
-        : seconds < 86_400
-          ? { amount: Math.floor(seconds / 3600), unit: "hour" as const }
-          : { amount: Math.floor(seconds / 86_400), unit: "day" as const };
-  try {
-    return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(
-      -unit.amount,
-      unit.unit,
-    );
-  } catch {
-    return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(-unit.amount, unit.unit);
-  }
-}
-
-function statusKind(
-  status: RunConsoleRun["status"],
-): "success" | "warning" | "danger" | "info" | "neutral" {
-  switch (status) {
-    case "completed":
-      return "success";
-    case "pending":
-    case "suspended":
-      return "warning";
-    case "failed":
-      return "danger";
-    case "running":
-      return "info";
-    case "cancelled":
-      return "neutral";
-  }
-}
-
 function resultValue(result: {
   readonly isError?: boolean | undefined;
   readonly structuredContent?: unknown;
@@ -103,138 +57,188 @@ function resultValue(result: {
   return result.structuredContent;
 }
 
-function appendMetadata(document: Document, parent: HTMLElement, label: string, value: string): void {
-  parent.append(element(document, "dt", label), element(document, "dd", value));
-}
+class RunsConsoleController implements RunsConsoleView {
+  private readonly document: Document;
+  private readonly window: Window;
+  private readonly strings: ReturnType<typeof getStrings>;
+  private readonly layout: RunsConsoleLayout;
+  private readonly now: () => number;
+  private timer: number | undefined;
+  private pollDelay = pollIntervalMs;
+  private refreshing = false;
+  private disposed = false;
+  private hasRendered = false;
+  private clickCount = 0;
 
-function renderDetail(
-  host: HTMLElement,
-  detail: RunConsoleDetail,
-  strings: ReturnType<typeof getStrings>,
-  locale: string,
-  onOpenApproval: (approvalId: string) => void,
-): void {
-  const document = host.ownerDocument;
-  const section = element(document, "section");
-  section.setAttribute("aria-labelledby", "run-detail-heading");
-  section.append(element(document, "h2", strings.runDetailsTitle));
-  section.lastElementChild?.setAttribute("id", "run-detail-heading");
-  const metadata = element(document, "dl");
-  appendMetadata(document, metadata, strings.runDetailStatus, detail.status);
-  appendMetadata(document, metadata, strings.runDetailSteps, formatNumber(detail.steps, locale));
-  appendMetadata(
-    document,
-    metadata,
-    strings.runDetailInputTokens,
-    formatNumber(detail.usage.inputTokens, locale),
-  );
-  appendMetadata(
-    document,
-    metadata,
-    strings.runDetailOutputTokens,
-    formatNumber(detail.usage.outputTokens, locale),
-  );
-  appendMetadata(
-    document,
-    metadata,
-    strings.runDetailCost,
-    formatNumber(detail.usage.costMicros, locale),
-  );
-  appendMetadata(
-    document,
-    metadata,
-    strings.runDetailApprovals,
-    formatNumber(detail.pendingApprovals.length, locale),
-  );
-  section.append(metadata);
-  for (const approval of detail.pendingApprovals) {
-    const button = element(
-      document,
-      "button",
-      formatMessage(strings.openApproval, { id: approval.approvalId }),
-    );
-    button.type = "button";
-    button.addEventListener("click", () => onOpenApproval(approval.approvalId));
-    section.append(button);
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly options: RunsConsoleOptions,
+    window: Window,
+  ) {
+    this.document = container.ownerDocument;
+    this.window = window;
+    this.strings = getStrings(this.document.documentElement.lang);
+    this.layout = createRunsConsoleLayout(container, this.strings);
+    this.now = options.now ?? (() => Date.now());
+    this.layout.refreshButton.addEventListener("click", this.refreshClicked);
+    this.layout.filter.addEventListener("change", this.filterChanged);
+    this.document.addEventListener("visibilitychange", this.visibilityChanged);
+    void this.refresh();
   }
-  host.replaceChildren(section);
-}
 
-function renderRuns(
-  host: HTMLElement,
-  runs: readonly RunConsoleRun[],
-  now: number,
-  locale: string,
-  strings: ReturnType<typeof getStrings>,
-  onDetails: (run: RunConsoleRun) => void,
-  onApproval: (run: RunConsoleRun) => void,
-): void {
-  const document = host.ownerDocument;
-  if (runs.length === 0) {
-    host.replaceChildren(createEmptyState(document, strings.noRunsTitle, strings.noRunsMessage));
-    return;
+  private readonly refreshClicked = (): void => {
+    this.recordInteraction();
+    void this.refresh();
+  };
+
+  private readonly filterChanged = (): void => {
+    this.recordInteraction();
+    void this.refresh();
+  };
+
+  private readonly visibilityChanged = (): void => {
+    if (this.document.visibilityState === "hidden") {
+      this.clearTimer();
+      this.flushInteractions();
+    } else {
+      void this.refresh();
+    }
+  };
+
+  private recordInteraction(): void {
+    this.clickCount = Math.min(1000, this.clickCount + 1);
   }
-  const wrapper = element(document, "div");
-  wrapper.className = "table-scroll";
-  wrapper.tabIndex = 0;
-  wrapper.setAttribute("aria-label", strings.runsConsoleDescription);
-  const table = element(document, "table");
-  table.append(element(document, "caption", strings.runsConsoleTitle));
-  const head = element(document, "thead");
-  const header = element(document, "tr");
-  for (const label of [
-    strings.runId,
-    strings.runStatus,
-    strings.runAge,
-    strings.runSteps,
-    strings.runApprovals,
-    strings.viewRunDetails,
-  ]) {
-    const cell = element(document, "th", label);
-    cell.scope = "col";
-    header.append(cell);
+
+  private flushInteractions(): void {
+    if (this.clickCount > 0) {
+      this.options.telemetry.record("ui.interaction", {
+        kind: "click",
+        count: this.clickCount,
+      });
+      this.clickCount = 0;
+    }
+    void this.options.telemetry.flush();
   }
-  head.append(header);
-  const body = element(document, "tbody");
-  for (const run of runs) {
-    const row = element(document, "tr");
-    row.append(
-      element(document, "th", run.runId),
-      element(document, "td"),
-      element(document, "td", relativeAge(run.createdAt, now, locale)),
-      element(document, "td", formatNumber(run.steps, locale)),
-      element(document, "td"),
-      element(document, "td"),
-    );
-    row.cells[0]?.setAttribute("scope", "row");
-    row.cells[1]?.append(createStatusBadge(document, statusKind(run.status), run.status));
-    const approvalCell = row.cells[4];
-    if (approvalCell !== undefined) {
-      if (run.pendingApprovals > 0) {
-        const button = element(
-          document,
-          "button",
-          formatMessage(strings.needsApproval, { count: run.pendingApprovals }, locale),
-        );
-        button.type = "button";
-        button.addEventListener("click", () => onApproval(run));
-        approvalCell.append(button);
-      } else {
-        approvalCell.textContent = formatNumber(0, locale);
+
+  private clearTimer(): void {
+    if (this.timer !== undefined) {
+      this.window.clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+  }
+
+  private schedule(delay: number): void {
+    this.clearTimer();
+    if (!this.disposed && this.document.visibilityState !== "hidden") {
+      this.timer = this.window.setTimeout(() => {
+        this.timer = undefined;
+        void this.refresh();
+      }, delay);
+    }
+  }
+
+  private setError(): void {
+    this.layout.liveRegion.textContent = this.strings.runsUnavailable;
+    this.options.telemetry.record("ui.error", { code: "bridge_unavailable" });
+    void this.options.telemetry.flush();
+  }
+
+  private async getRunDetail(runId: string): Promise<RunConsoleDetail> {
+    const response = await this.options.bridge.callTool(detailTool, { runId });
+    return RunConsoleDetailSchema.parse(resultValue(response));
+  }
+
+  private async openApproval(run: RunConsoleRun): Promise<void> {
+    try {
+      const detail = await this.getRunDetail(run.runId);
+      const approval = detail.pendingApprovals[0];
+      if (approval === undefined) {
+        this.layout.liveRegion.textContent = this.strings.runsUpdated;
+        return;
       }
+      await this.options.bridge.openApproval(approval.approvalId);
+    } catch {
+      this.setError();
     }
-    const detailsCell = row.cells[5];
-    if (detailsCell !== undefined) {
-      const button = element(document, "button", strings.viewRunDetails);
-      button.type = "button";
-      button.addEventListener("click", () => onDetails(run));
-      detailsCell.append(button);
-    }
-    body.append(row);
   }
-  table.append(head, body);
-  wrapper.append(table);
-  host.replaceChildren(wrapper);
+
+  private async showDetails(run: RunConsoleRun): Promise<void> {
+    this.recordInteraction();
+    try {
+      const detail = await this.getRunDetail(run.runId);
+      renderRunDetail(this.layout.detailHost, detail, {
+        strings: this.strings,
+        locale: this.document.documentElement.lang,
+        onOpenApproval: (approvalId) => {
+          this.recordInteraction();
+          void this.options.bridge.openApproval(approvalId).catch(() => {
+            this.setError();
+          });
+        },
+      });
+    } catch {
+      this.layout.detailHost.replaceChildren(
+        createEmptyState(this.document, this.strings.errorTitle, this.strings.runsUnavailable),
+      );
+      this.setError();
+    }
+  }
+
+  private renderList(runs: readonly RunConsoleRun[]): void {
+    renderRuns(this.layout.listHost, runs, {
+      now: this.now(),
+      locale: this.document.documentElement.lang,
+      strings: this.strings,
+      onDetails: (run) => {
+        void this.showDetails(run);
+      },
+      onApproval: (run) => {
+        this.recordInteraction();
+        void this.openApproval(run);
+      },
+    });
+  }
+
+  async refresh(): Promise<void> {
+    if (this.disposed || this.refreshing || this.document.visibilityState === "hidden") {
+      return;
+    }
+    this.refreshing = true;
+    this.clearTimer();
+    try {
+      const status = this.layout.filter.value === "all" ? undefined : this.layout.filter.value;
+      const response = await this.options.bridge.callTool(listTool, {
+        ...(status === undefined ? {} : { status }),
+      });
+      const parsed = RunConsoleListSchema.parse(resultValue(response));
+      this.renderList(parsed.runs);
+      this.layout.liveRegion.textContent = this.strings.runsUpdated;
+      if (!this.hasRendered) {
+        this.options.telemetry.record("ui.render", {});
+        this.hasRendered = true;
+      }
+      this.pollDelay = pollIntervalMs;
+    } catch {
+      this.setError();
+      this.pollDelay = Math.min(this.pollDelay * 2, maxPollIntervalMs);
+    } finally {
+      this.refreshing = false;
+      this.schedule(this.pollDelay);
+    }
+  }
+
+  dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.clearTimer();
+    this.layout.refreshButton.removeEventListener("click", this.refreshClicked);
+    this.layout.filter.removeEventListener("change", this.filterChanged);
+    this.document.removeEventListener("visibilitychange", this.visibilityChanged);
+    this.flushInteractions();
+    this.container.replaceChildren();
+  }
 }
 
 /** Mounts an accessible metadata-only runs console backed by MCP App bridge tools. */
@@ -242,178 +246,9 @@ export function createRunsConsoleView(
   container: HTMLElement,
   options: RunsConsoleOptions,
 ): RunsConsoleView {
-  const document = container.ownerDocument;
-  const window = document.defaultView;
+  const window = container.ownerDocument.defaultView;
   if (window === null) {
     throw new Error("runs_console_document_unavailable");
   }
-  const now = options.now ?? (() => Date.now());
-  const strings = getStrings(document.documentElement.lang);
-  const main = element(document, "main");
-  const heading = element(document, "h1", strings.runsConsoleTitle);
-  heading.tabIndex = -1;
-  main.append(heading, element(document, "p", strings.runsConsoleDescription));
-  const filterLabel = element(document, "label", strings.runStatusFilter);
-  const filter = element(document, "select");
-  filter.id = "run-status-filter";
-  filterLabel.htmlFor = filter.id;
-  const allOption = element(document, "option", strings.allRunStatuses);
-  allOption.value = "all";
-  filter.append(allOption);
-  for (const status of RunStatus.options) {
-    const option = element(document, "option", status);
-    option.value = status;
-    filter.append(option);
-  }
-  main.append(filterLabel, filter);
-  const refreshButton = element(document, "button", strings.refreshRuns);
-  refreshButton.type = "button";
-  main.append(refreshButton);
-  const liveRegion = element(document, "p");
-  liveRegion.setAttribute("role", "status");
-  liveRegion.setAttribute("aria-live", "polite");
-  liveRegion.textContent = strings.runsUpdated;
-  main.append(liveRegion);
-  const listHost = element(document, "section");
-  listHost.setAttribute("aria-label", strings.runsConsoleTitle);
-  const detailHost = element(document, "section");
-  detailHost.setAttribute("aria-live", "polite");
-  main.append(listHost, detailHost);
-  container.replaceChildren(main);
-  heading.focus();
-
-  let timer: number | undefined;
-  let pollDelay = pollIntervalMs;
-  let refreshing = false;
-  let disposed = false;
-  let hasRendered = false;
-  const recordInteraction = (): void => {
-    options.telemetry.record("ui.interaction", { kind: "click", count: 1 });
-  };
-  const clearTimer = (): void => {
-    if (timer !== undefined) {
-      window.clearTimeout(timer);
-      timer = undefined;
-    }
-  };
-  const schedule = (delay: number): void => {
-    clearTimer();
-    if (!disposed && document.visibilityState !== "hidden") {
-      timer = window.setTimeout(() => {
-        timer = undefined;
-        void refresh();
-      }, delay);
-    }
-  };
-  const setError = (): void => {
-    liveRegion.textContent = strings.runsUnavailable;
-    options.telemetry.record("ui.error", { code: "bridge_unavailable" });
-    void options.telemetry.flush();
-  };
-  const getRunDetail = async (runId: string): Promise<RunConsoleDetail> => {
-    const response = await options.bridge.callTool(detailTool, { runId });
-    return RunConsoleDetailSchema.parse(resultValue(response));
-  };
-  const openApproval = async (run: RunConsoleRun): Promise<void> => {
-    try {
-      const detail = await getRunDetail(run.runId);
-      const approval = detail.pendingApprovals[0];
-      if (approval === undefined) {
-        liveRegion.textContent = strings.runsUpdated;
-        return;
-      }
-      await options.bridge.openApproval(approval.approvalId);
-    } catch {
-      setError();
-    }
-  };
-  const showDetails = async (run: RunConsoleRun): Promise<void> => {
-    recordInteraction();
-    try {
-      const detail = await getRunDetail(run.runId);
-      renderDetail(detailHost, detail, strings, document.documentElement.lang, (approvalId) => {
-        recordInteraction();
-        void options.bridge.openApproval(approvalId).catch(setError);
-      });
-    } catch {
-      detailHost.replaceChildren(createEmptyState(document, strings.errorTitle, strings.runsUnavailable));
-      setError();
-    }
-  };
-
-  async function refresh(): Promise<void> {
-    if (disposed || refreshing || document.visibilityState === "hidden") {
-      return;
-    }
-    refreshing = true;
-    clearTimer();
-    try {
-      const status = filter.value === "all" ? undefined : filter.value;
-      const response = await options.bridge.callTool(listTool, {
-        ...(status === undefined ? {} : { status }),
-      });
-      const parsed = RunConsoleListSchema.parse(resultValue(response));
-      renderRuns(
-        listHost,
-        parsed.runs,
-        now(),
-        document.documentElement.lang,
-        strings,
-        (run) => {
-          void showDetails(run);
-        },
-        (run) => {
-          recordInteraction();
-          void openApproval(run);
-        },
-      );
-      liveRegion.textContent = strings.runsUpdated;
-      if (!hasRendered) {
-        options.telemetry.record("ui.render", {});
-        hasRendered = true;
-      }
-      pollDelay = pollIntervalMs;
-    } catch {
-      setError();
-      pollDelay = Math.min(pollDelay * 2, maxPollIntervalMs);
-    } finally {
-      refreshing = false;
-      schedule(pollDelay);
-    }
-  }
-
-  const refreshNow = (): void => {
-    recordInteraction();
-    void refresh();
-  };
-  const filterChanged = (): void => {
-    recordInteraction();
-    void refresh();
-  };
-  const visibilityChanged = (): void => {
-    if (document.visibilityState === "hidden") {
-      clearTimer();
-    } else {
-      void refresh();
-    }
-  };
-  refreshButton.addEventListener("click", refreshNow);
-  filter.addEventListener("change", filterChanged);
-  document.addEventListener("visibilitychange", visibilityChanged);
-  void refresh();
-
-  return {
-    refresh,
-    dispose() {
-      if (disposed) {
-        return;
-      }
-      disposed = true;
-      clearTimer();
-      refreshButton.removeEventListener("click", refreshNow);
-      filter.removeEventListener("change", filterChanged);
-      document.removeEventListener("visibilitychange", visibilityChanged);
-      container.replaceChildren();
-    },
-  };
+  return new RunsConsoleController(container, options, window);
 }

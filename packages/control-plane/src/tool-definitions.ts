@@ -29,37 +29,7 @@ import {
 /** Returns public MCP tool definitions in the order used by `tools/list`. */
 export function toolDefinitions(): Tool[] {
   return [
-    {
-      name: "list_runs",
-      description: "List run status and metadata counts.",
-      inputSchema: objectInputSchema(listRunsInputSchema),
-      outputSchema: z.toJSONSchema(listRunsOutputSchema),
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-      _meta: { ui: { resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
-    },
-    {
-      name: "get_run",
-      description: "Get run status, usage, approvals, and recent safe event metadata.",
-      inputSchema: objectInputSchema(getRunInputSchema),
-      outputSchema: z.toJSONSchema(getRunOutputSchema),
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-    },
-    {
-      name: "harness.runs.list",
-      description: "List run status and metadata counts for the runs console.",
-      inputSchema: objectInputSchema(listRunsInputSchema),
-      outputSchema: z.toJSONSchema(listRunsOutputSchema),
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
-    },
-    {
-      name: "harness.runs.get",
-      description: "Get run metadata for the runs console detail panel.",
-      inputSchema: objectInputSchema(getRunInputSchema),
-      outputSchema: z.toJSONSchema(getRunOutputSchema),
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
-    },
+    ...runToolDefinitions(),
     {
       name: "approve",
       description: "Approve a pending approval without resuming its run.",
@@ -119,6 +89,42 @@ export function toolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(runLifecycleInputSchema),
       outputSchema: z.toJSONSchema(decisionOutputSchema),
       annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+  ];
+}
+
+function runToolDefinitions(): Tool[] {
+  return [
+    {
+      name: "list_runs",
+      description: "List run status and metadata counts.",
+      inputSchema: objectInputSchema(listRunsInputSchema),
+      outputSchema: z.toJSONSchema(listRunsOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
+    },
+    {
+      name: "get_run",
+      description: "Get run status, usage, approvals, and recent safe event metadata.",
+      inputSchema: objectInputSchema(getRunInputSchema),
+      outputSchema: z.toJSONSchema(getRunOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "harness.runs.list",
+      description: "List run status and metadata counts for the runs console.",
+      inputSchema: objectInputSchema(listRunsInputSchema),
+      outputSchema: z.toJSONSchema(listRunsOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
+    },
+    {
+      name: "harness.runs.get",
+      description: "Get run metadata for the runs console detail panel.",
+      inputSchema: objectInputSchema(getRunInputSchema),
+      outputSchema: z.toJSONSchema(getRunOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
     },
   ];
 }

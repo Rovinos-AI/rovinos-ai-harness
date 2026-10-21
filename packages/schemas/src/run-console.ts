@@ -35,20 +35,19 @@ const RunConsolePendingApprovalSchema = z
   .strict();
 
 /** Metadata-only fields rendered from a `get_run` response. */
-export const RunConsoleDetailSchema = z
-  .object({
-    runId: Id,
-    status: RunStatus,
-    steps: z.number().int().nonnegative(),
-    usage: z
-      .object({
-        inputTokens: z.number().int().nonnegative(),
-        outputTokens: z.number().int().nonnegative(),
-        costMicros: z.number().int().nonnegative(),
-      })
-      .strict(),
-    pendingApprovals: z.array(RunConsolePendingApprovalSchema),
-  });
+export const RunConsoleDetailSchema = z.object({
+  runId: Id,
+  status: RunStatus,
+  steps: z.number().int().nonnegative(),
+  usage: z
+    .object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      costMicros: z.number().int().nonnegative(),
+    })
+    .strict(),
+  pendingApprovals: z.array(RunConsolePendingApprovalSchema),
+});
 
 /** Inferred safe list output for the runs console. */
 export type RunConsoleList = z.infer<typeof RunConsoleListSchema>;

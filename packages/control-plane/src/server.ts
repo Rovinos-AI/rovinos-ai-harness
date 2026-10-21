@@ -136,18 +136,7 @@ export function createControlPlaneServer(
   server.server.registerCapabilities({ tools: {} });
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);
-  registerListRunsTool(server, store, options.onAudit);
-  registerGetRunTool(server, store, options.onAudit);
-  registerListRunsTool(server, store, options.onAudit, {
-    name: "harness.runs.list",
-    appOnly: true,
-  });
-  registerGetRunTool(server, store, options.onAudit, {
-    name: "harness.runs.get",
-    appOnly: true,
-  });
-  registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
-  registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
+  registerRunInspection(server, store, options);
   registerConfiguredApprovalTools({
     server,
     store,
@@ -206,14 +195,30 @@ export function createControlPlaneServer(
 
 function isAppOnlyTool(meta: unknown): boolean {
   const parsed = z
-    .object({
-      ui: z
-        .object({ visibility: z.array(z.string()).optional() })
-        .passthrough(),
+    .looseObject({
+      ui: z.looseObject({ visibility: z.array(z.string()).optional() }),
     })
-    .passthrough()
     .safeParse(meta);
   return parsed.success && parsed.data.ui.visibility?.includes("app") === true;
+}
+
+function registerRunInspection(
+  server: McpServer,
+  store: EventStore,
+  options: ControlPlaneServerOptions,
+): void {
+  registerListRunsTool(server, store, options.onAudit);
+  registerGetRunTool(server, store, options.onAudit);
+  registerListRunsTool(server, store, options.onAudit, {
+    name: "harness.runs.list",
+    appOnly: true,
+  });
+  registerGetRunTool(server, store, options.onAudit, {
+    name: "harness.runs.get",
+    appOnly: true,
+  });
+  registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
+  registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
 }
 
 function registerLifecycleTools(input: {

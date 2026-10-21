@@ -50,9 +50,9 @@ function createTelemetry() {
   const emitted: unknown[] = [];
   const telemetry: TestTelemetry = createAppTelemetry({
     bridge: {
-      callTool: async (_name, args) => {
+      callTool: (_name, args) => {
         emitted.push(...args.spans);
-        return { content: [] };
+        return Promise.resolve({ content: [] });
       },
     },
     hostReady: Promise.resolve(),
@@ -61,26 +61,28 @@ function createTelemetry() {
   return { telemetry, emitted };
 }
 
-async function setup(input: {
-  readonly list?: unknown;
-  readonly detail?: unknown;
-  readonly listError?: boolean;
-  readonly now?: () => number;
-} = {}) {
+async function setup(
+  input: {
+    readonly list?: unknown;
+    readonly detail?: unknown;
+    readonly listError?: boolean;
+    readonly now?: () => number;
+  } = {},
+) {
   document.documentElement.lang = "en";
   document.title = "Runs";
   const calls: { readonly name: string; readonly args: Record<string, unknown> }[] = [];
-  const openApproval = vi.fn(async () => undefined);
+  const openApproval = vi.fn(() => Promise.resolve());
   const bridge: RunsConsoleBridge = {
-    callTool: async (name, args) => {
+    callTool: (name, args) => {
       calls.push({ name, args });
       if (name === "harness.runs.list") {
         if (input.listError === true) {
-          throw new Error("SYNTHETIC_BRIDGE_CANARY");
+          return Promise.reject(new Error("SYNTHETIC_BRIDGE_CANARY"));
         }
-        return { structuredContent: input.list ?? runList() };
+        return Promise.resolve({ structuredContent: input.list ?? runList() });
       }
-      return { structuredContent: input.detail ?? runDetail() };
+      return Promise.resolve({ structuredContent: input.detail ?? runDetail() });
     },
     openApproval,
   };
@@ -138,9 +140,8 @@ describe("runs console view", () => {
       runs: runList(statuses.length).runs.map((run, index) => ({
         ...run,
         status: statuses[index] ?? "pending",
-        createdAt: [now - 1_000, now - 60_000, now - 3_600_000, now - 86_400_000, now, 0][
-          index
-        ] ?? 0,
+        createdAt:
+          [now - 1_000, now - 60_000, now - 3_600_000, now - 86_400_000, now, 0][index] ?? 0,
       })),
     };
     const { view } = await setup({ list, now: () => now });
@@ -180,6 +181,25 @@ describe("runs console view", () => {
     view.dispose();
   });
 
+  it("aggregates click telemetry and flushes it when the document becomes hidden", async () => {
+    const { view, telemetry, emitted } = await setup();
+    const refreshButton = document.querySelector("button");
+    refreshButton?.click();
+    refreshButton?.click();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(emitted).toContainEqual(
+        expect.objectContaining({ name: "ui.interaction", kind: "click", count: 2 }),
+      );
+    });
+    view.dispose();
+    await telemetry.dispose();
+  });
+
   it("loads metadata detail only and opens its pending approval through the host bridge", async () => {
     const canary = "SYNTHETIC_EVENT_CONTENT_CANARY";
     const { view, calls, openApproval, emitted } = await setup({
@@ -187,7 +207,7 @@ describe("runs console view", () => {
       detail: runDetail(canary),
     });
     const approvalButton = [...document.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Needs approval"),
+      button.textContent.includes("Needs approval"),
     );
     approvalButton?.click();
     await vi.waitFor(() => {
@@ -216,7 +236,7 @@ describe("runs console view", () => {
       detail: { ...runDetail(), pendingApprovals: [] },
     });
     [...document.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("Needs approval"))
+      .find((button) => button.textContent.includes("Needs approval"))
       ?.click();
     await vi.waitFor(() => {
       expect(document.querySelector('[role="status"]')?.textContent).toBe("Run list updated.");
@@ -256,16 +276,16 @@ describe("runs console view", () => {
     const { telemetry, emitted } = createTelemetry();
     const view = createRunsConsoleView(document.body, {
       bridge: {
-        callTool: async (name) => {
+        callTool: (name) => {
           calls.push(name);
           if (name === "harness.runs.list" && fail) {
-            throw new Error("SYNTHETIC_BRIDGE_CANARY");
+            return Promise.reject(new Error("SYNTHETIC_BRIDGE_CANARY"));
           }
-          return {
+          return Promise.resolve({
             structuredContent: name === "harness.runs.list" ? runList() : runDetail(),
-          };
+          });
         },
-        openApproval: async () => undefined,
+        openApproval: () => Promise.resolve(),
       },
       telemetry,
       now: () => 10_000,
@@ -297,13 +317,13 @@ describe("runs console view", () => {
     const { telemetry } = createTelemetry();
     const view = createRunsConsoleView(document.body, {
       bridge: {
-        callTool: async (name) => {
+        callTool: (name) => {
           calls.push(name);
-          return {
+          return Promise.resolve({
             structuredContent: name === "harness.runs.list" ? runList() : runDetail(),
-          };
+          });
         },
-        openApproval: async () => undefined,
+        openApproval: () => Promise.resolve(),
       },
       telemetry,
     });

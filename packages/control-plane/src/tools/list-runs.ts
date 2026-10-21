@@ -67,9 +67,10 @@ export function registerListRunsTool(
   options: { readonly name?: string; readonly appOnly?: boolean } = {},
 ): void {
   const name = options.name ?? "list_runs";
-  const uiMeta = options.appOnly
-    ? { ui: { visibility: ["app" as const], resourceUri: RUNS_CONSOLE_RESOURCE_URI } }
-    : { ui: { resourceUri: RUNS_CONSOLE_RESOURCE_URI } };
+  const uiMeta =
+    options.appOnly === true
+      ? { ui: { visibility: ["app" as const], resourceUri: RUNS_CONSOLE_RESOURCE_URI } }
+      : { ui: { resourceUri: RUNS_CONSOLE_RESOURCE_URI } };
   server.registerTool(
     name,
     {

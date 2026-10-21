@@ -25,40 +25,42 @@ const appMock = vi.hoisted(() => {
 
 vi.mock("@modelcontextprotocol/ext-apps", () => ({
   App: class {
-    readonly callServerTool = vi.fn(async ({ name }: { readonly name: string }) => ({
-      structuredContent:
-        name === "harness.runs.get"
-          ? {
-              runId: "00000000000000000000000001",
-              status: "suspended",
-              steps: 1,
-              usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
-              pendingApprovals: [
-                {
-                  approvalId: "00000000000000000000000002",
-                  toolId: "tool.call",
-                  ruleId: "policy.review",
-                },
-              ],
-            }
-          : {
-              runs: [
-                {
-                  runId: "00000000000000000000000001",
-                  status: "suspended",
-                  createdAt: 1,
-                  lastTs: 2,
-                  lastSeq: 3,
-                  steps: 1,
-                  pendingApprovals: 1,
-                },
-              ],
-            },
-      content: [],
-    }));
-    readonly connect = vi.fn(async () => undefined);
+    readonly callServerTool = vi.fn(({ name }: { readonly name: string }) =>
+      Promise.resolve({
+        structuredContent:
+          name === "harness.runs.get"
+            ? {
+                runId: "00000000000000000000000001",
+                status: "suspended",
+                steps: 1,
+                usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+                pendingApprovals: [
+                  {
+                    approvalId: "00000000000000000000000002",
+                    toolId: "tool.call",
+                    ruleId: "policy.review",
+                  },
+                ],
+              }
+            : {
+                runs: [
+                  {
+                    runId: "00000000000000000000000001",
+                    status: "suspended",
+                    createdAt: 1,
+                    lastTs: 2,
+                    lastSeq: 3,
+                    steps: 1,
+                    pendingApprovals: 1,
+                  },
+                ],
+              },
+        content: [],
+      }),
+    );
+    readonly connect = vi.fn(() => Promise.resolve());
     readonly getHostContext = vi.fn(() => ({ theme: "light", locale: "en" }));
-    readonly openLink = vi.fn(async () => ({}));
+    readonly openLink = vi.fn(() => Promise.resolve({}));
     readonly addEventListener = vi.fn();
     readonly removeEventListener = vi.fn();
 
@@ -87,7 +89,7 @@ describe("runs console app bootstrap", () => {
       expect(document.body.textContent).toContain("Needs approval (1)");
     });
     const approvalButton = [...document.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Needs approval"),
+      button.textContent.includes("Needs approval"),
     );
     approvalButton?.click();
     await vi.waitFor(() => {
