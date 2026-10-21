@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import { composeIntegrationSuites } from "./scripts/compose/compose-suites.js";
 
+const composeSuiteSet = new Set<string>(composeIntegrationSuites);
 const parallelIntegrationSuites = globSync("**/*.int.test.ts", {
   exclude: (path) => path === "node_modules" || path === ".tmp" || path === "dist",
-}).filter((path) => !(composeIntegrationSuites as readonly string[]).includes(path));
+}).filter((path) => !composeSuiteSet.has(path));
 
 export default defineConfig({
   resolve: {
