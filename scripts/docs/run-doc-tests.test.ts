@@ -5,41 +5,9 @@ import { join } from "node:path";
 import { ModelsConfigSchema, parseYaml } from "@harness/schemas";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
-import {
-  createDocTestTemporaryRoot,
-  executeDocTestBlocks,
-  extractDocTestBlocks,
-  substituteCaptures,
-} from "./run-doc-tests.js";
+import { createDocTestTemporaryRoot, executeDocTestBlocks } from "./run-doc-tests.js";
 
 describe("quickstart documentation test runner", () => {
-  it("extracts marked shell blocks and their capture directives", () => {
-    const markdown = [
-      "```text",
-      "not executed",
-      "```",
-      "<!-- test:run -->",
-      "<!-- capture:runId=(?<runId>[A-Z]+) -->",
-      "",
-      "```bash",
-      "echo run",
-      "```",
-      "<!-- test:cleanup -->",
-      "```sh",
-      "cleanup",
-      "```",
-    ].join("\n");
-
-    expect(extractDocTestBlocks(markdown)).toEqual([
-      {
-        kind: "run",
-        code: "echo run",
-        captures: [{ name: "runId", pattern: "(?<runId>[A-Z]+)" }],
-      },
-      { kind: "cleanup", code: "cleanup", captures: [] },
-    ]);
-  });
-
   it("creates the temporary parent when it is missing", async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "quickstart-doc-test-"));
     const missingParent = join(temporaryDirectory, ".tmp");
@@ -68,15 +36,6 @@ describe("quickstart documentation test runner", () => {
       { id: "openai", kind: "openai", apiKey: "env:OPENAI_API_KEY" },
     ]);
     expect(parsed.models.routing.default).toEqual([{ provider: "openai", model: "gpt-4o-mini" }]);
-  });
-
-  it("substitutes named captures and rejects missing placeholders", () => {
-    expect(substituteCaptures("inspect <runId>", new Map([["runId", "RUN123"]]))).toBe(
-      "inspect RUN123",
-    );
-    expect(() => substituteCaptures("inspect <missing>", new Map())).toThrow(
-      "docs_quickstart_test_failed",
-    );
   });
 
   it("uses a named capture from one block in the next block", () => {
@@ -201,12 +160,6 @@ describe("quickstart documentation test runner", () => {
   });
 
   it("fails when a capture pattern is invalid or does not match", () => {
-    expect(() =>
-      extractDocTestBlocks(
-        ["<!-- test:run -->", "<!-- capture:runId=[ -->", "```bash", "run", "```"].join("\n"),
-      ),
-    ).toThrow("docs_quickstart_test_failed");
-
     expect(() => {
       executeDocTestBlocks(
         [
