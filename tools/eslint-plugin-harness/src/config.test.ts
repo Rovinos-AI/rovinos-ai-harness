@@ -113,6 +113,14 @@ ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
+      code: 'meter.createCounter<QuotaRejectionAttributes>("harness.quota.rejections");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
+      code: 'meter.createCounter<WorkerJobAttributes>("harness.worker.jobs");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
       code: 'meter.createCounter("harness.test.count");',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.test.ts"),
     },

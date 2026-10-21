@@ -45,6 +45,7 @@ const runCreatedEvent = z
     parentCallId: Id.optional(),
     continuationOf: Id.optional(),
     requestedBy: Principal.optional(),
+    quotaRole: Code.optional(),
     scopeId: Id.optional(),
     depth: z.number().int().nonnegative().default(0),
   })
@@ -299,7 +300,7 @@ const budgetExceededEvent = z
   .object({
     ...eventEnvelopeShape,
     type: z.literal("budget_exceeded"),
-    budget: z.enum(["steps", "cost", "wall_clock"]),
+    budget: z.enum(["steps", "cost", "wall_clock", "quota"]),
     limit: z.number(),
     observed: z.number(),
   })

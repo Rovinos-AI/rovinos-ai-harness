@@ -37,6 +37,8 @@ export { registerApproveTool, type ApproveToolOptions } from "./tools/approve.js
 export { registerDenyTool, type DenyToolOptions } from "./tools/deny.js";
 export { registerResumeRunTool, type ResumeRunToolOptions } from "./tools/resume-run.js";
 export { registerCancelRunTool, type CancelRunToolOptions } from "./tools/cancel-run.js";
+export { registerStartRunTool, type StartRunToolOptions } from "./tools/start-run.js";
+export { registerContinueRunTool, type ContinueRunToolOptions } from "./tools/continue-run.js";
 export {
   registerApprovalAppTools,
   ApprovalAppRevealRateLimiter,
@@ -61,6 +63,9 @@ export {
   runLifecycleInputSchema,
   decisionOutputSchema,
   resumeRunOutputSchema,
+  startRunInputSchema,
+  continueRunInputSchema,
+  startRunOutputSchema,
   controlPlaneHttpPortSchema,
   listRunsInputSchema,
   listRunsOutputSchema,
@@ -70,6 +75,9 @@ export {
   type DenyInput,
   type DecisionOutput,
   type ResumeRunOutput,
+  type StartRunInput,
+  type ContinueRunInput,
+  type StartRunOutput,
   type ListRunsInput,
   type ListRunsOutput,
 } from "./schemas.js";

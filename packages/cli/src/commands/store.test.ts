@@ -132,7 +132,7 @@ describe("harness store migrate", () => {
     expect(dryExitCode).toBe(ExitCode.ok);
     expect(parseJson(StoreMigrateResultSchema, dryStdout[0] ?? "")).toEqual({
       applied: [],
-      pending: ["0001", "0002", "0003", "0004", "0005", "0006"],
+      pending: ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"],
     });
     expect(existsSync(databasePath)).toBe(false);
 
@@ -142,7 +142,7 @@ describe("harness store migrate", () => {
     ]);
     expect(applyExitCode).toBe(ExitCode.ok);
     expect(parseJson(StoreMigrateResultSchema, applyStdout[0] ?? "")).toEqual({
-      applied: ["0001", "0002", "0003", "0004", "0005", "0006"],
+      applied: ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"],
       pending: [],
     });
 
@@ -196,7 +196,7 @@ describe("harness store migrate", () => {
     expect(exitCode).toBe(ExitCode.ok);
     expect(parseJson(StoreMigrateResultSchema, stdout[0] ?? "")).toEqual({
       applied: [],
-      pending: ["0001", "0002", "0003", "0004", "0005", "0006"],
+      pending: ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"],
     });
     expect(postgresState.queries).toEqual([
       "SELECT to_regclass('schema_migrations') IS NOT NULL AS present",

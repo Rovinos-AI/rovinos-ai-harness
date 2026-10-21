@@ -21,6 +21,7 @@ import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
 import { finalizeChild, type SubagentResult } from "./result.js";
 import { foldRunState, isTerminalRunState } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
+import { QuotaService, type QuotaIdentity } from "../quotas.js";
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
@@ -174,7 +175,10 @@ interface SubagentRuntimeOptions {
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
   readonly resolver?: AuditingVaultResolver;
+  readonly quotaService: QuotaService;
 }
+
+type SubagentRuntimeInput = Omit<SubagentRuntimeOptions, "quotaService">;
 
 async function startPendingChild(
   options: SubagentRuntimeOptions,
@@ -219,10 +223,15 @@ async function startPendingChild(
   );
 }
 
-function resumeChildOptions(
+async function resumeChildOptions(
   options: SubagentRuntimeOptions,
   request: SubagentRunRequest,
-): Parameters<typeof resumeRun>[0] {
+): Promise<Parameters<typeof resumeRun>[0]> {
+  const requestedBy = await parentRequester(options.store, request.parentRunId);
+  const quotaIdentity: QuotaIdentity = {
+    role: request.role.id,
+    ...(requestedBy === undefined ? {} : { requestedBy }),
+  };
   return {
     store: options.store,
     runId: request.runId,
@@ -234,6 +243,8 @@ function resumeChildOptions(
     context: contextForRole(request.role),
     signal: request.signal,
     scopes: options.scopes,
+    quotaService: options.quotaService,
+    quotaIdentity,
     goal: request.input,
     budgets: request.budgets,
     deadlineTs: request.budgetDeadlineTs,
@@ -286,7 +297,7 @@ async function resumeChild(
   let resumeError: Error | undefined;
   try {
     await startPendingChild(options, request);
-    await resumeRun(resumeChildOptions(options, request));
+    await resumeRun(await resumeChildOptions(options, request));
   } catch (error) {
     if (
       !(error instanceof RunAwaitingApprovalError) &&
@@ -304,6 +315,10 @@ async function runNewChild(
   request: SubagentRunRequest,
 ): Promise<SubagentResult> {
   const requestedBy = await parentRequester(options.store, request.parentRunId);
+  const quotaIdentity: QuotaIdentity = {
+    role: request.role.id,
+    ...(requestedBy === undefined ? {} : { requestedBy }),
+  };
   const recorder = new RunRecorder(
     options.store,
     request.runId,
@@ -327,6 +342,8 @@ async function runNewChild(
     checkpointEveryEvents: options.config.run.checkpointEveryEvents,
     ...childRunOptions(options.config, options.workspaceSnapshotter),
     policyVersion: options.policyVersion,
+    quotaService: options.quotaService,
+    quotaIdentity,
     role: request.role.route ?? request.role.id,
     ...(request.role.resultSchema === undefined
       ? {}
@@ -356,16 +373,27 @@ async function runNewChild(
 }
 
 /** Creates the runtime's spawn decorator and production child-run callback. */
-export function createSubagentTool(options: SubagentRuntimeOptions): ToolPort {
+export function createSubagentTool(options: SubagentRuntimeInput): ToolPort {
+  const runtimeOptions: SubagentRuntimeOptions = {
+    ...options,
+    quotaService: new QuotaService(options.config.quotas ?? [], options.store, options.clock),
+  };
   const supervisor = new SubagentSupervisor({
-    store: options.store,
-    ids: options.ids,
-    clock: options.clock,
-    runConfig: options.config.run,
-    scopes: options.scopes,
-    parentTools: options.parentTool,
-    resumeChild: (request) => resumeChild(options, request),
-    runChild: (request) => runNewChild(options, request),
+    store: runtimeOptions.store,
+    ids: runtimeOptions.ids,
+    clock: runtimeOptions.clock,
+    runConfig: runtimeOptions.config.run,
+    scopes: runtimeOptions.scopes,
+    parentTools: runtimeOptions.parentTool,
+    assertQuotaStart: async (role, parentRunId) => {
+      const requestedBy = await parentRequester(runtimeOptions.store, parentRunId);
+      await runtimeOptions.quotaService.assertCanStart({
+        role: role.id,
+        ...(requestedBy === undefined ? {} : { requestedBy }),
+      });
+    },
+    resumeChild: (request) => resumeChild(runtimeOptions, request),
+    runChild: (request) => runNewChild(runtimeOptions, request),
   });
-  return new AgentSpawnTool(options.parentTool, options.roles, supervisor);
+  return new AgentSpawnTool(runtimeOptions.parentTool, runtimeOptions.roles, supervisor);
 }

@@ -114,7 +114,7 @@ const budgetExceeded = z
   .object({
     ...commonFields,
     kind: attr.enum(["budget_exceeded"]),
-    budget: attr.enum(["steps", "cost", "wall_clock"]),
+    budget: attr.enum(["steps", "cost", "wall_clock", "quota"]),
     limit: attr.num(),
     observed: attr.num(),
   })

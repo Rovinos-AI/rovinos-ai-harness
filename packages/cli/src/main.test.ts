@@ -198,6 +198,10 @@ describe("CLI main", () => {
     expect(exitCodeForError("budget_exceeded")).toBe(6);
   });
 
+  it("maps quota_exceeded to exit code 9", () => {
+    expect(exitCodeForError("quota_exceeded")).toBe(9);
+  });
+
   it("uses failure for unmapped and invalid error codes", () => {
     expect(exitCodeForError("unmapped_error")).toBe(ExitCode.failure);
     expect(errorCodeOf(new Error("private message"))).toBe("failure");
@@ -241,6 +245,7 @@ describe("CLI main", () => {
       "servers",
       "store",
       "healthcheck",
+      "worker",
     ]);
     expect(code).toBe(ExitCode.ok);
     expect(stdout.join("")).toContain("Usage: harness");

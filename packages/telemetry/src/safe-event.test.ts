@@ -203,6 +203,16 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
   },
   {
     event: validEvent({
+      type: "budget_exceeded",
+      budget: "quota",
+      limit: 10,
+      observed: 10,
+    }),
+    kind: "budget_exceeded",
+    fields: { budget: "quota", limit: 10, observed: 10 },
+  },
+  {
+    event: validEvent({
       type: "subagent_spawned",
       childRunId: "00000000000000000000000002",
       role: "reviewer",

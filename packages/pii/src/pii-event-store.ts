@@ -16,6 +16,9 @@ import {
 } from "@harness/schemas";
 import { PiiStorageFailedError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
+import { isMarked } from "./sanitization-markers.js";
+
+export { isSanitizedField, markSanitized, markSanitizedField } from "./sanitization-markers.js";
 
 interface RunSummaryLike {
   readonly runId: Id;
@@ -43,6 +46,23 @@ interface WatchRunsOptionsLike {
   readonly signal: AbortSignal;
 }
 
+interface UsageLedgerDeltaLike {
+  readonly quotaId: Code;
+  readonly period: "hour" | "day" | "month";
+  readonly periodStart: number;
+  readonly costMicros: number;
+  readonly runsStarted: number;
+  readonly maxRunsStarted?: number;
+}
+
+interface UsageLedgerRowLike {
+  readonly quotaId: Code;
+  readonly period: "hour" | "day" | "month";
+  readonly periodStart: number;
+  readonly costMicros: number;
+  readonly runsStarted: number;
+}
+
 /** Structural event-store contract implemented by the wrapped store. */
 export interface EventStoreLike {
   append(
@@ -58,6 +78,17 @@ export interface EventStoreLike {
     snapshot: Snapshot,
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }>;
+  appendWithUsage(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
+  ): Promise<{ nextSeq: number }>;
+  readUsageLedger(
+    quotaId: Code,
+    period: UsageLedgerDeltaLike["period"],
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRowLike[]>;
   claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
   renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
   releaseRunExecution(runId: Id, owner: Id): Promise<void>;
@@ -98,37 +129,6 @@ export interface EventStoreLike {
   ): Promise<boolean>;
   releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void>;
   close(): Promise<void>;
-}
-
-type WeakObject = Exclude<WeakKey, symbol>;
-
-const sanitized = new WeakSet<WeakObject>();
-const sanitizedFields = new WeakMap<WeakObject, Set<PropertyKey>>();
-
-/** Marks an event or object-valued content field as already sanitized. */
-export function markSanitized<T>(value: T): T {
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    sanitized.add(value);
-  }
-  return value;
-}
-
-/** Marks a content field on its containing event or call as already sanitized. */
-export function markSanitizedField<T>(value: T, field: PropertyKey): T {
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    const marked = sanitizedFields.get(value) ?? new Set<PropertyKey>();
-    marked.add(field);
-    sanitizedFields.set(value, marked);
-  }
-  return value;
-}
-
-/** Checks whether a field on its containing call or result was marked sanitized. */
-export function isSanitizedField(value: unknown, field: PropertyKey): boolean {
-  return (
-    ((typeof value === "object" && value !== null) || typeof value === "function") &&
-    sanitizedFields.get(value)?.has(field) === true
-  );
 }
 
 /** Tokenizes classified event content and snapshot values before they reach storage. */
@@ -188,6 +188,25 @@ export class PiiEventStore implements EventStoreLike {
       sanitizedSnapshot,
       leaseOwner,
     );
+  }
+
+  async appendWithUsage(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
+  ): Promise<{ nextSeq: number }> {
+    const prepared = await this.prepareEvents(runId, events, expectedSeq);
+    await this.notifySummaries(prepared.summaries);
+    return this.inner.appendWithUsage(runId, prepared.events, expectedSeq, options);
+  }
+
+  readUsageLedger(
+    quotaId: Code,
+    period: UsageLedgerDeltaLike["period"],
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRowLike[]> {
+    return this.inner.readUsageLedger(quotaId, period, periodStarts);
   }
 
   latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
@@ -307,7 +326,7 @@ export class PiiEventStore implements EventStoreLike {
     const prepared: NewEvent[] = [];
     const summaries: PiiActionSummary[] = [];
     for (const [index, source] of events.entries()) {
-      if (sanitized.has(source)) {
+      if (isMarked(source)) {
         prepared.push(source);
         continue;
       }
@@ -334,7 +353,14 @@ export class PiiEventStore implements EventStoreLike {
         if (result.actions.some(({ action }) => action === "allow")) {
           throw new PiiStorageFailedError();
         }
-        const sanitizedContent = asJsonObject(result.value);
+        if (
+          typeof result.value !== "object" ||
+          result.value === null ||
+          Array.isArray(result.value)
+        ) {
+          throw new PiiStorageFailedError();
+        }
+        const sanitizedContent = result.value;
         summaries.push(...result.actions);
         if (Object.keys(sanitizedContent).length === 0) {
           prepared.push(source);
@@ -379,31 +405,4 @@ export class PiiEventStore implements EventStoreLike {
       }
     }
   }
-}
-
-function isMarked(container: unknown, field?: string): boolean {
-  if ((typeof container !== "object" || container === null) && typeof container !== "function") {
-    return false;
-  }
-  if (sanitized.has(container)) {
-    return true;
-  }
-  if (field === undefined) {
-    return false;
-  }
-  if (sanitizedFields.get(container)?.has(field) === true) {
-    return true;
-  }
-  const value: unknown = Object.getOwnPropertyDescriptor(container, field)?.value;
-  return (
-    ((typeof value === "object" && value !== null) || typeof value === "function") &&
-    sanitized.has(value)
-  );
-}
-
-function asJsonObject(value: JsonValue): Record<string, JsonValue> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new PiiStorageFailedError();
-  }
-  return value;
 }

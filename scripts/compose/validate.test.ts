@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { RunConfigSchema } from "@harness/schemas";
+import { parseYaml, RunConfigSchema } from "@harness/schemas";
 import { evaluateComposeSecurity, validateComposeProfiles } from "./validate.js";
+import { z } from "zod";
+
+const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+const composeSchema = z.object({ services: z.record(z.string(), z.unknown()) });
+const serviceSchema = z.object({ healthcheck: z.unknown() });
+const healthcheckSchema = z.looseObject({ start_period: z.string(), test: z.array(z.string()) });
+const documentedPresidioStartPeriodMs = 300_000;
 
 function service(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -13,6 +23,23 @@ function service(overrides: Record<string, unknown> = {}): Record<string, unknow
     healthcheck: { test: ["CMD", "node", "dist/bin.js", "healthcheck"] },
     ...overrides,
   };
+}
+
+function durationMilliseconds(duration: string): number {
+  const match = /^(\d+(?:\.\d+)?)(ms|[smh])$/u.exec(duration);
+  if (match === null) {
+    return 0;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+  const multipliers: Readonly<Record<string, number>> = {
+    ms: 1,
+    s: 1_000,
+    m: 60_000,
+    h: 3_600_000,
+  };
+  return amount * (unit === undefined ? 0 : (multipliers[unit] ?? 0));
 }
 
 function config(services: Record<string, Record<string, unknown>>) {
@@ -27,6 +54,20 @@ function config(services: Record<string, Record<string, unknown>>) {
 }
 
 describe("compose security evaluator", () => {
+  it("keeps the Presidio startup grace at or above its documented minimum", () => {
+    const compose = parseYaml(
+      composeSchema,
+      readFileSync(resolve(root, "infra/compose/docker-compose.yml"), "utf8"),
+    );
+    const presidioService = serviceSchema.parse(compose.services["presidio-analyzer"]);
+    const healthcheck = healthcheckSchema.parse(presidioService.healthcheck);
+
+    expect(durationMilliseconds(healthcheck.start_period)).toBeGreaterThanOrEqual(
+      documentedPresidioStartPeriodMs,
+    );
+    expect(healthcheck.test.join(" ")).toContain("http://127.0.0.1:3000/health");
+  });
+
   it.each([
     ["privileged containers", { privileged: true }, "privileged"],
     [

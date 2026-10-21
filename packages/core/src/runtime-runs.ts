@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   type Code,
+  type Event,
   type Id,
   type JsonValue,
   type RunConfig,
@@ -10,11 +11,13 @@ import {
 import type { EventStore } from "@harness/store";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";
-import { continueRun as startContinuation } from "./continue.js";
+import { continueRun as startContinuation, loadContinuationChain } from "./continue.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
-import type { Runtime, RuntimeComposition } from "./runtime-config.js";
+import type { Runtime, RuntimeComposition, RuntimeRunHandle } from "./runtime-config.js";
 import { configHash } from "./runtime-ids.js";
+import { QuotaService } from "./quotas.js";
+import type { QuotaIdentity } from "./quotas.js";
 
 /** Reads the original goal from a run's persisted input or first model request. */
 export async function readStoredGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
@@ -31,6 +34,26 @@ export async function readStoredGoal(store: EventStore, runId: Id): Promise<Json
     }
   }
   return undefined;
+}
+
+/** Reads continuation ancestors for a queued continuation that has not started yet. */
+export async function readContinuationHistory(
+  store: EventStore,
+  runId: Id,
+  maxChainLength: number,
+): Promise<Event[][] | undefined> {
+  let continuation = false;
+  for await (const event of store.read(runId)) {
+    if (event.type === "run_created") {
+      continuation = event.continuationOf !== undefined;
+      break;
+    }
+  }
+  if (!continuation) {
+    return undefined;
+  }
+  const chain = await loadContinuationChain(store, runId, maxChainLength);
+  return chain.slice(0, -1);
 }
 
 /** Recovers an inherited child allocation so runtime recreation cannot widen its limits. */
@@ -93,7 +116,13 @@ export function startRun(
 ): Promise<RunLoopResult> {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
   const runId = options.runId ?? ids.next();
-  return options.runWithControl(runId, (signal) => {
+  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
+  const quotaIdentity: QuotaIdentity = {
+    ...(options.role === undefined ? {} : { role: options.role }),
+    ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
+  };
+  return options.runWithControl(runId, async (signal) => {
+    await quotaService.assertCanStart(quotaIdentity);
     const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
     return runLoop({
       recorder,
@@ -116,6 +145,8 @@ export function startRun(
       workspaceSnapshotter: composition.workspaceSnapshotter,
       configHash: configHash(config),
       policyVersion,
+      quotaService,
+      quotaIdentity,
       ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
     });
   });
@@ -129,14 +160,33 @@ export function createRuntimeContinuation(
   runWithControl: RunControl,
 ): Runtime["continueRun"] {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
-  return (previousRunId: Id, input: RunInput) => {
+  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
+  return (
+    previousRunId: Id,
+    input: RunInput,
+    runOptions?: { readonly requestedBy?: Principal },
+  ) => {
     const runId = ids.next();
+    let resolveStarted: () => void = () => undefined;
+    let rejectStarted: (reason?: unknown) => void = () => undefined;
+    const started = new Promise<void>((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    void started.catch(() => undefined);
     const goal =
       input.metadata === undefined
         ? { goal: input.goal }
         : { goal: input.goal, metadata: input.metadata };
-    return runWithControl(runId, (signal) =>
-      startContinuation({
+    const completion = runWithControl(runId, async (signal) => {
+      const stored = await readStoredQuotaIdentity(store, previousRunId);
+      // An explicit caller is charged for the continuation; the role is inherited.
+      const identity: QuotaIdentity =
+        runOptions?.requestedBy === undefined
+          ? stored
+          : { ...stored, requestedBy: runOptions.requestedBy };
+      await quotaService.assertCanStart(identity);
+      return startContinuation({
         store,
         runId,
         previousRunId,
@@ -158,7 +208,34 @@ export function createRuntimeContinuation(
         policyVersion,
         continuations: config.run.continuations,
         scopes,
-      }),
-    );
+        onStarted: resolveStarted,
+        ...(runOptions?.requestedBy === undefined ? {} : { requestedBy: runOptions.requestedBy }),
+        quotaService,
+        quotaIdentity: identity,
+      });
+    });
+    void completion.catch(rejectStarted);
+    return { runId, started, completion } satisfies RuntimeRunHandle;
+  };
+}
+
+/** Reads only the stable principal and role codes needed to enforce inherited quotas. */
+export async function readStoredQuotaIdentity(
+  store: EventStore,
+  runId: Id,
+): Promise<QuotaIdentity> {
+  let requestedBy: Principal | undefined;
+  let role: Code | undefined;
+  for await (const event of store.read(runId)) {
+    if (event.type === "run_created" && event.requestedBy !== undefined) {
+      requestedBy = event.requestedBy;
+    }
+    if (role === undefined && event.type === "run_created" && event.quotaRole !== undefined) {
+      role = event.quotaRole;
+    }
+  }
+  return {
+    ...(requestedBy === undefined ? {} : { requestedBy }),
+    ...(role === undefined ? {} : { role }),
   };
 }

@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { ControlPlaneConfigSchema } from "./control-plane.js";
 
 describe("ControlPlaneConfigSchema", () => {
-  it("defaults to disabled reveal, loopback binding, and a bounded request rate", () => {
+  it("defaults to disabled optional behavior, loopback binding, and a bounded request rate", () => {
     expect(ControlPlaneConfigSchema.parse({})).toEqual({
       allowReveal: false,
+      allowAgentStartedRuns: false,
       auth: { tokens: [] },
       listen: { host: "127.0.0.1", port: 3_000 },
       allowedHosts: ["127.0.0.1", "localhost", "::1"],
@@ -13,10 +14,11 @@ describe("ControlPlaneConfigSchema", () => {
     });
   });
 
-  it("accepts auth, run filters, TLS references, and the reveal setting", () => {
+  it("accepts auth, run filters, TLS references, and explicit start permissions", () => {
     expect(
       ControlPlaneConfigSchema.parse({
         allowReveal: true,
+        allowAgentStartedRuns: true,
         auth: {
           tokens: [
             {
@@ -34,6 +36,7 @@ describe("ControlPlaneConfigSchema", () => {
       }),
     ).toEqual({
       allowReveal: true,
+      allowAgentStartedRuns: true,
       auth: {
         tokens: [
           {

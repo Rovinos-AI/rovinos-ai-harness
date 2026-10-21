@@ -26,6 +26,7 @@ import {
   type Event,
   type Principal,
 } from "@harness/schemas";
+import type { EnqueueRunJob, RunQueue, RunQueueJob } from "@harness/store";
 import { InMemoryEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
@@ -90,6 +91,7 @@ interface Fixture {
   readonly nextId: () => Id;
   readonly runtimeCalls: () => number;
   readonly configLoads: () => number;
+  readonly enqueuedJobs: () => readonly { readonly kind: string; readonly runId: Id }[];
 }
 
 function createFixture(
@@ -110,6 +112,32 @@ function createFixture(
     counter += 1;
     return Id.parse(String(counter).padStart(26, "0"));
   };
+  const enqueuedJobs: { kind: string; runId: Id }[] = [];
+  const queue: RunQueue = {
+    enqueue: (input: EnqueueRunJob) => {
+      enqueuedJobs.push({ kind: input.kind, runId: input.runId });
+      const now = clock.now();
+      const queued: RunQueueJob = {
+        jobId: nextId(),
+        kind: input.kind,
+        runId: input.runId,
+        priority: input.priority ?? 0,
+        availableAt: input.availableAt ?? now,
+        attempts: 0,
+        maxAttempts: input.maxAttempts ?? 5,
+        createdAt: now,
+        updatedAt: now,
+      };
+      return Promise.resolve(queued);
+    },
+    claim: () => Promise.resolve([]),
+    heartbeat: () => Promise.resolve(true),
+    complete: () => Promise.resolve(true),
+    fail: () => Promise.resolve("retry"),
+    release: () => Promise.resolve(true),
+    getDeadLetter: () => Promise.resolve(undefined),
+    close: () => Promise.resolve(),
+  };
   const out = createOutput({
     stdout: (text) => stdout.push(text),
     stderr: (text) => stderr.push(text),
@@ -121,6 +149,7 @@ function createFixture(
     },
     out,
     clock,
+    openRunQueue: () => Promise.resolve(queue),
     ...(interactive === undefined ? {} : { interactive }),
     createVaultResolver: () =>
       withVault ? new AuditingVaultResolver(vault, () => undefined) : undefined,
@@ -131,6 +160,7 @@ function createFixture(
         store,
         transientVault: true,
         clock,
+        ...(overrides?.queue === undefined ? {} : { queue: overrides.queue }),
         context: new NaiveContext(),
         tool: overrides?.tool ?? new FakeToolPort(),
         model: new FakeModelPort([]),
@@ -158,6 +188,7 @@ function createFixture(
     nextId,
     runtimeCalls: () => runtimeCalls,
     configLoads: () => configLoads,
+    enqueuedJobs: () => enqueuedJobs,
   } satisfies Fixture;
 }
 
@@ -392,6 +423,7 @@ describe("harness approvals", () => {
 
     expect(await run(fixture, "approvals", "approve", approvalId, "--yes")).toBe(ExitCode.ok);
     expect(fixture.stdout.join("")).toContain(`harness resume ${runId}`);
+    expect(fixture.enqueuedJobs()).toEqual([{ kind: "resume", runId }]);
     const resolved = (await readAll(fixture.store, runId)).find(
       (event) => event.type === "approval_resolved",
     );
@@ -429,6 +461,7 @@ describe("harness approvals", () => {
     });
     const events = await readAll(fixture.store, runId);
     expect(events.find((event) => event.type === "approval_resolved")?.decision).toBe("deny");
+    expect(fixture.enqueuedJobs()).toEqual([]);
   });
 
   it("maps a still-suspended resume to exit code 5", async () => {

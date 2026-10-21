@@ -14,6 +14,7 @@ import { requestHash } from "@harness/models";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { EventPartial, RunRecorder } from "../recorder.js";
+import type { UsageLedgerDelta } from "@harness/store";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
 import type { ValueTransform } from "@harness/models";
@@ -42,6 +43,7 @@ export interface ModelStepOptions {
   readonly modelName?: Code;
   readonly outputSchema?: z.ZodType;
   readonly valueTransform?: ValueTransform;
+  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
   readonly includeTools?: boolean;
   readonly contextMetadata: {
     readonly strategyId: Code;
@@ -182,6 +184,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       const structuredValue = tokenizedStructuredValue(completion);
       const response = await options.recorder.record(
         responsePayload(requestId, completion, structuredValue),
+        options.usageUpdatesForCost?.(completion.usage.costMicros),
       );
       recorded.push(response);
       result = {
@@ -217,23 +220,26 @@ async function recordModelFailure({
   if (options.outputSchema !== undefined && code === "model_output_invalid") {
     const usage = readFailureUsage(error);
     if (usage !== undefined) {
-      const response = await options.recorder.record({
-        type: "model_response",
-        v: 1,
-        requestId,
-        provider: options.provider ?? "unknown",
-        model: options.modelName ?? "unknown",
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
-        finishReason: "invalid_output",
-        latencyMs: readFailureCount(error, "latencyMs"),
-        schemaValid: false,
-        repairAttempts: readFailureCount(error, "repairAttempts"),
-        fallbackDepth: 0,
-        content: [],
-        providerBlobs: null,
-      });
+      const response = await options.recorder.record(
+        {
+          type: "model_response",
+          v: 1,
+          requestId,
+          provider: options.provider ?? "unknown",
+          model: options.modelName ?? "unknown",
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+          finishReason: "invalid_output",
+          latencyMs: readFailureCount(error, "latencyMs"),
+          schemaValid: false,
+          repairAttempts: readFailureCount(error, "repairAttempts"),
+          fallbackDepth: 0,
+          content: [],
+          providerBlobs: null,
+        },
+        options.usageUpdatesForCost?.(usage.costMicros),
+      );
       recorded.push(response);
     }
   }
