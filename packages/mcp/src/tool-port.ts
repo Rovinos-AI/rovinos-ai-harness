@@ -4,28 +4,19 @@ import {
   ProtocolError,
   type CallToolResult,
 } from "@modelcontextprotocol/client";
-import { Code, HarnessError, JsonValue, compileJsonSchema } from "@harness/schemas";
-import type { InputResponse, JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
+import { Code, compileJsonSchema } from "@harness/schemas";
+import type { JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
 import * as telemetry from "@harness/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
 import type { McpConnection, McpConnectionDependencies } from "./connection.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { McpProtocolError } from "./errors.js";
-import { countMcpInputRequest } from "@harness/telemetry";
-import {
-  type ElicitationInputOutcome,
-  type ElicitationPort,
-  type ElicitationRetry,
-} from "./elicitation/mrtr.js";
-import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
-import {
-  InputRequestContentSchema,
-  McpInputRequestError,
-  validateInputRequiredResult,
-} from "./elicitation/validate.js";
+import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
+import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
+import { normalizedResult } from "./tool-result.js";
 
 const MCP_CALL_SPAN = telemetry.defineSemconvSpan(
   "mcp.client.call",
@@ -37,8 +28,6 @@ const MCP_CALL_SPAN = telemetry.defineSemconvSpan(
   },
   { taskId: "6.5", packageName: "@harness/mcp" },
 );
-
-const SMALL_BINARY_BYTES = 8_192;
 
 /** An MCP tool invocation structurally compatible with the core tool port. */
 export interface McpToolCall {
@@ -81,163 +70,6 @@ export interface McpToolPortOptions {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function binaryBytes(value: unknown): Uint8Array | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  try {
-    return Buffer.from(value, "base64");
-  } catch {
-    return undefined;
-  }
-}
-
-interface ResourceBytes {
-  readonly bytes?: Uint8Array;
-  readonly data?: string;
-  readonly mimeType: string;
-}
-
-function resourceBytes(block: Record<string, unknown>): ResourceBytes {
-  const resource = block.resource;
-  if (!isRecord(resource)) {
-    return { mimeType: "application/octet-stream" };
-  }
-  const mimeType =
-    typeof resource.mimeType === "string" ? resource.mimeType : "application/octet-stream";
-  if (typeof resource.text === "string") {
-    return { bytes: new TextEncoder().encode(resource.text), data: resource.text, mimeType };
-  }
-  const bytes = binaryBytes(resource.blob);
-  return {
-    ...(bytes === undefined ? {} : { bytes }),
-    ...(typeof resource.blob === "string" ? { data: resource.blob } : {}),
-    mimeType,
-  };
-}
-
-interface NormalizedBlock {
-  readonly block: JsonValueType;
-  readonly offloadBlock: JsonValueType;
-  readonly hasLargeBinary: boolean;
-  readonly binaryPayload?: Uint8Array;
-}
-
-function isGenuineBinary(block: Record<string, unknown>, isResource: boolean): boolean {
-  if (!isResource) {
-    return block.type === "image" || block.type === "audio" || block.type === "blob";
-  }
-  return (
-    isRecord(block.resource) &&
-    typeof block.resource.blob === "string" &&
-    typeof block.resource.text !== "string"
-  );
-}
-
-function blockBytes(
-  block: Record<string, unknown>,
-  isResource: boolean,
-  resource: ResourceBytes | undefined,
-  genuineBinary: boolean,
-): Uint8Array | undefined {
-  if (isResource) {
-    return resource?.bytes;
-  }
-  return genuineBinary ? binaryBytes(block.data) : undefined;
-}
-
-function blockMimeType(
-  block: Record<string, unknown>,
-  isResource: boolean,
-  resource: ResourceBytes | undefined,
-): string {
-  if (isResource) {
-    return resource?.mimeType ?? "application/octet-stream";
-  }
-  return typeof block.mimeType === "string" ? block.mimeType : "application/octet-stream";
-}
-
-function blockData(
-  block: Record<string, unknown>,
-  isResource: boolean,
-  resource: ResourceBytes | undefined,
-): string | undefined {
-  const value = isResource ? resource?.data : block.data;
-  return typeof value === "string" ? value : undefined;
-}
-
-function visibleBlock(
-  metadata: { readonly type: string; readonly mimeType: string; readonly bytes: number },
-  data: string | undefined,
-  hasLargeBinary: boolean,
-): JsonValueType {
-  if (data === undefined || hasLargeBinary) {
-    return metadata;
-  }
-  return { ...metadata, data };
-}
-
-function normalizeBlock(block: unknown): NormalizedBlock {
-  if (!isRecord(block) || typeof block.type !== "string") {
-    return {
-      block: { type: "unknown" },
-      offloadBlock: { type: "unknown" },
-      hasLargeBinary: false,
-    };
-  }
-  if (block.type === "text" && typeof block.text === "string") {
-    const textBlock = { type: "text", text: block.text };
-    return { block: textBlock, offloadBlock: textBlock, hasLargeBinary: false };
-  }
-  const isResource = block.type === "resource";
-  const resource = isResource ? resourceBytes(block) : undefined;
-  const genuineBinary = isGenuineBinary(block, isResource);
-  const bytes = blockBytes(block, isResource, resource, genuineBinary);
-  const mimeType = blockMimeType(block, isResource, resource);
-  const byteCount = bytes?.byteLength ?? 0;
-  const hasLargeBinary = genuineBinary && byteCount > SMALL_BINARY_BYTES;
-  const type = block.type;
-  const metadata = { type, mimeType, bytes: byteCount };
-  const data = blockData(block, isResource, resource);
-  const visible = visibleBlock(metadata, data, hasLargeBinary);
-  const offloadBlock = data === undefined ? metadata : { ...metadata, data };
-  return {
-    block: visible,
-    offloadBlock,
-    hasLargeBinary,
-    ...(hasLargeBinary && bytes !== undefined ? { binaryPayload: bytes } : {}),
-  };
-}
-
-function normalizedResult(result: CallToolResult): {
-  readonly value: JsonValueType;
-  readonly offloadValue: JsonValueType;
-  readonly hasLargeBinary: boolean;
-  readonly binaryPayload?: Uint8Array;
-} {
-  const blocks = result.content.map(normalizeBlock);
-  const content = blocks.map(({ block }) => block);
-  const offloadContent = blocks.map(({ offloadBlock }) => offloadBlock);
-  const structuredContent: unknown = Reflect.get(result, "structuredContent");
-  const value = JsonValue.parse({
-    content,
-    ...(structuredContent === undefined ? {} : { structured: structuredContent }),
-  });
-  const offloadValue = JsonValue.parse({
-    content: offloadContent,
-    ...(structuredContent === undefined ? {} : { structured: structuredContent }),
-  });
-  const largeBinaryBlock = blocks.find(({ hasLargeBinary }) => hasLargeBinary);
-  return {
-    value,
-    offloadValue,
-    hasLargeBinary: blocks.some(({ hasLargeBinary }) => hasLargeBinary),
-    ...(largeBinaryBlock?.binaryPayload === undefined
-      ? {}
-      : { binaryPayload: largeBinaryBlock.binaryPayload }),
-  };
 }
 
 function protocolErrorCode(protocolCode: number): string {
@@ -295,13 +127,6 @@ function failure(code: string, result: JsonValueType = null): McpToolExecutionRe
   return { outcome: "error", errorCode: Code.parse(code), result };
 }
 
-function isRecorderFailure(error: unknown): boolean {
-  return (
-    error instanceof HarnessError &&
-    (error.code === "run_event_record_failed" || error.code === "pii_summary_record_failed")
-  );
-}
-
 function setOutcome(span: Span, outcome: McpToolExecutionResult): void {
   telemetry.setActiveSpanAttribute("harness.outcome", outcome.outcome);
   if (outcome.outcome === "error") {
@@ -319,206 +144,76 @@ function validToolArgs(inputSchema: JsonValueType, args: JsonValueType): boolean
   }
 }
 
-type TokenizedInputRequest = ReturnType<typeof InputRequestContentSchema.parse>[number] & {
-  readonly inputKey: string;
-};
-
-interface ProtectedInputRequests {
-  readonly tokenizedRequests: readonly TokenizedInputRequest[];
-  readonly protectedRequestState?: string;
-  readonly rawKeysByProtectedKey: ReadonlyMap<string, string>;
-  readonly sensitiveInputKeys: readonly string[];
-  readonly sensitiveKeys: ReadonlySet<string>;
+interface ToolRoundResult {
+  readonly kind: "result";
+  readonly result: CallToolResult;
 }
 
-async function protectInputRequests(
-  validated: ReturnType<typeof validateInputRequiredResult>,
-  tokenizeHumanInput: (value: JsonValueType) => Promise<JsonValueType>,
-  protectInputMetadata: (value: string) => Promise<string>,
-): Promise<ProtectedInputRequests> {
-  const tokenized = await tokenizeHumanInput(
-    JsonValue.parse(validated.inputRequests.map(({ inputKey: _inputKey, ...request }) => request)),
-  );
-  const parsed = InputRequestContentSchema.parse(tokenized);
-  const protectedKeys = await Promise.all(
-    validated.inputRequests.map(({ inputKey }) => protectInputMetadata(inputKey)),
-  );
-  const protectedRequestState =
-    validated.requestState === undefined
-      ? undefined
-      : await protectInputMetadata(validated.requestState);
-  const rawKeysByProtectedKey = new Map(
-    protectedKeys.map((protectedKey, index) => [
-      protectedKey,
-      validated.inputRequests[index]?.inputKey ?? "",
-    ]),
-  );
-  const tokenizedRequests = parsed.map((request, index) => {
-    if (validated.inputRequests[index] === undefined) {
-      throw new Error("Validated request count changed.");
-    }
-    const inputKey = protectedKeys[index];
-    if (inputKey === undefined) {
-      throw new Error("Protected request key is missing.");
-    }
-    return { ...request, inputKey };
-  });
-  const sensitiveInputKeys = tokenizedRequests
-    .filter((request) => {
-      const originalKey = rawKeysByProtectedKey.get(request.inputKey);
-      return validated.inputRequests.some(
-        (original) => original.inputKey === originalKey && requestsSensitiveFormField(original),
-      );
-    })
-    .map(({ inputKey }) => inputKey);
-  return {
-    tokenizedRequests,
-    ...(protectedRequestState === undefined ? {} : { protectedRequestState }),
-    rawKeysByProtectedKey,
-    sensitiveInputKeys,
-    sensitiveKeys: new Set(sensitiveInputKeys),
-  };
+interface McpObjectToolCall extends Omit<McpToolCall, "args"> {
+  readonly args: Record<string, unknown>;
 }
 
-function restoreInputResponses(
-  protectedResponses: Readonly<Record<string, InputResponse>>,
-  rawKeysByProtectedKey: ReadonlyMap<string, string>,
-): Record<string, InputResponse> | undefined {
-  const rawResponses = new Map<string, InputResponse>();
-  for (const [protectedKey, response] of Object.entries(protectedResponses)) {
-    const inputKey = rawKeysByProtectedKey.get(protectedKey);
-    if (inputKey === undefined) {
-      return undefined;
-    }
-    rawResponses.set(inputKey, response);
-  }
-  return Object.fromEntries(rawResponses);
-}
+type ToolRoundOutcome =
+  | ToolRoundResult
+  | { readonly kind: "failure"; readonly errorCode: string }
+  | { readonly kind: "suspend" };
 
-async function executeRegisteredTool(options: {
+async function callToolWithInputRounds(options: {
   readonly connection: McpConnection;
   readonly route: ResolvedTool;
-  readonly call: McpToolCall;
+  readonly call: McpObjectToolCall;
   readonly signal: AbortSignal;
-  readonly offloadBinaryResults: boolean;
   readonly elicitation?: ElicitationPort;
   readonly inputRetry?: ElicitationRetry;
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata?: (value: string) => Promise<string>;
-}): Promise<McpToolExecutionResult> {
-  const { connection, route, call, signal, offloadBinaryResults, elicitation } = options;
-  if (signal.aborted) {
-    return failure("mcp_timeout");
-  }
-  if (!isRecord(call.args) || !validToolArgs(route.inputSchema, call.args)) {
-    return failure("args_invalid");
-  }
+}): Promise<ToolRoundOutcome> {
+  const { connection, route, call, signal } = options;
   let inputRetry = options.inputRetry;
   let round = inputRetry?.round ?? 0;
   let result: CallToolResult;
   for (;;) {
     try {
-      result = await connection.callTool(
-        { name: route.nativeName, arguments: call.args },
-        route.inputSchema,
-        { signal },
-        route.tool,
-        inputRetry,
-      );
-    } catch (error) {
-      return failure(errorCode(error, signal));
-    }
-    if (!isInputRequiredResult(result)) {
-      break;
-    }
-    round += 1;
-    if (round > route.server.elicitation.maxRounds) {
-      countMcpInputRequest("rounds_exceeded");
-      return failure("mcp_input_rounds_exceeded");
-    }
-    let validated;
-    try {
-      validated = validateInputRequiredResult(result, route.server);
-    } catch (error) {
-      countMcpInputRequest("rejected");
-      return failure(
-        error instanceof McpInputRequestError ? error.code : "mcp_input_request_invalid",
-      );
-    }
-    if (elicitation === undefined) {
-      countMcpInputRequest("rejected");
-      return failure("mcp_input_request_invalid");
-    }
-    const protectInputMetadata = options.protectInputMetadata;
-    if (options.tokenizeHumanInput === undefined || protectInputMetadata === undefined) {
-      countMcpInputRequest("rejected");
-      return failure("mcp_input_request_invalid");
-    }
-    let protectedRequests: ProtectedInputRequests;
-    try {
-      protectedRequests = await protectInputRequests(
-        validated,
-        options.tokenizeHumanInput,
-        protectInputMetadata,
-      );
-    } catch (error) {
-      if (isRecorderFailure(error)) {
-        throw error;
-      }
-      return failure("mcp_input_request_invalid");
-    }
-    let inputOutcome: ElicitationInputOutcome;
-    try {
-      inputOutcome = await elicitation.handleInputRequired({
-        callId: call.callId,
-        serverId: route.server.id,
-        round,
-        maxPerRun: route.server.elicitation.maxPerRun,
-        inputRequests: protectedRequests.tokenizedRequests,
-        sensitiveInputKeys: protectedRequests.sensitiveInputKeys,
-        signal,
-        ...(protectedRequests.protectedRequestState === undefined
-          ? {}
-          : { requestState: protectedRequests.protectedRequestState }),
+      result = await connection.callTool({
+        params: { name: route.nativeName, arguments: call.args },
+        inputSchema: route.inputSchema,
+        options: { signal },
+        toolDefinition: route.tool,
+        ...(inputRetry === undefined ? {} : { inputRetry }),
       });
     } catch (error) {
-      if (isRecorderFailure(error)) {
-        throw error;
-      }
-      return failure("mcp_input_request_invalid");
+      return { kind: "failure", errorCode: errorCode(error, signal) };
     }
-    if (inputOutcome.kind === "error") {
-      countMcpInputRequest(
-        inputOutcome.errorCode === "mcp_input_rate_limited" ? "rate_limited" : "rejected",
-      );
-      return failure(inputOutcome.errorCode);
+    if (!isInputRequiredResult(result)) {
+      return { kind: "result", result };
     }
-    for (const request of protectedRequests.tokenizedRequests) {
-      countMcpInputRequest(
-        protectedRequests.sensitiveKeys.has(request.inputKey) ? "declined_sensitive" : "asked",
-      );
-    }
-    if (inputOutcome.kind === "suspend") {
-      return {
-        outcome: "ok",
-        result: null,
-        suspend: true,
-        suspendReason: "awaiting_input",
-      };
-    }
-    const inputResponses = restoreInputResponses(
-      inputOutcome.inputResponses,
-      protectedRequests.rawKeysByProtectedKey,
-    );
-    if (inputResponses === undefined) {
-      return failure("mcp_input_request_invalid");
-    }
-    inputRetry = {
-      inputResponses,
+    const handled = await handleInputRequiredCall({
+      value: result,
+      route,
+      call,
+      signal,
       round,
-      ...(validated.requestState === undefined ? {} : { requestState: validated.requestState }),
-    };
+      ...(options.elicitation === undefined ? {} : { elicitation: options.elicitation }),
+      ...(options.tokenizeHumanInput === undefined
+        ? {}
+        : { tokenizeHumanInput: options.tokenizeHumanInput }),
+      ...(options.protectInputMetadata === undefined
+        ? {}
+        : { protectInputMetadata: options.protectInputMetadata }),
+    });
+    if (handled.kind === "failure" || handled.kind === "suspend") {
+      return handled;
+    }
+    inputRetry = handled.inputRetry;
+    round = inputRetry.round;
   }
+}
+
+function mapToolResult(
+  result: CallToolResult,
+  route: ResolvedTool,
+  offloadBinaryResults: boolean,
+): McpToolExecutionResult {
   const mapped = normalizedResult(result);
   const serialized = JSON.stringify(mapped.offloadValue);
   if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
@@ -539,6 +234,38 @@ async function executeRegisteredTool(options: {
     return failure("tool_reported_error", mapped.value);
   }
   return { outcome: "ok", result: mapped.value };
+}
+
+async function executeRegisteredTool(options: {
+  readonly connection: McpConnection;
+  readonly route: ResolvedTool;
+  readonly call: McpToolCall;
+  readonly signal: AbortSignal;
+  readonly offloadBinaryResults: boolean;
+  readonly elicitation?: ElicitationPort;
+  readonly inputRetry?: ElicitationRetry;
+  readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
+  readonly protectInputMetadata?: (value: string) => Promise<string>;
+}): Promise<McpToolExecutionResult> {
+  const { route, call, signal } = options;
+  if (signal.aborted) {
+    return failure("mcp_timeout");
+  }
+  const args = call.args;
+  if (!isRecord(args) || !validToolArgs(route.inputSchema, args)) {
+    return failure("args_invalid");
+  }
+  const roundOutcome = await callToolWithInputRounds({
+    ...options,
+    call: { ...call, args },
+  });
+  if (roundOutcome.kind === "failure") {
+    return failure(roundOutcome.errorCode);
+  }
+  if (roundOutcome.kind === "suspend") {
+    return { outcome: "ok", result: null, suspend: true, suspendReason: "awaiting_input" };
+  }
+  return mapToolResult(roundOutcome.result, route, options.offloadBinaryResults);
 }
 
 /**

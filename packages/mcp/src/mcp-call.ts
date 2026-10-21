@@ -33,8 +33,9 @@ export async function invokeMcpTool(options: {
 }): Promise<CallToolResult> {
   const { _meta: existingMeta, ...callParams } = options.params;
   const requestMeta = buildActiveRequestMeta(options.server, existingMeta);
-  const clientCapabilities = { ...requestMeta };
-  delete clientCapabilities[CLIENT_CAPABILITIES_META_KEY];
+  const clientCapabilities = Object.fromEntries(
+    Object.entries(requestMeta ?? {}).filter(([key]) => key !== CLIENT_CAPABILITIES_META_KEY),
+  );
   if (options.server.elicitation.enabled) {
     clientCapabilities[CLIENT_CAPABILITIES_META_KEY] = {
       elicitation: Object.fromEntries(options.server.elicitation.modes.map((mode) => [mode, {}])),

@@ -281,8 +281,7 @@ function applyInputRequest(state: MutableRunState, event: InputRequestedEvent): 
 function applyInputResolution(state: MutableRunState, event: InputResolvedEvent): MutableRunState {
   const request = state.pendingInputs.get(event.requestId);
   if (
-    request === undefined ||
-    request.source !== event.source ||
+    request?.source !== event.source ||
     request.mode !== event.mode ||
     request.round !== event.round
   ) {
@@ -335,48 +334,60 @@ function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"])
     segmentId: event.segmentId,
     lastTs: event.ts,
   };
-  if (event.type === "run_status_changed") {
-    return applyStatusEvent(withEnvelope, event);
-  }
-  if (event.type === "model_response") {
-    return applyResponseEvent(withEnvelope, event);
-  }
-  if (event.type === "context_compacted") {
-    return {
-      ...withEnvelope,
-      usage: {
-        inputTokens: withEnvelope.usage.inputTokens + (event.inputTokens ?? 0),
-        outputTokens: withEnvelope.usage.outputTokens + (event.outputTokens ?? 0),
-        costMicros: withEnvelope.usage.costMicros + (event.costMicros ?? 0),
-      },
-    };
-  }
-  if (event.type === "subagent_completed") {
-    return applySubagentCompletion(withEnvelope, event);
+  const primaryEvent = applyPrimaryEvent(withEnvelope, event);
+  if (primaryEvent !== undefined) {
+    return primaryEvent;
   }
   const toolLifecycle = applyToolLifecycle(withEnvelope, event);
   if (toolLifecycle !== undefined) {
     return toolLifecycle;
   }
+  return applyRemainingEvent(withEnvelope, event);
+}
+
+function applyPrimaryEvent(state: MutableRunState, event: Event): MutableRunState | undefined {
+  if (event.type === "run_status_changed") {
+    return applyStatusEvent(state, event);
+  }
+  if (event.type === "model_response") {
+    return applyResponseEvent(state, event);
+  }
+  if (event.type === "context_compacted") {
+    return {
+      ...state,
+      usage: {
+        inputTokens: state.usage.inputTokens + (event.inputTokens ?? 0),
+        outputTokens: state.usage.outputTokens + (event.outputTokens ?? 0),
+        costMicros: state.usage.costMicros + (event.costMicros ?? 0),
+      },
+    };
+  }
+  if (event.type === "subagent_completed") {
+    return applySubagentCompletion(state, event);
+  }
+  return undefined;
+}
+
+function applyRemainingEvent(state: MutableRunState, event: Event): MutableRunState {
   if (event.type === "approval_requested") {
-    return applyApprovalRequest(withEnvelope, event);
+    return applyApprovalRequest(state, event);
   }
   if (event.type === "approval_resolved") {
-    return applyApprovalResolution(withEnvelope, event);
+    return applyApprovalResolution(state, event);
   }
   if (event.type === "input_requested") {
-    return applyInputRequest(withEnvelope, event);
+    return applyInputRequest(state, event);
   }
   if (event.type === "input_resolved") {
-    return applyInputResolution(withEnvelope, event);
+    return applyInputResolution(state, event);
   }
   if (event.type === "checkpoint_written") {
     return {
-      ...withEnvelope,
+      ...state,
       lastCheckpoint: { checkpointId: event.checkpointId, atSeq: event.atSeq },
     };
   }
-  return withEnvelope;
+  return state;
 }
 
 /**

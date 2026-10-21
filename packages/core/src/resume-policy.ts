@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Id, RunResumePolicySchema } from "@harness/schemas";
-import type { RunState, ToolIntentEvent } from "./run-state.js";
+import type { InputRequestedEvent, RunState, ToolIntentEvent } from "./run-state.js";
 import type { ModelToolCall, ToolExecutionResult, ToolPort } from "./ports.js";
 import type { z } from "zod";
 
@@ -56,6 +56,21 @@ export type DanglingIntentAction =
       readonly errorCode: "unknown_tool" | "resume_ambiguous" | "pii_blocked";
     };
 
+function hasUnsentResolvedInputRound(options: {
+  readonly state: RunState;
+  readonly intent: ToolIntentEvent;
+  readonly latestRound: number;
+  readonly latestInputs: readonly InputRequestedEvent[];
+  readonly initialAttempt: number;
+}): boolean {
+  const { state, intent, latestRound, latestInputs, initialAttempt } = options;
+  return (
+    latestInputs.length > 0 &&
+    latestInputs.every(({ requestId }) => state.resolvedInputs.has(requestId)) &&
+    (state.toolExecutionAttempts.get(intent.callId) ?? 0) <= initialAttempt + latestRound - 1
+  );
+}
+
 /**
  * Plans how to handle tool intents without results, preserving the state map's order.
  *
@@ -89,9 +104,13 @@ export function planDanglingIntents(
     const initialAttempt =
       resumeStrategy !== undefined || (intent.idempotent && description.idempotent) ? 0 : 1;
     if (
-      latestInputs.length > 0 &&
-      latestInputs.every(({ requestId }) => state.resolvedInputs.has(requestId)) &&
-      (state.toolExecutionAttempts.get(intent.callId) ?? 0) <= initialAttempt + latestRound - 1
+      hasUnsentResolvedInputRound({
+        state,
+        intent,
+        latestRound,
+        latestInputs,
+        initialAttempt,
+      })
     ) {
       return { kind: "retry_input", callId: intent.callId };
     }

@@ -12,6 +12,7 @@ import { context as otelContext, SpanStatusCode, trace } from "@opentelemetry/ap
 import type { SpanContext } from "@opentelemetry/api";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import {
+  HarnessError,
   JsonValue,
   ServerConfigSchema,
   type JsonValue as JsonValueType,
@@ -21,6 +22,7 @@ import { createTestContextManager, createTestSpanCollector } from "@harness/tele
 import { lookupSpanDefinition } from "@harness/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
+import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
@@ -155,6 +157,14 @@ const call = {
   toolId: "mcp_test.echo",
   args: { value: "ok" },
 };
+
+class InputRecorderFailure extends HarnessError {
+  readonly code = "run_event_record_failed";
+
+  constructor() {
+    super("input event recording failed");
+  }
+}
 
 const mrtrConfig: NonNullable<ServerConfig["elicitation"]> = {
   enabled: true,
@@ -454,6 +464,84 @@ describe("McpToolPort", () => {
     }
   });
 
+  it("fails closed for invalid persistence and input-handler outcomes", async () => {
+    const route = {
+      server: ServerConfigSchema.parse({
+        id: "mcp_test",
+        transport: { kind: "stdio", command: "not-spawned-by-test" },
+        elicitation: mrtrConfig,
+        timeouts: { callMs: 1_000 },
+        maxResultBytes: 1_048_576,
+      }),
+      nativeName: "echo",
+      tool: { name: "echo", inputSchema },
+      inputSchema: JsonValue.parse(inputSchema),
+    };
+    const base = {
+      value: requiredResult("state"),
+      route,
+      call: { callId: call.callId },
+      signal: new AbortController().signal,
+      round: 0,
+      tokenizeHumanInput: (value: JsonValueType) => Promise.resolve(value),
+      protectInputMetadata: (value: string) => Promise.resolve(value),
+    };
+    try {
+      await expect(handleInputRequiredCall(base)).resolves.toEqual({
+        kind: "failure",
+        errorCode: "mcp_input_request_invalid",
+      });
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          tokenizeHumanInput: () => Promise.reject(new Error("tokenization failed")),
+          elicitation: { handleInputRequired: () => Promise.resolve({ kind: "suspend" }) },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_request_invalid" });
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: {
+            handleInputRequired: () => Promise.reject(new Error("input handler failed")),
+          },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_request_invalid" });
+
+      const recorderFailure = new InputRecorderFailure();
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: { handleInputRequired: () => Promise.reject(recorderFailure) },
+        }),
+      ).rejects.toBe(recorderFailure);
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: {
+            handleInputRequired: () =>
+              Promise.resolve({ kind: "error", errorCode: "mcp_input_rate_limited" }),
+          },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_rate_limited" });
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: {
+            handleInputRequired: () =>
+              Promise.resolve({
+                kind: "retry",
+                inputResponses: {
+                  "unknown-key": { action: "decline" },
+                },
+              }),
+          },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_request_invalid" });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("retries an input-required call with the response and byte-identical request state", async () => {
     const requestState = "state-\u0000-\u{1f4a1}";
     const inputCanary = "MRTR_SERVER_TEXT_CANARY";
@@ -466,9 +554,9 @@ describe("McpToolPort", () => {
     const tokenizedInputs: JsonValueType[] = [];
     const callTool = vi
       .spyOn(McpConnection.prototype, "callTool")
-      .mockImplementation((_params, _schema, _options, _tool, inputRetry) => {
-        if (inputRetry !== undefined) {
-          retries.push(inputRetry);
+      .mockImplementation((request) => {
+        if (request.inputRetry !== undefined) {
+          retries.push(request.inputRetry);
         }
         const response = responses.shift();
         if (response === undefined) {
@@ -556,9 +644,9 @@ describe("McpToolPort", () => {
     ];
     const callTool = vi
       .spyOn(McpConnection.prototype, "callTool")
-      .mockImplementation((_params, _schema, _options, _tool, inputRetry) => {
-        if (inputRetry !== undefined) {
-          retries.push(inputRetry);
+      .mockImplementation((request) => {
+        if (request.inputRetry !== undefined) {
+          retries.push(request.inputRetry);
         }
         const response = responses.shift();
         if (response === undefined) {

@@ -41,6 +41,12 @@ export function toWireInputResponses(
   inputResponses: Readonly<Record<string, InputResponse>>,
 ): InputResponses {
   const entries = Object.entries(inputResponses).map(([inputKey, response]) => {
+    if (
+      response.answer !== undefined &&
+      (typeof response.answer !== "object" || response.answer === null || Array.isArray(response.answer))
+    ) {
+      throw new TypeError("Resolved input does not match the MCP elicitation response schema.");
+    }
     const validated = specTypeSchemas.ElicitResult["~standard"].validate({
       action: response.action,
       content: response.answer ?? {},

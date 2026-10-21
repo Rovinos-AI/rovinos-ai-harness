@@ -27,10 +27,10 @@ describe("invokeMcpTool elicitation metadata", () => {
     const calls: CallToolRequest["params"][] = [];
     const options: (CallToolRequestOptions | undefined)[] = [];
     const client: Pick<Client, "callTool"> = {
-      callTool: async (params, requestOptions) => {
+      callTool: (params, requestOptions) => {
         calls.push(params);
         options.push(requestOptions);
-        return { content: [] } satisfies CallToolResult;
+        return Promise.resolve({ content: [] } satisfies CallToolResult);
       },
     };
     const requestState = "opaque-\u0000-\u{1f4a1}";
@@ -68,9 +68,9 @@ describe("invokeMcpTool elicitation metadata", () => {
   it("removes caller-supplied capabilities when elicitation is disabled", async () => {
     const calls: CallToolRequest["params"][] = [];
     const client: Pick<Client, "callTool"> = {
-      callTool: async (params) => {
+      callTool: (params) => {
         calls.push(params);
-        return { content: [] } satisfies CallToolResult;
+        return Promise.resolve({ content: [] } satisfies CallToolResult);
       },
     };
     await invokeMcpTool({
@@ -89,7 +89,7 @@ describe("invokeMcpTool elicitation metadata", () => {
 
   it("rejects an answer that cannot be represented by an MCP elicitation result", async () => {
     const client: Pick<Client, "callTool"> = {
-      callTool: async () => ({ content: [] }),
+      callTool: () => Promise.resolve({ content: [] }),
     };
     await expect(
       invokeMcpTool({

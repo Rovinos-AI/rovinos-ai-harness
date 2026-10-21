@@ -37,6 +37,14 @@ export type { McpConnectionDependencies, McpConnectionState } from "./connection
 export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
 export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
 
+interface ConnectionToolCall {
+  readonly params: CallToolRequest["params"];
+  readonly inputSchema: unknown;
+  readonly options?: CallToolRequestOptions;
+  readonly toolDefinition?: McpTool;
+  readonly inputRetry?: ElicitationRetry;
+}
+
 /**
  * Manages one MCP SDK client, its transport, tool discovery, and reconnection.
  */
@@ -311,18 +319,11 @@ export class McpConnection {
 
   /**
    * Validates tool arguments before network I/O and calls the remote tool.
-   * @param params - Native tool name, arguments, and optional request metadata.
-   * @param inputSchema - Untrusted JSON Schema supplied by the tool registry.
-   * @param options - SDK request options such as the cancellation signal.
+   * @param request - Native tool request and its schema and retry options.
    * @returns The remote tool result.
    */
-  async callTool(
-    params: CallToolRequest["params"],
-    inputSchema: unknown,
-    options?: CallToolRequestOptions,
-    toolDefinition?: McpTool,
-    inputRetry?: ElicitationRetry,
-  ): Promise<CallToolResult> {
+  async callTool(request: ConnectionToolCall): Promise<CallToolResult> {
+    const { params, inputSchema, options, toolDefinition, inputRetry } = request;
     try {
       const validate = getOrCreateValidator(inputSchema);
       validate(params.arguments ?? {});

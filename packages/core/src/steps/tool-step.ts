@@ -8,12 +8,11 @@ import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
 import { recordDeniedResult } from "./tool-result.js";
-import type { IdGenerator, ModelToolCall, PolicyPort, ToolPort } from "../ports.js";
+import type { IdGenerator, ModelToolCall, PolicyPort, RunContext, ToolPort } from "../ports.js";
 import { foldRunState, type ToolIntentEvent } from "../run-state.js";
 import {
   normalizeUnregisteredToolCall,
   prepareToolCall,
-  toolRunContext,
   type PreparedToolCall,
 } from "./prepare-tool.js";
 import {
@@ -24,8 +23,8 @@ import {
   requestPolicyApproval,
   setPolicySpanAttributes,
 } from "./policy-step.js";
-import { createMcpElicitationPort } from "./input-step.js";
 import type { ElicitationRetry } from "@harness/mcp";
+import { createToolExecutionContext } from "./tool-context.js";
 import {
   executePreparedTool,
   executedArgsHashField,
@@ -107,7 +106,7 @@ export async function runToolCall(
   const call = unregistered?.call ?? proposedCall;
   const safeBehavior =
     unregistered === undefined ? behavior : { ...behavior, prepared: unregistered.prepared };
-  const context = executionContext(options, events, call.callId, behavior.inputRetry);
+  const context = createToolExecutionContext(options, events, call.callId, behavior.inputRetry);
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, (span) =>
     runToolCallWithinSpan({
       options,
@@ -132,7 +131,7 @@ interface RunToolCallSpanOptions {
   readonly proposedCall: ModelToolCall;
   readonly description: ReturnType<ToolPort["describe"]>;
   readonly behavior: RunToolCallBehavior;
-  readonly context: ReturnType<typeof executionContext>;
+  readonly context: RunContext;
   readonly events: Event[];
   readonly span: Span;
 }
@@ -379,50 +378,12 @@ async function prepareRunToolCall(
   options: ToolStepExecutionOptions,
   proposedCall: ModelToolCall,
   behavior: RunToolCallBehavior,
-  context: ReturnType<typeof executionContext>,
+  context: RunContext,
 ): Promise<PreparedToolCall> {
   if (behavior.existingIntent?.policyDecision === "deny") {
     return { call: { ...proposedCall, args: null }, errorCode: "pii_blocked" };
   }
   return behavior.prepared ?? prepareToolCall(options.tool, proposedCall, context);
-}
-
-function executionContext(
-  options: ToolStepExecutionOptions & {
-    readonly ids?: IdGenerator;
-    readonly checkpointer?: Checkpointer;
-    readonly history?: readonly Event[];
-  },
-  events: Event[],
-  callId: Id,
-  inputRetry?: ElicitationRetry,
-) {
-  const base = toolRunContext(
-    {
-      runId: options.runId,
-      signal: options.signal,
-      toolRegistry: options.tool,
-      ...(options.depth === undefined ? {} : { depth: options.depth }),
-    },
-    options.recorder,
-    events,
-  );
-  if (options.ids === undefined) {
-    return base;
-  }
-  return {
-    ...base,
-    elicitation: createMcpElicitationPort({
-      callId,
-      clock: options.clock,
-      events,
-      history: options.history ?? [],
-      ids: options.ids,
-      recorder: options.recorder,
-      checkpointer: options.checkpointer,
-    }),
-    ...(inputRetry === undefined ? {} : { inputRetry }),
-  };
 }
 
 /** Records prepared tool intents durably before execution, then records results. */

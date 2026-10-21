@@ -22,6 +22,7 @@ import {
   restoreWorkspaceSnapshot,
 } from "./resume-history.js";
 import { claimResumeLock } from "./resume-lock.js";
+import { RESUME_LEASE_MS, startLeaseRenewal } from "./resume-lease.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */
 export class RunAlreadyTerminalError extends HarnessError {
@@ -77,9 +78,6 @@ export class RunAwaitingInputError extends HarnessError {
     this.name = "RunAwaitingInputError";
   }
 }
-
-const RESUME_LEASE_MS = 30_000;
-const RESUME_LEASE_RENEW_MS = 10_000;
 
 /** Inputs for resuming an existing run. */
 export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorder"> {
@@ -379,33 +377,6 @@ async function withResumeLease(
     }
     release();
   }
-}
-
-function startLeaseRenewal(
-  options: ResumeRunOptions,
-  leaseOwner: Id,
-  leaseController: AbortController,
-): ReturnType<typeof setInterval> {
-  let renewalPending = false;
-  return setInterval(() => {
-    if (renewalPending) {
-      return;
-    }
-    renewalPending = true;
-    void options.store
-      .renewRunExecution(options.runId, leaseOwner, options.clock.now(), RESUME_LEASE_MS)
-      .then((renewed) => {
-        if (!renewed) {
-          leaseController.abort("resume_lease_lost");
-        }
-      })
-      .catch(() => {
-        leaseController.abort("resume_lease_lost");
-      })
-      .finally(() => {
-        renewalPending = false;
-      });
-  }, RESUME_LEASE_RENEW_MS);
 }
 
 async function resumeFromHistory(

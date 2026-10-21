@@ -1260,7 +1260,7 @@ describe("durable MCP input requests", () => {
       {
         ...resumeOptions(secondRecorder, tool),
         history: durableEvents,
-        beforeToolExecution: async () => undefined,
+        beforeToolExecution: () => Promise.resolve(),
       },
       resolvedState,
       actions,
