@@ -20,6 +20,7 @@ import {
   type SecretRef,
   type ServersConfig,
   type StoreConfig,
+  type DeploymentConfig,
   type VaultConfig,
 } from "@harness/schemas";
 import type { z } from "zod";
@@ -89,6 +90,7 @@ export interface RuntimeOverrides {
 /** Runtime configuration required by the currently implemented run loop. */
 export interface RuntimeConfig {
   readonly run: RunConfig;
+  readonly deployment?: DeploymentConfig;
   readonly pii?: PiiConfig;
   readonly store?: StoreConfig;
   readonly vault?: VaultConfig;
@@ -182,6 +184,7 @@ export interface RuntimeComposition {
   readonly keys: LocalKeyProvider;
   readonly sandboxBackend: SandboxBackend;
   readonly workspaceSnapshotter: WorkspaceSnapshotPort;
+  readonly instanceHeartbeat?: { close(): Promise<void> };
   readonly vault: RuntimeVault;
   readonly vaultResolver: AuditingVaultResolver;
   readonly pii:

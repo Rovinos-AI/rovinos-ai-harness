@@ -3,7 +3,8 @@ import type { Readable } from "node:stream";
 import type { Id } from "@harness/schemas";
 import { RemoteSandboxError } from "./remote-errors.js";
 import type { FsOperation, FsToolResult, WorkspaceFileToolBackend } from "./fs-tools.js";
-import type { WebFetchBackend, WebFetchRequest, WebFetchResult } from "./web-fetch-tool.js";
+import type { WebFetchRequest, WebFetchResult } from "./web-fetch-contracts.js";
+import type { WebFetchBackend } from "./web-fetch-tool.js";
 import type { RemoteWorkspaceSnapshotPort } from "./snapshot.js";
 import type { ExecResult, ExecSpec, SandboxBackend } from "./types.js";
 

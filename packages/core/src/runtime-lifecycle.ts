@@ -62,6 +62,7 @@ export async function closeRuntimeResources(options: {
   readonly vault: RuntimeComposition["vault"];
   readonly keys: RuntimeComposition["keys"];
   readonly sandboxBackend: RuntimeComposition["sandboxBackend"];
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
   readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
 }): Promise<void> {
   try {
@@ -80,7 +81,11 @@ export async function closeRuntimeResources(options: {
         try {
           await options.vault.close();
         } finally {
-          options.keys.dispose();
+          try {
+            await options.instanceHeartbeat?.close();
+          } finally {
+            options.keys.dispose();
+          }
         }
       }
     }

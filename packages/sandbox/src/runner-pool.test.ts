@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RemoteSandboxError } from "./remote-errors.js";
 import { RunnerPool } from "./runner-pool.js";
 import type { RunnerPoolRunner } from "./runner-pool.js";
-import type { WebFetchResult } from "./web-fetch-tool.js";
+import type { WebFetchResult } from "./web-fetch-contracts.js";
 
 const runId = Id.parse("00000000000000000000000001");
 const secondRunId = Id.parse("00000000000000000000000002");

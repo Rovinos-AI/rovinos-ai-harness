@@ -320,6 +320,7 @@ function composeRuntime(
         vault,
         keys,
         sandboxBackend: options.sandboxBackend,
+        instanceHeartbeat: options.instanceHeartbeat,
         flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
       }),
   };

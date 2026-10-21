@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { PiiConfig } from "@harness/schemas";
+import { openSqliteInstanceHeartbeat } from "@harness/store-sqlite";
 import { PiiToolPort } from "@harness/pii";
 import type { McpToolPort } from "@harness/mcp";
 import type { LocalKeyProvider } from "@harness/vault";
@@ -37,6 +38,7 @@ import type {
   RuntimeOverrides,
   RuntimeVault,
 } from "./runtime-config.js";
+import { DeploymentStartupError, validateDeploymentTopology } from "./runtime-deployment.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
@@ -45,6 +47,7 @@ async function closeSetupResources(options: {
   readonly sandboxBackend?: SandboxBackend | undefined;
   readonly eventStore: EventStore | undefined;
   readonly vault: RuntimeVault | undefined;
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
   readonly disposeKeys: () => void;
 }): Promise<void> {
   try {
@@ -60,7 +63,11 @@ async function closeSetupResources(options: {
       try {
         await options.vault?.close();
       } finally {
-        options.disposeKeys();
+        try {
+          await options.instanceHeartbeat?.close();
+        } finally {
+          options.disposeKeys();
+        }
       }
     }
   }
@@ -72,12 +79,14 @@ function cleanupRuntimeSetupFailure(options: {
   readonly vault: RuntimeVault | undefined;
   readonly keys: RuntimeComposition["keys"];
   readonly overrides: RuntimeOverrides;
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
 }): Promise<void> {
   return closeSetupResources({
     mcpToolPort: options.tools?.mcpToolPort,
     sandboxBackend: options.tools?.sandboxBackend ?? options.overrides.sandboxBackend,
     eventStore: options.eventStore,
     vault: options.vault,
+    instanceHeartbeat: options.instanceHeartbeat,
     disposeKeys: () => {
       options.keys.dispose();
     },
@@ -224,6 +233,10 @@ export async function setupRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides,
 ): Promise<RuntimeSetup> {
+  validateDeploymentTopology(
+    config,
+    overrides.queue !== undefined || overrides.readOnlyStore === true,
+  );
   const piiConfig = validatePiiConfig(config, overrides);
   const runtimeConfig = { ...config, pii: piiConfig };
   ensureTracing();
@@ -233,8 +246,24 @@ export async function setupRuntime(
   let vault: RuntimeVault | undefined;
   let eventStore: EventStore | undefined;
   let tools: RuntimeTools | undefined;
+  let instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
   try {
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
+    if (
+      config.deployment?.mode !== "multi" &&
+      config.store?.dialect !== "postgres" &&
+      overrides.readOnlyStore !== true &&
+      overrides.store === undefined
+    ) {
+      instanceHeartbeat = await openSqliteInstanceHeartbeat({
+        databasePath: join(dataDir, "harness.db"),
+        instanceId: ids.next(),
+        now: () => clock.now(),
+      });
+      if (instanceHeartbeat === undefined) {
+        throw new DeploymentStartupError("deployment_single_instance_violation");
+      }
+    }
     const runtimeVault = await createRuntimeVault({
       dataDir,
       config: runtimeConfig,
@@ -280,6 +309,7 @@ export async function setupRuntime(
       keys,
       sandboxBackend,
       workspaceSnapshotter,
+      ...(instanceHeartbeat === undefined ? {} : { instanceHeartbeat }),
       vault: runtimeVault,
       vaultResolver: piiRuntime.resolver,
       pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
@@ -295,7 +325,14 @@ export async function setupRuntime(
       scopes,
     };
   } catch (error) {
-    await cleanupRuntimeSetupFailure({ tools, eventStore, vault, keys, overrides });
+    await cleanupRuntimeSetupFailure({
+      tools,
+      eventStore,
+      vault,
+      keys,
+      overrides,
+      instanceHeartbeat,
+    });
     throw error;
   }
 }
