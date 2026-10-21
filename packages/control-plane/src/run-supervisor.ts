@@ -2,6 +2,7 @@
 import { Code, Id } from "@harness/schemas";
 import { activeRuns } from "@harness/telemetry";
 import type { ActiveRuns } from "@harness/telemetry";
+import type { RunQueue } from "@harness/store";
 import { z } from "zod";
 import type { ResumeRunOutput } from "./schemas.js";
 
@@ -14,6 +15,7 @@ const RunSupervisorOptionsSchema = z
 /** Dependencies for supervising in-process run resumes. */
 export interface RunSupervisorOptions {
   readonly maxConcurrentRuns?: number;
+  readonly queue?: RunQueue;
   readonly resumeRun?: (runId: Id, signal: AbortSignal, onClaimed: () => void) => Promise<unknown>;
   readonly activeRuns?: Pick<ActiveRuns, "register" | "terminate">;
 }
@@ -22,6 +24,7 @@ export interface RunSupervisorOptions {
 export class RunSupervisor {
   private readonly active = new Map<Id, AbortController>();
   private readonly maxConcurrentRuns: number;
+  private readonly queue: RunQueue | undefined;
   private readonly resumeRun: RunSupervisorOptions["resumeRun"];
   private readonly activeRuns: Pick<ActiveRuns, "register" | "terminate">;
 
@@ -30,6 +33,7 @@ export class RunSupervisor {
     this.maxConcurrentRuns = RunSupervisorOptionsSchema.parse({
       maxConcurrentRuns: options.maxConcurrentRuns,
     }).maxConcurrentRuns;
+    this.queue = options.queue;
     this.resumeRun = options.resumeRun;
     this.activeRuns = options.activeRuns ?? activeRuns;
   }
@@ -37,6 +41,12 @@ export class RunSupervisor {
   /** Queues a resume and returns without waiting for the run to finish. */
   start(runId: Id): Promise<ResumeRunOutput> {
     Id.parse(runId);
+    if (this.queue !== undefined) {
+      return this.queue
+        .enqueue({ kind: "resume", runId })
+        .then(() => ({ started: true }))
+        .catch(() => ({ started: false, code: Code.parse("run_queue_unavailable") }));
+    }
     if (this.resumeRun === undefined) {
       return Promise.resolve({
         started: false,

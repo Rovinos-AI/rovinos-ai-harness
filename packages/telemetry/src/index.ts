@@ -38,10 +38,14 @@ export {
   countPiiDetectorDegraded,
   countPolicyDecision,
   countQuotaRejection,
+  countWorkerJob,
   METRIC_ALLOWLIST,
+  recordWorkerQueueLag,
   type HostAppRejectedReason,
   type PolicyDecision,
   POLICY_DECISIONS,
+  type WorkerJobOutcome,
+  WORKER_JOB_OUTCOMES,
   type TelemetryDropReason,
 } from "./metrics.js";
 export {

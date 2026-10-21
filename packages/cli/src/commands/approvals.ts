@@ -15,9 +15,10 @@ import {
   type Event,
 } from "@harness/schemas";
 import type { CliContext, CommandModule } from "../command.js";
-import { cliApprovalMetadata, createCommandRuntime } from "../command.js";
+import { cliApprovalMetadata } from "../command.js";
 import { waitForShutdown } from "../serve.js";
 import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
+import { withApprovalRuntime } from "./approval-runtime.js";
 import { runApprovalSweep } from "./approval-sweep.js";
 import { assertResumeStatus } from "./resume.js";
 
@@ -131,21 +132,6 @@ async function confirm(context: CliContext, yes: boolean | undefined, question: 
   }
 }
 
-async function withRuntime<T>(
-  context: CliContext,
-  overrides: Parameters<typeof createCommandRuntime>[2],
-  action: (runtime: Runtime, config: HarnessConfig) => Promise<T>,
-  config?: HarnessConfig,
-): Promise<T> {
-  const runtimeConfig = config ?? (await context.loadConfig());
-  const runtime = await createCommandRuntime(context, runtimeConfig, overrides);
-  try {
-    return await action(runtime, runtimeConfig);
-  } finally {
-    await runtime.close();
-  }
-}
-
 function registerList(approvals: Command, context: CliContext): void {
   approvals
     .command("list")
@@ -153,7 +139,7 @@ function registerList(approvals: Command, context: CliContext): void {
     .option("--run <id>", "only list approvals of this run")
     .action(async (options: { readonly run?: string }) => {
       const runFilter = options.run === undefined ? undefined : parseId(options.run);
-      await withRuntime(context, undefined, async (runtime) => {
+      await withApprovalRuntime(context, undefined, async (runtime) => {
         const runIds = runFilter === undefined ? await suspendedRunIds(runtime.store) : [runFilter];
         const now = context.clock.now();
         const rows: ApprovalSummary[] = [];
@@ -222,12 +208,12 @@ async function showApproval(input: {
   ) {
     throw new ApprovalsCodeError("reveal_unavailable");
   }
-  await withRuntime(
+  await withApprovalRuntime(
     context,
     undefined,
     (runtime, runtimeConfig) =>
       showApprovalInRuntime({ approvals, context, runtime, runtimeConfig, approvalId, options }),
-    config,
+    { config },
   );
 }
 
@@ -347,7 +333,7 @@ async function decide(
   if (edits !== undefined && tool === undefined && config.servers.length === 0) {
     throw new ApprovalsCodeError("approval_edit_unavailable");
   }
-  await withRuntime(
+  await withApprovalRuntime(
     context,
     tool === undefined ? undefined : { tool },
     async (runtime) => {
@@ -374,7 +360,7 @@ async function decide(
         assertResumeStatus(resumed.status, resumed.events);
       }
     },
-    config,
+    { config, disableAutoResume: options.resume === true, useQueue: true },
   );
 }
 
@@ -403,8 +389,11 @@ function registerSweep(approvals: Command, context: CliContext): void {
     .command("sweep")
     .description("Expire and escalate pending approvals")
     .action(() =>
-      withRuntime(context, undefined, (runtime, config) =>
-        runApprovalSweep(runtime, context, config),
+      withApprovalRuntime(
+        context,
+        undefined,
+        (runtime, config) => runApprovalSweep(runtime, context, config),
+        { useQueue: true },
       ),
     );
 }

@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RunConfigSchema, StoreConfigSchema, VaultConfigSchema } from "@harness/schemas";
 import { PiiEventStore } from "@harness/pii";
 import { expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
-import { openConfiguredKeyRotation, openConfiguredVaultAdmin } from "./runtime-store.js";
+import {
+  openConfiguredKeyRotation,
+  openConfiguredRunQueue,
+  openConfiguredVaultAdmin,
+} from "./runtime-store.js";
 
 const postgresPool = vi.hoisted(() => ({ ended: 0 }));
 
@@ -53,6 +60,18 @@ vi.mock("pg", () => ({
     }
   },
 }));
+
+it("does not create a SQLite database when opening a queue read-only", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-readonly-queue-"));
+  try {
+    await expect(
+      openConfiguredRunQueue({}, { dataDir: directory, readOnly: true }),
+    ).rejects.toThrow();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 it("creates the configured Postgres store and resolves its connection with the injected resolver", async () => {
   postgresPool.ended = 0;
