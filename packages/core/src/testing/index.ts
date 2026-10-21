@@ -16,3 +16,9 @@ export {
   type CrashingEventStoreOptions,
 } from "./crash-store.js";
 export { allowAllPolicy } from "./allow-policy.js";
+export {
+  ObedientModel,
+  type ObedientModelBootstrapCall,
+  type ObedientModelOptions,
+  type ObedientModelRequest,
+} from "./obedient-model.js";
