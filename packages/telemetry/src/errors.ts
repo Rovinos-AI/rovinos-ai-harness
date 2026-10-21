@@ -2,6 +2,16 @@
 import { HarnessError } from "@harness/schemas";
 import type { z } from "zod";
 
+/** Closed SDK startup failure. */
+export class TelemetrySdkError extends HarnessError {
+  readonly code = "telemetry_content_capture_enabled";
+
+  constructor() {
+    super("telemetry_content_capture_enabled");
+    Object.defineProperty(this, "code", { configurable: false, writable: false });
+  }
+}
+
 /** Validation paths returned when span definitions or attributes are invalid. */
 export interface SpanRegistryIssue {
   readonly path: readonly (string | number)[];
