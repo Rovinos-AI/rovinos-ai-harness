@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FormSchema, type ServerConfig } from "@harness/schemas";
-import { HarnessError } from "@harness/schemas";
+import { FormSchema, HarnessError, type ServerConfig } from "@harness/schemas";
 import { z } from "zod";
 
 /** Raised when an MCP server returns malformed or undeclared input-required data. */
@@ -27,7 +26,10 @@ const InputRequestParamsSchema = z
         (params.requestedSchema === undefined || params.url !== undefined)) ||
       (params.mode === "url" && (params.url === undefined || params.requestedSchema !== undefined))
     ) {
-      context.addIssue({ code: "custom", message: "Input request mode does not match its fields." });
+      context.addIssue({
+        code: "custom",
+        message: "Input request mode does not match its fields.",
+      });
     }
     if (params.url !== undefined && !URL.canParse(params.url)) {
       context.addIssue({ code: "custom", path: ["url"], message: "Input URL is invalid." });
@@ -47,7 +49,7 @@ const InputRequiredResultSchema = z
     inputRequests: z.record(z.string(), z.unknown()).optional(),
     requestState: z.string().optional(),
   })
-  .passthrough();
+  .loose();
 
 /** A validated MRTR elicitation request with its server-assigned correlation key. */
 export const ValidatedInputRequestSchema = z
@@ -71,6 +73,47 @@ export const InputRequestContentSchema = z.array(
   ValidatedInputRequestSchema.omit({ inputKey: true }),
 );
 
+function hasUnsupportedFormPattern(request: z.infer<typeof InputRequestParamsSchema>): boolean {
+  return (
+    request.mode === "form" &&
+    request.requestedSchema !== undefined &&
+    Object.values(request.requestedSchema.properties).some(
+      (property) => property.type === "string" && property.pattern !== undefined,
+    )
+  );
+}
+
+function validateInputRequest(
+  inputKey: string,
+  rawRequest: unknown,
+  server: ServerConfig,
+): ValidatedInputRequest {
+  const entry = InputRequestEntrySchema.safeParse(rawRequest);
+  if (!entry.success || entry.data.method !== "elicitation/create") {
+    throw new McpInputRequestError();
+  }
+  const params = InputRequestParamsSchema.safeParse(entry.data.params);
+  if (
+    !params.success ||
+    inputKey.length === 0 ||
+    inputKey.length > 128 ||
+    !server.elicitation.enabled ||
+    !server.elicitation.modes.includes(params.data.mode) ||
+    hasUnsupportedFormPattern(params.data)
+  ) {
+    throw new McpInputRequestError();
+  }
+  return {
+    inputKey,
+    mode: params.data.mode,
+    message: params.data.message,
+    ...(params.data.requestedSchema === undefined
+      ? {}
+      : { requestedSchema: params.data.requestedSchema }),
+    ...(params.data.url === undefined ? {} : { url: params.data.url }),
+  };
+}
+
 /** Validates every embedded request and enforces per-server MRTR limits. */
 export function validateInputRequiredResult(
   value: unknown,
@@ -85,46 +128,9 @@ export function validateInputRequiredResult(
   if (entries.length === 0) {
     throw new McpInputRequestError();
   }
-  const inputRequests: ValidatedInputRequest[] = [];
-  for (const [inputKey, rawRequest] of entries) {
-    const entryParse = InputRequestEntrySchema.safeParse(rawRequest);
-    if (!entryParse.success) {
-      throw new McpInputRequestError();
-    }
-    const entry = entryParse.data;
-    if (
-      entry.method !== "elicitation/create" ||
-      inputKey.length === 0 ||
-      inputKey.length > 128 ||
-      !server.elicitation.enabled
-    ) {
-      throw new McpInputRequestError();
-    }
-    const paramsParse = InputRequestParamsSchema.safeParse(entry.params);
-    if (!paramsParse.success) {
-      throw new McpInputRequestError();
-    }
-    const params = paramsParse.data;
-    if (!server.elicitation.modes.includes(params.mode)) {
-      throw new McpInputRequestError();
-    }
-    if (
-      params.mode === "form" &&
-      params.requestedSchema !== undefined &&
-      Object.values(params.requestedSchema.properties).some(
-        (property) => property.type === "string" && property.pattern !== undefined,
-      )
-    ) {
-      throw new McpInputRequestError();
-    }
-    inputRequests.push({
-      inputKey,
-      mode: params.mode,
-      message: params.message,
-      ...(params.requestedSchema === undefined ? {} : { requestedSchema: params.requestedSchema }),
-      ...(params.url === undefined ? {} : { url: params.url }),
-    });
-  }
+  const inputRequests = entries.map(([inputKey, rawRequest]) =>
+    validateInputRequest(inputKey, rawRequest, server),
+  );
   if (
     result.requestState !== undefined &&
     Buffer.byteLength(result.requestState, "utf8") > server.elicitation.maxRequestStateBytes

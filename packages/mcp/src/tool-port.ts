@@ -5,7 +5,7 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/client";
 import { Code, HarnessError, JsonValue, compileJsonSchema } from "@harness/schemas";
-import type { JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
+import type { InputResponse, JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
 import * as telemetry from "@harness/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
@@ -56,6 +56,8 @@ export interface McpToolCallContext {
   readonly inputRetry?: ElicitationRetry;
   /** Tokenizes server-provided request content before durable recording. */
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
+  /** Stores opaque correlation values in the run-scoped encrypted vault. */
+  readonly protectInputMetadata?: (value: string) => Promise<string>;
 }
 
 /** Safe tool result structurally compatible with the core tool port. */
@@ -317,6 +319,82 @@ function validToolArgs(inputSchema: JsonValueType, args: JsonValueType): boolean
   }
 }
 
+type TokenizedInputRequest = ReturnType<typeof InputRequestContentSchema.parse>[number] & {
+  readonly inputKey: string;
+};
+
+interface ProtectedInputRequests {
+  readonly tokenizedRequests: readonly TokenizedInputRequest[];
+  readonly protectedRequestState?: string;
+  readonly rawKeysByProtectedKey: ReadonlyMap<string, string>;
+  readonly sensitiveInputKeys: readonly string[];
+  readonly sensitiveKeys: ReadonlySet<string>;
+}
+
+async function protectInputRequests(
+  validated: ReturnType<typeof validateInputRequiredResult>,
+  tokenizeHumanInput: (value: JsonValueType) => Promise<JsonValueType>,
+  protectInputMetadata: (value: string) => Promise<string>,
+): Promise<ProtectedInputRequests> {
+  const tokenized = await tokenizeHumanInput(
+    JsonValue.parse(validated.inputRequests.map(({ inputKey: _inputKey, ...request }) => request)),
+  );
+  const parsed = InputRequestContentSchema.parse(tokenized);
+  const protectedKeys = await Promise.all(
+    validated.inputRequests.map(({ inputKey }) => protectInputMetadata(inputKey)),
+  );
+  const protectedRequestState =
+    validated.requestState === undefined
+      ? undefined
+      : await protectInputMetadata(validated.requestState);
+  const rawKeysByProtectedKey = new Map(
+    protectedKeys.map((protectedKey, index) => [
+      protectedKey,
+      validated.inputRequests[index]?.inputKey ?? "",
+    ]),
+  );
+  const tokenizedRequests = parsed.map((request, index) => {
+    if (validated.inputRequests[index] === undefined) {
+      throw new Error("Validated request count changed.");
+    }
+    const inputKey = protectedKeys[index];
+    if (inputKey === undefined) {
+      throw new Error("Protected request key is missing.");
+    }
+    return { ...request, inputKey };
+  });
+  const sensitiveInputKeys = tokenizedRequests
+    .filter((request) => {
+      const originalKey = rawKeysByProtectedKey.get(request.inputKey);
+      return validated.inputRequests.some(
+        (original) => original.inputKey === originalKey && requestsSensitiveFormField(original),
+      );
+    })
+    .map(({ inputKey }) => inputKey);
+  return {
+    tokenizedRequests,
+    ...(protectedRequestState === undefined ? {} : { protectedRequestState }),
+    rawKeysByProtectedKey,
+    sensitiveInputKeys,
+    sensitiveKeys: new Set(sensitiveInputKeys),
+  };
+}
+
+function restoreInputResponses(
+  protectedResponses: Readonly<Record<string, InputResponse>>,
+  rawKeysByProtectedKey: ReadonlyMap<string, string>,
+): Record<string, InputResponse> | undefined {
+  const rawResponses = new Map<string, InputResponse>();
+  for (const [protectedKey, response] of Object.entries(protectedResponses)) {
+    const inputKey = rawKeysByProtectedKey.get(protectedKey);
+    if (inputKey === undefined) {
+      return undefined;
+    }
+    rawResponses.set(inputKey, response);
+  }
+  return Object.fromEntries(rawResponses);
+}
+
 async function executeRegisteredTool(options: {
   readonly connection: McpConnection;
   readonly route: ResolvedTool;
@@ -326,6 +404,7 @@ async function executeRegisteredTool(options: {
   readonly elicitation?: ElicitationPort;
   readonly inputRetry?: ElicitationRetry;
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
+  readonly protectInputMetadata?: (value: string) => Promise<string>;
 }): Promise<McpToolExecutionResult> {
   const { connection, route, call, signal, offloadBinaryResults, elicitation } = options;
   if (signal.aborted) {
@@ -366,33 +445,22 @@ async function executeRegisteredTool(options: {
         error instanceof McpInputRequestError ? error.code : "mcp_input_request_invalid",
       );
     }
-    const sensitiveInputKeys = validated.inputRequests
-      .filter(requestsSensitiveFormField)
-      .map(({ inputKey }) => inputKey);
-    const sensitiveKeys = new Set(sensitiveInputKeys);
     if (elicitation === undefined) {
       countMcpInputRequest("rejected");
       return failure("mcp_input_request_invalid");
     }
-    if (options.tokenizeHumanInput === undefined) {
+    const protectInputMetadata = options.protectInputMetadata;
+    if (options.tokenizeHumanInput === undefined || protectInputMetadata === undefined) {
       countMcpInputRequest("rejected");
       return failure("mcp_input_request_invalid");
     }
-    let tokenizedRequests;
+    let protectedRequests: ProtectedInputRequests;
     try {
-      const tokenized = await options.tokenizeHumanInput(
-        JsonValue.parse(
-          validated.inputRequests.map(({ inputKey: _inputKey, ...request }) => request),
-        ),
+      protectedRequests = await protectInputRequests(
+        validated,
+        options.tokenizeHumanInput,
+        protectInputMetadata,
       );
-      const parsed = InputRequestContentSchema.parse(tokenized);
-      tokenizedRequests = parsed.map((request, index) => {
-        const original = validated.inputRequests[index];
-        if (original === undefined) {
-          throw new Error("Validated request count changed.");
-        }
-        return { ...request, inputKey: original.inputKey };
-      });
     } catch (error) {
       if (isRecorderFailure(error)) {
         throw error;
@@ -406,11 +474,12 @@ async function executeRegisteredTool(options: {
         serverId: route.server.id,
         round,
         maxPerRun: route.server.elicitation.maxPerRun,
-        inputRequests: tokenizedRequests,
-        sensitiveInputKeys,
-        ...(validated.requestState === undefined
+        inputRequests: protectedRequests.tokenizedRequests,
+        sensitiveInputKeys: protectedRequests.sensitiveInputKeys,
+        signal,
+        ...(protectedRequests.protectedRequestState === undefined
           ? {}
-          : { requestState: validated.requestState }),
+          : { requestState: protectedRequests.protectedRequestState }),
       });
     } catch (error) {
       if (isRecorderFailure(error)) {
@@ -424,8 +493,10 @@ async function executeRegisteredTool(options: {
       );
       return failure(inputOutcome.errorCode);
     }
-    for (const request of validated.inputRequests) {
-      countMcpInputRequest(sensitiveKeys.has(request.inputKey) ? "declined_sensitive" : "asked");
+    for (const request of protectedRequests.tokenizedRequests) {
+      countMcpInputRequest(
+        protectedRequests.sensitiveKeys.has(request.inputKey) ? "declined_sensitive" : "asked",
+      );
     }
     if (inputOutcome.kind === "suspend") {
       return {
@@ -435,8 +506,15 @@ async function executeRegisteredTool(options: {
         suspendReason: "awaiting_input",
       };
     }
+    const inputResponses = restoreInputResponses(
+      inputOutcome.inputResponses,
+      protectedRequests.rawKeysByProtectedKey,
+    );
+    if (inputResponses === undefined) {
+      return failure("mcp_input_request_invalid");
+    }
     inputRetry = {
-      inputResponses: inputOutcome.inputResponses,
+      inputResponses,
       round,
       ...(validated.requestState === undefined ? {} : { requestState: validated.requestState }),
     };
@@ -572,6 +650,9 @@ export class McpToolPort {
             ...(context.tokenizeHumanInput === undefined
               ? {}
               : { tokenizeHumanInput: context.tokenizeHumanInput }),
+            ...(context.protectInputMetadata === undefined
+              ? {}
+              : { protectInputMetadata: context.protectInputMetadata }),
           });
           setOutcome(span, outcome);
           return outcome;

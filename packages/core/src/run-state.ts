@@ -2,6 +2,7 @@
 import { HarnessError, type Event, type JsonValue, type RunStatus } from "@harness/schemas";
 import { createPlanReducerState, planReducer, type PlanReducerState } from "@harness/context";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
+import { clearToolExecution, inspectInputRound } from "./run-state-tools.js";
 import type { ModelToolCall } from "./ports.js";
 
 /** A tool-intent event that has not yet received a result. */
@@ -29,6 +30,7 @@ export interface RunState {
   readonly pendingToolCalls: ReadonlyMap<ToolIntentEvent["callId"], ToolIntentEvent>;
   readonly toolExecutionStarted?: ReadonlySet<ToolIntentEvent["callId"]>;
   readonly toolExecutionAttempts: ReadonlyMap<ToolIntentEvent["callId"], number>;
+  readonly toolExecutionRounds?: ReadonlyMap<ToolIntentEvent["callId"], number>;
   readonly pendingApprovals: ReadonlyMap<
     ApprovalRequestedEvent["approvalId"],
     ApprovalRequestedEvent
@@ -68,6 +70,7 @@ interface MutableRunState {
   pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
   toolExecutionStarted: Set<ToolIntentEvent["callId"]>;
   toolExecutionAttempts: Map<ToolIntentEvent["callId"], number>;
+  toolExecutionRounds: Map<ToolIntentEvent["callId"], number>;
   pendingApprovals: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   approvalRequests: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   resolvedApprovals: Map<
@@ -208,13 +211,7 @@ function applyToolResult(
   if (!state.pendingToolCalls.has(event.callId)) {
     throw new CorruptLogError();
   }
-  const pendingToolCalls = new Map(state.pendingToolCalls);
-  pendingToolCalls.delete(event.callId);
-  const toolExecutionStarted = new Set(state.toolExecutionStarted);
-  toolExecutionStarted.delete(event.callId);
-  const toolExecutionAttempts = new Map(state.toolExecutionAttempts);
-  toolExecutionAttempts.delete(event.callId);
-  return { ...state, pendingToolCalls, toolExecutionStarted, toolExecutionAttempts };
+  return { ...state, ...clearToolExecution(state, event.callId) };
 }
 
 function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunState | undefined {
@@ -229,25 +226,20 @@ function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunSta
       throw new CorruptLogError("Tool execution marker has no pending intent.");
     }
     const previousAttempt = state.toolExecutionAttempts.get(event.callId) ?? 0;
-    if (previousAttempt > 0) {
-      const requests = Array.from(state.inputRequests.values()).filter(
-        (request) => request.callId === event.callId,
+    const intent = state.pendingToolCalls.get(event.callId);
+    const { latestRound, canRepeat } = inspectInputRound(state, event.callId, intent);
+    if (previousAttempt > 0 && !canRepeat) {
+      throw new CorruptLogError(
+        "A repeated tool execution marker requires a resolved input round.",
       );
-      const latestRound = Math.max(-1, ...requests.map(({ round }) => round));
-      const latestRequests = requests.filter(({ round }) => round === latestRound);
-      if (
-        latestRequests.length === 0 ||
-        latestRound < previousAttempt ||
-        latestRequests.some(({ requestId }) => !state.resolvedInputs.has(requestId))
-      ) {
-        throw new CorruptLogError("A repeated tool execution marker requires a resolved input round.");
-      }
     }
     const toolExecutionStarted = new Set(state.toolExecutionStarted);
     toolExecutionStarted.add(event.callId);
     const toolExecutionAttempts = new Map(state.toolExecutionAttempts);
     toolExecutionAttempts.set(event.callId, previousAttempt + 1);
-    return { ...state, toolExecutionStarted, toolExecutionAttempts };
+    const toolExecutionRounds = new Map(state.toolExecutionRounds);
+    toolExecutionRounds.set(event.callId, latestRound);
+    return { ...state, toolExecutionStarted, toolExecutionAttempts, toolExecutionRounds };
   }
   return undefined;
 }
@@ -411,6 +403,7 @@ export function foldRunState(events: Iterable<Event>): RunState {
     pendingToolCalls: new Map(),
     toolExecutionStarted: new Set(),
     toolExecutionAttempts: new Map(),
+    toolExecutionRounds: new Map(),
     pendingApprovals: new Map(),
     approvalRequests: new Map(),
     resolvedApprovals: new Map(),

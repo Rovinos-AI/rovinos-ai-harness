@@ -430,8 +430,8 @@ describe("McpToolPort", () => {
       content: [],
       resultType: "input_required",
     });
-    const handleInputRequired = vi.fn(async () => ({ kind: "suspend" as const }));
-    const tokenizeHumanInput = vi.fn(async (value: JsonValueType) => value);
+    const handleInputRequired = vi.fn(() => Promise.resolve({ kind: "suspend" as const }));
+    const tokenizeHumanInput = vi.fn((value: JsonValueType) => Promise.resolve(value));
     try {
       await expect(
         current.port.execute(
@@ -442,10 +442,10 @@ describe("McpToolPort", () => {
           }),
         ),
       ).resolves.toEqual({
-          outcome: "error",
-          errorCode: "mcp_input_request_invalid",
-          result: null,
-        });
+        outcome: "error",
+        errorCode: "mcp_input_request_invalid",
+        result: null,
+      });
       expect(handleInputRequired).not.toHaveBeenCalled();
       expect(tokenizeHumanInput).not.toHaveBeenCalled();
     } finally {
@@ -466,7 +466,7 @@ describe("McpToolPort", () => {
     const tokenizedInputs: JsonValueType[] = [];
     const callTool = vi
       .spyOn(McpConnection.prototype, "callTool")
-      .mockImplementation(async (_params, _schema, _options, _tool, inputRetry) => {
+      .mockImplementation((_params, _schema, _options, _tool, inputRetry) => {
         if (inputRetry !== undefined) {
           retries.push(inputRetry);
         }
@@ -474,37 +474,41 @@ describe("McpToolPort", () => {
         if (response === undefined) {
           throw new Error("Unexpected test call.");
         }
-        return response;
+        return Promise.resolve(response);
       });
-    const handleInputRequired = vi.fn(async (input: Parameters<
-      NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]
-    >[0]) => ({
-      kind: "retry" as const,
-      inputResponses: {
-        [input.inputRequests[0]?.inputKey ?? "server-key"]: {
-          action: "accept" as const,
-          answer: { answer: "Ada" },
-        },
-      },
-    }));
+    const handleInputRequired = vi.fn(
+      (input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
+        Promise.resolve({
+          kind: "retry" as const,
+          inputResponses: {
+            [input.inputRequests[0]?.inputKey ?? "server-key"]: {
+              action: "accept" as const,
+              answer: { answer: "Ada" },
+            },
+          },
+        }),
+    );
     try {
       const spanStart = spanCollector.getFinishedSpans().length;
       const result = await current.port.execute(
         call,
         context(new AbortController().signal, {
           elicitation: { handleInputRequired },
-          tokenizeHumanInput: async (value) => {
+          tokenizeHumanInput: (value) => {
             tokenizedInputs.push(value);
             if (!Array.isArray(value)) {
-              return value;
+              return Promise.resolve(value);
             }
-            return value.map((request) => {
-              if (typeof request !== "object" || request === null || Array.isArray(request)) {
-                return request;
-              }
-              return { ...request, message: "tokenized-message" };
-            });
+            return Promise.resolve(
+              value.map((request) => {
+                if (typeof request !== "object" || request === null || Array.isArray(request)) {
+                  return request;
+                }
+                return { ...request, message: "tokenized-message" };
+              }),
+            );
           },
+          protectInputMetadata: (value) => Promise.resolve(value),
         }),
       );
       expect(result).toMatchObject({
@@ -552,7 +556,7 @@ describe("McpToolPort", () => {
     ];
     const callTool = vi
       .spyOn(McpConnection.prototype, "callTool")
-      .mockImplementation(async (_params, _schema, _options, _tool, inputRetry) => {
+      .mockImplementation((_params, _schema, _options, _tool, inputRetry) => {
         if (inputRetry !== undefined) {
           retries.push(inputRetry);
         }
@@ -560,7 +564,7 @@ describe("McpToolPort", () => {
         if (response === undefined) {
           throw new Error("Unexpected test call.");
         }
-        return response;
+        return Promise.resolve(response);
       });
 
     try {
@@ -568,20 +572,21 @@ describe("McpToolPort", () => {
         call,
         context(new AbortController().signal, {
           elicitation: {
-            handleInputRequired: async (input) => {
+            handleInputRequired: (input) => {
               rounds.push(input.round);
-              return {
+              return Promise.resolve({
                 kind: "retry",
                 inputResponses: {
                   [input.inputRequests[0]?.inputKey ?? "server-key"]: {
                     action: "accept",
-                    answer: { answer: `round-${input.round}` },
+                    answer: { answer: `round-${String(input.round)}` },
                   },
                 },
-              };
+              });
             },
           },
-          tokenizeHumanInput: async (value) => value,
+          tokenizeHumanInput: (value) => Promise.resolve(value),
+          protectInputMetadata: (value) => Promise.resolve(value),
         }),
       );
       expect(result.outcome).toBe("ok");
@@ -597,32 +602,29 @@ describe("McpToolPort", () => {
     const current = await fixture({
       elicitation: { ...mrtrConfig, maxRounds: 1 },
     });
-    const responses: CallToolResult[] = [
-      requiredResult("first"),
-      requiredResult("second"),
-    ];
-    const callTool = vi
-      .spyOn(McpConnection.prototype, "callTool")
-      .mockImplementation(async () => {
-        const response = responses.shift();
-        if (response === undefined) {
-          throw new Error("Unexpected test call.");
-        }
-        return response;
-      });
+    const responses: CallToolResult[] = [requiredResult("first"), requiredResult("second")];
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation(() => {
+      const response = responses.shift();
+      if (response === undefined) {
+        throw new Error("Unexpected test call.");
+      }
+      return Promise.resolve(response);
+    });
     try {
       const result = await current.port.execute(
         call,
         context(new AbortController().signal, {
           elicitation: {
-            handleInputRequired: async (input) => ({
-              kind: "retry",
-              inputResponses: {
-                [input.inputRequests[0]?.inputKey ?? "server-key"]: { action: "decline" },
-              },
-            }),
+            handleInputRequired: (input) =>
+              Promise.resolve({
+                kind: "retry",
+                inputResponses: {
+                  [input.inputRequests[0]?.inputKey ?? "server-key"]: { action: "decline" },
+                },
+              }),
           },
-          tokenizeHumanInput: async (value) => value,
+          tokenizeHumanInput: (value) => Promise.resolve(value),
+          protectInputMetadata: (value) => Promise.resolve(value),
         }),
       );
       expect(result).toMatchObject({

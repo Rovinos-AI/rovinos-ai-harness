@@ -3,7 +3,6 @@
 import {
   ToolBinaryPayloadSchema,
   compileJsonSchema,
-  JsonValue as JsonValueSchema,
   type Code,
   HarnessError,
   type Id,
@@ -16,9 +15,9 @@ import {
 import { type AuditingVaultResolver, type VaultAuditHandler } from "@harness/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
+import { resolveInputRetry } from "./input-retry.js";
 import { markSanitized, markSanitizedField } from "./pii-event-store.js";
 import type { Tokenizer } from "./tokenizer.js";
-import { validateWithTokens } from "./validate-with-tokens.js";
 
 /** Schema-typed tool invocation, structurally compatible with core's port. */
 export interface PiiToolCall {
@@ -36,6 +35,7 @@ export interface PiiToolContext {
     readonly round: number;
     readonly requestState?: string;
   };
+  readonly protectInputMetadata?: (value: string) => Promise<string>;
   readonly tokenizeHumanInput?: (value: JsonValue) => Promise<JsonValue>;
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
   readonly recordVaultAudit?: VaultAuditHandler;
@@ -75,32 +75,6 @@ export interface PiiToolPortDependencies {
   readonly tokenizer: Tokenizer;
   readonly config: PiiConfig;
   readonly resolver: AuditingVaultResolver;
-}
-
-async function resolveInputRetry(
-  context: PiiToolContext,
-  retry: NonNullable<PiiToolContext["inputRetry"]>,
-  resolver: AuditingVaultResolver,
-): Promise<NonNullable<PiiToolContext["inputRetry"]>> {
-  const inputResponses = Object.fromEntries(
-    await Promise.all(
-      Object.entries(retry.inputResponses).map(async ([key, response]) => {
-        if (response.answer === undefined) {
-          return [key, response];
-        }
-        const resolved = await validateWithTokens(JsonValueSchema, response.answer, {
-          runId: context.runId,
-          resolver,
-          wantRaw: true,
-        });
-        if (!resolved.ok || resolved.raw === undefined) {
-          throw new PiiTokenUnresolvableError();
-        }
-        return [key, { ...response, answer: resolved.raw }];
-      }),
-    ),
-  );
-  return { ...retry, inputResponses };
 }
 
 const safeToolErrorCodes = new Set([
@@ -248,9 +222,12 @@ export class PiiToolPort implements PiiToolPortLike {
     let inputRetry = context.inputRetry;
     try {
       if (inputRetry !== undefined) {
-        inputRetry = await resolveInputRetry(context, inputRetry, this.deps.resolver);
+        inputRetry = await resolveInputRetry(context, inputRetry, this.deps.resolver, call.toolId);
       }
-    } catch {
+    } catch (error) {
+      if (isBoundaryRecordingFailure(error)) {
+        throw error;
+      }
       return { outcome: "error", errorCode: "pii_vault_failed", result: null };
     }
     try {
@@ -270,16 +247,17 @@ export class PiiToolPort implements PiiToolPortLike {
             if (!tokenized.actions.some(({ action }) => action === "allow")) {
               return tokenized.value;
             }
-            const stored = await this.deps.tokenizer.tokenizeJson(
-              context.runId,
-              tokenized.value,
-              { boundary: "storage", destination: { tool: call.toolId } },
-            );
+            const stored = await this.deps.tokenizer.tokenizeJson(context.runId, tokenized.value, {
+              boundary: "storage",
+              destination: { tool: call.toolId },
+            });
             for (const summary of stored.actions) {
               await context.recordPiiAction?.(summary);
             }
             return stored.value;
           },
+          protectInputMetadata: (value) =>
+            this.deps.tokenizer.tokenizeOpaqueValue(context.runId, value),
         },
       );
     } catch (error) {

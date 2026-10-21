@@ -58,7 +58,6 @@ export {
 export { UNREGISTERED_TOOL_ID } from "./registry.js";
 export { buildRequestMeta } from "./trace-injection.js";
 export {
-  toWireInputResponses,
   type ElicitationInputOutcome,
   type ElicitationInputRequired,
   type ElicitationPort,

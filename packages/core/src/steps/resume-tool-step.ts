@@ -20,6 +20,9 @@ import {
   ResumeEventMissingError,
 } from "./resume-errors.js";
 
+type ApprovalExecutionOptions = Omit<ResumeToolStepOptions, "ids"> &
+  Partial<Pick<ResumeToolStepOptions, "ids">>;
+
 export {
   ApprovalEditNotAllowedError,
   ApprovalEditsRequiredError,
@@ -253,7 +256,7 @@ async function applyToolResumeDecision(
 
 /** Applies a resolved approval without appending another intent. */
 export async function applyApprovalDecision(
-  options: Omit<ResumeToolStepOptions, "ids">,
+  options: ApprovalExecutionOptions,
   intent: ToolIntentEvent,
   approval: ApprovalRequestedEvent,
   approvalDecision: {
@@ -311,7 +314,7 @@ function approvedArgs(
 }
 
 async function applyAuthorizedApproval(
-  options: Omit<ResumeToolStepOptions, "ids">,
+  options: ApprovalExecutionOptions,
   intent: ToolIntentEvent,
   approvalDecision: {
     readonly resolution: Extract<Event, { type: "approval_resolved" }>;
@@ -322,6 +325,7 @@ async function applyAuthorizedApproval(
   const { resolution, state, args } = approvalDecision;
   const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
   const description = options.tool.describe(intent.toolId, args);
+  const inputRetry = state === undefined ? undefined : inputRetryForCall(state, intent.callId);
   if (description !== undefined) {
     await options.beforeToolExecution?.();
   }
@@ -340,6 +344,7 @@ async function applyAuthorizedApproval(
     ...(resolution.decision === "edit"
       ? { compareArgsHash: intent.argsHash, checkEditedPolicy: true }
       : {}),
+    ...(inputRetry === undefined ? {} : { inputRetry }),
   });
 }
 

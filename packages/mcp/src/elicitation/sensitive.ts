@@ -2,10 +2,12 @@
 import type { ValidatedInputRequest } from "./validate.js";
 
 const SECRET_FIELD_PATTERN =
-  /(?:^| )(?:password|passphrase|token|secret|api key|credential|(?:credit )?card(?: number| security| code)?|cvv|cvc|security code)(?: |$)/u;
+  /(?:^|[^\p{L}\p{N}])(?:password|passphrase|token|secret|api key|credential|(?:credit )?card(?: number| security| code)?|cvv|cvc|security code)(?=$|[^\p{L}\p{N}])/u;
 
 function isSensitiveFieldName(value: string): boolean {
-  return SECRET_FIELD_PATTERN.test(value.toLowerCase().replaceAll(/[_-]+/gu, " ").replaceAll(/\s+/gu, " "));
+  return SECRET_FIELD_PATTERN.test(
+    value.toLowerCase().replaceAll(/[_-]+/gu, " ").replaceAll(/\s+/gu, " ").trim(),
+  );
 }
 
 /** Identifies form requests that must be declined without being shown to a human. */

@@ -197,9 +197,9 @@ describe("countDroppedTelemetry", () => {
         { "harness.mcp.input_requests.outcome": outcome },
       ]),
     );
-    expect(
-      TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.mcp.input_requests.outcome"],
-    ).toEqual(MCP_INPUT_REQUEST_OUTCOMES);
+    expect(TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.mcp.input_requests.outcome"]).toEqual(
+      MCP_INPUT_REQUEST_OUTCOMES,
+    );
     expectAddCallsAreAllowlisted("harness.mcp.input_requests");
   });
 

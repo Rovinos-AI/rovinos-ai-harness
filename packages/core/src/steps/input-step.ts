@@ -11,6 +11,59 @@ import {
 import type { IdGenerator } from "../ports.js";
 import { foldRunState, type RunState } from "../run-state.js";
 
+function inputSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function inputRequestPartials(
+  input: ElicitationInputRequired,
+  ids: IdGenerator,
+): {
+  readonly partials: EventPartial[];
+  readonly inputResponses: Record<string, InputResponse>;
+  readonly pendingCount: number;
+} {
+  const sensitiveKeys = new Set(input.sensitiveInputKeys);
+  const partials: EventPartial[] = [];
+  const inputResponses: Record<string, InputResponse> = {};
+  let pendingCount = 0;
+  for (const request of input.inputRequests) {
+    const requestId = ids.next();
+    partials.push({
+      type: "input_requested",
+      v: 1,
+      requestId,
+      source: "mcp_mrtr",
+      serverId: input.serverId,
+      callId: input.callId,
+      inputKey: request.inputKey,
+      round: input.round,
+      mode: request.mode,
+      message: request.message,
+      ...(request.requestedSchema === undefined ? {} : { schema: request.requestedSchema }),
+      ...(request.url === undefined ? {} : { url: request.url }),
+      ...(input.requestState === undefined ? {} : { requestState: input.requestState }),
+    });
+    if (!sensitiveKeys.has(request.inputKey)) {
+      pendingCount++;
+      continue;
+    }
+    partials.push({
+      type: "input_resolved",
+      v: 1,
+      requestId,
+      source: "mcp_mrtr",
+      mode: request.mode,
+      round: input.round,
+      action: "decline",
+      decidedBy: "policy",
+      waitMs: 0,
+    });
+    inputResponses[request.inputKey] = { action: "decline" };
+  }
+  return { partials, inputResponses, pendingCount };
+}
+
 /** Creates the per-call MCP input handler that records and checkpoints requests before exposure. */
 export function createMcpElicitationPort(options: {
   readonly callId: Id;
@@ -23,6 +76,9 @@ export function createMcpElicitationPort(options: {
 }): ElicitationPort {
   return {
     handleInputRequired: async (input) => {
+      if (inputSignalAborted(input.signal)) {
+        return { kind: "error", errorCode: "mcp_input_request_invalid" };
+      }
       const state = foldRunState([...options.history, ...options.events]);
       const intent = state.pendingToolCalls.get(input.callId);
       if (
@@ -38,44 +94,7 @@ export function createMcpElicitationPort(options: {
       if (requestedInRun + input.inputRequests.length > input.maxPerRun) {
         return { kind: "error", errorCode: "mcp_input_rate_limited" };
       }
-      const sensitiveKeys = new Set(input.sensitiveInputKeys);
-      const partials: EventPartial[] = [];
-      const inputResponses: Record<string, InputResponse> = {};
-      let pendingCount = 0;
-      for (const request of input.inputRequests) {
-        const requestId = options.ids.next();
-        partials.push({
-          type: "input_requested",
-          v: 1,
-          requestId,
-          source: "mcp_mrtr",
-          serverId: input.serverId,
-          callId: input.callId,
-          inputKey: request.inputKey,
-          round: input.round,
-          mode: request.mode,
-          message: request.message,
-          ...(request.requestedSchema === undefined ? {} : { schema: request.requestedSchema }),
-          ...(request.url === undefined ? {} : { url: request.url }),
-          ...(input.requestState === undefined ? {} : { requestState: input.requestState }),
-        });
-        if (sensitiveKeys.has(request.inputKey)) {
-          partials.push({
-            type: "input_resolved",
-            v: 1,
-            requestId,
-            source: "mcp_mrtr",
-            mode: request.mode,
-            round: input.round,
-            action: "decline",
-            decidedBy: "policy",
-            waitMs: 0,
-          });
-          inputResponses[request.inputKey] = { action: "decline" };
-        } else {
-          pendingCount++;
-        }
-      }
+      const { partials, inputResponses, pendingCount } = inputRequestPartials(input, options.ids);
       if (pendingCount > 0) {
         partials.push({
           type: "run_status_changed",
@@ -84,6 +103,9 @@ export function createMcpElicitationPort(options: {
           to: "suspended",
           reason: "awaiting_input",
         });
+      }
+      if (inputSignalAborted(input.signal)) {
+        return { kind: "error", errorCode: "mcp_input_request_invalid" };
       }
       try {
         options.events.push(...(await options.recorder.recordBatch(partials)));
@@ -117,10 +139,7 @@ export function createMcpElicitationPort(options: {
 }
 
 /** Reconstructs the latest fully resolved MRTR round for a dangling tool call. */
-export function inputRetryForCall(
-  state: RunState,
-  callId: Id,
-): ElicitationRetry | undefined {
+export function inputRetryForCall(state: RunState, callId: Id): ElicitationRetry | undefined {
   const requests = Array.from(state.inputRequests.values()).filter(
     (request) => request.callId === callId,
   );
@@ -146,8 +165,9 @@ export function inputRetryForCall(
       ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
     };
   }
-  const requestState = latestRequests.find((request) => request.requestState !== undefined)
-    ?.requestState;
+  const requestState = latestRequests.find(
+    (request) => request.requestState !== undefined,
+  )?.requestState;
   return {
     inputResponses,
     round: latestRound,

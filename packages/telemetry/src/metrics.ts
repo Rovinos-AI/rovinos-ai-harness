@@ -70,8 +70,7 @@ interface ModelUsageAttributes extends Readonly<Record<string, CodeType>> {
 interface QuotaRejectionAttributes extends Readonly<Record<string, CodeType>> {
   readonly "harness.quota.id": CodeType;
 }
-interface McpInputRequestAttributes
-  extends Readonly<Record<string, McpInputRequestOutcome>> {
+interface McpInputRequestAttributes extends Readonly<Record<string, McpInputRequestOutcome>> {
   readonly "harness.mcp.input_requests.outcome": McpInputRequestOutcome;
 }
 

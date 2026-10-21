@@ -11,6 +11,7 @@ export interface ElicitationInputRequired {
   readonly inputRequests: readonly ValidatedInputRequest[];
   readonly sensitiveInputKeys: readonly string[];
   readonly maxPerRun: number;
+  readonly signal?: AbortSignal;
   readonly requestState?: string;
 }
 
@@ -41,9 +42,9 @@ export function toWireInputResponses(
 ): InputResponses {
   const entries = Object.entries(inputResponses).map(([inputKey, response]) => {
     const validated = specTypeSchemas.ElicitResult["~standard"].validate({
-        action: response.action,
-        content: response.answer ?? {},
-      });
+      action: response.action,
+      content: response.answer ?? {},
+    });
     if (validated.issues !== undefined) {
       throw new TypeError("Resolved input does not match the MCP elicitation response schema.");
     }

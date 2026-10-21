@@ -22,6 +22,15 @@ const form = {
   },
 };
 
+function captureError(action: () => unknown): unknown {
+  try {
+    action();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
 describe("validateInputRequiredResult", () => {
   it("validates form and URL requests and preserves request state", () => {
     expect(
@@ -50,7 +59,12 @@ describe("validateInputRequiredResult", () => {
             properties: { displayName: { type: "string", title: "Display name" } },
           },
         },
-        { inputKey: "url_1", mode: "url", message: "Continue", url: "https://example.test/consent" },
+        {
+          inputKey: "url_1",
+          mode: "url",
+          message: "Continue",
+          url: "https://example.test/consent",
+        },
       ],
       requestState: "opaque",
     });
@@ -58,18 +72,41 @@ describe("validateInputRequiredResult", () => {
 
   it.each([
     { inputRequests: { bad: { method: "sampling/createMessage", params: {} } } },
-    { inputRequests: { bad: { method: "elicitation/create", params: { ...form.params, url: "x" } } } },
     {
       inputRequests: {
-        bad: { method: "elicitation/create", params: { ...form.params, message: "x".repeat(2_001) } },
+        bad: { method: "elicitation/create", params: { ...form.params, url: "x" } },
       },
     },
     {
       inputRequests: {
-        bad: { method: "elicitation/create", params: { ...form.params, requestedSchema: { type: "object", properties: { key: { type: "string", pattern: ".*" } } } } },
+        bad: {
+          method: "elicitation/create",
+          params: { ...form.params, message: "x".repeat(2_001) },
+        },
       },
     },
-    { inputRequests: { bad: { method: "elicitation/create", params: { mode: "url", message: "x", url: "not a URL" } } } },
+    {
+      inputRequests: {
+        bad: {
+          method: "elicitation/create",
+          params: {
+            ...form.params,
+            requestedSchema: {
+              type: "object",
+              properties: { key: { type: "string", pattern: ".*" } },
+            },
+          },
+        },
+      },
+    },
+    {
+      inputRequests: {
+        bad: {
+          method: "elicitation/create",
+          params: { mode: "url", message: "x", url: "not a URL" },
+        },
+      },
+    },
     { inputRequests: { ["k".repeat(129)]: form } },
     { inputRequests: {} },
     { inputRequests: { form }, requestState: "x".repeat(9) },
@@ -85,7 +122,10 @@ describe("validateInputRequiredResult", () => {
       transport: { kind: "stdio", command: "server" },
     });
     expect(() =>
-      validateInputRequiredResult({ resultType: "input_required", inputRequests: { form: form } }, disabled),
+      validateInputRequiredResult(
+        { resultType: "input_required", inputRequests: { form } },
+        disabled,
+      ),
     ).toThrow();
     const formOnly = ServerConfigSchema.parse({
       id: "mcp_test",
@@ -114,7 +154,10 @@ describe("validateInputRequiredResult", () => {
         {
           resultType: "input_required",
           inputRequests: {
-            bad: { method: "elicitation/create", params: { mode: "form", message: "server-canary" } },
+            bad: {
+              method: "elicitation/create",
+              params: { mode: "form", message: "server-canary" },
+            },
           },
         },
         server,
@@ -135,15 +178,12 @@ describe("validateInputRequiredResult", () => {
     },
     { inputRequests: { form }, requestState: "x".repeat(9) },
   ])("maps malformed request data to a typed MCP error", (payload) => {
-    expect(() => validateInputRequiredResult({ resultType: "input_required", ...payload }, server))
-      .toThrow(McpInputRequestError);
-    try {
-      validateInputRequiredResult({ resultType: "input_required", ...payload }, server);
-    } catch (error) {
-      expect(error).toBeInstanceOf(McpInputRequestError);
-      expect(error).not.toHaveProperty("issues");
-      expect(error).toMatchObject({ code: "mcp_input_request_invalid" });
-    }
+    const error = captureError(() =>
+      validateInputRequiredResult({ resultType: "input_required", ...payload }, server),
+    );
+    expect(error).toBeInstanceOf(McpInputRequestError);
+    expect(error).not.toHaveProperty("issues");
+    expect(error).toMatchObject({ code: "mcp_input_request_invalid" });
   });
 });
 

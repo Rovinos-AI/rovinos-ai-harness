@@ -443,9 +443,7 @@ export async function toolStep(options: ToolStepOptions): Promise<readonly Event
     );
     events.push(...callEvents);
     if (
-      callEvents.some(
-        (event) => event.type === "run_status_changed" && event.to === "suspended",
-      )
+      callEvents.some((event) => event.type === "run_status_changed" && event.to === "suspended")
     ) {
       break;
     }

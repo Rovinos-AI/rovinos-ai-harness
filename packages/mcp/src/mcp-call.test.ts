@@ -10,10 +10,7 @@ import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { invokeMcpTool } from "./mcp-call.js";
 
-function serverConfig(input: {
-  readonly enabled: boolean;
-  readonly modes?: ("form" | "url")[];
-}) {
+function serverConfig(input: { readonly enabled: boolean; readonly modes?: ("form" | "url")[] }) {
   return ServerConfigSchema.parse({
     id: "mcp_test",
     transport: { kind: "stdio", command: "unused-test-command" },
