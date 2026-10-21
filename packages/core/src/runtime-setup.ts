@@ -8,7 +8,12 @@ import { PiiToolPort } from "@harness/pii";
 import type { McpToolPort } from "@harness/mcp";
 import type { LocalKeyProvider } from "@harness/vault";
 import type { EventStore } from "@harness/store";
-import { createSandboxBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
+import {
+  createSandboxBackend,
+  RemoteSandboxBackend,
+  RunnerPool,
+  type SandboxBackend,
+} from "@harness/sandbox";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
@@ -247,7 +252,7 @@ export async function setupRuntime(
       config: runtimeConfig,
       ids,
       keys,
-      ...(sandboxBackend instanceof RemoteSandboxBackend
+      ...(sandboxBackend instanceof RemoteSandboxBackend || sandboxBackend instanceof RunnerPool
         ? { remoteWorkspace: sandboxBackend }
         : {}),
     });

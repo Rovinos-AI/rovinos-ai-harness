@@ -33,6 +33,7 @@ const RemoteOptionsSchema = z
   })
   .strict();
 const RunnerLeaseResponseSchema = z.object({ status: z.literal("ok") }).strict();
+const RunnerHealthResponseSchema = z.object({ status: z.literal("ok") }).strict();
 const RunnerLeaseRequestSchema = z
   .object({
     runId: Id,
@@ -133,6 +134,31 @@ export class RemoteSandboxBackend
       timeoutGraceMs: this.#timeoutGraceMs,
       fetcher: this.#fetcher,
     });
+  }
+
+  /** Checks the runner's bounded health endpoint without exposing its token. */
+  async healthCheck(): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await this.#fetcher(new URL("/healthz", this.#url), {
+        method: "GET",
+        redirect: "error",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        return false;
+      }
+      parseJson(RunnerHealthResponseSchema, await readBoundedResponse(response, 1024), {
+        maxBytes: 1024,
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Acquires or renews the runner lease for a run. */

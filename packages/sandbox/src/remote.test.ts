@@ -55,6 +55,26 @@ function backend(fetcher: typeof fetch, options: { timeoutGraceMs?: number } = {
 }
 
 describe("RemoteSandboxBackend", () => {
+  it("checks the bounded runner health endpoint and fails closed for bad responses", async () => {
+    const healthyFetcher: typeof fetch = vi.fn(() => Promise.resolve(response({ status: "ok" })));
+    const remote = backend(healthyFetcher);
+
+    await expect(remote.healthCheck()).resolves.toBe(true);
+    expect(healthyFetcher).toHaveBeenCalledWith(
+      new URL("http://sandbox-runner:8080/healthz"),
+      expect.objectContaining({ method: "GET", redirect: "error" }),
+    );
+    await expect(
+      backend(() => Promise.resolve(response({}, 503))).healthCheck(),
+    ).resolves.toBe(false);
+    await expect(
+      backend(() => Promise.resolve(response({ status: "bad" }))).healthCheck(),
+    ).resolves.toBe(false);
+    await expect(
+      backend(() => Promise.reject(new Error("synthetic network failure"))).healthCheck(),
+    ).resolves.toBe(false);
+  });
+
   it("streams workspace snapshot downloads and restores", async () => {
     let uploaded = "";
     const fetcher: typeof fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

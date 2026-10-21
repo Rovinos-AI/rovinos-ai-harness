@@ -5,6 +5,7 @@ import {
   createWebFetchTool,
   InProcessBackend,
   RemoteSandboxBackend,
+  RunnerPool,
 } from "@harness/sandbox";
 import type { SandboxBackend } from "@harness/sandbox";
 import type { ToolPort } from "./ports.js";
@@ -81,7 +82,11 @@ export function composeSandboxTools(
   useWorkspace: boolean,
 ): ToolPort {
   let composed = existing;
-  if (backend instanceof InProcessBackend || backend instanceof RemoteSandboxBackend) {
+  if (
+    backend instanceof InProcessBackend ||
+    backend instanceof RemoteSandboxBackend ||
+    backend instanceof RunnerPool
+  ) {
     const candidate = createFsTools(backend);
     const ownedIds = new Set((existing.getToolSpecs?.() ?? []).map(({ toolId }) => toolId));
     const excludedIds = candidate
@@ -93,7 +98,7 @@ export function composeSandboxTools(
       composed = composeToolPorts(fileTools, composed);
     }
   }
-  if (backend instanceof RemoteSandboxBackend) {
+  if (backend instanceof RemoteSandboxBackend || backend instanceof RunnerPool) {
     const webFetch = createWebFetchTool(config.sandbox?.egress?.allow, backend, useWorkspace);
     if (webFetch !== undefined) {
       composed = composeToolPorts(webFetch, composed);

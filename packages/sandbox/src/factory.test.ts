@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id, SandboxConfigSchema, SecretRefSchema } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSandboxBackend, InProcessBackend, RemoteSandboxBackend } from "./index.js";
+import {
+  createSandboxBackend,
+  InProcessBackend,
+  RemoteSandboxBackend,
+  RunnerPool,
+} from "./index.js";
 
 const deps = { workspaceRoot: process.cwd(), logger: { log: vi.fn() } };
 const runner = {
@@ -72,6 +77,25 @@ describe("createSandboxBackend", () => {
       authorization: ["Bearer", token].join(" "),
     });
     expect(JSON.stringify(backend)).not.toContain(token);
+  });
+
+  it("resolves all configured runner references into a pool without serializing tokens", async () => {
+    const secondRunner = {
+      url: "http://sandbox-runner-2:8080",
+      token: SecretRefSchema.parse("file:/run/secrets/runner_two"),
+    };
+    const resolve = vi.fn((ref: typeof runner.token) =>
+      Promise.resolve({ reveal: () => `${ref}-synthetic-runner-token-value` }),
+    );
+    const pool = await createSandboxBackend(
+      SandboxConfigSchema.parse({ runners: [runner, secondRunner] }),
+      { ...deps, secretResolver: { resolve } },
+    );
+
+    expect(pool).toBeInstanceOf(RunnerPool);
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(pool)).not.toContain("synthetic-runner-token-value");
+    await pool.close?.();
   });
 
   // threat: T-03
