@@ -3,7 +3,21 @@
 import { globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
-import { composeIntegrationSuites } from "./scripts/compose/compose-suites.js";
+
+// Integration suites that start Docker Compose stacks. The `integration-compose` project runs them
+// one file at a time: parallel stacks starve the CI agent's Docker VM (2026-10-21, #523). The list
+// lives here, not in an imported module, because tests load this config through Node's own loader.
+/** Repository-relative paths of the integration suites that start Compose stacks. */
+export const composeIntegrationSuites = [
+  "packages/sandbox/egress-proxy/src/proxy.int.test.ts",
+  "packages/sandbox/runner/src/server.int.test.ts",
+  "scripts/ci/docker-image.int.test.ts",
+  "scripts/collector/validate.int.test.ts",
+  "scripts/compose/presidio.int.test.ts",
+  "scripts/compose/prod-like.int.test.ts",
+  "test/e2e-skeleton.int.test.ts",
+  "test/network-isolation.int.test.ts",
+] as const;
 
 const composeSuiteSet = new Set<string>(composeIntegrationSuites);
 const parallelIntegrationSuites = globSync("**/*.int.test.ts", {
@@ -83,7 +97,7 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          // Compose suites run one file at a time (see scripts/compose/compose-suites.ts).
+          // Compose suites run one file at a time (see composeIntegrationSuites above).
           name: "integration-compose",
           include: [...composeIntegrationSuites],
           fileParallelism: false,

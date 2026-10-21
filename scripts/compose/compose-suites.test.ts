@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { composeIntegrationSuites } from "./compose-suites.js";
+import { composeIntegrationSuites } from "../../vitest.config.js";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const startsCompose = /"compose"|runNetworkIsolationCompose|composeArgs/u;
