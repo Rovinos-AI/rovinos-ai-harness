@@ -81,6 +81,7 @@ async function recordAppContent(
   store: EventStore,
   clock: Clock,
   content: RuntimeAppContent,
+  ownershipSignal?: AbortSignal,
 ): Promise<void> {
   const validated = AppContentEnvelopeSchema.parse({
     source: "app",
@@ -101,7 +102,16 @@ async function recordAppContent(
   if (lastEvent === undefined) {
     throw new AppContentRunUnavailableError();
   }
-  const recorder = new RunRecorder(store, validated.runId, lastEvent.segmentId, nextSeq, clock);
+  const recorder = new RunRecorder(
+    store,
+    validated.runId,
+    lastEvent.segmentId,
+    nextSeq,
+    clock,
+    undefined,
+    undefined,
+    ownershipSignal,
+  );
   await recorder.withStepSpan(
     APP_CONTENT_SPAN,
     { "harness.app.id": Code.parse(validated.appId) },
@@ -129,6 +139,7 @@ async function recordAppContent(
 export function createRuntimeAppCallbacks(options: {
   readonly store: EventStore;
   readonly clock: Clock;
+  readonly ownershipSignal?: AbortSignal;
   readonly tokenize?: AppContentTokenize;
 }): RuntimeAppCallbacks {
   return {
@@ -152,6 +163,7 @@ export function createRuntimeAppCallbacks(options: {
         throw new AppContentUnavailableError();
       }
     },
-    onAppContent: (content) => recordAppContent(options.store, options.clock, content),
+    onAppContent: (content) =>
+      recordAppContent(options.store, options.clock, content, options.ownershipSignal),
   };
 }

@@ -2,6 +2,7 @@
 import { HarnessError, type Event, type Id } from "@harness/schemas";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import {
+  assertRuntimeOwnership,
   closeRuntimeResources,
   markTerminalBestEffort,
   withSandboxLease,
@@ -36,7 +37,6 @@ import {
 } from "./runtime-runs.js";
 import { QuotaService } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
-import { DeploymentStartupError } from "./runtime-deployment.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
@@ -122,12 +122,6 @@ interface RunControlOptions {
   readonly graceMs: number;
   readonly operation: (signal: AbortSignal) => Promise<RunLoopResult>;
   readonly ownershipSignal?: AbortSignal;
-}
-
-function assertRuntimeOwnership(signal: AbortSignal | undefined): void {
-  if (signal?.aborted && signal.reason === "deployment_single_instance_violation") {
-    throw new DeploymentStartupError("deployment_single_instance_violation");
-  }
 }
 
 async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
@@ -298,6 +292,9 @@ function composeRuntime(
   const appCallbacks = createRuntimeAppCallbacks({
     store,
     clock,
+    ...(options.instanceHeartbeat === undefined
+      ? {}
+      : { ownershipSignal: options.instanceHeartbeat.signal }),
     ...(pii === undefined ? {} : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
   });
   return {
@@ -312,6 +309,7 @@ function composeRuntime(
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
     cancel: async (runId) => {
+      assertRuntimeOwnership(options.instanceHeartbeat?.signal);
       const result = await cancelRun(store, runId, clock, ids);
       if (result === "cancelled") {
         await markTerminalBestEffort(vault, runId, clock.now());
@@ -319,7 +317,12 @@ function composeRuntime(
       return result;
     },
     ...appCallbacks,
+    onAppContent: (content) => {
+      assertRuntimeOwnership(options.instanceHeartbeat?.signal);
+      return appCallbacks.onAppContent(content);
+    },
     resolveApproval: async (runId, approvalId, decision, resolveOptions) => {
+      assertRuntimeOwnership(options.instanceHeartbeat?.signal);
       if (
         decision === "edit" &&
         options.overrides.tool === undefined &&

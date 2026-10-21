@@ -5,6 +5,14 @@ import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
 import type { SandboxBackend } from "@harness/sandbox";
 import type { EventStore } from "@harness/store";
 import type { RuntimeComposition, RuntimeOverrides } from "./runtime-config.js";
+import { DeploymentStartupError } from "./runtime-deployment.js";
+
+/** Throws after this process loses ownership of a guarded SQLite runtime. */
+export function assertRuntimeOwnership(signal: AbortSignal | undefined): void {
+  if (signal?.aborted && signal.reason === "deployment_single_instance_violation") {
+    throw new DeploymentStartupError("deployment_single_instance_violation");
+  }
+}
 
 /** Runs an operation while holding the backend's optional run-scoped lease. */
 export async function withSandboxLease<T>(

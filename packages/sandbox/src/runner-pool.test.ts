@@ -176,6 +176,44 @@ describe("RunnerPool", () => {
     await pool.releaseLease(runId);
   });
 
+  it("restores a suspended run's snapshot when resume selects another runner", async () => {
+    let firstWorkspace = true;
+    let secondWorkspace = false;
+    let restoredContents = "";
+    let random = 0.9;
+    const first = runner();
+    const second = runner();
+    vi.mocked(first.hasWorkspace).mockImplementation(() => Promise.resolve(firstWorkspace));
+    vi.mocked(first.createArchive).mockImplementation(() =>
+      Promise.resolve(Readable.from([Buffer.from("synthetic workspace contents")])),
+    );
+    vi.mocked(second.hasWorkspace).mockImplementation(() => Promise.resolve(secondWorkspace));
+    vi.mocked(second.restoreArchive).mockImplementation(async (_id, archive) => {
+      for await (const chunk of archive) {
+        restoredContents += chunk.toString();
+      }
+      secondWorkspace = true;
+    });
+    vi.mocked(second.exec).mockImplementation(() =>
+      Promise.resolve({ ...execResult, stdout: restoredContents }),
+    );
+    const pool = new RunnerPool({ runners: [first, second], random: () => random });
+
+    await pool.acquireLease(runId);
+    const snapshot = await pool.createArchive(runId, 1024, 2048);
+    await pool.releaseLease(runId);
+    firstWorkspace = false;
+    random = 0;
+
+    await pool.acquireLease(runId);
+    await expect(pool.hasWorkspace(runId)).resolves.toBe(false);
+    await pool.restoreArchive(runId, snapshot, 1024, 2048);
+    await expect(pool.exec(runId, spec, new AbortController().signal)).resolves.toMatchObject({
+      stdout: "synthetic workspace contents",
+    });
+    await pool.releaseLease(runId);
+  });
+
   it("releases runner leases when the pool closes and safely ignores an unleased run", async () => {
     const assigned = runner();
     const pool = new RunnerPool({ runners: [assigned] });
