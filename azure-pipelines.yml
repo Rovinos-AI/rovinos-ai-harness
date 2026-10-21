@@ -112,12 +112,19 @@ stages:
     dependsOn: unit
     jobs:
       - job: integration
+        timeoutInMinutes: 60
         steps:
           - template: pipelines/templates/node-setup.yml
-          - bash: scripts/ci/compose-wait.sh
-            displayName: Start Compose services and wait for health
           - script: yarn build:schemas
             displayName: Build schemas for worker-thread tests
+          - script: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/ci/compose-cleanup.ts
+            displayName: Clean up stale CI Compose projects
+            env:
+              COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
+          - bash: scripts/ci/compose-wait.sh
+            displayName: Start Compose services and wait for health
+            env:
+              COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
           - script: yarn build:host
             displayName: Build reference host browser bundle
           - script: yarn workspace @harness/approval-app build
@@ -138,12 +145,15 @@ stages:
             displayName: Integration tests
             # The container linter fixtures run on a fresh agent, so they must pull the pinned images.
             env:
+              COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
               TEST_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness
               TEST_VAULT_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness_vault
               LINT_PULL_IMAGES: "1"
           - script: yarn pii:report --mode presidio --out-dir "$(Build.ArtifactStagingDirectory)/pii-report"
             condition: succeededOrFailed()
             displayName: Presidio detector precision and recall report
+            env:
+              COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
           - task: PublishBuildArtifacts@1
             condition: succeededOrFailed()
             inputs:
@@ -176,15 +186,19 @@ stages:
                 > "$(Build.ArtifactStagingDirectory)/compose.log"
             condition: failed()
             displayName: Collect Compose logs
+            env:
+              COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
           - task: PublishBuildArtifacts@1
             condition: failed()
             inputs:
               PathtoPublish: $(Build.ArtifactStagingDirectory)/compose.log
               ArtifactName: compose-logs
               publishLocation: Container
-          - bash: docker compose --env-file infra/collector/VERSION -f infra/compose/docker-compose.test.yml down -v
+          - bash: docker compose --env-file infra/collector/VERSION -f infra/compose/docker-compose.test.yml down -v --remove-orphans
             condition: always()
             displayName: Stop Compose services
+            env:
+              COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
 
   - stage: gates
     dependsOn: integration
