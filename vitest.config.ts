@@ -2,6 +2,7 @@
 // Keep the coverage floor in root config so Vitest applies it to every project.
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { composeIntegrationSuites } from "./scripts/compose/compose-suites.js";
 
 export default defineConfig({
   resolve: {
@@ -68,6 +69,17 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["**/*.int.test.ts"],
+          exclude: ["**/node_modules/**", ...composeIntegrationSuites],
+          globalSetup: ["./scripts/compose/build-images.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // Compose suites run one file at a time (see scripts/compose/compose-suites.ts).
+          name: "integration-compose",
+          include: [...composeIntegrationSuites],
+          fileParallelism: false,
           globalSetup: ["./scripts/compose/build-images.ts"],
         },
       },
