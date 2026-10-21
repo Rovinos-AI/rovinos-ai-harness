@@ -2,6 +2,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -66,13 +67,28 @@ function runHarnessScript(
   options: { readonly name?: string; readonly detach?: boolean } = {},
 ): string {
   const containerName =
-    options.name ?? `${projectName}-script-${String(process.pid)}-${String(++scriptContainerSequence)}`;
+    options.name ??
+    `${projectName}-script-${String(process.pid)}-${String(++scriptContainerSequence)}`;
+  const postgresContainer = compose(["ps", "--quiet", "postgres"]).trim();
+  const postgresAddress = execFileSync(
+    "docker",
+    [
+      "inspect",
+      "--format",
+      `{{(index .NetworkSettings.Networks "${projectName}_internal").IPAddress}}`,
+      postgresContainer,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  expect(isIP(postgresAddress)).toBe(4);
   const args = [
     "create",
     "--name",
     containerName,
     "--network",
     `${projectName}_internal`,
+    "--add-host",
+    `postgres:${postgresAddress}`,
     "--read-only",
     "--tmpfs",
     "/tmp:rw,noexec,nosuid,nodev,size=16m",

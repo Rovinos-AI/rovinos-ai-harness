@@ -4,11 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, resolve as resolvePath } from "node:path";
-import {
-  InspectResultSchema,
-  RunResultSchema,
-  parseJson,
-} from "@harness/schemas";
+import { InspectResultSchema, RunResultSchema, parseJson } from "@harness/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const projectName = `harness-prod-like-${String(process.pid)}`;
@@ -159,13 +155,17 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
       'import { writeFileSync } from "node:fs";',
       'import { createDefaultContext, createOutput, main } from "@harness/cli/programmatic";',
       'import { FakeModelPort } from "@harness/core/testing";',
+      'import { openConfiguredRunQueue } from "@harness/core";',
       "const action = process.env.HARNESS_E2E_ACTION;",
-      'const scriptedModel = new FakeModelPort([{ parts: [{ type: "text", text: "resumed" }], usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "stop", provider: "scripted", model: "shutdown-test", latencyMs: 1, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }]);',
       "const context = createDefaultContext(new Command(), createOutput());",
+      "const config = await context.loadConfig();",
+      "const queue = await openConfiguredRunQueue(config, { clock: context.clock, secretResolver: context.secretResolver });",
+      'const scriptedModel = new FakeModelPort([{ parts: [{ type: "text", text: "resumed" }], usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "stop", provider: "scripted", model: "shutdown-test", latencyMs: 1, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }]);',
       "const createRuntime = context.createRuntime;",
-      'context.createRuntime = async (config, overrides) => createRuntime(config, { ...overrides, model: { complete: async (request, runContext) => { if (action === "run") { process.stdout.write(`RUN_STARTED ${runContext.runId}\\n`); await new Promise((resolve, reject) => { const timer = setTimeout(resolve, 60000); runContext.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("synthetic slow model interrupted")); }, { once: true }); }); } return scriptedModel.complete(request, runContext); } } });',
+      'context.createRuntime = async (config, overrides) => createRuntime(config, { ...overrides, queue, model: { complete: async (request, runContext) => { if (action === "run") { process.stdout.write(`RUN_STARTED ${runContext.runId}\\n`); await new Promise((resolve, reject) => { const timer = setTimeout(resolve, 60000); runContext.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("synthetic slow model interrupted")); }, { once: true }); }); } return scriptedModel.complete(request, runContext); } } });',
       'const args = action === "run" ? (writeFileSync("/tmp/harness-shutdown-input.json", JSON.stringify({ goal: "resume after container stop" })), ["run", "--input", "/tmp/harness-shutdown-input.json"]) : ["--json", "resume", process.env.HARNESS_E2E_RUN_ID];',
       "process.exitCode = await main(args, context);",
+      "await queue.close();",
     ].join("\n");
     compose([
       "run",

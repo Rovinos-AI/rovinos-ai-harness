@@ -173,6 +173,7 @@ interface SubagentRuntimeOptions {
   readonly parentTool: ToolPort;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];
+  readonly sandboxBackend?: SandboxBackend;
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
