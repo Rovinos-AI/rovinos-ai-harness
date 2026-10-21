@@ -13,7 +13,7 @@ import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation } from "./continue.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
-import type { Runtime, RuntimeComposition } from "./runtime-config.js";
+import type { Runtime, RuntimeComposition, RuntimeRunHandle } from "./runtime-config.js";
 import { configHash } from "./runtime-ids.js";
 import { QuotaService } from "./quotas.js";
 import type { QuotaIdentity } from "./quotas.js";
@@ -140,14 +140,30 @@ export function createRuntimeContinuation(
 ): Runtime["continueRun"] {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
   const quotaService = new QuotaService(config.quotas ?? [], store, clock);
-  return (previousRunId: Id, input: RunInput) => {
+  return (
+    previousRunId: Id,
+    input: RunInput,
+    runOptions?: { readonly requestedBy?: Principal },
+  ) => {
     const runId = ids.next();
+    let resolveStarted: () => void = () => undefined;
+    let rejectStarted: (reason?: unknown) => void = () => undefined;
+    const started = new Promise<void>((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    void started.catch(() => undefined);
     const goal =
       input.metadata === undefined
         ? { goal: input.goal }
         : { goal: input.goal, metadata: input.metadata };
-    return runWithControl(runId, async (signal) => {
-      const identity = await readStoredQuotaIdentity(store, previousRunId);
+    const completion = runWithControl(runId, async (signal) => {
+      const stored = await readStoredQuotaIdentity(store, previousRunId);
+      // An explicit caller is charged for the continuation; the role is inherited.
+      const identity: QuotaIdentity =
+        runOptions?.requestedBy === undefined
+          ? stored
+          : { ...stored, requestedBy: runOptions.requestedBy };
       await quotaService.assertCanStart(identity);
       return startContinuation({
         store,
@@ -171,10 +187,14 @@ export function createRuntimeContinuation(
         policyVersion,
         continuations: config.run.continuations,
         scopes,
+        onStarted: resolveStarted,
+        ...(runOptions?.requestedBy === undefined ? {} : { requestedBy: runOptions.requestedBy }),
         quotaService,
         quotaIdentity: identity,
       });
     });
+    void completion.catch(rejectStarted);
+    return { runId, started, completion } satisfies RuntimeRunHandle;
   };
 }
 

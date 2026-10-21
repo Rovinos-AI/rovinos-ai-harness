@@ -55,6 +55,33 @@ export const denyInputSchema = z
 /** Validated input for run lifecycle tools. */
 export const runLifecycleInputSchema = z.object({ runId: Id }).strict();
 
+const runMetadataSchema = z.record(Code, z.union([Code, z.number(), z.boolean()]));
+
+/** Validated input for `start_run`; `goal` is content and is never returned. */
+export const startRunInputSchema = z
+  .object({
+    goal: z.string().min(1).max(8_000),
+    metadata: runMetadataSchema.optional(),
+    role: Code.optional(),
+    idempotencyKey: z.string().min(1).max(256).optional(),
+  })
+  .strict();
+
+/** Validated input for `continue_run`; `goal` is content and is never returned. */
+export const continueRunInputSchema = z
+  .object({
+    runId: Id,
+    goal: z.string().min(1).max(8_000),
+    metadata: runMetadataSchema.optional(),
+  })
+  .strict();
+
+/** Metadata-only success or coded failure returned by run-creation tools. */
+export const startRunOutputSchema = z.union([
+  z.object({ runId: Id, status: RunStatus }).strict(),
+  z.object({ code: Code }).strict(),
+]);
+
 /** Metadata-only output for decision tools. */
 export const decisionOutputSchema = z
   .object({
@@ -121,3 +148,9 @@ export type DenyInput = z.input<typeof denyInputSchema>;
 export type DecisionOutput = z.infer<typeof decisionOutputSchema>;
 /** Inferred metadata-only resume output. */
 export type ResumeRunOutput = z.infer<typeof resumeRunOutputSchema>;
+/** Inferred input for `start_run`. */
+export type StartRunInput = z.infer<typeof startRunInputSchema>;
+/** Inferred input for `continue_run`. */
+export type ContinueRunInput = z.infer<typeof continueRunInputSchema>;
+/** Inferred output for run-creation tools. */
+export type StartRunOutput = z.infer<typeof startRunOutputSchema>;

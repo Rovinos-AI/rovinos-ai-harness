@@ -81,7 +81,9 @@ export const continueCommand: CommandModule = {
         const config = await context.loadConfig();
         const runtime = await createCommandRuntime(context, config);
         try {
-          const result = await runtime.continueRun(runId, input);
+          const continuation = runtime.continueRun(runId, input);
+          await continuation.started;
+          const result = await continuation.completion;
           const firstEvent = result.events[0];
           if (firstEvent === undefined) {
             throw new ContinueStatusError("run_failed");
