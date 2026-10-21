@@ -37,6 +37,7 @@ export function cleanupStaleComposeProjects(
   for (const { Name } of projects) {
     if (
       (Name !== "compose" &&
+        Name !== "harness-local" &&
         !Name.startsWith("harness-local-") &&
         !Name.startsWith("harness-ci-")) ||
       Name === currentProjectName

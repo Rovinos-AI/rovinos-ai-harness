@@ -6,6 +6,7 @@ it("removes only known stale projects and keeps current or recently started stac
   const commands: string[][] = [];
   const projects = [
     { Name: "compose", Status: "exited(2)" },
+    { Name: "harness-local", Status: "exited(2)" },
     { Name: "harness-local-1", Status: "exited(2)" },
     { Name: "harness-ci-41", Status: "exited(2)" },
     { Name: "harness-ci-42", Status: "running(1)" },
@@ -15,6 +16,7 @@ it("removes only known stale projects and keeps current or recently started stac
   ];
   const containerIdsByProject: Record<string, string[]> = {
     compose: ["compose-exited"],
+    "harness-local": ["local-fixed-exited"],
     "harness-local-1": ["local-exited"],
     "harness-ci-41": ["exited"],
     "harness-ci-42": ["recent"],
@@ -23,6 +25,7 @@ it("removes only known stale projects and keeps current or recently started stac
   };
   const startedAtByContainer: Record<string, string> = {
     "compose-exited": "2026-10-21T16:03:30.631Z",
+    "local-fixed-exited": "2026-10-21T12:13:30.631Z",
     "local-exited": "2026-10-21T12:13:30.631Z",
     exited: "2026-10-21T12:13:30.631Z",
     recent: "2026-10-21T16:03:30.631Z",
@@ -31,6 +34,7 @@ it("removes only known stale projects and keeps current or recently started stac
   };
   const stateByContainer: Record<string, string> = {
     "compose-exited": "exited",
+    "local-fixed-exited": "exited",
     "local-exited": "exited",
     exited: "exited",
     recent: "running",
@@ -67,7 +71,13 @@ it("removes only known stale projects and keeps current or recently started stac
   const downProjects = commands
     .filter((args) => args[0] === "compose" && args.includes("down"))
     .map((args) => args[2]);
-  expect(downProjects).toEqual(["compose", "harness-local-1", "harness-ci-41", "harness-ci-43"]);
+  expect(downProjects).toEqual([
+    "compose",
+    "harness-local",
+    "harness-local-1",
+    "harness-ci-41",
+    "harness-ci-43",
+  ]);
   expect(commands).not.toContainEqual([
     "ps",
     "--all",
