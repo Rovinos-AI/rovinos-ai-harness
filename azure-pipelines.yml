@@ -112,8 +112,11 @@ stages:
     dependsOn: unit
     jobs:
       - job: integration
+        timeoutInMinutes: 60
         steps:
           - template: pipelines/templates/node-setup.yml
+          - script: yarn build:schemas
+            displayName: Build schemas for worker-thread tests
           - script: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/ci/compose-cleanup.ts
             displayName: Clean up stale CI Compose projects
             env:
@@ -122,8 +125,6 @@ stages:
             displayName: Start Compose services and wait for health
             env:
               COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
-          - script: yarn build:schemas
-            displayName: Build schemas for worker-thread tests
           - script: yarn build:host
             displayName: Build reference host browser bundle
           - script: yarn workspace @harness/approval-app build
@@ -151,6 +152,8 @@ stages:
           - script: yarn pii:report --mode presidio --out-dir "$(Build.ArtifactStagingDirectory)/pii-report"
             condition: succeededOrFailed()
             displayName: Presidio detector precision and recall report
+            env:
+              COMPOSE_PROJECT_NAME: harness-ci-$(Build.BuildId)
           - task: PublishBuildArtifacts@1
             condition: succeededOrFailed()
             inputs:

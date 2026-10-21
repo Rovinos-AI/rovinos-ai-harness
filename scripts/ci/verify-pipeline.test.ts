@@ -190,18 +190,30 @@ it("runs integration tests with an isolated Compose project and always tears it 
   const stages = readStages(readPipeline());
   const integrationStage = findStage(stages, "integration");
   const integrationSteps = readSteps(integrationStage);
+  const integrationJobs = integrationStage.jobs;
+  if (!isUnknownArray(integrationJobs) || !isRecord(integrationJobs[0])) {
+    throw new TypeError("Pipeline integration stage must contain a job.");
+  }
   const projectName = "harness-ci-$(Build.BuildId)";
 
   expect(statSync(resolve(root, "scripts/ci/compose-wait.sh")).mode & 0o111).not.toBe(0);
   expect(integrationStage.dependsOn).toBe("unit");
+  expect(integrationJobs[0].timeoutInMinutes).toBe(60);
+  const buildSchemas = integrationSteps.find(
+    (step) => typeof step.script === "string" && step.script.includes("yarn build:schemas"),
+  );
   const cleanup = integrationSteps.find(
     (step) => typeof step.script === "string" && step.script.includes("compose-cleanup.ts"),
   );
   const start = integrationSteps.find(
     (step) => typeof step.bash === "string" && step.bash.includes("compose-wait.sh"),
   );
+  expect(buildSchemas).toBeDefined();
   expect(cleanup).toBeDefined();
   expect(start).toBeDefined();
+  expect(integrationSteps.indexOf(buildSchemas ?? {})).toBeLessThan(
+    integrationSteps.indexOf(cleanup ?? {}),
+  );
   expect(integrationSteps.indexOf(cleanup ?? {})).toBeLessThan(
     integrationSteps.indexOf(start ?? {}),
   );
@@ -218,10 +230,20 @@ it("runs integration tests with an isolated Compose project and always tears it 
   });
   expect(
     integrationSteps.some(
-      (step) => typeof step.script === "string" && step.script.includes("yarn build:schemas"),
+      (step) =>
+        typeof step.script === "string" && step.script.includes("yarn pii:report --mode presidio"),
     ),
   ).toBe(true);
   expect(integrationSteps.some((step) => step.script === "yarn build")).toBe(true);
+  for (const step of integrationSteps.filter((candidate) =>
+    [candidate.script, candidate.bash].some(
+      (command) =>
+        typeof command === "string" &&
+        /docker compose|compose-cleanup\.ts|compose-wait\.sh|pii:report/.test(command),
+    ),
+  )) {
+    expect(step.env).toMatchObject({ COMPOSE_PROJECT_NAME: projectName });
+  }
   expect(
     integrationSteps.some(
       (step) => step.task === "PublishTestResults@2" && step.condition === "succeededOrFailed()",
