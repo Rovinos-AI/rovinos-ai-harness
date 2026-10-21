@@ -43,7 +43,9 @@ export function toWireInputResponses(
   const entries = Object.entries(inputResponses).map(([inputKey, response]) => {
     if (
       response.answer !== undefined &&
-      (typeof response.answer !== "object" || response.answer === null || Array.isArray(response.answer))
+      (typeof response.answer !== "object" ||
+        response.answer === null ||
+        Array.isArray(response.answer))
     ) {
       throw new TypeError("Resolved input does not match the MCP elicitation response schema.");
     }

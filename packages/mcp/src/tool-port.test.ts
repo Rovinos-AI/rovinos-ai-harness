@@ -552,18 +552,16 @@ describe("McpToolPort", () => {
       { content: [{ type: "text", text: "complete" }] },
     ];
     const tokenizedInputs: JsonValueType[] = [];
-    const callTool = vi
-      .spyOn(McpConnection.prototype, "callTool")
-      .mockImplementation((request) => {
-        if (request.inputRetry !== undefined) {
-          retries.push(request.inputRetry);
-        }
-        const response = responses.shift();
-        if (response === undefined) {
-          throw new Error("Unexpected test call.");
-        }
-        return Promise.resolve(response);
-      });
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation((request) => {
+      if (request.inputRetry !== undefined) {
+        retries.push(request.inputRetry);
+      }
+      const response = responses.shift();
+      if (response === undefined) {
+        throw new Error("Unexpected test call.");
+      }
+      return Promise.resolve(response);
+    });
     const handleInputRequired = vi.fn(
       (input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
         Promise.resolve({
@@ -642,18 +640,16 @@ describe("McpToolPort", () => {
       requiredResult(secondState),
       { content: [{ type: "text", text: "complete" }] },
     ];
-    const callTool = vi
-      .spyOn(McpConnection.prototype, "callTool")
-      .mockImplementation((request) => {
-        if (request.inputRetry !== undefined) {
-          retries.push(request.inputRetry);
-        }
-        const response = responses.shift();
-        if (response === undefined) {
-          throw new Error("Unexpected test call.");
-        }
-        return Promise.resolve(response);
-      });
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation((request) => {
+      if (request.inputRetry !== undefined) {
+        retries.push(request.inputRetry);
+      }
+      const response = responses.shift();
+      if (response === undefined) {
+        throw new Error("Unexpected test call.");
+      }
+      return Promise.resolve(response);
+    });
 
     try {
       const result = await current.port.execute(
