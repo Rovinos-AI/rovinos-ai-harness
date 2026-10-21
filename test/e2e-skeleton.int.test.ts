@@ -662,6 +662,16 @@ describe("config", () => {
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
   });
 
+  it("refuses multi-instance runtime startup with local SQLite adapters", async () => {
+    const current = fixture();
+    const loaded = await current.context.loadConfig();
+    const multi = HarnessConfigSchema.parse({ ...loaded, deployment: { mode: "multi" } });
+
+    await expect(createRuntime(multi)).rejects.toMatchObject({
+      code: "deployment_requires_postgres",
+    });
+  });
+
   it("loads a configured Azure Key Vault key through the injected resolver", async () => {
     const keyBytes = Buffer.alloc(32, 37);
     const provider = new AkvKeyProvider({

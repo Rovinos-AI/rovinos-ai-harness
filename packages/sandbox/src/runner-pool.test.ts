@@ -34,13 +34,21 @@ const fetchResult: WebFetchResult = {
   hiddenTextDropped: 0,
 };
 
-function runner(options: { healthy?: boolean; busy?: boolean } = {}): RunnerPoolRunner {
+function runner(
+  options: {
+    healthy?: boolean;
+    busy?: boolean;
+    healthError?: Error;
+  } = {},
+): RunnerPoolRunner {
   return {
-    healthCheck: vi.fn(() => Promise.resolve(options.healthy ?? true)),
+    healthCheck: vi.fn(() =>
+      options.healthError === undefined
+        ? Promise.resolve(options.healthy ?? true)
+        : Promise.reject(options.healthError),
+    ),
     acquireLease: vi.fn(() =>
-      options.busy
-        ? Promise.reject(new RemoteSandboxError("sandbox_busy"))
-        : Promise.resolve(),
+      options.busy ? Promise.reject(new RemoteSandboxError("sandbox_busy")) : Promise.resolve(),
     ),
     releaseLease: vi.fn(() => Promise.resolve()),
     exec: vi.fn(() => Promise.resolve(execResult)),
@@ -88,9 +96,9 @@ describe("RunnerPool", () => {
 
     await pool.releaseLease(runId);
     expect(availableRunner.releaseLease).toHaveBeenCalledExactlyOnceWith(runId);
-    await expect(
-      pool.exec(runId, spec, new AbortController().signal),
-    ).rejects.toMatchObject({ code: "sandbox_unavailable" });
+    await expect(pool.exec(runId, spec, new AbortController().signal)).rejects.toMatchObject({
+      code: "sandbox_unavailable",
+    });
   });
 
   it("temporarily evicts an unhealthy runner and retries its health check after cooldown", async () => {
@@ -114,6 +122,28 @@ describe("RunnerPool", () => {
     now = 105;
     await pool.acquireLease(runId);
     expect(unhealthy.healthCheck).toHaveBeenCalledTimes(2);
+  });
+
+  it("temporarily evicts a runner when its health check throws", async () => {
+    let now = 100;
+    const unavailable = runner({ healthError: new Error("health check failed") });
+    const healthy = runner();
+    const pool = new RunnerPool({
+      runners: [unavailable, healthy],
+      now: () => now,
+      random: () => 0.9,
+      healthCooldownMs: 5,
+    });
+
+    await pool.acquireLease(runId);
+    await pool.releaseLease(runId);
+    now = 104;
+    await pool.acquireLease(secondRunId);
+    expect(unavailable.healthCheck).toHaveBeenCalledOnce();
+    await pool.releaseLease(secondRunId);
+    now = 105;
+    await pool.acquireLease(runId);
+    expect(unavailable.healthCheck).toHaveBeenCalledTimes(2);
   });
 
   it("returns busy when every healthy runner is occupied and unavailable when all fail health", async () => {

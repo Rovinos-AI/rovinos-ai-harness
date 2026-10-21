@@ -24,10 +24,7 @@ export interface RunnerPoolOptions {
 
 /** Required runner operations routed while a run holds its lease. */
 export interface RunnerPoolRunner
-  extends SandboxBackend,
-    WorkspaceFileToolBackend,
-    WebFetchBackend,
-    RemoteWorkspaceSnapshotPort {
+  extends SandboxBackend, WorkspaceFileToolBackend, WebFetchBackend, RemoteWorkspaceSnapshotPort {
   /** Checks whether the runner is ready to accept a lease. */
   healthCheck(): Promise<boolean>;
   /** Acquires the runner lease for one run. */
@@ -75,7 +72,14 @@ export class RunnerPool
       if ((this.#unavailableUntil.get(runner) ?? 0) > this.#now()) {
         continue;
       }
-      if (!(await runner.healthCheck())) {
+      let healthy: boolean;
+      try {
+        healthy = await runner.healthCheck();
+      } catch {
+        this.#evict(runner);
+        continue;
+      }
+      if (!healthy) {
         this.#evict(runner);
         continue;
       }
@@ -116,11 +120,7 @@ export class RunnerPool
   }
 
   /** Fetches allowlisted content through the runner leased to this run. */
-  async fetch(
-    runId: Id,
-    request: WebFetchRequest,
-    signal: AbortSignal,
-  ): Promise<WebFetchResult> {
+  async fetch(runId: Id, request: WebFetchRequest, signal: AbortSignal): Promise<WebFetchResult> {
     return this.#runnerFor(runId).fetch(runId, request, signal);
   }
 
@@ -178,10 +178,7 @@ export class RunnerPool
   #randomizedRunners(): RunnerPoolRunner[] {
     const runners = [...this.options.runners];
     for (let index = runners.length - 1; index > 0; index -= 1) {
-      const randomIndex = Math.min(
-        index,
-        Math.max(0, Math.floor(this.#random() * (index + 1))),
-      );
+      const randomIndex = Math.min(index, Math.max(0, Math.floor(this.#random() * (index + 1))));
       const current = runners[index];
       const selected = runners[randomIndex];
       if (current !== undefined && selected !== undefined) {

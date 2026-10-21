@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { VaultConfigSchema } from "@harness/schemas";
 import { DeploymentStartupError, validateDeploymentTopology } from "./runtime-deployment.js";
+
+const postgresVault = VaultConfigSchema.parse({
+  backend: "postgres",
+  postgres: { url: "env:TEST_VAULT_URL" },
+});
+const sqliteVault = VaultConfigSchema.parse({ backend: "sqlite" });
 
 describe("validateDeploymentTopology", () => {
   const cases: readonly {
@@ -13,7 +20,7 @@ describe("validateDeploymentTopology", () => {
       config: {
         deployment: { mode: "multi" },
         store: { dialect: "postgres" },
-        vault: { backend: "postgres" },
+        vault: postgresVault,
       },
       supported: true,
     },
@@ -21,7 +28,7 @@ describe("validateDeploymentTopology", () => {
       config: {
         deployment: { mode: "multi" },
         store: { dialect: "sqlite" },
-        vault: { backend: "postgres" },
+        vault: postgresVault,
       },
       supported: false,
     },
@@ -29,7 +36,7 @@ describe("validateDeploymentTopology", () => {
       config: {
         deployment: { mode: "multi" },
         store: { dialect: "postgres" },
-        vault: { backend: "sqlite" },
+        vault: sqliteVault,
       },
       supported: false,
     },
@@ -38,11 +45,13 @@ describe("validateDeploymentTopology", () => {
 
   it.each(cases)("validates topology $config", ({ config, supported }) => {
     if (supported) {
-      expect(() => validateDeploymentTopology(config, config.deployment?.mode === "multi")).not.toThrow();
+      expect(() =>
+        validateDeploymentTopology(config, config.deployment?.mode === "multi"),
+      ).not.toThrow();
     } else {
-      expect(() => validateDeploymentTopology(config, config.store?.dialect === "postgres")).toThrow(
-        expect.objectContaining({ code: "deployment_requires_postgres" }),
-      );
+      expect(() =>
+        validateDeploymentTopology(config, config.store?.dialect === "postgres"),
+      ).toThrow(expect.objectContaining({ code: "deployment_requires_postgres" }));
     }
   });
 
@@ -51,14 +60,14 @@ describe("validateDeploymentTopology", () => {
       validateDeploymentTopology({
         deployment: { mode: "multi" },
         store: { dialect: "postgres" },
-        vault: { backend: "postgres" },
+        vault: postgresVault,
       }),
     ).toThrow(expect.objectContaining({ code: "deployment_requires_postgres" }));
   });
 
   it("provides a typed refusal for a second live SQLite instance", () => {
-    expect(
-      new DeploymentStartupError("deployment_single_instance_violation"),
-    ).toMatchObject({ code: "deployment_single_instance_violation" });
+    expect(new DeploymentStartupError("deployment_single_instance_violation")).toMatchObject({
+      code: "deployment_single_instance_violation",
+    });
   });
 });

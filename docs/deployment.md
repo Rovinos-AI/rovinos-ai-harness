@@ -35,6 +35,53 @@ non-production copy.
 `HARNESS_DATA_DIR` selects the event-store directory; `HARNESS_VAULT_DATA_DIR` optionally selects
 the vault directory and otherwise defaults to `HARNESS_DATA_DIR`.
 
+## Scaling
+
+`deployment.mode` defaults to `single`. In this mode, SQLite remains supported and a heartbeat in
+the event-store database rejects another live runtime using the same SQLite files. The heartbeat is
+refreshed every 10 seconds; a row older than 30 seconds can be reclaimed after an unclean shutdown.
+
+Set `deployment.mode` to `multi` for a shared deployment. Every runtime must use a Postgres event
+store, a Postgres vault, and a configured run queue; startup fails with
+`deployment_requires_postgres` when any requirement is absent. Do not share SQLite event-store or
+vault files between processes.
+
+Configure a runner pool with one or more remote sandbox runners. Each runner still grants one run
+lease at a time. The pool tries healthy runners in randomized order, skips a runner with an active
+lease, and temporarily excludes a runner that fails its health check. Keep a runner assignment for
+the duration of a run. On resume a different runner may be selected, in which case the workspace is
+restored from the persisted snapshot.
+
+```yaml
+deployment:
+  mode: multi
+store:
+  dialect: postgres
+  connectionString: file:/run/secrets/store_database_url
+vault:
+  backend: postgres
+  postgres:
+    url: file:/run/secrets/vault_database_url
+sandbox:
+  runners:
+    - url: http://sandbox-runner:8080
+      token: file:/run/secrets/sandbox_runner_token
+    - url: http://sandbox-runner-2:8080
+      token: file:/run/secrets/sandbox_runner_token
+```
+
+The `prod-like` Compose profile defines two `harness-worker` replicas and two separately addressed
+`sandbox-runner` services. Scale the workers with the deployment controller (or Docker Compose's
+`--scale harness-worker=2`); do not scale a single runner endpoint behind a load balancer because
+lease acquisition and subsequent workspace operations must reach the same runner. The worker and
+runner Kubernetes manifests under `infra/k8s/` are examples, not supported deployment templates.
+
+Workers reclaim a queued job after its lease expires if its original worker disappears. Resumption
+uses the event log and snapshot, and non-idempotent tool recovery follows
+`run.resume.onNonIdempotent`. A tool that performs an external side effect must provide an
+idempotency mechanism or a transaction boundary appropriate to that system; a queue lease alone
+cannot make an external side effect exactly once.
+
 ## Postgres vault
 
 Set `vault.backend` to `postgres` and configure `vault.postgres.url` with a `SecretRef`. Resolve that

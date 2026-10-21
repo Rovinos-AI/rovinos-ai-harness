@@ -16,6 +16,7 @@ export const composeIntegrationSuites = [
   "scripts/compose/presidio.int.test.ts",
   "scripts/compose/prod-like.int.test.ts",
   "test/e2e-skeleton.int.test.ts",
+  "test/multi-worker.int.test.ts",
   "test/network-isolation.int.test.ts",
 ] as const;
 

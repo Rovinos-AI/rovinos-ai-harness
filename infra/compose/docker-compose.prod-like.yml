@@ -98,6 +98,16 @@ services:
       SANDBOX_RUNNER_TOKEN: null
       SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
       SANDBOX_ALLOWED_HOSTS: sandbox-runner-2:8080
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get({ host: '127.0.0.1', port: 8080, path: '/healthz', headers: { host: 'sandbox-runner-2:8080' } }, (response) => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
     secrets:
       - sandbox_runner_token
     depends_on:
