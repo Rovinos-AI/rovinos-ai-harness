@@ -17,7 +17,7 @@ Each vector is table-driven against the same policy-denied call, an `ask` call p
 
 ## Authority and evidence
 
-The model may propose tool calls, but the runtime still evaluates each prepared call through the configured policy. A deny decision is expected to produce no successful tool result; an `ask` decision suspends the run, and the model-visible tool list contains no approval-resolution tool. The integration matrix also compares the policy decision, rule, and reason for an injected call with the same call in an uninjected baseline.
+The model may propose tool calls, but the runtime still evaluates each prepared call through the configured policy. A deny decision is expected to produce no successful tool result; an `ask` decision suspends the run, and the model-visible tool list contains no approval-resolution tool. The integration matrix also compares the policy decision, rule, and reason for an injected call with the same call in a baseline run without injected content.
 
 Sensitive synthetic values enter through tool output and are checked at the PII tool boundary. A non-allowlisted external tool receives a token; a configured allowlisted pointer is detokenized for its designated tool and produces a `pii_action` audit event. Event and model-request assertions check that the raw canary is absent. A negative control deliberately makes policy trust an argument derived from tool output and demonstrates that the forbidden execution assertion fails.
 
