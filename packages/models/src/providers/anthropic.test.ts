@@ -315,7 +315,7 @@ describe("AnthropicAdapter", () => {
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
       baseURL: "https://provider.test",
-      // ~72 frames 40 ms apart run ~3 s, well past the idle timeout, so only keepalives and thinking
+      // ~72 frames 40 ms apart run ~3 s, well past the idle timeout, so only keep-alive and thinking
       // frames keep the stream alive; the 25x margin tolerates a loaded CI agent.
       fetch: () => Promise.resolve(streamedSseResponse(frames, 40)),
     });
