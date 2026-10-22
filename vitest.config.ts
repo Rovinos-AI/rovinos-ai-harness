@@ -17,6 +17,7 @@ export const composeIntegrationSuites = [
   "scripts/compose/prod-like.int.test.ts",
   "test/e2e-skeleton.int.test.ts",
   "test/network-isolation.int.test.ts",
+  "test/quickstart.int.test.ts",
 ] as const;
 
 const composeSuiteSet = new Set<string>(composeIntegrationSuites);
