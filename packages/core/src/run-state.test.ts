@@ -4,6 +4,8 @@ import { HarnessError, type Event, type RunStatus } from "@harness/schemas";
 import type { Plan } from "@harness/context";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
 import { planLastModelResponseRecovery } from "./run-state.js";
+import { planDanglingIntents } from "./resume-policy.js";
+import type { ToolPort } from "./ports.js";
 
 const id = "00000000000000000000000000";
 const otherRunId = "11111111111111111111111111";
@@ -48,13 +50,13 @@ function statusChanged(
   };
 }
 
-function toolIntent(seq: number, callId = id): Event {
+function toolIntent(seq: number, callId = id, idempotent = false): Event {
   return {
     ...envelope(seq),
     type: "tool_intent",
     callId,
     toolId: "test.tool",
-    idempotent: false,
+    idempotent,
     policyDecision: "allow",
     argsHash: hash,
     args: {},
@@ -170,6 +172,108 @@ describe("foldRunState", () => {
     expect(state.nextSeq).toBe(3);
     expect(state.startedAt).toBe(1);
     expect(state.lastTs).toBe(3);
+  });
+
+  test("allows repeated recovery attempts within the same resolved input round", () => {
+    const requestId = otherRunId;
+    const marker = (seq: number): Event => ({
+      ...envelope(seq),
+      type: "tool_execution_started",
+      callId: id,
+      toolId: "test.tool",
+    });
+    const events = [
+      runCreated(0),
+      statusChanged(1, "pending", "running", "start"),
+      toolIntent(2, id, true),
+      marker(3),
+      {
+        ...envelope(4),
+        type: "input_requested" as const,
+        requestId,
+        source: "mcp_mrtr" as const,
+        serverId: "mcp_test",
+        callId: id,
+        inputKey: "<MCP_INPUT_1>",
+        round: 1,
+        mode: "form" as const,
+        message: "Provide a value",
+        schema: { type: "object" as const, properties: { answer: { type: "string" as const } } },
+        requestState: "<MCP_INPUT_2>",
+      },
+      {
+        ...envelope(5),
+        type: "input_resolved" as const,
+        requestId,
+        source: "mcp_mrtr" as const,
+        mode: "form" as const,
+        round: 1,
+        action: "accept" as const,
+        decidedBy: "human" as const,
+        approverId: "cli.test",
+        waitMs: 1,
+        answer: { answer: "Ada" },
+      },
+      marker(6),
+      marker(7),
+      marker(8),
+    ];
+
+    const state = foldRunState(events);
+
+    expect(state.toolExecutionAttempts.get(id)).toBe(4);
+    expect(state.toolExecutionRounds?.get(id)).toBe(1);
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    };
+    expect(planDanglingIntents(state, tool)).toEqual([{ kind: "rerun", callId: id }]);
+  });
+
+  test("does not permit repeated same-round attempts for a non-idempotent tool", () => {
+    const requestId = otherRunId;
+    const marker = (seq: number): Event => ({
+      ...envelope(seq),
+      type: "tool_execution_started",
+      callId: id,
+      toolId: "test.tool",
+    });
+    const events = [
+      runCreated(0),
+      statusChanged(1, "pending", "running", "start"),
+      toolIntent(2),
+      marker(3),
+      {
+        ...envelope(4),
+        type: "input_requested" as const,
+        requestId,
+        source: "mcp_mrtr" as const,
+        serverId: "mcp_test",
+        callId: id,
+        inputKey: "key",
+        round: 1,
+        mode: "form" as const,
+        message: "Provide a value",
+        schema: { type: "object" as const, properties: { answer: { type: "string" as const } } },
+      },
+      {
+        ...envelope(5),
+        type: "input_resolved" as const,
+        requestId,
+        source: "mcp_mrtr" as const,
+        mode: "form" as const,
+        round: 1,
+        action: "accept" as const,
+        decidedBy: "human" as const,
+        approverId: "cli.test",
+        waitMs: 1,
+        answer: { answer: "Ada" },
+      },
+      marker(6),
+      marker(7),
+    ];
+
+    expect(() => foldRunState(events)).toThrow(CorruptLogError);
   });
 
   test("derives the latest successful plan for checkpoint snapshots", () => {

@@ -23,6 +23,7 @@ import type {
   TokenizedModelGatewayResponse,
   ValueTransform,
 } from "@harness/models";
+import type { ElicitationPort, ElicitationRetry } from "@harness/mcp";
 import type { ToolResumeStrategy } from "./resume-policy.js";
 import { z } from "zod";
 
@@ -33,6 +34,10 @@ export type ModelRequest = SharedModelRequest;
 export interface RunContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** Durable MRTR handler installed by the core tool step. */
+  readonly elicitation?: ElicitationPort;
+  /** Resolved MRTR responses for a retried MCP call. */
+  readonly inputRetry?: ElicitationRetry;
   /** The active run's available tools, used to prevent children from widening access. */
   readonly toolRegistry?: ToolPort;
   /** Nesting depth of the run making a tool call. */
@@ -107,6 +112,8 @@ export interface ToolExecutionResult {
   readonly binary?: boolean;
   /** Signals that the run must suspend without recording a tool result. */
   readonly suspend?: boolean;
+  /** Reason when the tool has already recorded its durable suspension. */
+  readonly suspendReason?: "awaiting_input";
   readonly outcome: "ok" | "error";
   readonly result: JsonValue;
   readonly errorCode?: Code;

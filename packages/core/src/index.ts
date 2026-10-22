@@ -69,6 +69,7 @@ export {
 export {
   ResumeConflictError,
   RunAwaitingApprovalError,
+  RunAwaitingInputError,
   RunAlreadyTerminalError,
   RunNotResumableError,
   resumeRun,

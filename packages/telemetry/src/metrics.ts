@@ -43,6 +43,14 @@ export const HOST_APP_REJECTED_REASONS = [
 
 /** Policy outcomes used by the decision counter. */
 export const POLICY_DECISIONS = ["allow", "ask", "deny"] as const;
+/** Bounded outcomes for MCP human-input requests. */
+export const MCP_INPUT_REQUEST_OUTCOMES = [
+  "asked",
+  "declined_sensitive",
+  "rejected",
+  "rounds_exceeded",
+  "rate_limited",
+] as const;
 /** Closed worker job outcomes used by the worker counter. */
 export const WORKER_JOB_OUTCOMES = ["completed", "suspended", "failed", "lease_lost"] as const;
 
@@ -52,6 +60,8 @@ export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
 export type HostAppRejectedReason = (typeof HOST_APP_REJECTED_REASONS)[number];
 /** Bounded policy decision outcome. */
 export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
+/** Bounded outcomes counted for an MCP human-input request. */
+export type McpInputRequestOutcome = (typeof MCP_INPUT_REQUEST_OUTCOMES)[number];
 /** Bounded worker job outcome. */
 export type WorkerJobOutcome = (typeof WORKER_JOB_OUTCOMES)[number];
 interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
@@ -70,6 +80,9 @@ interface ModelUsageAttributes extends Readonly<Record<string, CodeType>> {
 interface QuotaRejectionAttributes extends Readonly<Record<string, CodeType>> {
   readonly "harness.quota.id": CodeType;
 }
+interface McpInputRequestAttributes extends Readonly<Record<string, McpInputRequestOutcome>> {
+  readonly "harness.mcp.input_requests.outcome": McpInputRequestOutcome;
+}
 
 interface WorkerJobAttributes extends Readonly<Record<string, WorkerJobOutcome>> {
   readonly "harness.worker.jobs.outcome": WorkerJobOutcome;
@@ -80,6 +93,7 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.telemetry.dropped.reason": TELEMETRY_DROP_REASONS,
   "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
   "harness.policy.decision": POLICY_DECISIONS,
+  "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
   "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
 } as const;
 
@@ -99,6 +113,7 @@ export const METRIC_ALLOWLIST = {
   "harness.sentinel.short_values_skipped": [],
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
   "harness.mcp.discovery_failed": [],
+  "harness.mcp.input_requests": ["harness.mcp.input_requests.outcome"],
   "harness.worker.jobs": ["harness.worker.jobs.outcome"],
   "harness.worker.queue_lag_ms": [],
 } as const satisfies Record<Code, readonly Code[]>;
@@ -117,6 +132,7 @@ let modelCacheReadCounter: Counter<ModelUsageAttributes> | undefined;
 let modelCacheWriteCounter: Counter<ModelUsageAttributes> | undefined;
 let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
+let mcpInputRequestsCounter: Counter<McpInputRequestAttributes> | undefined;
 let workerJobsCounter: Counter<WorkerJobAttributes> | undefined;
 let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
 
@@ -240,6 +256,14 @@ function getQuotaRejectionsCounter(): Counter<QuotaRejectionAttributes> {
     (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
   );
   return quotaRejectionsCounter;
+}
+
+function getMcpInputRequestsCounter(): Counter<McpInputRequestAttributes> {
+  mcpInputRequestsCounter ??= createCounter<McpInputRequestAttributes>(
+    "harness.mcp.input_requests",
+    (meter, name) => meter.createCounter<McpInputRequestAttributes>(name),
+  );
+  return mcpInputRequestsCounter;
 }
 
 /** Counts one quota rejection using the configured quota's bounded code. */
@@ -394,6 +418,15 @@ export function countModelUsage(
 export function countMcpDiscoveryFailed(): void {
   try {
     getMcpDiscoveryFailedCounter().add(1);
+  } catch {
+    return;
+  }
+}
+
+/** Counts an MCP input-request outcome without server identifiers or request content. */
+export function countMcpInputRequest(outcome: McpInputRequestOutcome): void {
+  try {
+    getMcpInputRequestsCounter().add(1, { "harness.mcp.input_requests.outcome": outcome });
   } catch {
     return;
   }

@@ -4,7 +4,9 @@ import {
   ToolBinaryPayloadSchema,
   compileJsonSchema,
   type Code,
+  HarnessError,
   type Id,
+  type InputResponse,
   type JsonValue,
   type PiiActionSummary,
   type PiiConfig,
@@ -13,6 +15,7 @@ import {
 import { type AuditingVaultResolver, type VaultAuditHandler } from "@harness/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
+import { resolveInputRetry } from "./input-retry.js";
 import { markSanitized, markSanitizedField } from "./pii-event-store.js";
 import type { Tokenizer } from "./tokenizer.js";
 
@@ -27,6 +30,13 @@ export interface PiiToolCall {
 export interface PiiToolContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  readonly inputRetry?: {
+    readonly inputResponses: Readonly<Record<string, InputResponse>>;
+    readonly round: number;
+    readonly requestState?: string;
+  };
+  readonly protectInputMetadata?: (value: string) => Promise<string>;
+  readonly tokenizeHumanInput?: (value: JsonValue) => Promise<JsonValue>;
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
   readonly recordVaultAudit?: VaultAuditHandler;
 }
@@ -36,6 +46,7 @@ export interface PiiToolResult {
   readonly binary?: boolean;
   readonly metadata?: JsonValue;
   readonly suspend?: boolean;
+  readonly suspendReason?: "awaiting_input";
   readonly outcome: "ok" | "error";
   readonly result: JsonValue;
   readonly errorCode?: Code;
@@ -83,6 +94,9 @@ const safeToolErrorCodes = new Set([
   "mcp_error",
   "mcp_header_mismatch",
   "mcp_internal_error",
+  "mcp_input_rate_limited",
+  "mcp_input_request_invalid",
+  "mcp_input_rounds_exceeded",
   "mcp_invalid_params",
   "mcp_method_not_found",
   "mcp_protocol_unsupported",
@@ -93,6 +107,13 @@ const safeToolErrorCodes = new Set([
   "workspace_quota_exceeded",
   "precondition_failed",
 ]);
+
+function isBoundaryRecordingFailure(error: unknown): boolean {
+  return (
+    error instanceof HarnessError &&
+    (error.code === "run_event_record_failed" || error.code === "pii_summary_record_failed")
+  );
+}
 
 /** Tokenizes before persistence and resolves only allowlisted pointers in memory. */
 export class PiiToolPort implements PiiToolPortLike {
@@ -190,15 +211,57 @@ export class PiiToolPort implements PiiToolPortLike {
       );
       args = resolved.args;
     } catch (error) {
+      if (isBoundaryRecordingFailure(error)) {
+        throw error;
+      }
       // Arbitrary tool exception codes are attacker-controlled, even when regex-valid.
       const code = error instanceof PiiTokenUnresolvableError ? error.code : "pii_vault_failed";
       return { outcome: "error", errorCode: code, result: null };
     }
     let execution: PiiToolResult;
+    let inputRetry = context.inputRetry;
     try {
-      execution = await this.inner.execute({ ...call, args }, context);
+      if (inputRetry !== undefined) {
+        inputRetry = await resolveInputRetry(context, inputRetry, this.deps.resolver, call.toolId);
+      }
     } catch (error) {
-      if (context.signal.aborted) {
+      if (isBoundaryRecordingFailure(error)) {
+        throw error;
+      }
+      return { outcome: "error", errorCode: "pii_vault_failed", result: null };
+    }
+    try {
+      execution = await this.inner.execute(
+        { ...call, args },
+        {
+          ...context,
+          ...(inputRetry === undefined ? {} : { inputRetry }),
+          tokenizeHumanInput: async (value) => {
+            const tokenized = await this.deps.tokenizer.tokenizeJson(context.runId, value, {
+              boundary: "ui",
+              destination: { tool: call.toolId },
+            });
+            for (const summary of tokenized.actions) {
+              await context.recordPiiAction?.(summary);
+            }
+            if (!tokenized.actions.some(({ action }) => action === "allow")) {
+              return tokenized.value;
+            }
+            const stored = await this.deps.tokenizer.tokenizeJson(context.runId, tokenized.value, {
+              boundary: "storage",
+              destination: { tool: call.toolId },
+            });
+            for (const summary of stored.actions) {
+              await context.recordPiiAction?.(summary);
+            }
+            return stored.value;
+          },
+          protectInputMetadata: (value) =>
+            this.deps.tokenizer.tokenizeOpaqueValue(context.runId, value),
+        },
+      );
+    } catch (error) {
+      if (context.signal.aborted || isBoundaryRecordingFailure(error)) {
         throw error;
       }
       return { outcome: "error", errorCode: "tool_failed", result: null };
@@ -251,6 +314,7 @@ async function binaryResult(
     result: payload.data,
     binary: true,
     ...(execution.suspend === true ? { suspend: true } : {}),
+    ...(execution.suspendReason === undefined ? {} : { suspendReason: execution.suspendReason }),
     ...(execution.outcome === "error" ? { errorCode: "tool_failed" } : {}),
     ...(metadata === undefined ? {} : { metadata }),
   };
@@ -289,6 +353,7 @@ async function tokenizeToolOutput(
       outcome: execution.outcome,
       result: markJsonSanitized(stored.value),
       ...(execution.suspend === true ? { suspend: true } : {}),
+      ...(execution.suspendReason === undefined ? {} : { suspendReason: execution.suspendReason }),
       ...(execution.outcome === "error"
         ? { errorCode: safeToolErrorCode(execution.errorCode) }
         : {}),

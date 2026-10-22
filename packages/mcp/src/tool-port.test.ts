@@ -11,13 +11,21 @@ import {
 import { context as otelContext, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SpanContext } from "@opentelemetry/api";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { JsonValue, ServerConfigSchema } from "@harness/schemas";
+import {
+  HarnessError,
+  JsonValue,
+  ServerConfigSchema,
+  type JsonValue as JsonValueType,
+  type ServerConfig,
+} from "@harness/schemas";
 import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
 import { lookupSpanDefinition } from "@harness/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
+import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
+import type { ElicitationRetry } from "./elicitation/mrtr.js";
 
 const spanCollector = createTestSpanCollector();
 const canary = "TOOL_ERROR_CANARY";
@@ -50,6 +58,7 @@ async function fixture(
     readonly maxResultBytes?: number;
     readonly offloadBinaryResults?: boolean;
     readonly authRequiredMethod?: "tools/list" | "tools/call";
+    readonly elicitation?: ServerConfig["elicitation"];
   } = {},
 ): Promise<Fixture> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -80,7 +89,7 @@ async function fixture(
   const config = ServerConfigSchema.parse({
     id: "mcp_test",
     transport: { kind: "stdio", command: "not-spawned-by-test" },
-    protocol: "2025-11-25",
+    ...(options.elicitation === undefined ? {} : { elicitation: options.elicitation }),
     timeouts: { callMs: options.callMs ?? 1_000 },
     maxResultBytes: options.maxResultBytes ?? 1_048_576,
   });
@@ -134,8 +143,13 @@ async function fixture(
   };
 }
 
-function context(signal = new AbortController().signal) {
-  return { signal };
+type McpToolContext = Parameters<McpToolPort["execute"]>[1];
+
+function context(
+  signal = new AbortController().signal,
+  extras: Omit<McpToolContext, "signal"> = {},
+): McpToolContext {
+  return { signal, ...extras };
 }
 
 const call = {
@@ -143,6 +157,44 @@ const call = {
   toolId: "mcp_test.echo",
   args: { value: "ok" },
 };
+
+class InputRecorderFailure extends HarnessError {
+  readonly code = "run_event_record_failed";
+
+  constructor() {
+    super("input event recording failed");
+  }
+}
+
+const mrtrConfig: NonNullable<ServerConfig["elicitation"]> = {
+  enabled: true,
+  modes: ["form"],
+  maxRounds: 2,
+  maxPerRun: 4,
+  maxRequestStateBytes: 128,
+  legacyLiveTimeoutMs: 300_000,
+};
+
+function requiredResult(requestState: string, message = "Provide a value"): CallToolResult {
+  return {
+    content: [],
+    resultType: "input_required",
+    inputRequests: {
+      "server-key": {
+        method: "elicitation/create",
+        params: {
+          mode: "form",
+          message,
+          requestedSchema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+          },
+        },
+      },
+    },
+    requestState,
+  };
+}
 
 beforeAll(() => {
   otelContext.setGlobalContextManager(createTestContextManager());
@@ -382,18 +434,288 @@ describe("McpToolPort", () => {
     }
   });
 
-  it("fails with a typed error for unsupported input-required results", async () => {
-    const current = await fixture();
+  it("rejects malformed input-required results with a typed error", async () => {
+    const current = await fixture({ elicitation: mrtrConfig });
     const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockResolvedValue({
       content: [],
       resultType: "input_required",
     });
+    const handleInputRequired = vi.fn(() => Promise.resolve({ kind: "suspend" as const }));
+    const tokenizeHumanInput = vi.fn((value: JsonValueType) => Promise.resolve(value));
     try {
-      await expect(current.port.execute(call, context())).resolves.toEqual({
+      await expect(
+        current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            elicitation: { handleInputRequired },
+            tokenizeHumanInput,
+          }),
+        ),
+      ).resolves.toEqual({
         outcome: "error",
-        errorCode: "mcp_input_required_unsupported",
+        errorCode: "mcp_input_request_invalid",
         result: null,
       });
+      expect(handleInputRequired).not.toHaveBeenCalled();
+      expect(tokenizeHumanInput).not.toHaveBeenCalled();
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("fails closed for invalid persistence and input-handler outcomes", async () => {
+    const route = {
+      server: ServerConfigSchema.parse({
+        id: "mcp_test",
+        transport: { kind: "stdio", command: "not-spawned-by-test" },
+        elicitation: mrtrConfig,
+        timeouts: { callMs: 1_000 },
+        maxResultBytes: 1_048_576,
+      }),
+      nativeName: "echo",
+      tool: { name: "echo", inputSchema },
+      inputSchema: JsonValue.parse(inputSchema),
+    };
+    const base = {
+      value: requiredResult("state"),
+      route,
+      call: { callId: call.callId },
+      signal: new AbortController().signal,
+      round: 0,
+      tokenizeHumanInput: (value: JsonValueType) => Promise.resolve(value),
+      protectInputMetadata: (value: string) => Promise.resolve(value),
+    };
+    try {
+      await expect(handleInputRequiredCall(base)).resolves.toEqual({
+        kind: "failure",
+        errorCode: "mcp_input_request_invalid",
+      });
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          tokenizeHumanInput: () => Promise.reject(new Error("tokenization failed")),
+          elicitation: { handleInputRequired: () => Promise.resolve({ kind: "suspend" }) },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_request_invalid" });
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: {
+            handleInputRequired: () => Promise.reject(new Error("input handler failed")),
+          },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_request_invalid" });
+
+      const recorderFailure = new InputRecorderFailure();
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: { handleInputRequired: () => Promise.reject(recorderFailure) },
+        }),
+      ).rejects.toBe(recorderFailure);
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: {
+            handleInputRequired: () =>
+              Promise.resolve({ kind: "error", errorCode: "mcp_input_rate_limited" }),
+          },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_rate_limited" });
+      await expect(
+        handleInputRequiredCall({
+          ...base,
+          elicitation: {
+            handleInputRequired: () =>
+              Promise.resolve({
+                kind: "retry",
+                inputResponses: {
+                  "unknown-key": { action: "decline" },
+                },
+              }),
+          },
+        }),
+      ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_request_invalid" });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("retries an input-required call with the response and byte-identical request state", async () => {
+    const requestState = "state-\u0000-\u{1f4a1}";
+    const inputCanary = "MRTR_SERVER_TEXT_CANARY";
+    const current = await fixture({ elicitation: mrtrConfig });
+    const retries: ElicitationRetry[] = [];
+    const responses: CallToolResult[] = [
+      requiredResult(requestState, inputCanary),
+      { content: [{ type: "text", text: "complete" }] },
+    ];
+    const tokenizedInputs: JsonValueType[] = [];
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation((request) => {
+      if (request.inputRetry !== undefined) {
+        retries.push(request.inputRetry);
+      }
+      const response = responses.shift();
+      if (response === undefined) {
+        throw new Error("Unexpected test call.");
+      }
+      return Promise.resolve(response);
+    });
+    const handleInputRequired = vi.fn(
+      (input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
+        Promise.resolve({
+          kind: "retry" as const,
+          inputResponses: {
+            [input.inputRequests[0]?.inputKey ?? "server-key"]: {
+              action: "accept" as const,
+              answer: { answer: "Ada" },
+            },
+          },
+        }),
+    );
+    try {
+      const spanStart = spanCollector.getFinishedSpans().length;
+      const result = await current.port.execute(
+        call,
+        context(new AbortController().signal, {
+          elicitation: { handleInputRequired },
+          tokenizeHumanInput: (value) => {
+            tokenizedInputs.push(value);
+            if (!Array.isArray(value)) {
+              return Promise.resolve(value);
+            }
+            return Promise.resolve(
+              value.map((request) => {
+                if (typeof request !== "object" || request === null || Array.isArray(request)) {
+                  return request;
+                }
+                return { ...request, message: "tokenized-message" };
+              }),
+            );
+          },
+          protectInputMetadata: (value) => Promise.resolve(value),
+        }),
+      );
+      expect(result).toMatchObject({
+        outcome: "ok",
+        result: { content: [{ type: "text", text: "complete" }] },
+      });
+      expect(handleInputRequired).toHaveBeenCalledWith(
+        expect.objectContaining({ requestState, round: 1 }),
+      );
+      expect(handleInputRequired.mock.calls[0]?.[0].inputRequests[0]?.message).toBe(
+        "tokenized-message",
+      );
+      expect(JSON.stringify(tokenizedInputs)).not.toContain("server-key");
+      expect(
+        JSON.stringify(
+          spanCollector
+            .getFinishedSpans()
+            .slice(spanStart)
+            .map(({ attributes }) => attributes),
+        ),
+      ).not.toContain(inputCanary);
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+    expect(retries).toEqual([
+      {
+        inputResponses: { "server-key": { action: "accept", answer: { answer: "Ada" } } },
+        round: 1,
+        requestState,
+      },
+    ]);
+  });
+
+  it("supports multiple MRTR rounds without changing opaque state", async () => {
+    const firstState = "first-state";
+    const secondState = "second-state";
+    const current = await fixture({ elicitation: mrtrConfig });
+    const rounds: number[] = [];
+    const retries: ElicitationRetry[] = [];
+    const responses: CallToolResult[] = [
+      requiredResult(firstState),
+      requiredResult(secondState),
+      { content: [{ type: "text", text: "complete" }] },
+    ];
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation((request) => {
+      if (request.inputRetry !== undefined) {
+        retries.push(request.inputRetry);
+      }
+      const response = responses.shift();
+      if (response === undefined) {
+        throw new Error("Unexpected test call.");
+      }
+      return Promise.resolve(response);
+    });
+
+    try {
+      const result = await current.port.execute(
+        call,
+        context(new AbortController().signal, {
+          elicitation: {
+            handleInputRequired: (input) => {
+              rounds.push(input.round);
+              return Promise.resolve({
+                kind: "retry",
+                inputResponses: {
+                  [input.inputRequests[0]?.inputKey ?? "server-key"]: {
+                    action: "accept",
+                    answer: { answer: `round-${String(input.round)}` },
+                  },
+                },
+              });
+            },
+          },
+          tokenizeHumanInput: (value) => Promise.resolve(value),
+          protectInputMetadata: (value) => Promise.resolve(value),
+        }),
+      );
+      expect(result.outcome).toBe("ok");
+      expect(rounds).toEqual([1, 2]);
+      expect(retries.map(({ requestState }) => requestState)).toEqual([firstState, secondState]);
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("fails after the configured maximum MRTR rounds", async () => {
+    const current = await fixture({
+      elicitation: { ...mrtrConfig, maxRounds: 1 },
+    });
+    const responses: CallToolResult[] = [requiredResult("first"), requiredResult("second")];
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation(() => {
+      const response = responses.shift();
+      if (response === undefined) {
+        throw new Error("Unexpected test call.");
+      }
+      return Promise.resolve(response);
+    });
+    try {
+      const result = await current.port.execute(
+        call,
+        context(new AbortController().signal, {
+          elicitation: {
+            handleInputRequired: (input) =>
+              Promise.resolve({
+                kind: "retry",
+                inputResponses: {
+                  [input.inputRequests[0]?.inputKey ?? "server-key"]: { action: "decline" },
+                },
+              }),
+          },
+          tokenizeHumanInput: (value) => Promise.resolve(value),
+          protectInputMetadata: (value) => Promise.resolve(value),
+        }),
+      );
+      expect(result).toMatchObject({
+        outcome: "error",
+        errorCode: "mcp_input_rounds_exceeded",
+      });
+      expect(responses).toHaveLength(0);
     } finally {
       callTool.mockRestore();
       await current.close();

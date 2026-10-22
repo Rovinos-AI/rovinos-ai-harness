@@ -149,8 +149,8 @@ describe("MCP transports", () => {
 
     try {
       await trace.getTracer("mcp-test").startActiveSpan("harness.mcp_call", async (span) => {
-        await trustedConnection.callTool(
-          {
+        await trustedConnection.callTool({
+          params: {
             name: "tool-1",
             arguments: {},
             _meta: {
@@ -160,10 +160,10 @@ describe("MCP transports", () => {
               baggage: "private=value",
             },
           },
-          { type: "object" },
-        );
-        await externalConnection.callTool(
-          {
+          inputSchema: { type: "object" },
+        });
+        await externalConnection.callTool({
+          params: {
             name: "tool-1",
             arguments: {},
             _meta: {
@@ -173,8 +173,8 @@ describe("MCP transports", () => {
               baggage: "private=value",
             },
           },
-          { type: "object" },
-        );
+          inputSchema: { type: "object" },
+        });
 
         const callRequests = requests.filter(({ body }) => body.method === "tools/call");
         expect(callRequests.map(({ body }) => body.params?._meta)).toEqual([
@@ -219,10 +219,10 @@ describe("MCP transports", () => {
 
       await connection.connect();
       await connection.listTools();
-      const result: CallToolResult = await connection.callTool(
-        { name: "environment", arguments: {} },
-        { type: "object" },
-      );
+      const result: CallToolResult = await connection.callTool({
+        params: { name: "environment", arguments: {} },
+        inputSchema: { type: "object" },
+      });
 
       expect(result.content[0]).toMatchObject({
         text: JSON.stringify({
