@@ -22,8 +22,10 @@ suite file's directory.
 
 TypeScript suites are loaded with Node's built-in TypeScript type stripping,
 available in the pinned Node 26 runtime; the eval package does not need a separate
-`tsx` dependency. TypeScript suites are executable code and should only be loaded
-from trusted sources.
+`tsx` dependency. Type stripping only supports erasable TypeScript syntax, so
+suites must avoid constructs that require JavaScript transformation, including
+enums and parameter properties. TypeScript suites are executable code and should
+only be loaded from trusted sources.
 
 Simulated humans default to denying approvals. A script that uses default approval
 must set `unsafeAutoApprove: true`; the schema rejects implicit auto-approval.

@@ -197,6 +197,58 @@ describe("eval suite schemas", () => {
     ).toBe(true);
   });
 
+  it.each(["recipient", "/recipient~2name"])(
+    "rejects malformed simulated-human JSON pointer %s at its field path",
+    (pointer) => {
+      const error = expectContractError(() =>
+        defineSuite({
+          ...validSuite,
+          tasks: [
+            {
+              ...validSuite.tasks[0],
+              human: {
+                rules: [
+                  {
+                    match: { pointerEquals: { pointer, value: "synthetic" } },
+                    decision: "deny",
+                  },
+                ],
+                default: "deny",
+              },
+            },
+          ],
+        }),
+      );
+
+      expect(error.issues).toContainEqual({
+        path: ["tasks", 0, "human", "rules", 0, "match", "pointerEquals", "pointer"],
+        code: "custom",
+      });
+    },
+  );
+
+  it("accepts a valid escaped simulated-human JSON pointer", () => {
+    expect(
+      defineSuite({
+        ...validSuite,
+        tasks: [
+          {
+            ...validSuite.tasks[0],
+            human: {
+              rules: [
+                {
+                  match: { pointerEquals: { pointer: "/recipient~1name", value: "synthetic" } },
+                  decision: "deny",
+                },
+              ],
+              default: "deny",
+            },
+          },
+        ],
+      }).tasks[0]?.human?.rules,
+    ).toHaveLength(1);
+  });
+
   it("rejects unexpected fields on task and suite objects", () => {
     expect(
       EvalSuiteSchema.safeParse({

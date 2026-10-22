@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApprovalEditsSchema } from "@harness/policy";
-import { Code, JsonValue, ModelRefSchema } from "@harness/schemas";
+import { Code, JsonPointerSchema, JsonValue, ModelRefSchema } from "@harness/schemas";
 import { z } from "zod";
 
 /** Assertions that inspect an eval trial's event trajectory. */
@@ -108,7 +108,10 @@ const HumanRuleSchema = z
       .object({
         toolId: Code.optional(),
         ruleId: Code.optional(),
-        pointerEquals: z.object({ pointer: z.string(), value: JsonValue }).strict().optional(),
+        pointerEquals: z
+          .object({ pointer: JsonPointerSchema, value: JsonValue })
+          .strict()
+          .optional(),
       })
       .strict(),
     decision: z.enum(["approve", "deny", "edit"]),
