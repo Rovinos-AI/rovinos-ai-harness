@@ -9,7 +9,7 @@ const hadolintImage =
   "hadolint/hadolint:v2.14.0-debian@sha256:158cd0184dcaa18bd8ec20b61f4c1cabdf8b32a592d062f57bdcb8e4c1d312e2";
 const editorconfigImage =
   "ghcr.io/editorconfig-checker/editorconfig-checker:4.0.2@sha256:2ba6232bfa0058f72f5f7d7816711590aa764afab1542af30b3ecb4553587918";
-const ignoredDirectories = new Set([".git", "node_modules", "dist", "coverage"]);
+const ignoredDirectories = new Set([".git", ".tmp", "node_modules", "dist", "coverage"]);
 
 function findFiles(directory: string, matches: (name: string) => boolean): string[] {
   const files: string[] = [];

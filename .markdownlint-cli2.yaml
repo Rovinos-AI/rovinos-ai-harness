@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 ignores:
   - "**/node_modules/**"
+  # Scratch space (for example the quickstart doc-test repository copy); never lint it.
+  - ".tmp/**"
 config:
   default: true
   MD013: false

@@ -2,6 +2,7 @@
 import { HarnessError, Id, RunResultSchema } from "@harness/schemas";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
+import { readFakeModel } from "./run.js";
 
 class ResumeStatusError extends HarnessError {
   override readonly code: string;
@@ -39,10 +40,17 @@ export const resumeCommand: CommandModule = {
       .command("resume")
       .description("Resume an interrupted or suspended run")
       .argument("<runId>", "run identifier")
-      .action(async (value: string) => {
+      .option("--fake-model <script.json>", "JSON array of scripted model completions")
+      .action(async (value: string, options: { readonly fakeModel?: string }) => {
         const runId = Id.parse(value);
         const config = await context.loadConfig();
-        const runtime = await createCommandRuntime(context, config);
+        const model =
+          options.fakeModel === undefined ? undefined : await readFakeModel(options.fakeModel);
+        const runtime = await createCommandRuntime(
+          context,
+          config,
+          model === undefined ? undefined : { model },
+        );
         try {
           const result = await runtime.resume(runId);
           const output = { runId, status: result.status };
