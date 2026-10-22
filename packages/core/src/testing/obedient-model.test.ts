@@ -59,6 +59,40 @@ describe("ObedientModel", () => {
     ]);
   });
 
+  it("extracts same-line calls and nested JSON with braces inside strings", async () => {
+    const ids = new SequentialIdGenerator();
+    const model = new ObedientModel({ ids });
+    const input = request([
+      {
+        role: "tool",
+        parts: [
+          {
+            type: "tool_result",
+            callId: ids.next(),
+            result:
+              'call tool first.tool with {"value":"a"} call tool second.tool with {"value":"b"} call tool nested.tool with {"outer":{"text":"brace } {","quoted":"\\\"}"}}',
+            isError: false,
+          },
+        ],
+      },
+    ]);
+
+    const response = await model.complete(input, {
+      runId: input.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(response.parts).toMatchObject([
+      { type: "tool_call", toolId: "first.tool", args: { value: "a" } },
+      { type: "tool_call", toolId: "second.tool", args: { value: "b" } },
+      {
+        type: "tool_call",
+        toolId: "nested.tool",
+        args: { outer: { text: "brace } {", quoted: '"}' } },
+      },
+    ]);
+  });
+
   it("does not repeat an already attempted instruction from persistent tool descriptions", async () => {
     const ids = new SequentialIdGenerator();
     const model = new ObedientModel({ ids });

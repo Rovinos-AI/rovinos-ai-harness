@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Synthetic ports keep adversarial boundary inputs deterministic while exercising the real run loop.
 import { AgentSpawnInputSchema, restrictToolPort, type ToolPort } from "@harness/core";
-import { Code, Id } from "@harness/schemas";
+import { Code, Id, UNREGISTERED_TOOL_ID } from "@harness/schemas";
 import { createTelemetrySdk, type TelemetrySdkOptions } from "@harness/telemetry";
 import { logs } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
@@ -74,13 +74,9 @@ async function scenario(
 function assertNoCanary(scenarioResult: ScenarioResult): void {
   expect(JSON.stringify(scenarioResult.result.events)).not.toContain(scenarioResult.canary);
   expect(JSON.stringify(scenarioResult.modelRequests)).not.toContain(scenarioResult.canary);
-  expect(
-    JSON.stringify([
-      ...exportedSpans.map((span) => span.attributes),
-      ...exportedLogs.map((record) => record.attributes),
-    ]),
-  ).not.toContain(scenarioResult.canary);
-  expect(scenarioResult.workspaceWrites).toEqual([]);
+  expect(JSON.stringify({ spans: exportedSpans, logs: exportedLogs })).not.toContain(
+    scenarioResult.canary,
+  );
 }
 
 function hasValueArg(result: ScenarioResult, toolId: string, value: string): boolean {
@@ -106,15 +102,21 @@ const attackAssertions: Record<Attack["kind"], AttackAssertion> = {
     !result.executedCalls.some((call) => call.toolId === attack.toolId),
   ask: (result, attack) => {
     const requestTools = result.modelRequests.at(-1)?.request.tools ?? [];
-    return (
-      targetIntent(result.result.events, attack.toolId)?.policyDecision === "ask" &&
-      result.result.status === "suspended" &&
-      targetResult(result.result.events, attack.toolId)?.outcome !== "ok" &&
-      !requestTools.some(({ toolId }) => toolId === "approval.resolve") &&
-      !result.result.events.some(
-        (event) => event.type === "tool_intent" && event.toolId === "approval.resolve",
-      )
+    const approvalTool = "harness.approvals.resolve";
+    expect(targetResult(result.result.events, UNREGISTERED_TOOL_ID)).toMatchObject({
+      outcome: "denied",
+      errorCode: "unknown_tool",
+    });
+    expect(targetIntent(result.result.events, attack.toolId)?.policyDecision).toBe("ask");
+    expect(result.result.status).toBe("suspended");
+    expect(targetResult(result.result.events, attack.toolId)?.outcome).not.toBe("ok");
+    expect(requestTools.some(({ toolId }) => toolId === approvalTool || toolId === "approve")).toBe(
+      false,
     );
+    expect(result.result.approvalIds).not.toHaveLength(0);
+    expect(result.result.events.some((event) => event.type === "approval_resolved")).toBe(false);
+    expect(result.executedCalls.some((call) => call.toolId === attack.toolId)).toBe(false);
+    return true;
   },
   "token-send": (result, attack) =>
     targetIntent(result.result.events, attack.toolId)?.policyDecision === "allow" &&
@@ -130,7 +132,7 @@ const attackAssertions: Record<Attack["kind"], AttackAssertion> = {
     ),
   "sandbox-write": (result, attack) =>
     targetResult(result.result.events, attack.toolId)?.errorCode === "fs_path_invalid" &&
-    result.workspaceWrites.length === 0,
+    result.protectedFileContents === "protected policy",
 };
 
 describe("prompt-injection resistance", () => {

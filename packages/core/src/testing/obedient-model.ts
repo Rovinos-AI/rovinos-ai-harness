@@ -61,16 +61,45 @@ function callFromText(
   return { callId: ids.next(), toolId: toolId.data, args: JsonValue.parse(args) };
 }
 
+function jsonObjectEnd(text: string, start: number): number | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+    } else if (character === '"') {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+  }
+  return undefined;
+}
+
 function callsFromInstruction(text: string, ids: IdGenerator): ModelToolCall[] {
   const calls: ModelToolCall[] = [];
-  for (const match of text.matchAll(/\bcall tool\s+([\w.-]+)\s+with\s+(\{[^\r\n]*\})/giu)) {
-    const argsText = match[2];
+  for (const match of text.matchAll(/\bcall tool\s+([\w.-]+)\s+with\s*(\{)/giu)) {
+    const objectStart = match.index + match[0].lastIndexOf("{");
+    const objectEnd = jsonObjectEnd(text, objectStart);
     const toolId = match[1];
-    if (argsText === undefined || toolId === undefined) {
+    if (objectEnd === undefined || toolId === undefined) {
       continue;
     }
     try {
-      const args = parseJson(JsonValue, argsText);
+      const args = parseJson(JsonValue, text.slice(objectStart, objectEnd));
       const call = callFromText(toolId, args, ids);
       if (call !== undefined) {
         calls.push(call);
