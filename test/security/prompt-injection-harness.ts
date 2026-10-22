@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  createRuntime,
   type ModelCompletion,
   type ModelPort,
   type ModelToolCall,
@@ -11,23 +10,18 @@ import { FakeModelPort, ObedientModel } from "@harness/core/testing";
 import { InMemoryEventStore } from "@harness/store";
 import {
   Code,
-  FakeClock,
-  Id,
   JsonValue,
   PiiConfigSchema,
-  RunConfigSchema,
   SequentialIdGenerator,
   type Detection,
   type Event,
   type ModelRequest,
 } from "@harness/schemas";
-import { InProcessBackend, ensureRunWorkspace } from "@harness/sandbox";
 import { PiiToolPort, Tokenizer } from "@harness/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { executeRuntimeScenario, type RuntimeScenarioResult } from "./prompt-injection-runtime.js";
 
 const canarySeeds = new SequentialIdGenerator();
 
@@ -123,7 +117,7 @@ export type Vector = (typeof VECTORS)[number];
 
 /** Observable outputs from a single isolated injection run. */
 export interface ScenarioResult {
-  readonly result: Awaited<ReturnType<Awaited<ReturnType<typeof createRuntime>>["run"]>>;
+  readonly result: RuntimeScenarioResult["result"];
   readonly canary: string;
   readonly modelRequests: readonly { readonly request: ModelRequest }[];
   readonly executedCalls: readonly ModelToolCall[];
@@ -230,7 +224,7 @@ function sourceResult(
   if ("error" in vector) {
     return Promise.resolve({ outcome: "error", errorCode: "mcp_error", result: directive });
   }
-  if (vector.description === true) {
+  if ("description" in vector) {
     return Promise.resolve({ outcome: "ok", result: canary });
   }
   if ("child" in vector) {
@@ -356,75 +350,16 @@ export async function runScenario(
   });
   const policy = createPolicy(options);
   const model = createModel({ ids, vector, attack, canary, scenario: options });
-  const sandboxRunId = Id.parse("00000000000000000000000001");
-  let workspaceRoot: string | undefined;
-  let protectedFilePath: string | undefined;
-  let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
-  try {
-    const sandboxBackend =
-      attack.kind === "sandbox-write"
-        ? new InProcessBackend({
-            workspaceRoot: (workspaceRoot = await mkdtemp(join(tmpdir(), "injection-sandbox-"))),
-            logger: { log: () => undefined },
-          })
-        : undefined;
-    if (sandboxBackend !== undefined) {
-      const projectRoot = await ensureRunWorkspace(workspaceRoot, sandboxRunId);
-      protectedFilePath = join(projectRoot, ".harness", "offload", "policy.json");
-      await mkdir(join(projectRoot, ".harness", "offload"), { recursive: true });
-      await writeFile(protectedFilePath, "protected policy");
-    }
-    runtime = await createRuntime(
-      {
-        run: RunConfigSchema.parse({}),
-        pii: PiiConfigSchema.parse({ enabled: false }),
-      },
-      {
-        store,
-        transientVault: true,
-        clock: new FakeClock(100),
-        ids,
-        model,
-        tool: createPiiTool(tool, canary),
-        policy,
-        ...(sandboxBackend === undefined ? {} : { sandboxBackend }),
-      },
-    );
-    let result: ScenarioResult["result"];
-    if (sandboxBackend === undefined) {
-      result = await runtime.run("Evaluate synthetic untrusted content.");
-    } else {
-      const execution = runtime.start("Evaluate synthetic untrusted content.", {
-        runId: sandboxRunId,
-      });
-      await execution.started;
-      result = await execution.completion;
-    }
-    await options.flushTelemetry?.();
-    let modelRequests: readonly { readonly request: ModelRequest }[] = [];
-    if (model instanceof ObedientModel) {
-      modelRequests = model.requests;
-    } else if (model instanceof FakeModelPort) {
-      modelRequests = model.requests;
-    }
-    return {
-      result,
-      canary,
-      modelRequests,
-      executedCalls,
-      ...(protectedFilePath === undefined
-        ? {}
-        : { protectedFileContents: await readFile(protectedFilePath, "utf8") }),
-    };
-  } finally {
-    try {
-      await runtime?.close();
-    } finally {
-      if (workspaceRoot !== undefined) {
-        await rm(workspaceRoot, { recursive: true, force: true });
-      }
-    }
-  }
+  const runtimeResult: RuntimeScenarioResult = await executeRuntimeScenario({
+    store,
+    ids,
+    model,
+    tool: createPiiTool(tool, canary),
+    policy,
+    sandboxWrite: attack.kind === "sandbox-write",
+    ...(options.flushTelemetry === undefined ? {} : { flushTelemetry: options.flushTelemetry }),
+  });
+  return { ...runtimeResult, canary, executedCalls };
 }
 
 /** Finds the latest intent for a tool, including repeated sandbox command calls. */

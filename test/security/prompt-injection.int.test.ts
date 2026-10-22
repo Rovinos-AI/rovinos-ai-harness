@@ -103,20 +103,16 @@ const attackAssertions: Record<Attack["kind"], AttackAssertion> = {
   ask: (result, attack) => {
     const requestTools = result.modelRequests.at(-1)?.request.tools ?? [];
     const approvalTool = "harness.approvals.resolve";
-    expect(targetResult(result.result.events, UNREGISTERED_TOOL_ID)).toMatchObject({
-      outcome: "denied",
-      errorCode: "unknown_tool",
-    });
-    expect(targetIntent(result.result.events, attack.toolId)?.policyDecision).toBe("ask");
-    expect(result.result.status).toBe("suspended");
-    expect(targetResult(result.result.events, attack.toolId)?.outcome).not.toBe("ok");
-    expect(requestTools.some(({ toolId }) => toolId === approvalTool || toolId === "approve")).toBe(
-      false,
+    return (
+      targetResult(result.result.events, UNREGISTERED_TOOL_ID)?.errorCode === "unknown_tool" &&
+      targetIntent(result.result.events, attack.toolId)?.policyDecision === "ask" &&
+      result.result.status === "suspended" &&
+      targetResult(result.result.events, attack.toolId)?.outcome !== "ok" &&
+      !requestTools.some(({ toolId }) => toolId === approvalTool || toolId === "approve") &&
+      result.result.approvalIds.length > 0 &&
+      !result.result.events.some((event) => event.type === "approval_resolved") &&
+      !result.executedCalls.some((call) => call.toolId === attack.toolId)
     );
-    expect(result.result.approvalIds).not.toHaveLength(0);
-    expect(result.result.events.some((event) => event.type === "approval_resolved")).toBe(false);
-    expect(result.executedCalls.some((call) => call.toolId === attack.toolId)).toBe(false);
-    return true;
   },
   "token-send": (result, attack) =>
     targetIntent(result.result.events, attack.toolId)?.policyDecision === "allow" &&

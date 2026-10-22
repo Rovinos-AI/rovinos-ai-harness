@@ -91,7 +91,7 @@ function jsonObjectEnd(text: string, start: number): number | undefined {
 
 function callsFromInstruction(text: string, ids: IdGenerator): ModelToolCall[] {
   const calls: ModelToolCall[] = [];
-  for (const match of text.matchAll(/\bcall tool\s+([\w.-]+)\s+with\s*(\{)/giu)) {
+  for (const match of text.matchAll(/\bcall tool\s+([\w.-]+)\s+with\s*\{/giu)) {
     const objectStart = match.index + match[0].lastIndexOf("{");
     const objectEnd = jsonObjectEnd(text, objectStart);
     const toolId = match[1];
