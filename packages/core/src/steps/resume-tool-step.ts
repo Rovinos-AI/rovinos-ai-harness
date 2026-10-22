@@ -5,19 +5,28 @@ import { ApprovalPayloadSchema, approvalEditsAreAllowed, diffToEdits } from "@ha
 import { SpanStatusCode } from "@opentelemetry/api";
 import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { EventPartial } from "../recorder.js";
-import type { ModelToolCall, PolicyDecision } from "../ports.js";
+import type { ModelToolCall } from "../ports.js";
 import { requestPolicyApproval } from "./policy-step.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
 import type { DanglingIntentAction, ToolResumeDecision } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
+import { inputRetryForCall } from "./input-step.js";
 import { runToolCall, type ResumeToolStepOptions } from "./tool-step.js";
 import { requestResumeApprovals } from "./resume-approval-request.js";
+import {
+  callFromIntent,
+  policyDecisionFromIntent,
+  setPolicySpanAttributes,
+} from "./resume-intent.js";
 import {
   ApprovalEditNotAllowedError,
   ApprovalEditsRequiredError,
   ResumeActionMismatchError,
   ResumeEventMissingError,
 } from "./resume-errors.js";
+
+type ApprovalExecutionOptions = Omit<ResumeToolStepOptions, "ids"> &
+  Partial<Pick<ResumeToolStepOptions, "ids">>;
 
 export {
   ApprovalEditNotAllowedError,
@@ -79,30 +88,57 @@ async function recordPolicyDenied(
   return [result];
 }
 
-function setPolicySpanAttributes(intent: ToolIntentEvent): void {
-  setActiveSpanAttribute("harness.policy.decision", intent.policyDecision);
-  if (intent.ruleId !== undefined) {
-    setActiveSpanAttribute("harness.policy.rule_id", intent.ruleId);
+async function applyIntentPolicy(
+  options: ResumeToolStepOptions,
+  state: RunState,
+  intent: ToolIntentEvent,
+): Promise<readonly Event[] | undefined> {
+  if (intent.policyDecision === "deny") {
+    return recordPolicyDenied(options, intent, intent.policyReason ?? "default_decision");
   }
+  if (intent.policyDecision !== "ask") {
+    return undefined;
+  }
+  if (options.checkpointer === undefined) {
+    return recordPolicyDenied(options, intent, "policy_error");
+  }
+  const approval = await requestPolicyApproval({
+    recorder: options.recorder,
+    ids: options.ids,
+    checkpointer: options.checkpointer,
+    state,
+    clock: options.clock,
+    call: callFromIntent(intent),
+    decision: policyDecisionFromIntent(intent),
+  });
+  return approval.events;
 }
 
-function policyDecisionFromIntent(intent: ToolIntentEvent): PolicyDecision {
-  return {
-    decision: "ask",
-    ruleId: intent.ruleId ?? "default",
-    reason: intent.policyReason ?? "default_decision",
-    editable: intent.policyEditable ?? [],
-    ...(intent.policyApprovalTtlMs === undefined
-      ? {}
-      : { approvalTtlMs: intent.policyApprovalTtlMs }),
-    ...(intent.policyEscalateAfterMs === undefined
-      ? {}
-      : { escalateAfterMs: intent.policyEscalateAfterMs }),
-  };
-}
-
-function callFromIntent(intent: ToolIntentEvent): ModelToolCall {
-  return { callId: intent.callId, toolId: intent.toolId, args: intent.args };
+async function applyNonExecutionAction(
+  options: ResumeToolStepOptions,
+  state: RunState,
+  intent: ToolIntentEvent,
+  action: DanglingIntentAction,
+): Promise<readonly Event[] | "escalate" | undefined> {
+  if (action.kind === "fail") {
+    return recordDanglingFailure(options, intent, action.errorCode);
+  }
+  if (action.kind === "escalate") {
+    return "escalate";
+  }
+  if (action.kind !== "strategy") {
+    return undefined;
+  }
+  const strategy = options.tool.resumeStrategy?.(intent.toolId);
+  if (strategy === undefined) {
+    throw new ResumeActionMismatchError();
+  }
+  const decision = await strategy.onDanglingIntent(callFromIntent(intent), state, {
+    runId: options.runId,
+    signal: options.signal,
+    toolRegistry: options.tool,
+  });
+  return applyToolResumeDecision(options, intent, decision);
 }
 
 async function applyDanglingIntentAction(
@@ -114,52 +150,41 @@ async function applyDanglingIntentAction(
   if (action.callId !== intent.callId) {
     throw new ResumeActionMismatchError();
   }
-  if (intent.policyDecision === "deny") {
-    return recordPolicyDenied(options, intent, intent.policyReason ?? "default_decision");
+  const policyEvents = await applyIntentPolicy(options, state, intent);
+  if (policyEvents !== undefined) {
+    return policyEvents;
   }
-  if (intent.policyDecision === "ask") {
-    if (options.checkpointer === undefined) {
-      return recordPolicyDenied(options, intent, "policy_error");
-    }
-    const approval = await requestPolicyApproval({
-      recorder: options.recorder,
-      ids: options.ids,
-      checkpointer: options.checkpointer,
-      state,
-      clock: options.clock,
-      call: callFromIntent(intent),
-      decision: policyDecisionFromIntent(intent),
-    });
-    return approval.events;
-  }
-  if (action.kind === "fail") {
-    return recordDanglingFailure(options, intent, action.errorCode);
-  }
-  if (action.kind === "escalate") {
-    return "escalate";
-  }
-  if (action.kind === "strategy") {
-    const strategy = options.tool.resumeStrategy?.(intent.toolId);
-    if (strategy === undefined) {
-      throw new ResumeActionMismatchError();
-    }
-    const decision = await strategy.onDanglingIntent(callFromIntent(intent), state, {
-      runId: options.runId,
-      signal: options.signal,
-      toolRegistry: options.tool,
-    });
-    return applyToolResumeDecision(options, intent, decision);
+  const alternateAction = await applyNonExecutionAction(options, state, intent, action);
+  if (alternateAction !== undefined) {
+    return alternateAction;
   }
 
   const description = options.tool.describe(intent.toolId, intent.args);
   if (description === undefined) {
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
+  if (action.kind === "retry_input") {
+    const inputRetry = inputRetryForCall(state, intent.callId);
+    if (inputRetry === undefined) {
+      throw new ResumeActionMismatchError();
+    }
+    await options.beforeToolExecution?.();
+    const call = callFromIntent(intent);
+    return runToolCall(options, call, description, {
+      existingIntent: intent,
+      prepared: { call },
+      inputRetry,
+    });
+  }
   if (!intent.idempotent || !description.idempotent) {
     return "escalate";
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
+  const inputRetry = inputRetryForCall(state, intent.callId);
+  return runToolCall(options, callFromIntent(intent), description, {
+    existingIntent: intent,
+    ...(inputRetry === undefined ? {} : { inputRetry }),
+  });
 }
 
 async function applyToolResumeDecision(
@@ -235,7 +260,7 @@ async function applyToolResumeDecision(
 
 /** Applies a resolved approval without appending another intent. */
 export async function applyApprovalDecision(
-  options: Omit<ResumeToolStepOptions, "ids">,
+  options: ApprovalExecutionOptions,
   intent: ToolIntentEvent,
   approval: ApprovalRequestedEvent,
   approvalDecision: {
@@ -293,7 +318,7 @@ function approvedArgs(
 }
 
 async function applyAuthorizedApproval(
-  options: Omit<ResumeToolStepOptions, "ids">,
+  options: ApprovalExecutionOptions,
   intent: ToolIntentEvent,
   approvalDecision: {
     readonly resolution: Extract<Event, { type: "approval_resolved" }>;
@@ -304,6 +329,7 @@ async function applyAuthorizedApproval(
   const { resolution, state, args } = approvalDecision;
   const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
   const description = options.tool.describe(intent.toolId, args);
+  const inputRetry = state === undefined ? undefined : inputRetryForCall(state, intent.callId);
   if (description !== undefined) {
     await options.beforeToolExecution?.();
   }
@@ -322,6 +348,7 @@ async function applyAuthorizedApproval(
     ...(resolution.decision === "edit"
       ? { compareArgsHash: intent.argsHash, checkEditedPolicy: true }
       : {}),
+    ...(inputRetry === undefined ? {} : { inputRetry }),
   });
 }
 

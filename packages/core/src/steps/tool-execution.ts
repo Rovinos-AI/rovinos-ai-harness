@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
+import type { ElicitationInputOutcome } from "@harness/mcp";
 import { Code, HarnessError, Sha256Hex, type Event, type JsonValue } from "@harness/schemas";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
 import { setActiveSpanAttribute } from "@harness/telemetry";
-import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
+import {
+  RunEventRecordingError,
+  type Clock,
+  type EventPartial,
+  type RunRecorder,
+} from "../recorder.js";
 import type {
   ModelToolCall,
   RunContext,
@@ -17,6 +23,94 @@ import { SummaryRecordingError } from "./prepare-tool.js";
 
 /** Internal timeout marker; only the closed tool_timeout code is recorded. */
 export class ToolTimeoutError extends Error {}
+
+function invalidElicitationOutcome(): ElicitationInputOutcome {
+  return { kind: "error", errorCode: "mcp_input_request_invalid" };
+}
+
+interface AttemptContextOptions {
+  readonly context: RunContext;
+  readonly signal: AbortSignal;
+  readonly isActive: () => boolean;
+  readonly pendingSummaries: Set<Promise<void>>;
+  readonly pendingElicitations: Set<Promise<unknown>>;
+  readonly onInputSuspension: () => void;
+}
+
+function createAttemptElicitationPort(
+  elicitation: NonNullable<RunContext["elicitation"]>,
+  options: AttemptContextOptions,
+): NonNullable<RunContext["elicitation"]> {
+  return {
+    handleInputRequired: async (input) => {
+      if (!options.isActive() || options.signal.aborted) {
+        return invalidElicitationOutcome();
+      }
+      const pending = elicitation
+        .handleInputRequired({ ...input, signal: options.signal })
+        .then((outcome) => {
+          if (outcome.kind === "suspend") {
+            options.onInputSuspension();
+          }
+          return outcome;
+        });
+      options.pendingElicitations.add(pending);
+      try {
+        return await pending;
+      } finally {
+        options.pendingElicitations.delete(pending);
+      }
+    },
+  };
+}
+
+function createAttemptContext(options: AttemptContextOptions): RunContext {
+  const { context, signal } = options;
+  const elicitation =
+    context.elicitation === undefined
+      ? undefined
+      : createAttemptElicitationPort(context.elicitation, options);
+  return {
+    ...context,
+    signal,
+    ...(elicitation === undefined ? {} : { elicitation }),
+    ...(context.recordPiiAction === undefined
+      ? {}
+      : {
+          recordPiiAction: async (summary) => {
+            if (!options.isActive() || signal.aborted) {
+              return;
+            }
+            const pending = context.recordPiiAction?.(summary);
+            if (pending === undefined) {
+              return;
+            }
+            options.pendingSummaries.add(pending);
+            try {
+              await pending;
+            } finally {
+              options.pendingSummaries.delete(pending);
+            }
+          },
+        }),
+    ...(context.recordVaultAudit === undefined
+      ? {}
+      : {
+          recordVaultAudit: async (audit) => {
+            if (!options.isActive() || signal.aborted) {
+              return;
+            }
+            const pending = Promise.resolve(context.recordVaultAudit?.(audit));
+            options.pendingSummaries.add(pending);
+            try {
+              await pending;
+            } finally {
+              options.pendingSummaries.delete(pending);
+            }
+          },
+        }),
+  };
+}
 
 function canonicalJson(value: JsonValue): string {
   if (value === null) {
@@ -58,6 +152,9 @@ export function toolErrorCode(error: unknown): Code {
   if (error instanceof SummaryRecordingError) {
     throw error.failure;
   }
+  if (error instanceof RunEventRecordingError) {
+    throw error.failure;
+  }
   if (error instanceof HarnessError) {
     const parsed = Code.safeParse(error.code);
     if (parsed.success) {
@@ -81,6 +178,8 @@ export async function executeWithTimeout(
   const signal = AbortSignal.any([context.signal, timeoutSignal]);
   let active = true;
   const pendingSummaries = new Set<Promise<void>>();
+  const pendingElicitations = new Set<Promise<unknown>>();
+  const inputSuspension = { committed: false };
   const closeAttempt = (): void => {
     active = false;
   };
@@ -97,46 +196,29 @@ export async function executeWithTimeout(
   if (timeoutSignal.aborted) {
     onTimeout();
   }
-  const attemptContext: RunContext = {
-    ...context,
+  const attemptContext = createAttemptContext({
+    context,
     signal,
-    ...(context.recordPiiAction === undefined
-      ? {}
-      : {
-          recordPiiAction: async (summary) => {
-            if (!active || signal.aborted || context.recordPiiAction === undefined) {
-              return;
-            }
-            const pending = context.recordPiiAction(summary);
-            pendingSummaries.add(pending);
-            try {
-              await pending;
-            } finally {
-              pendingSummaries.delete(pending);
-            }
-          },
-        }),
-    ...(context.recordVaultAudit === undefined
-      ? {}
-      : {
-          recordVaultAudit: async (audit) => {
-            if (!active || signal.aborted || context.recordVaultAudit === undefined) {
-              return;
-            }
-            const pending = Promise.resolve(context.recordVaultAudit(audit));
-            pendingSummaries.add(pending);
-            try {
-              await pending;
-            } finally {
-              pendingSummaries.delete(pending);
-            }
-          },
-        }),
-  };
+    isActive: () => active,
+    pendingSummaries,
+    pendingElicitations,
+    onInputSuspension: () => {
+      inputSuspension.committed = true;
+    },
+  });
   try {
     return await Promise.race([tool.execute(call, attemptContext), timeout]);
   } catch (error) {
     if (timeoutSignal.aborted) {
+      await Promise.allSettled(pendingElicitations);
+      if (inputSuspension.committed) {
+        return {
+          outcome: "ok",
+          result: null,
+          suspend: true,
+          suspendReason: "awaiting_input",
+        };
+      }
       throw new ToolTimeoutError();
     }
     throw error;
@@ -145,6 +227,7 @@ export async function executeWithTimeout(
     signal.removeEventListener("abort", closeAttempt);
     timeoutSignal.removeEventListener("abort", onTimeout);
     await Promise.allSettled(pendingSummaries);
+    await Promise.allSettled(pendingElicitations);
   }
 }
 
@@ -199,6 +282,12 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
   }
   if (execution.suspend === true) {
     if (options.signal.reason === "shutdown" && options.intentEvent !== undefined) {
+      return options.intentEvent;
+    }
+    if (execution.suspendReason === "awaiting_input") {
+      if (options.intentEvent === undefined) {
+        throw new ToolTimeoutError();
+      }
       return options.intentEvent;
     }
     return options.recorder.record({

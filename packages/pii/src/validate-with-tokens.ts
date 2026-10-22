@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, JsonValue as JsonValueSchema, type Id, type JsonValue } from "@harness/schemas";
-import { findTokens, type AuditingVaultResolver } from "@harness/vault";
+import {
+  Code,
+  JsonValue as JsonValueSchema,
+  type Code as CodeType,
+  type Id,
+  type JsonValue,
+} from "@harness/schemas";
+import { findTokens, type AuditingVaultResolver, type VaultAuditHandler } from "@harness/vault";
 import { z } from "zod";
 
 /** A value-free validation issue. */
@@ -59,11 +65,19 @@ export type ValidateWithTokensResult<Schema extends z.ZodType> = z.infer<
 export interface ValidateWithTokensOptions {
   readonly runId: Id;
   readonly resolver: AuditingVaultResolver;
+  readonly toolId?: CodeType;
+  readonly onAudit?: VaultAuditHandler;
   /**
    * Return the parsed raw value only for a necessary caller. Prefer detokenizeArgs and its
    * allowlisted tool argument pointers whenever possible.
    */
   readonly wantRaw?: boolean;
+}
+
+class VaultAuditRecordingError extends Error {
+  constructor(readonly failure: unknown) {
+    super("Vault audit recording failed.");
+  }
 }
 
 /**
@@ -171,9 +185,25 @@ async function resolveString(
     resolvedValues = await options.resolver.resolveMany(
       options.runId,
       matches.map(({ token }) => token),
-      { boundary: "tool_input" },
+      {
+        boundary: "tool_input",
+        ...(options.toolId === undefined ? {} : { toolId: options.toolId }),
+      },
+      options.onAudit === undefined
+        ? undefined
+        : async (audit) => {
+            try {
+              await options.onAudit?.(audit);
+            } catch (failure) {
+              throw new VaultAuditRecordingError(failure);
+            }
+          },
     );
-  } catch {
+  } catch (error) {
+    // Audit persistence failures are execution failures, never user-data validation failures.
+    if (error instanceof VaultAuditRecordingError) {
+      throw error.failure;
+    }
     return { value, issues: [{ path, code: Code.parse("pii_token_unresolvable") }] };
   }
   if (
