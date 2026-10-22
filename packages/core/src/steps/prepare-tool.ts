@@ -11,11 +11,23 @@ import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
 import type { ModelCompletion, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import { RunEventRecordingError, type RunRecorder } from "../recorder.js";
 import type { VaultAudit } from "@harness/vault";
+import type { ElicitationRetry } from "@harness/mcp";
+import type { ToolIntentEvent } from "../run-state.js";
 
 /** Internal preparation outcome, retained until the tool loop consumes it. */
 export interface PreparedToolCall {
   readonly call: ModelToolCall;
   readonly errorCode?: Code;
+}
+
+/** Preparation and recovery state consumed by the shared tool executor. */
+export interface RunToolCallBehavior {
+  readonly executedArgsHash?: string;
+  readonly compareArgsHash?: string;
+  readonly checkEditedPolicy?: boolean;
+  readonly existingIntent?: ToolIntentEvent;
+  readonly prepared?: PreparedToolCall;
+  readonly inputRetry?: ElicitationRetry;
 }
 
 /** Replaces unknown tool ids before they can be persisted or attributed to a tool span. */

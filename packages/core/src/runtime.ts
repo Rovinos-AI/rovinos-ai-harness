@@ -271,6 +271,7 @@ function composeRuntime(
   const appCallbacks = createRuntimeAppCallbacks({
     store,
     clock,
+    approval: { tool, policy: options.policy, context: options.context, ids },
     ...(pii === undefined ? {} : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
   });
   return {

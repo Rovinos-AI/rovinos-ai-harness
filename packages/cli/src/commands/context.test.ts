@@ -126,6 +126,7 @@ async function harness() {
     hasPendingApproval: () => Promise.resolve(false),
     tokenizeAppContent: (_runId: Id, content: JsonValue) => Promise.resolve(content),
     onAppContent: () => Promise.resolve(),
+    onAppCallApproval: () => Promise.reject(new Error("App approval is not used by context tests.")),
   }));
   const context: CliContext = {
     loadConfig: () => Promise.resolve(config),
