@@ -83,7 +83,7 @@ describe("policy-checked app call handler", () => {
     );
   });
 
-  it("does not execute an ask decision because app calls cannot suspend the run", async () => {
+  it("fails closed when the host cannot suspend an ask decision", async () => {
     const tools = tool();
     const result = await handler(policy("ask"), tools.port)(call, context);
 
@@ -91,6 +91,55 @@ describe("policy-checked app call handler", () => {
       content: [{ type: "text", text: "app_call_requires_approval" }],
       isError: true,
     });
+    expect(tools.execute).not.toHaveBeenCalled();
+  });
+
+  it("delegates ask to the configured approval handler and returns its result to the app", async () => {
+    const tools = tool();
+    const onAppCallApproval = vi.fn(() =>
+      Promise.resolve({ content: [{ type: "text" as const, text: '{"completed":true}' }] }),
+    );
+    const result = await createPolicyCheckedAppCallHandler({
+      policy: policy("ask"),
+      tool: tools.port,
+      nextCallId: () => Id.parse("00000000000000000000000003"),
+      onAppCallApproval,
+    })(call, context);
+
+    expect(result).toEqual({ content: [{ type: "text", text: '{"completed":true}' }] });
+    expect(onAppCallApproval).toHaveBeenCalledWith(
+      {
+        callId: Id.parse("00000000000000000000000003"),
+        toolId: Code.parse("approve"),
+        args: { value: "<PATH_1>" },
+      },
+      expect.objectContaining({
+        decision: "ask",
+        ruleId: Code.parse("app_rule"),
+        reason: Code.parse("app_rule_reason"),
+        editable: [],
+      }),
+      context,
+    );
+    expect(JSON.stringify(onAppCallApproval.mock.calls)).not.toContain("synthetic raw input");
+    expect(tools.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["denied", { content: [{ type: "text" as const, text: "approval_denied" }], isError: true }],
+    ["expired", { content: [{ type: "text" as const, text: "approval_expired" }], isError: true }],
+  ])("delivers a typed %s result returned by approval/resume", async (_outcome, response) => {
+    const tools = tool();
+    const onAppCallApproval = vi.fn(() => Promise.resolve(response));
+    const result = await createPolicyCheckedAppCallHandler({
+      policy: policy("ask"),
+      tool: tools.port,
+      nextCallId: () => Id.parse("00000000000000000000000003"),
+      onAppCallApproval,
+    })(call, context);
+
+    expect(result).toEqual(response);
+    expect(onAppCallApproval).toHaveBeenCalledOnce();
     expect(tools.execute).not.toHaveBeenCalled();
   });
 
