@@ -210,6 +210,9 @@ export function createPolicyCheckedAppCallHandler(
       return callError(decision.reason);
     }
     if (decision.decision === "ask") {
+      if (options.tool.prepare === undefined) {
+        return callError("app_call_requires_approval");
+      }
       return (
         (await options.onAppCallApproval?.(prepared, decision, context)) ??
         callError("app_call_requires_approval")

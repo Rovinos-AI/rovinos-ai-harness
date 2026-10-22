@@ -125,6 +125,24 @@ describe("policy-checked app call handler", () => {
     expect(tools.execute).not.toHaveBeenCalled();
   });
 
+  it("fails closed without preparation before delegating an ask with raw arguments", async () => {
+    const tools = tool();
+    const onAppCallApproval = vi.fn(() => Promise.resolve({ content: [] }));
+    const result = await createPolicyCheckedAppCallHandler({
+      policy: policy("ask"),
+      tool: { describe: tools.port.describe, execute: tools.execute },
+      nextCallId: () => Id.parse("00000000000000000000000003"),
+      onAppCallApproval,
+    })(call, context);
+
+    expect(result).toEqual({
+      content: [{ type: "text", text: "app_call_requires_approval" }],
+      isError: true,
+    });
+    expect(onAppCallApproval).not.toHaveBeenCalled();
+    expect(tools.execute).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["denied", { content: [{ type: "text" as const, text: "approval_denied" }], isError: true }],
     ["expired", { content: [{ type: "text" as const, text: "approval_expired" }], isError: true }],

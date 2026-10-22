@@ -13,6 +13,26 @@ The host validates the resource MIME type (`text/html` with the exact `profile=m
 
 Telemetry calls remain local to the host. The default `harness.telemetry.emit` handler checks the serialized payload limit (16 KiB), the 50-span batch limit, and strict schemas for `ui.render`, `ui.decision`, `ui.error`, and `ui.interaction`. Each app session has a token bucket allowing a burst of 20 batches and a sustained rate of 10 batches per second; a batch over that rate returns `rate_limited`. `host.limits` can override `batchesPerSecond`, `batchBurst`, `spansPerMinute` (default 200), and `spansPerSessionLifetime` (default 2,000). Spans over either span cap are silently dropped and counted as `session_cap`; invalid spans are dropped independently and counted with bounded reasons. The handler returns only `{ accepted, dropped }`, and the metrics do not include app or session IDs. Attributes on accepted spans come from validated fields; the default handler does not include the raw app payload in spans or its acknowledgment. A host-supplied `onTelemetryEmit` callback replaces that default and is responsible for applying the same validation and limits, returning only that acknowledgment, and keeping app payloads local.
 
+## App-call approvals
+
+Runtime-backed hosts supply `onAppCallApproval` from `createRuntimeAppCallbacks`
+(also exposed on the runtime). An app call that matches an `ask` rule records
+the prepared, tokenized call as a tool intent and one pending approval, then
+suspends the run using the same durable approval/checkpoint path as model tool
+calls. The app's call remains pending until the approval is resolved and the
+run resumes.
+
+Approve through the normal approval interface, then resume the run (or enable
+automatic resume). Policy is evaluated again before execution, including when
+the human edits arguments or the process restarts after approval. The app
+receives the recorded tool result. Denial and expiry return typed errors
+instead of executing the tool.
+
+`app_call_requires_approval` is still returned when the host has no durable
+approval callback, cannot suspend the run, or its tool port has no sanitizing
+`prepare` step. In particular, the host never delegates raw arguments to a
+durable approval callback when preparation is unavailable.
+
 ## Local channel
 
 The server binds to `127.0.0.1` by default. `host.listen.host` accepts only loopback addresses, and `host.listen.port` defaults to `0` to request an available local port. One generated bearer token is cached per Node process and protects every reference-host instance in that process. A leak therefore compromises all those host instances. `ReferenceHost.url` contains the token in a URL fragment; fragments are not part of HTTP requests, but the URL and token are still sensitive. The embedding CLI should display the launch URL once to the local user and must not send the token to logs or telemetry.
