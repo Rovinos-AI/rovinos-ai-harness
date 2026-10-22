@@ -186,32 +186,64 @@ it("publishes JUnit results after success or failure", () => {
   ).toContain("cobertura-coverage.xml");
 });
 
-it("runs integration tests with Compose and always tears down", () => {
+it("runs integration tests with an isolated Compose project and always tears it down", () => {
   const stages = readStages(readPipeline());
   const integrationStage = findStage(stages, "integration");
   const integrationSteps = readSteps(integrationStage);
+  const integrationJobs = integrationStage.jobs;
+  if (!isUnknownArray(integrationJobs) || !isRecord(integrationJobs[0])) {
+    throw new TypeError("Pipeline integration stage must contain a job.");
+  }
+  const projectName = "harness-ci-$(Build.BuildId)";
 
   expect(statSync(resolve(root, "scripts/ci/compose-wait.sh")).mode & 0o111).not.toBe(0);
   expect(integrationStage.dependsOn).toBe("unit");
-  expect(
-    integrationSteps.some(
-      (step) => typeof step.bash === "string" && step.bash.includes("compose-wait.sh"),
-    ),
-  ).toBe(true);
+  expect(integrationJobs[0].timeoutInMinutes).toBe(60);
+  const buildSchemas = integrationSteps.find(
+    (step) => typeof step.script === "string" && step.script.includes("yarn build:schemas"),
+  );
+  const cleanup = integrationSteps.find(
+    (step) => typeof step.script === "string" && step.script.includes("compose-cleanup.ts"),
+  );
+  const start = integrationSteps.find(
+    (step) => typeof step.bash === "string" && step.bash.includes("compose-wait.sh"),
+  );
+  expect(buildSchemas).toBeDefined();
+  expect(cleanup).toBeDefined();
+  expect(start).toBeDefined();
+  expect(integrationSteps.indexOf(buildSchemas ?? {})).toBeLessThan(
+    integrationSteps.indexOf(cleanup ?? {}),
+  );
+  expect(integrationSteps.indexOf(cleanup ?? {})).toBeLessThan(
+    integrationSteps.indexOf(start ?? {}),
+  );
+  expect(cleanup?.env).toMatchObject({ COMPOSE_PROJECT_NAME: projectName });
+  expect(start?.env).toMatchObject({ COMPOSE_PROJECT_NAME: projectName });
   const runTests = integrationSteps.find(
     (step) => typeof step.script === "string" && step.script.includes("yarn test:integration"),
   );
   expect(runTests?.script).toContain("--reporter=junit");
   expect(runTests?.script).toContain("integration-junit.xml");
   expect(runTests?.env).toMatchObject({
+    COMPOSE_PROJECT_NAME: projectName,
     TEST_POSTGRES_URL: "postgresql://harness@127.0.0.1:5432/harness",
   });
   expect(
     integrationSteps.some(
-      (step) => typeof step.script === "string" && step.script.includes("yarn build:schemas"),
+      (step) =>
+        typeof step.script === "string" && step.script.includes("yarn pii:report --mode presidio"),
     ),
   ).toBe(true);
   expect(integrationSteps.some((step) => step.script === "yarn build")).toBe(true);
+  for (const step of integrationSteps.filter((candidate) =>
+    [candidate.script, candidate.bash].some(
+      (command) =>
+        typeof command === "string" &&
+        /docker compose|compose-cleanup\.ts|compose-wait\.sh|pii:report/.test(command),
+    ),
+  )) {
+    expect(step.env).toMatchObject({ COMPOSE_PROJECT_NAME: projectName });
+  }
   expect(
     integrationSteps.some(
       (step) => step.task === "PublishTestResults@2" && step.condition === "succeededOrFailed()",
@@ -221,6 +253,7 @@ it("runs integration tests with Compose and always tears down", () => {
     (step) => typeof step.bash === "string" && step.bash.includes("logs --no-color"),
   );
   expect(collectLogs?.condition).toBe("failed()");
+  expect(collectLogs?.env).toMatchObject({ COMPOSE_PROJECT_NAME: projectName });
   expect(collectLogs?.bash).toContain("compose.log");
   expect(
     integrationSteps.some(
@@ -231,15 +264,14 @@ it("runs integration tests with Compose and always tears down", () => {
         step.inputs.PathtoPublish === "$(Build.ArtifactStagingDirectory)/compose.log",
     ),
   ).toBe(true);
-  expect(
-    integrationSteps.some(
-      (step) =>
-        typeof step.bash === "string" &&
-        step.bash.includes("docker compose") &&
-        step.bash.includes("down -v") &&
-        step.condition === "always()",
-    ),
-  ).toBe(true);
+  const stop = integrationSteps.find(
+    (step) =>
+      typeof step.bash === "string" &&
+      step.bash.includes("docker compose") &&
+      step.bash.includes("down -v"),
+  );
+  expect(stop?.condition).toBe("always()");
+  expect(stop?.env).toMatchObject({ COMPOSE_PROJECT_NAME: projectName });
 });
 
 it("enforces package source line coverage per file", () => {
