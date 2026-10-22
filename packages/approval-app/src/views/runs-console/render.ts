@@ -193,6 +193,7 @@ function renderRunRow(
 ): HTMLTableRowElement {
   const { now, locale, strings, onDetails, onApproval } = options;
   const row = element(document, "tr");
+  row.dataset.runId = run.runId;
   const runIdCell = element(document, "th", run.runId);
   const statusCell = element(document, "td");
   const ageCell = element(document, "td", relativeAge(run.createdAt, now, locale));
@@ -209,6 +210,7 @@ function renderRunRow(
       formatMessage(strings.needsApproval, { count: run.pendingApprovals }, locale),
     );
     approvalButton.type = "button";
+    approvalButton.dataset.runAction = "approval";
     approvalButton.addEventListener("click", () => {
       onApproval(run);
     });
@@ -218,6 +220,7 @@ function renderRunRow(
   }
   const detailsButton = element(document, "button", strings.viewRunDetails);
   detailsButton.type = "button";
+  detailsButton.dataset.runAction = "details";
   detailsButton.addEventListener("click", () => {
     onDetails(run);
   });
@@ -233,8 +236,19 @@ export function renderRuns(
 ): void {
   const document = host.ownerDocument;
   const { strings } = options;
+  const previousWrapper = host.querySelector<HTMLElement>(".table-scroll");
+  const scrollLeft = previousWrapper?.scrollLeft ?? 0;
+  const active = document.activeElement;
+  const focusedRow = active?.closest<HTMLTableRowElement>("tr[data-run-id]");
+  const focusedRunId = focusedRow?.dataset.runId;
+  const focusedAction =
+    active instanceof HTMLElement ? active.dataset.runAction : undefined;
   if (runs.length === 0) {
     host.replaceChildren(createEmptyState(document, strings.noRunsTitle, strings.noRunsMessage));
+    if (focusedRunId !== undefined) {
+      host.tabIndex = -1;
+      host.focus();
+    }
     return;
   }
   const wrapper = element(document, "div");
@@ -265,4 +279,20 @@ export function renderRuns(
   table.append(head, body);
   wrapper.append(table);
   host.replaceChildren(wrapper);
+  wrapper.scrollLeft = scrollLeft;
+  if (focusedRunId !== undefined) {
+    const nextFocusedButton = [...table.querySelectorAll<HTMLTableRowElement>("tr[data-run-id]")]
+      .find((row) => row.dataset.runId === focusedRunId)
+      ?.querySelector<HTMLButtonElement>("button");
+    const matchingAction = nextFocusedButton?.closest("tr")?.querySelector<HTMLButtonElement>(
+      `button[data-run-action="${focusedAction ?? ""}"]`,
+    );
+    if (matchingAction !== undefined && matchingAction !== null) {
+      matchingAction.focus();
+    } else {
+      wrapper.focus();
+    }
+  } else if (active === previousWrapper) {
+    wrapper.focus();
+  }
 }
