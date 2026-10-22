@@ -2,6 +2,7 @@
 import { HarnessError, type Event, type JsonValue, type RunStatus } from "@harness/schemas";
 import { createPlanReducerState, planReducer, type PlanReducerState } from "@harness/context";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
+import { clearToolExecution, inspectInputRound } from "./run-state-tools.js";
 import type { ModelToolCall } from "./ports.js";
 
 /** A tool-intent event that has not yet received a result. */
@@ -9,6 +10,10 @@ export type ToolIntentEvent = Extract<Event, { type: "tool_intent" }>;
 
 /** An approval request that has not yet been resolved. */
 export type ApprovalRequestedEvent = Extract<Event, { type: "approval_requested" }>;
+/** An input request that has not yet been resolved. */
+export type InputRequestedEvent = Extract<Event, { type: "input_requested" }>;
+/** A durable resolution of a human input request. */
+export type InputResolvedEvent = Extract<Event, { type: "input_resolved" }>;
 type CheckpointWrittenEvent = Extract<Event, { type: "checkpoint_written" }>;
 
 /** State derived from the append-only events for one run. */
@@ -24,6 +29,8 @@ export interface RunState {
   };
   readonly pendingToolCalls: ReadonlyMap<ToolIntentEvent["callId"], ToolIntentEvent>;
   readonly toolExecutionStarted?: ReadonlySet<ToolIntentEvent["callId"]>;
+  readonly toolExecutionAttempts: ReadonlyMap<ToolIntentEvent["callId"], number>;
+  readonly toolExecutionRounds?: ReadonlyMap<ToolIntentEvent["callId"], number>;
   readonly pendingApprovals: ReadonlyMap<
     ApprovalRequestedEvent["approvalId"],
     ApprovalRequestedEvent
@@ -36,6 +43,9 @@ export interface RunState {
     ApprovalRequestedEvent["approvalId"],
     Extract<Event, { type: "approval_resolved" }>
   >;
+  readonly inputRequests: ReadonlyMap<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  readonly pendingInputs: ReadonlyMap<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  readonly resolvedInputs: ReadonlyMap<InputResolvedEvent["requestId"], InputResolvedEvent>;
   readonly lastCheckpoint?: {
     readonly checkpointId: CheckpointWrittenEvent["checkpointId"];
     readonly atSeq: number;
@@ -59,12 +69,17 @@ interface MutableRunState {
   };
   pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
   toolExecutionStarted: Set<ToolIntentEvent["callId"]>;
+  toolExecutionAttempts: Map<ToolIntentEvent["callId"], number>;
+  toolExecutionRounds: Map<ToolIntentEvent["callId"], number>;
   pendingApprovals: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   approvalRequests: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   resolvedApprovals: Map<
     ApprovalRequestedEvent["approvalId"],
     Extract<Event, { type: "approval_resolved" }>
   >;
+  inputRequests: Map<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  pendingInputs: Map<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  resolvedInputs: Map<InputResolvedEvent["requestId"], InputResolvedEvent>;
   lastCheckpoint?: NonNullable<RunState["lastCheckpoint"]>;
   segmentId: Event["segmentId"];
   startedAt: number;
@@ -196,11 +211,7 @@ function applyToolResult(
   if (!state.pendingToolCalls.has(event.callId)) {
     throw new CorruptLogError();
   }
-  const pendingToolCalls = new Map(state.pendingToolCalls);
-  pendingToolCalls.delete(event.callId);
-  const toolExecutionStarted = new Set(state.toolExecutionStarted);
-  toolExecutionStarted.delete(event.callId);
-  return { ...state, pendingToolCalls, toolExecutionStarted };
+  return { ...state, ...clearToolExecution(state, event.callId) };
 }
 
 function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunState | undefined {
@@ -214,12 +225,21 @@ function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunSta
     if (!state.pendingToolCalls.has(event.callId)) {
       throw new CorruptLogError("Tool execution marker has no pending intent.");
     }
-    if (state.toolExecutionStarted.has(event.callId)) {
-      throw new CorruptLogError("Tool execution marker was duplicated.");
+    const previousAttempt = state.toolExecutionAttempts.get(event.callId) ?? 0;
+    const intent = state.pendingToolCalls.get(event.callId);
+    const { latestRound, canRepeat } = inspectInputRound(state, event.callId, intent);
+    if (previousAttempt > 0 && !canRepeat) {
+      throw new CorruptLogError(
+        "A repeated tool execution marker requires a resolved input round.",
+      );
     }
     const toolExecutionStarted = new Set(state.toolExecutionStarted);
     toolExecutionStarted.add(event.callId);
-    return { ...state, toolExecutionStarted };
+    const toolExecutionAttempts = new Map(state.toolExecutionAttempts);
+    toolExecutionAttempts.set(event.callId, previousAttempt + 1);
+    const toolExecutionRounds = new Map(state.toolExecutionRounds);
+    toolExecutionRounds.set(event.callId, latestRound);
+    return { ...state, toolExecutionStarted, toolExecutionAttempts, toolExecutionRounds };
   }
   return undefined;
 }
@@ -238,6 +258,40 @@ function applyApprovalRequest(
   const resolvedApprovals = new Map(state.resolvedApprovals);
   resolvedApprovals.delete(event.approvalId);
   return { ...state, pendingApprovals, approvalRequests, resolvedApprovals };
+}
+
+function applyInputRequest(state: MutableRunState, event: InputRequestedEvent): MutableRunState {
+  if (
+    state.inputRequests.has(event.requestId) ||
+    (event.source === "mcp_mrtr" &&
+      (event.callId === undefined ||
+        event.serverId === undefined ||
+        event.inputKey === undefined ||
+        !state.pendingToolCalls.has(event.callId)))
+  ) {
+    throw new CorruptLogError("Input request does not match a pending tool call.");
+  }
+  const inputRequests = new Map(state.inputRequests);
+  inputRequests.set(event.requestId, event);
+  const pendingInputs = new Map(state.pendingInputs);
+  pendingInputs.set(event.requestId, event);
+  return { ...state, inputRequests, pendingInputs };
+}
+
+function applyInputResolution(state: MutableRunState, event: InputResolvedEvent): MutableRunState {
+  const request = state.pendingInputs.get(event.requestId);
+  if (
+    request?.source !== event.source ||
+    request.mode !== event.mode ||
+    request.round !== event.round
+  ) {
+    throw new CorruptLogError("Input resolution does not match a pending request.");
+  }
+  const pendingInputs = new Map(state.pendingInputs);
+  pendingInputs.delete(event.requestId);
+  const resolvedInputs = new Map(state.resolvedInputs);
+  resolvedInputs.set(event.requestId, event);
+  return { ...state, pendingInputs, resolvedInputs };
 }
 
 function applyApprovalResolution(
@@ -280,42 +334,60 @@ function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"])
     segmentId: event.segmentId,
     lastTs: event.ts,
   };
-  if (event.type === "run_status_changed") {
-    return applyStatusEvent(withEnvelope, event);
-  }
-  if (event.type === "model_response") {
-    return applyResponseEvent(withEnvelope, event);
-  }
-  if (event.type === "context_compacted") {
-    return {
-      ...withEnvelope,
-      usage: {
-        inputTokens: withEnvelope.usage.inputTokens + (event.inputTokens ?? 0),
-        outputTokens: withEnvelope.usage.outputTokens + (event.outputTokens ?? 0),
-        costMicros: withEnvelope.usage.costMicros + (event.costMicros ?? 0),
-      },
-    };
-  }
-  if (event.type === "subagent_completed") {
-    return applySubagentCompletion(withEnvelope, event);
+  const primaryEvent = applyPrimaryEvent(withEnvelope, event);
+  if (primaryEvent !== undefined) {
+    return primaryEvent;
   }
   const toolLifecycle = applyToolLifecycle(withEnvelope, event);
   if (toolLifecycle !== undefined) {
     return toolLifecycle;
   }
+  return applyRemainingEvent(withEnvelope, event);
+}
+
+function applyPrimaryEvent(state: MutableRunState, event: Event): MutableRunState | undefined {
+  if (event.type === "run_status_changed") {
+    return applyStatusEvent(state, event);
+  }
+  if (event.type === "model_response") {
+    return applyResponseEvent(state, event);
+  }
+  if (event.type === "context_compacted") {
+    return {
+      ...state,
+      usage: {
+        inputTokens: state.usage.inputTokens + (event.inputTokens ?? 0),
+        outputTokens: state.usage.outputTokens + (event.outputTokens ?? 0),
+        costMicros: state.usage.costMicros + (event.costMicros ?? 0),
+      },
+    };
+  }
+  if (event.type === "subagent_completed") {
+    return applySubagentCompletion(state, event);
+  }
+  return undefined;
+}
+
+function applyRemainingEvent(state: MutableRunState, event: Event): MutableRunState {
   if (event.type === "approval_requested") {
-    return applyApprovalRequest(withEnvelope, event);
+    return applyApprovalRequest(state, event);
   }
   if (event.type === "approval_resolved") {
-    return applyApprovalResolution(withEnvelope, event);
+    return applyApprovalResolution(state, event);
+  }
+  if (event.type === "input_requested") {
+    return applyInputRequest(state, event);
+  }
+  if (event.type === "input_resolved") {
+    return applyInputResolution(state, event);
   }
   if (event.type === "checkpoint_written") {
     return {
-      ...withEnvelope,
+      ...state,
       lastCheckpoint: { checkpointId: event.checkpointId, atSeq: event.atSeq },
     };
   }
-  return withEnvelope;
+  return state;
 }
 
 /**
@@ -341,9 +413,14 @@ export function foldRunState(events: Iterable<Event>): RunState {
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     pendingToolCalls: new Map(),
     toolExecutionStarted: new Set(),
+    toolExecutionAttempts: new Map(),
+    toolExecutionRounds: new Map(),
     pendingApprovals: new Map(),
     approvalRequests: new Map(),
     resolvedApprovals: new Map(),
+    inputRequests: new Map(),
+    pendingInputs: new Map(),
+    resolvedInputs: new Map(),
     segmentId: first.value.segmentId,
     startedAt: first.value.ts,
     lastTs: first.value.ts,

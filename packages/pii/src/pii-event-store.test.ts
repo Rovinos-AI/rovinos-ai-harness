@@ -6,13 +6,19 @@ import {
   Id,
   PiiConfigSchema,
   SequentialIdGenerator,
+  Code,
   type Detection,
   type Event,
   type JsonValue,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
-import { InMemoryVault, type VaultWriter } from "@harness/vault";
+import {
+  AuditingVaultResolver,
+  InMemoryVault,
+  type VaultAudit,
+  type VaultWriter,
+} from "@harness/vault";
 import { emailDetector } from "./detectors/email.js";
 import {
   PiiEventStore,
@@ -22,6 +28,7 @@ import {
 } from "./pii-event-store.js";
 import { PiiStorageFailedError } from "./errors.js";
 import { Tokenizer, type PiiDetectorRegistry } from "./tokenizer.js";
+import { PiiToolPort, type PiiToolContext, type PiiToolPortLike } from "./pii-tool-port.js";
 
 const ids = new SequentialIdGenerator();
 const canarySeed = randomUUID();
@@ -434,5 +441,155 @@ describe("PiiEventStore", () => {
     ).rejects.toBeInstanceOf(PiiStorageFailedError);
     await expect(inner.head(runId)).resolves.toBe(0);
     await expect(inner.latestSnapshot(runId)).resolves.toBeUndefined();
+  });
+
+  it("restores protected MRTR keys and state after a PiiEventStore restart", async () => {
+    const vault = new InMemoryVault();
+    const tokenizer = createTokenizer(undefined, vault);
+    const config = PiiConfigSchema.parse({});
+    const callId = Id.parse(ids.next());
+    const inputKeyCanary = canary("mrtr-key");
+    const requestStateCanary = "\t opaque-request-state-canary \n";
+    let protectedInputKey: string | undefined;
+    let protectedRequestState: string | undefined;
+    const producer: PiiToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: async (_call, context) => {
+        const protect = context.protectInputMetadata;
+        if (protect === undefined) {
+          throw new Error("Expected the opaque-input protector.");
+        }
+        protectedInputKey = await protect(inputKeyCanary);
+        protectedRequestState = await protect(requestStateCanary);
+        return { outcome: "ok", result: null };
+      },
+    };
+    const resolver = new AuditingVaultResolver(vault, () => undefined);
+    const dependencies = { config, tokenizer, resolver };
+    const producerPort = new PiiToolPort(producer, dependencies);
+    await producerPort.execute(
+      { callId, toolId: Code.parse("mcp_test.tool"), args: {} },
+      { runId, signal: new AbortController().signal },
+    );
+    if (protectedInputKey === undefined || protectedRequestState === undefined) {
+      throw new Error("Expected protected MRTR metadata.");
+    }
+
+    const innerStore = createInnerStore();
+    const store = new PiiEventStore(innerStore, tokenizer);
+    await store.append(
+      runId,
+      [
+        runCreated(),
+        {
+          ...common(),
+          type: "input_requested",
+          requestId: Id.parse(ids.next()),
+          source: "mcp_mrtr",
+          serverId: "mcp_test",
+          callId,
+          inputKey: protectedInputKey,
+          round: 1,
+          mode: "form",
+          message: "Provide an answer",
+          schema: { type: "object", properties: { answer: { type: "string" } } },
+          requestState: protectedRequestState,
+        },
+      ],
+      0,
+    );
+    await store.appendWithSnapshot(
+      runId,
+      [
+        {
+          ...common(),
+          type: "checkpoint_written",
+          checkpointId: snapshotId,
+          atSeq: 2,
+          traceparent: `00-${traceId}-${spanId}-01`,
+        },
+      ],
+      2,
+      {
+        snapshotId,
+        runId,
+        atSeq: 2,
+        createdAt: 10,
+        traceparent: `00-${traceId}-${spanId}-01`,
+        context: { inputKey: protectedInputKey, requestState: protectedRequestState },
+        plan: null,
+      },
+    );
+
+    const restartedStore = new PiiEventStore(innerStore, tokenizer);
+    const persistedEvents = await collect(restartedStore.read(runId));
+    const persistedSnapshot = await restartedStore.latestSnapshot(runId);
+    const serialized = JSON.stringify({ persistedEvents, persistedSnapshot });
+    expect(serialized).not.toContain(inputKeyCanary);
+    expect(serialized).not.toContain(requestStateCanary);
+    const persistedRequest = persistedEvents.find(
+      (event): event is Extract<Event, { type: "input_requested" }> =>
+        event.type === "input_requested",
+    );
+    if (persistedRequest?.type !== "input_requested") {
+      throw new Error("Expected the persisted input request.");
+    }
+
+    const answer = await tokenizer.tokenizeJson(
+      runId,
+      { answer: "human@example.test" },
+      { boundary: "storage", destination: "any" },
+    );
+    const dispatchedRetries: NonNullable<PiiToolContext["inputRetry"]>[] = [];
+    const auditRecords: VaultAudit[] = [];
+    let auditCountAtDispatch = 0;
+    const consumer: PiiToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: (_call, context) => {
+        if (context.inputRetry !== undefined) {
+          dispatchedRetries.push(context.inputRetry);
+        }
+        auditCountAtDispatch = auditRecords.length;
+        expect(auditRecords.length).toBeGreaterThan(0);
+        return Promise.resolve({ outcome: "ok", result: null });
+      },
+    };
+    const restartedPort = new PiiToolPort(consumer, {
+      config,
+      tokenizer,
+      resolver: new AuditingVaultResolver(vault, () => undefined),
+    });
+    await restartedPort.execute(
+      { callId, toolId: Code.parse("mcp_test.tool"), args: {} },
+      {
+        runId,
+        signal: new AbortController().signal,
+        inputRetry: {
+          inputResponses: {
+            [persistedRequest.inputKey ?? ""]: { action: "accept", answer: answer.value },
+          },
+          round: persistedRequest.round,
+          ...(typeof persistedRequest.requestState === "string"
+            ? { requestState: persistedRequest.requestState }
+            : {}),
+        },
+        recordVaultAudit: (audit) => {
+          auditRecords.push(audit);
+        },
+      },
+    );
+
+    expect(dispatchedRetries).toEqual([
+      {
+        inputResponses: {
+          [inputKeyCanary]: { action: "accept", answer: { answer: "human@example.test" } },
+        },
+        round: 1,
+        requestState: requestStateCanary,
+      },
+    ]);
+    expect(auditRecords.map(({ toolId }) => toolId)).toEqual(["mcp_test.tool", "mcp_test.tool"]);
+    expect(auditRecords.map(({ entities }) => entities[0]?.type)).toEqual(["mcp_input", "email"]);
+    expect(auditCountAtDispatch).toBe(2);
   });
 });

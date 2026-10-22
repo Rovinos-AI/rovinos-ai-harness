@@ -27,12 +27,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as telemetry from "@harness/telemetry";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
+import { applyResolvedApprovals } from "../approvals.js";
 import { NaiveContext } from "../context/naive-context.js";
 import { planDanglingIntents } from "../resume-policy.js";
 import { foldRunState, type ApprovalRequestedEvent, type ToolIntentEvent } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
-import type { PolicyPort, ToolPort } from "../ports.js";
+import type { PolicyPort, RunContext, ToolPort } from "../ports.js";
 import { modelToolOptions } from "./model-step.js";
 import {
   applyApprovalDecision,
@@ -1143,3 +1144,441 @@ async function resolveEvent(
   }
   return resolved;
 }
+
+describe("durable MCP input requests", () => {
+  it("suspends with a checkpoint and resumes from a separate recorder with stored answers", async () => {
+    const { recorder, store } = createRecorder();
+    const history = await createRun(recorder, []);
+    const retryCalls: RunContext["inputRetry"][] = [];
+    let sideEffects = 0;
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: false,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              retryCalls.push(runContext.inputRetry);
+              if (runContext.inputRetry === undefined) {
+                const outcome = await runContext.elicitation?.handleInputRequired({
+                  callId: callIds.nonIdempotent,
+                  serverId: "mcp_test",
+                  round: 1,
+                  maxPerRun: 3,
+                  inputRequests: [
+                    {
+                      inputKey: "server-key",
+                      mode: "form",
+                      message: "tokenized message",
+                      requestedSchema: {
+                        type: "object",
+                        properties: { answer: { type: "string" } },
+                      },
+                    },
+                  ],
+                  sensitiveInputKeys: [],
+                  requestState: "opaque-state-\u0000",
+                });
+                return outcome?.kind === "suspend"
+                  ? {
+                      outcome: "ok",
+                      result: null,
+                      suspend: true,
+                      suspendReason: "awaiting_input",
+                    }
+                  : { outcome: "error", errorCode: "tool_failed", result: null };
+              }
+              sideEffects++;
+              return { outcome: "ok", result: { accepted: true } };
+            },
+          },
+        ],
+      ]),
+    );
+    const initialEvents = await toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      calls: [{ callId: callIds.nonIdempotent, toolId: "known_tool", args: { value: "initial" } }],
+    });
+    expect(initialEvents.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "tool_execution_started",
+      "input_requested",
+      "run_status_changed",
+      "checkpoint_written",
+    ]);
+    const pendingState = foldRunState(
+      initialEvents.length === 0 ? history : [...history, ...initialEvents],
+    );
+    expect(pendingState.status).toBe("suspended");
+    expect(pendingState.pendingInputs.size).toBe(1);
+    expect(pendingState.pendingToolCalls.size).toBe(1);
+
+    const secondRecorder = new RunRecorder(
+      store,
+      runId,
+      "77777777777777777777777777",
+      await store.head(runId),
+      new FakeClock(200),
+    );
+    const requestId = Array.from(pendingState.pendingInputs.keys())[0];
+    if (requestId === undefined) {
+      throw new Error("Expected a pending input request.");
+    }
+    await secondRecorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await secondRecorder.record({
+        type: "input_resolved",
+        v: 1,
+        requestId,
+        source: "mcp_mrtr",
+        mode: "form",
+        round: 1,
+        action: "accept",
+        decidedBy: "human",
+        approverId: "cli.test",
+        waitMs: 10,
+        answer: { answer: "Ada" },
+      });
+      const resumed = await secondRecorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "suspended",
+        to: "running",
+        reason: "resumed",
+      });
+      return resumed;
+    });
+    const durableEvents: Event[] = [];
+    for await (const event of store.read(runId)) {
+      durableEvents.push(event);
+    }
+    const resolvedState = foldRunState(durableEvents);
+    expect(resolvedState.pendingInputs.size).toBe(0);
+    const actions = planDanglingIntents(resolvedState, tool);
+    expect(actions).toEqual([{ kind: "retry_input", callId: callIds.nonIdempotent }]);
+    const resumedEvents = await applyDanglingIntents(
+      {
+        ...resumeOptions(secondRecorder, tool),
+        history: durableEvents,
+        beforeToolExecution: () => Promise.resolve(),
+      },
+      resolvedState,
+      actions,
+    );
+    expect(resumedEvents.map(({ type }) => type)).toEqual([
+      "tool_execution_started",
+      "tool_result",
+    ]);
+    expect(retryCalls[1]).toEqual({
+      inputResponses: { "server-key": { action: "accept", answer: { answer: "Ada" } } },
+      round: 1,
+      requestState: "opaque-state-\u0000",
+    });
+    expect(sideEffects).toBe(1);
+    expect(foldRunState([...durableEvents, ...resumedEvents]).pendingToolCalls.size).toBe(0);
+  });
+
+  it("declines sensitive forms without suspending or exposing them", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    let outcomeKind: string | undefined;
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              const outcome = await runContext.elicitation?.handleInputRequired({
+                callId: callIds.idempotent,
+                serverId: "mcp_test",
+                round: 1,
+                maxPerRun: 3,
+                inputRequests: [
+                  {
+                    inputKey: "password",
+                    mode: "form",
+                    message: "tokenized prompt",
+                    requestedSchema: {
+                      type: "object",
+                      properties: { password: { type: "string" } },
+                    },
+                  },
+                ],
+                sensitiveInputKeys: ["password"],
+              });
+              outcomeKind = outcome?.kind;
+              return { outcome: "ok", result: null };
+            },
+          },
+        ],
+      ]),
+    );
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      calls: [{ callId: callIds.idempotent, toolId: "known_tool", args: { value: "initial" } }],
+    });
+    const state = foldRunState([...history, ...events]);
+    expect(outcomeKind).toBe("retry");
+    expect(state.status).toBe("running");
+    expect(state.pendingInputs.size).toBe(0);
+    expect(Array.from(state.resolvedInputs.values())).toMatchObject([
+      { action: "decline", decidedBy: "policy" },
+    ]);
+  });
+
+  it("fails closed when an MCP server exceeds the per-run input limit", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              const outcome = await runContext.elicitation?.handleInputRequired({
+                callId: callIds.idempotent,
+                serverId: "mcp_test",
+                round: 1,
+                maxPerRun: 0,
+                inputRequests: [
+                  {
+                    inputKey: "key",
+                    mode: "form",
+                    message: "tokenized prompt",
+                    requestedSchema: { type: "object", properties: {} },
+                  },
+                ],
+                sensitiveInputKeys: [],
+              });
+              return {
+                outcome: "error",
+                errorCode: outcome?.kind === "error" ? outcome.errorCode : "tool_failed",
+                result: null,
+              };
+            },
+          },
+        ],
+      ]),
+    );
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      calls: [{ callId: callIds.idempotent, toolId: "known_tool", args: { value: "initial" } }],
+    });
+    expect(events.map(({ type }) => type)).toEqual(["tool_intent", "tool_result"]);
+    expect(events.at(-1)).toMatchObject({
+      outcome: "error",
+      errorCode: "mcp_input_rate_limited",
+    });
+  });
+
+  it("keeps a committed input suspension when its checkpoint completes after the tool deadline", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    const dependencies = toolStepDependencies(recorder, new FakeToolPort(new Map()), history);
+    const writeCheckpoint = dependencies.checkpointer.write.bind(dependencies.checkpointer);
+    vi.spyOn(dependencies.checkpointer, "write").mockImplementation(async (state, reason) => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return writeCheckpoint(state, reason);
+    });
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 50,
+            execute: async (_call, runContext) => {
+              const outcome = await runContext.elicitation?.handleInputRequired({
+                callId: callIds.idempotent,
+                serverId: "mcp_test",
+                round: 1,
+                maxPerRun: 3,
+                inputRequests: [
+                  {
+                    inputKey: "delayed-checkpoint",
+                    mode: "form",
+                    message: "Provide a value",
+                    requestedSchema: {
+                      type: "object",
+                      properties: { answer: { type: "string" } },
+                    },
+                  },
+                ],
+                sensitiveInputKeys: [],
+              });
+              return outcome?.kind === "suspend"
+                ? {
+                    outcome: "ok",
+                    result: null,
+                    suspend: true,
+                    suspendReason: "awaiting_input",
+                  }
+                : { outcome: "error", errorCode: "tool_failed", result: null };
+            },
+          },
+        ],
+      ]),
+    );
+
+    const events = await toolStep({
+      ...dependencies,
+      tool,
+      calls: [{ callId: callIds.idempotent, toolId: "known_tool", args: { value: "initial" } }],
+    });
+    const state = foldRunState([...history, ...events]);
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "input_requested",
+      "run_status_changed",
+      "checkpoint_written",
+    ]);
+    expect(events.some(({ type }) => type === "tool_result")).toBe(false);
+    expect(state.status).toBe("suspended");
+    expect(state.pendingInputs.size).toBe(1);
+  });
+
+  it("installs the durable input handler for a policy-approved tool", async () => {
+    const { recorder, store } = createRecorder();
+    const history = await createRun(recorder, []);
+    const askPolicy: PolicyPort = {
+      version: Code.parse("test.policy"),
+      decide: () => ({
+        decision: "ask",
+        ruleId: Code.parse("human_review"),
+        reason: Code.parse("needs_review"),
+        editable: [],
+      }),
+    };
+    let receivedRetry: unknown;
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              if (runContext.inputRetry !== undefined) {
+                receivedRetry = runContext.inputRetry;
+                return { outcome: "ok", result: { accepted: true } };
+              }
+              const outcome = await runContext.elicitation?.handleInputRequired({
+                callId: callIds.idempotent,
+                serverId: "mcp_test",
+                round: 1,
+                maxPerRun: 3,
+                inputRequests: [
+                  {
+                    inputKey: "approval-input-key",
+                    mode: "form",
+                    message: "Provide a value",
+                    requestedSchema: {
+                      type: "object",
+                      properties: { answer: { type: "string" } },
+                    },
+                  },
+                ],
+                sensitiveInputKeys: [],
+              });
+              return outcome?.kind === "suspend"
+                ? {
+                    outcome: "ok",
+                    result: null,
+                    suspend: true,
+                    suspendReason: "awaiting_input",
+                  }
+                : { outcome: "error", errorCode: "tool_failed", result: null };
+            },
+          },
+        ],
+      ]),
+    );
+    const executionOptions = toolStepDependencies(recorder, tool, history, askPolicy);
+    const approved = await toolStep({
+      ...executionOptions,
+      calls: [{ callId: callIds.idempotent, toolId: "known_tool", args: { value: "initial" } }],
+    });
+    const approval = approved.find(
+      (event): event is ApprovalRequestedEvent => event.type === "approval_requested",
+    );
+    if (approval === undefined) {
+      throw new Error("Expected a policy approval.");
+    }
+    await resolveEvent(recorder, approval.approvalId, "approve");
+    const durableHistory: Event[] = [];
+    for await (const event of store.read(runId)) {
+      durableHistory.push(event);
+    }
+
+    const resumed = await applyResolvedApprovals(
+      { ...executionOptions, history: durableHistory },
+      foldRunState(durableHistory),
+    );
+    const state = foldRunState([...durableHistory, ...resumed]);
+
+    expect(resumed.map(({ type }) => type)).toEqual([
+      "input_requested",
+      "run_status_changed",
+      "checkpoint_written",
+    ]);
+    expect(state.status).toBe("suspended");
+    expect(state.pendingInputs.size).toBe(1);
+    expect(state.pendingToolCalls.size).toBe(1);
+
+    const requestId = Array.from(state.pendingInputs.keys())[0];
+    if (requestId === undefined) {
+      throw new Error("Expected a pending input request.");
+    }
+    const inputRecorder = new RunRecorder(
+      store,
+      runId,
+      "77777777777777777777777777",
+      await store.head(runId),
+      new FakeClock(200),
+    );
+    await inputRecorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await inputRecorder.record({
+        type: "input_resolved",
+        v: 1,
+        requestId,
+        source: "mcp_mrtr",
+        mode: "form",
+        round: 1,
+        action: "accept",
+        decidedBy: "human",
+        approverId: "cli.test",
+        waitMs: 10,
+        answer: { answer: "Ada" },
+      });
+      return inputRecorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "suspended",
+        to: "running",
+        reason: "resumed",
+      });
+    });
+    const historyAfterInput: Event[] = [];
+    for await (const event of store.read(runId)) {
+      historyAfterInput.push(event);
+    }
+    const completed = await applyResolvedApprovals(
+      toolStepDependencies(inputRecorder, tool, historyAfterInput, askPolicy),
+      foldRunState(historyAfterInput),
+    );
+    const completedState = foldRunState([...historyAfterInput, ...completed]);
+    expect(completed.map(({ type }) => type)).toEqual(["tool_execution_started", "tool_result"]);
+    expect(receivedRetry).toEqual({
+      inputResponses: {
+        "approval-input-key": { action: "accept", answer: { answer: "Ada" } },
+      },
+      round: 1,
+    });
+    expect(completedState.pendingToolCalls.size).toBe(0);
+  });
+});

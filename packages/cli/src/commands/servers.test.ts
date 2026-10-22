@@ -1239,7 +1239,7 @@ describe("harness servers check", () => {
       });
       try {
         await expect(
-          connection.callTool({ name: "listed", arguments: {} }, inputSchema),
+          connection.callTool({ params: { name: "listed", arguments: {} }, inputSchema }),
         ).rejects.toMatchObject({ code: "mcp_connection_lost" });
       } finally {
         vi.unstubAllGlobals();
