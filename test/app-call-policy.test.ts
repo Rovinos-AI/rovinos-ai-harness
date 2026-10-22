@@ -130,7 +130,10 @@ describe("policy-checked app call handler", () => {
     const onAppCallApproval = vi.fn(() => Promise.resolve({ content: [] }));
     const result = await createPolicyCheckedAppCallHandler({
       policy: policy("ask"),
-      tool: { describe: tools.port.describe, execute: tools.execute },
+      tool: {
+        describe: (toolId, args) => tools.port.describe(toolId, args),
+        execute: tools.execute,
+      },
       nextCallId: () => Id.parse("00000000000000000000000003"),
       onAppCallApproval,
     })(call, context);

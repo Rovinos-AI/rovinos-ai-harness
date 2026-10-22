@@ -1424,8 +1424,12 @@ describe("app-call runtime approval", () => {
           );
         } else {
           let resolution: "approve" | "deny" | "edit" = "approve";
-          if (edited) {resolution = "edit";}
-          if (decision === "deny") {resolution = "deny";}
+          if (edited) {
+            resolution = "edit";
+          }
+          if (decision === "deny") {
+            resolution = "deny";
+          }
           await current.runtime.resolveApproval(
             current.runId,
             current.approval.approvalId,
@@ -1448,9 +1452,15 @@ describe("app-call runtime approval", () => {
         expect(result.isError).toBe(!allowed);
         expect(current.execute).toHaveBeenCalledTimes(allowed ? 1 : 0);
         let expected = "app_policy";
-        if (allowed) {expected = '{"delivered":true}';}
-        if (decision === "deny") {expected = "approval_denied";}
-        if (decision === "expiry") {expected = "approval_expired";}
+        if (allowed) {
+          expected = '{"delivered":true}';
+        }
+        if (decision === "deny") {
+          expected = "approval_denied";
+        }
+        if (decision === "expiry") {
+          expected = "approval_expired";
+        }
         expect(result.content).toEqual([{ type: "text", text: expected }]);
         const after = await readEvents(current.store, current.runId);
         expect(after.filter((event) => event.type === "tool_intent")).toHaveLength(1);

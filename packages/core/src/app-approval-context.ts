@@ -38,6 +38,8 @@ export function appApprovalContext(
     previous?.type !== "app_content" ||
     previous.runId !== intent.runId ||
     previous.segmentId !== intent.segmentId ||
+    previous.traceId !== intent.traceId ||
+    previous.spanId !== intent.spanId ||
     previous.kind !== "model_context"
   ) {
     return undefined;
@@ -72,6 +74,19 @@ export class AppApprovalPolicyError extends HarnessError {
   }
 }
 
+function requesterApproved(
+  history: readonly Event[] | undefined,
+  resolution: Extract<Event, { type: "approval_resolved" }>,
+): boolean {
+  const created = history?.find((event) => event.type === "run_created");
+  return (
+    resolution.decidedBy === "human" &&
+    created?.type === "run_created" &&
+    created.requestedBy !== undefined &&
+    created.requestedBy === resolution.approverId
+  );
+}
+
 /** Reconstructs and rechecks app policy without trusting app-provided messages. */
 export function approvedAppPolicy(input: {
   readonly options: Pick<ResumeToolStepOptions, "history" | "policy" | "clock">;
@@ -99,6 +114,13 @@ export function approvedAppPolicy(input: {
   const decision = decidePolicy(scoped, { callId: intent.callId, toolId: intent.toolId, args }, 0);
   if (decision.decision === "deny") {
     throw new AppApprovalPolicyError(decision.reason);
+  }
+  if (
+    decision.decision === "ask" &&
+    decision.separationOfDuties === true &&
+    requesterApproved(options.history, resolution)
+  ) {
+    throw new AppApprovalPolicyError(Code.parse("approver_is_requester"));
   }
   if (
     decision.decision === "ask" &&

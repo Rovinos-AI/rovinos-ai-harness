@@ -15,7 +15,7 @@ import { createTestContextManager, createTestSpanCollector } from "@harness/tele
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import { FakeModelPort } from "./testing/fake-model.js";
-import type { PolicyDecision, PolicyPort, ToolPort } from "./ports.js";
+import type { ModelPort, PolicyDecision, PolicyPort, ToolPort } from "./ports.js";
 import { foldRunState } from "./run-state.js";
 import {
   AppApprovalPolicyError,
@@ -31,6 +31,14 @@ const ask: PolicyDecision = {
   approvalTtlMs: 100,
 };
 const human = { metadata: { decidedBy: "human" as const, approverId: Code.parse("cli.app_test") } };
+
+function deferred() {
+  let release: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, resolve: release };
+}
 
 async function eventsFor(store: InMemoryEventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
@@ -65,7 +73,7 @@ async function setup() {
   const store = new InMemoryEventStore();
   const builders = createEventBuilders();
   const runId = Id.parse(ids.next());
-  const created = builders.runCreated(runId);
+  const created = { ...builders.runCreated(runId), requestedBy: Code.parse("cli.app_test") };
   await store.append(
     runId,
     [
@@ -89,6 +97,7 @@ async function setup() {
   const setDecision = (decision: PolicyDecision) => {
     policyState.decision = decision;
   };
+
   const decide = vi.fn<PolicyPort["decide"]>((_call, context) =>
     context.app === "synthetic.app"
       ? policyState.decision
@@ -173,6 +182,51 @@ async function setup() {
 }
 
 describe("runtime app approval execution", () => {
+  it("returns a suspended live run after an app approval advances its recorder", () =>
+    scenario(async (f) => {
+      const entered = deferred();
+      const released = deferred();
+      const model: ModelPort = {
+        complete: async (request, context) => {
+          entered.resolve();
+          await released.promise;
+          return f.overrides.model.complete(request, context);
+        },
+      };
+      const runtime = await createRuntime(f.config, { ...f.overrides, model });
+      const run = runtime.start("Synthetic live app approval");
+      let response: ReturnType<typeof runtime.onAppCallApproval> | undefined;
+      try {
+        await entered.promise;
+        response = runtime.onAppCallApproval(f.call, ask, { ...f.context, runId: run.runId });
+        await vi.waitFor(async () => {
+          expect(await runtime.hasPendingApproval(run.runId)).toBe(true);
+        });
+        released.resolve();
+        await expect(run.completion).resolves.toMatchObject({ status: "suspended" });
+        expect(f.execute).not.toHaveBeenCalled();
+      } finally {
+        released.resolve();
+        await runtime.cancel(run.runId);
+        await response;
+        await runtime.close();
+      }
+    }));
+
+  it("enforces newly required separation of duties after approval", () =>
+    scenario(async (f) => {
+      const response = f.request();
+      const approval = await f.pending();
+      await f.runtime.resolveApproval(f.runId, approval.approvalId, "approve", human);
+      f.setDecision({ ...ask, separationOfDuties: true });
+      await f.runtime.resume(f.runId);
+      await expect(response).resolves.toMatchObject({
+        isError: true,
+        content: [{ text: "approver_is_requester" }],
+      });
+      expect(f.execute).not.toHaveBeenCalled();
+    }));
+
   it("rejects invalid callback decisions, unavailable runs, and unknown tools without execution", () =>
     scenario(async (f) => {
       await expect(

@@ -15,8 +15,7 @@ Telemetry calls remain local to the host. The default `harness.telemetry.emit` h
 
 ## App-call approvals
 
-Runtime-backed hosts supply `onAppCallApproval` from `createRuntimeAppCallbacks`
-(also exposed on the runtime). An app call that matches an `ask` rule records
+Runtime-backed hosts supply `runtime.onAppCallApproval`. An app call that matches an `ask` rule records
 the prepared, tokenized call as a tool intent and one pending approval, then
 suspends the run using the same durable approval/checkpoint path as model tool
 calls. The app's call remains pending until the approval is resolved and the
@@ -29,9 +28,11 @@ receives the recorded tool result. Denial and expiry return typed errors
 instead of executing the tool.
 
 `app_call_requires_approval` is still returned when the host has no durable
-approval callback, cannot suspend the run, or its tool port has no sanitizing
+approval callback or its tool port has no sanitizing
 `prepare` step. In particular, the host never delegates raw arguments to a
 durable approval callback when preparation is unavailable.
+The runtime returns `app_run_unavailable` if the bound run is unavailable or
+cannot accept a new approval in its current state.
 
 ## Local channel
 

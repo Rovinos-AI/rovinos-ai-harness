@@ -141,7 +141,7 @@ async function waitForAppResult(store: EventStore, runId: Id, callId: Id, fromSe
 export function createAppApprovalHandler(options: AppApprovalOptions): RuntimeAppApprovalHandler {
   return async (proposed, proposedDecision, context) => {
     const dependencies = options.approval;
-    if (dependencies === undefined) {
+    if (dependencies?.tool.prepare === undefined) {
       return appResult("app_call_requires_approval");
     }
     const runId = Id.parse(context.runId);
