@@ -27,11 +27,13 @@ export {
   type InputResponse,
 } from "./human-input.js";
 export {
+  ApprovalAppGetRequestSchema,
   ApprovalAppInputSchema,
   ResolveRequest,
   ResolveResponse,
   RevealRequest,
   RevealResponse,
+  type ApprovalAppGetRequest,
   type ApprovalAppInput,
 } from "./approval-tools.js";
 export { ToolBinaryPayloadSchema, type ToolBinaryPayload } from "./tool-binary.js";

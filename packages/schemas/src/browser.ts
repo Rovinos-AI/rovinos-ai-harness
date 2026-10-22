@@ -2,11 +2,13 @@
 // Browser entry excludes the Node-oriented external JSON Schema compiler.
 export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
 export {
+  ApprovalAppGetRequestSchema,
   ApprovalAppInputSchema,
   ResolveRequest,
   ResolveResponse,
   RevealRequest,
   RevealResponse,
+  type ApprovalAppGetRequest,
   type ApprovalAppInput,
 } from "./approval-tools.js";
 export { parseJson } from "./parse.js";

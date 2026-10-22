@@ -19,6 +19,9 @@ const listTool = "harness.runs.list";
 const detailTool = "harness.runs.get";
 const pollIntervalMs = 5_000;
 const maxPollIntervalMs = 60_000;
+const maxTelemetryActivationWaitMs = 2_500;
+const telemetryActivationPollMs = 25;
+const pageSize = 20;
 
 type RunsTelemetry = AppTelemetry<readonly ["ui.render", "ui.error", "ui.interaction"]>;
 
@@ -66,8 +69,16 @@ class RunsConsoleController implements RunsConsoleView {
   private timer: number | undefined;
   private pollDelay = pollIntervalMs;
   private refreshing = false;
+  private refreshRequested = false;
+  private detailGeneration = 0;
+  private requestedFilter: string | undefined;
+  private nextCursor: string | undefined;
+  private runs: RunConsoleRun[] = [];
+  private telemetryActivationTimer: number | undefined;
+  private telemetryActivationTimeout: number | undefined;
   private disposed = false;
   private hasRendered = false;
+  private pendingRenderSpan = false;
   private clickCount = 0;
 
   constructor(
@@ -81,6 +92,7 @@ class RunsConsoleController implements RunsConsoleView {
     this.layout = createRunsConsoleLayout(container, this.strings);
     this.now = options.now ?? (() => Date.now());
     this.layout.refreshButton.addEventListener("click", this.refreshClicked);
+    this.layout.loadMoreButton.addEventListener("click", this.loadMoreClicked);
     this.layout.filter.addEventListener("change", this.filterChanged);
     this.document.addEventListener("visibilitychange", this.visibilityChanged);
     void this.refresh();
@@ -93,7 +105,17 @@ class RunsConsoleController implements RunsConsoleView {
 
   private readonly filterChanged = (): void => {
     this.recordInteraction();
+    this.requestedFilter = this.currentFilter();
+    this.nextCursor = undefined;
+    this.runs = [];
+    this.layout.listHost.replaceChildren();
+    this.layout.liveRegion.textContent = this.strings.runsLoading;
     void this.refresh();
+  };
+
+  private readonly loadMoreClicked = (): void => {
+    this.recordInteraction();
+    void this.loadMore();
   };
 
   private readonly visibilityChanged = (): void => {
@@ -125,6 +147,47 @@ class RunsConsoleController implements RunsConsoleView {
       this.window.clearTimeout(this.timer);
       this.timer = undefined;
     }
+  }
+
+  private currentFilter(): string | undefined {
+    return this.layout.filter.value === "all" ? undefined : this.layout.filter.value;
+  }
+
+  private currentFilterMatches(requested: string | undefined): boolean {
+    return requested === this.currentFilter();
+  }
+
+  private clearTelemetryActivationTimers(): void {
+    if (this.telemetryActivationTimer !== undefined) {
+      this.window.clearInterval(this.telemetryActivationTimer);
+      this.telemetryActivationTimer = undefined;
+    }
+    if (this.telemetryActivationTimeout !== undefined) {
+      this.window.clearTimeout(this.telemetryActivationTimeout);
+      this.telemetryActivationTimeout = undefined;
+    }
+  }
+
+  private flushRenderSpan(): void {
+    if (!this.pendingRenderSpan || !this.options.telemetry.active) {
+      return;
+    }
+    this.clearTelemetryActivationTimers();
+    this.pendingRenderSpan = false;
+    this.options.telemetry.record("ui.render", {});
+    void this.options.telemetry.flush();
+  }
+
+  private waitForTelemetryActivation(): void {
+    if (this.telemetryActivationTimer !== undefined || !this.pendingRenderSpan) {
+      return;
+    }
+    this.telemetryActivationTimer = this.window.setInterval(() => {
+      this.flushRenderSpan();
+    }, telemetryActivationPollMs);
+    this.telemetryActivationTimeout = this.window.setTimeout(() => {
+      this.clearTelemetryActivationTimers();
+    }, maxTelemetryActivationWaitMs);
   }
 
   private schedule(delay: number): void {
@@ -164,8 +227,12 @@ class RunsConsoleController implements RunsConsoleView {
 
   private async showDetails(run: RunConsoleRun): Promise<void> {
     this.recordInteraction();
+    const generation = ++this.detailGeneration;
     try {
       const detail = await this.getRunDetail(run.runId);
+      if (generation !== this.detailGeneration || this.disposed) {
+        return;
+      }
       renderRunDetail(this.layout.detailHost, detail, {
         strings: this.strings,
         locale: this.document.documentElement.lang,
@@ -177,6 +244,9 @@ class RunsConsoleController implements RunsConsoleView {
         },
       });
     } catch {
+      if (generation !== this.detailGeneration || this.disposed) {
+        return;
+      }
       this.layout.detailHost.replaceChildren(
         createEmptyState(this.document, this.strings.errorTitle, this.strings.runsUnavailable),
       );
@@ -200,30 +270,122 @@ class RunsConsoleController implements RunsConsoleView {
   }
 
   async refresh(): Promise<void> {
-    if (this.disposed || this.refreshing || this.document.visibilityState === "hidden") {
+    if (this.disposed || this.document.visibilityState === "hidden") {
+      return;
+    }
+    if (this.refreshing) {
+      this.refreshRequested = true;
       return;
     }
     this.refreshing = true;
     this.clearTimer();
+    const requestedFilter = this.currentFilter();
     try {
-      const status = this.layout.filter.value === "all" ? undefined : this.layout.filter.value;
       const response = await this.options.bridge.callTool(listTool, {
-        ...(status === undefined ? {} : { status }),
+        limit: pageSize,
+        ...(requestedFilter === undefined ? {} : { status: requestedFilter }),
       });
       const parsed = RunConsoleListSchema.parse(resultValue(response));
-      this.renderList(parsed.runs);
+      if (!this.currentFilterMatches(requestedFilter)) {
+        this.refreshRequested = true;
+        return;
+      }
+      this.runs = [...parsed.runs];
+      this.nextCursor = parsed.nextCursor;
+      this.renderList(this.runs);
+      this.updateLoadMoreButton();
       this.layout.liveRegion.textContent = this.strings.runsUpdated;
       if (!this.hasRendered) {
-        this.options.telemetry.record("ui.render", {});
         this.hasRendered = true;
+        this.pendingRenderSpan = true;
+        this.flushRenderSpan();
+        this.waitForTelemetryActivation();
       }
       this.pollDelay = pollIntervalMs;
     } catch {
-      this.setError();
-      this.pollDelay = Math.min(this.pollDelay * 2, maxPollIntervalMs);
+      if (this.currentFilterMatches(requestedFilter)) {
+        this.setError();
+        this.pollDelay = Math.min(this.pollDelay * 2, maxPollIntervalMs);
+      } else {
+        this.refreshRequested = true;
+      }
+    } finally {
+      this.refreshing = false;
+      if (this.refreshRequested || !this.currentFilterMatches(requestedFilter)) {
+        this.refreshRequested = false;
+        void this.refresh();
+      } else {
+        this.schedule(this.pollDelay);
+      }
+    }
+  }
+
+  private updateLoadMoreButton(): void {
+    this.layout.loadMoreButton.hidden = this.nextCursor === undefined;
+  }
+
+  private async nextVisiblePage(
+    requestedFilter: string | undefined,
+    firstCursor: string,
+  ): Promise<ReturnType<typeof RunConsoleListSchema.parse> | undefined> {
+    let cursor = firstCursor;
+    const seenCursors = new Set<string>();
+    while (!seenCursors.has(cursor)) {
+      seenCursors.add(cursor);
+      const response = await this.options.bridge.callTool(listTool, {
+        limit: pageSize,
+        cursor,
+        ...(requestedFilter === undefined ? {} : { status: requestedFilter }),
+      });
+      const page = RunConsoleListSchema.parse(resultValue(response));
+      if (!this.currentFilterMatches(requestedFilter)) {
+        this.refreshRequested = true;
+        return undefined;
+      }
+      if (page.runs.length > 0) {
+        return {
+          runs: page.runs,
+          ...(page.nextCursor === undefined || seenCursors.has(page.nextCursor)
+            ? {}
+            : { nextCursor: page.nextCursor }),
+        };
+      }
+      if (page.nextCursor === undefined || seenCursors.has(page.nextCursor)) {
+        return { runs: [] };
+      }
+      cursor = page.nextCursor;
+    }
+    return { runs: [] };
+  }
+
+  private async loadMore(): Promise<void> {
+    if (this.disposed || this.nextCursor === undefined || this.refreshing) {
+      return;
+    }
+    this.clearTimer();
+    this.refreshing = true;
+    const requestedFilter = this.currentFilter();
+    const cursor = this.nextCursor;
+    try {
+      const page = await this.nextVisiblePage(requestedFilter, cursor);
+      if (page !== undefined && this.currentFilterMatches(requestedFilter)) {
+        this.runs = [...this.runs, ...page.runs];
+        this.nextCursor = page.nextCursor;
+        this.renderList(this.runs);
+        this.updateLoadMoreButton();
+        this.layout.liveRegion.textContent = this.strings.runsUpdated;
+      }
+    } catch {
+      if (this.currentFilterMatches(requestedFilter)) {
+        this.setError();
+      }
     } finally {
       this.refreshing = false;
       this.schedule(this.pollDelay);
+      if (this.refreshRequested) {
+        this.refreshRequested = false;
+        void this.refresh();
+      }
     }
   }
 
@@ -233,7 +395,10 @@ class RunsConsoleController implements RunsConsoleView {
     }
     this.disposed = true;
     this.clearTimer();
+    this.clearTelemetryActivationTimers();
+    this.detailGeneration += 1;
     this.layout.refreshButton.removeEventListener("click", this.refreshClicked);
+    this.layout.loadMoreButton.removeEventListener("click", this.loadMoreClicked);
     this.layout.filter.removeEventListener("change", this.filterChanged);
     this.document.removeEventListener("visibilitychange", this.visibilityChanged);
     this.flushInteractions();

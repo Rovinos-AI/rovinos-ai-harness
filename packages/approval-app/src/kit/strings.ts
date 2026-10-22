@@ -72,6 +72,8 @@ export const stringCatalog = {
     runStatusFilter: "Filter by status",
     allRunStatuses: "All statuses",
     refreshRuns: "Refresh runs",
+    loadMoreRuns: "Load more runs",
+    loadingMoreRuns: "Loading more runs.",
     runId: "Run ID",
     runStatus: "Status",
     runAge: "Age",

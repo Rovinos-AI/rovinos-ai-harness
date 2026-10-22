@@ -8,6 +8,7 @@ import type { getStrings } from "../../kit/strings.js";
 export interface RunsConsoleLayout {
   readonly filter: HTMLSelectElement;
   readonly refreshButton: HTMLButtonElement;
+  readonly loadMoreButton: HTMLButtonElement;
   readonly liveRegion: HTMLElement;
   readonly listHost: HTMLElement;
   readonly detailHost: HTMLElement;
@@ -105,7 +106,10 @@ export function createRunsConsoleLayout(
   main.append(filterLabel, filter);
   const refreshButton = element(document, "button", strings.refreshRuns);
   refreshButton.type = "button";
-  main.append(refreshButton);
+  const loadMoreButton = element(document, "button", strings.loadMoreRuns);
+  loadMoreButton.type = "button";
+  loadMoreButton.hidden = true;
+  main.append(refreshButton, loadMoreButton);
   const liveRegion = element(document, "p");
   liveRegion.setAttribute("role", "status");
   liveRegion.setAttribute("aria-live", "polite");
@@ -118,7 +122,7 @@ export function createRunsConsoleLayout(
   main.append(listHost, detailHost);
   container.replaceChildren(main);
   heading.focus();
-  return { filter, refreshButton, liveRegion, listHost, detailHost };
+  return { filter, refreshButton, loadMoreButton, liveRegion, listHost, detailHost };
 }
 
 function appendMetadata(
@@ -228,6 +232,52 @@ function renderRunRow(
   return row;
 }
 
+interface TablePosition {
+  readonly previousWrapper: HTMLElement | null;
+  readonly scrollLeft: number;
+  readonly activeElement: Element | null;
+  readonly focusedRunId: string | undefined;
+  readonly focusedAction: string | undefined;
+}
+
+function captureTablePosition(host: HTMLElement): TablePosition {
+  const document = host.ownerDocument;
+  const previousWrapper = host.querySelector<HTMLElement>(".table-scroll");
+  const activeElement = document.activeElement;
+  const focusedRow = activeElement?.closest<HTMLTableRowElement>("tr[data-run-id]");
+  return {
+    previousWrapper,
+    scrollLeft: previousWrapper?.scrollLeft ?? 0,
+    activeElement,
+    focusedRunId: focusedRow?.dataset.runId,
+    focusedAction:
+      activeElement instanceof HTMLElement ? activeElement.dataset.runAction : undefined,
+  };
+}
+
+function restoreTablePosition(
+  wrapper: HTMLElement,
+  table: HTMLTableElement,
+  position: TablePosition,
+): void {
+  const scrollContainer = wrapper;
+  scrollContainer.scrollLeft = position.scrollLeft;
+  if (position.focusedRunId !== undefined) {
+    const focusedButton = [...table.querySelectorAll<HTMLTableRowElement>("tr[data-run-id]")]
+      .find((row) => row.dataset.runId === position.focusedRunId)
+      ?.querySelector<HTMLButtonElement>(
+        `button[data-run-action="${position.focusedAction ?? ""}"]`,
+      );
+    if (focusedButton !== undefined && focusedButton !== null) {
+      focusedButton.focus();
+    } else {
+      wrapper.focus();
+    }
+  } else if (position.activeElement === position.previousWrapper) {
+    wrapper.focus();
+  }
+}
+
 /** Renders the table or its empty state using only DOM text nodes. */
 export function renderRuns(
   host: HTMLElement,
@@ -236,17 +286,11 @@ export function renderRuns(
 ): void {
   const document = host.ownerDocument;
   const { strings } = options;
-  const previousWrapper = host.querySelector<HTMLElement>(".table-scroll");
-  const scrollLeft = previousWrapper?.scrollLeft ?? 0;
-  const active = document.activeElement;
-  const focusedRow = active?.closest<HTMLTableRowElement>("tr[data-run-id]");
-  const focusedRunId = focusedRow?.dataset.runId;
-  const focusedAction =
-    active instanceof HTMLElement ? active.dataset.runAction : undefined;
+  const position = captureTablePosition(host);
   if (runs.length === 0) {
     host.replaceChildren(createEmptyState(document, strings.noRunsTitle, strings.noRunsMessage));
-    if (focusedRunId !== undefined) {
-      host.tabIndex = -1;
+    if (position.focusedRunId !== undefined) {
+      host.setAttribute("tabindex", "-1");
       host.focus();
     }
     return;
@@ -279,20 +323,5 @@ export function renderRuns(
   table.append(head, body);
   wrapper.append(table);
   host.replaceChildren(wrapper);
-  wrapper.scrollLeft = scrollLeft;
-  if (focusedRunId !== undefined) {
-    const nextFocusedButton = [...table.querySelectorAll<HTMLTableRowElement>("tr[data-run-id]")]
-      .find((row) => row.dataset.runId === focusedRunId)
-      ?.querySelector<HTMLButtonElement>("button");
-    const matchingAction = nextFocusedButton?.closest("tr")?.querySelector<HTMLButtonElement>(
-      `button[data-run-action="${focusedAction ?? ""}"]`,
-    );
-    if (matchingAction !== undefined && matchingAction !== null) {
-      matchingAction.focus();
-    } else {
-      wrapper.focus();
-    }
-  } else if (active === previousWrapper) {
-    wrapper.focus();
-  }
+  restoreTablePosition(wrapper, table, position);
 }

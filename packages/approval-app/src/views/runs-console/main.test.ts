@@ -25,39 +25,58 @@ const appMock = vi.hoisted(() => {
 
 vi.mock("@modelcontextprotocol/ext-apps", () => ({
   App: class {
-    readonly callServerTool = vi.fn(({ name }: { readonly name: string }) =>
-      Promise.resolve({
-        structuredContent:
-          name === "harness.runs.get"
-            ? {
-                runId: "00000000000000000000000001",
-                status: "suspended",
-                steps: 1,
-                usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
-                pendingApprovals: [
-                  {
-                    approvalId: "00000000000000000000000002",
-                    toolId: "tool.call",
-                    ruleId: "policy.review",
-                  },
-                ],
-              }
-            : {
-                runs: [
-                  {
-                    runId: "00000000000000000000000001",
-                    status: "suspended",
-                    createdAt: 1,
-                    lastTs: 2,
-                    lastSeq: 3,
-                    steps: 1,
-                    pendingApprovals: 1,
-                  },
-                ],
-              },
-        content: [],
-      }),
-    );
+    readonly callServerTool = vi.fn(({ name }: { readonly name: string }) => {
+      let structuredContent: unknown;
+      if (name === "harness.approvals.get") {
+        structuredContent = {
+          approvalId: "00000000000000000000000002",
+          payload: {
+            payloadVersion: 1,
+            kind: "tool_call",
+            callId: "00000000000000000000000004",
+            toolId: "tool.call",
+            ruleId: "policy.review",
+            reason: "approval_required",
+            summary: "Review selected approval",
+            args: { email: "<EMAIL_1>" },
+            ui: {
+              resourceUri: "ui://harness/approval/v1",
+              fallbackText: "Review approval",
+            },
+            editableFields: [],
+          },
+        };
+      } else if (name === "harness.runs.get") {
+        structuredContent = {
+          runId: "00000000000000000000000001",
+          status: "suspended",
+          steps: 1,
+          usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+          pendingApprovals: [
+            {
+              approvalId: "00000000000000000000000002",
+              toolId: "tool.call",
+              ruleId: "policy.review",
+            },
+          ],
+        };
+      } else {
+        structuredContent = {
+          runs: [
+            {
+              runId: "00000000000000000000000001",
+              status: "suspended",
+              createdAt: 1,
+              lastTs: 2,
+              lastSeq: 3,
+              steps: 1,
+              pendingApprovals: 1,
+            },
+          ],
+        };
+      }
+      return Promise.resolve({ structuredContent, content: [] });
+    });
     readonly connect = vi.fn(() => Promise.resolve());
     readonly getHostContext = vi.fn(() => ({ theme: "light", locale: "en" }));
     readonly openLink = vi.fn(() => Promise.resolve({}));
@@ -77,12 +96,12 @@ afterEach(() => {
 });
 
 describe("runs console app bootstrap", () => {
-  it("connects the app, loads metadata through the bridge, and opens the approval resource", async () => {
+  it("loads an approval payload and transitions to the approval view", async () => {
     await import("./index.js");
     await vi.waitFor(() => {
       expect(appMock.instance?.callServerTool).toHaveBeenCalledWith({
         name: "harness.runs.list",
-        arguments: {},
+        arguments: { limit: 20 },
       });
     });
     await vi.waitFor(() => {
@@ -93,12 +112,20 @@ describe("runs console app bootstrap", () => {
     );
     approvalButton?.click();
     await vi.waitFor(() => {
-      expect(appMock.instance?.openLink).toHaveBeenCalledWith({
-        url: "ui://harness/approval/v1?approvalId=00000000000000000000000002",
+      expect(appMock.instance?.callServerTool).toHaveBeenCalledWith({
+        name: "harness.approvals.get",
+        arguments: { approvalId: "00000000000000000000000002" },
       });
     });
+    await vi.waitFor(() => {
+      expect(document.querySelector("h1")?.textContent).toBe("Review selected approval");
+    });
+    expect(document.querySelector('nav[aria-label="Approval actions"] button')?.textContent).toBe(
+      "Approve",
+    );
+    expect(appMock.instance?.openLink).not.toHaveBeenCalled();
     expect(appMock.instance?.getHostContext).toHaveBeenCalled();
-    expect(document.title).toBe("Runs");
+    expect(document.title).toBe("Pending approval");
     const pageHide = new Event("pagehide");
     Object.defineProperty(pageHide, "persisted", { value: false });
     window.dispatchEvent(pageHide);

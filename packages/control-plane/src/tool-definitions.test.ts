@@ -12,6 +12,7 @@ describe("control-plane tool definitions", () => {
       "harness.runs.list": "read",
       "harness.runs.get": "read",
       approve: "approve",
+      "harness.approvals.get": "approve",
       "harness.approvals.resolve": "approve",
       "harness.approvals.reveal": "reveal",
       deny: "approve",

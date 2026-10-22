@@ -46,6 +46,16 @@ function runDetail(canary?: string): RunConsoleDetail {
   };
 }
 
+function deferred<T>() {
+  let fulfill: (value: T) => void = () => undefined;
+  let deferReject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((resolve, reject) => {
+    fulfill = resolve;
+    deferReject = reject;
+  });
+  return { promise, resolve: fulfill, reject: deferReject };
+}
+
 function createTelemetry() {
   const emitted: unknown[] = [];
   const telemetry: TestTelemetry = createAppTelemetry({
@@ -67,6 +77,12 @@ async function setup(
     readonly detail?: unknown;
     readonly listError?: boolean;
     readonly now?: () => number;
+    readonly listCall?: (
+      args: Record<string, unknown>,
+    ) => Promise<{ readonly structuredContent?: unknown }>;
+    readonly detailCall?: (
+      args: Record<string, unknown>,
+    ) => Promise<{ readonly structuredContent?: unknown }>;
   } = {},
 ) {
   document.documentElement.lang = "en";
@@ -77,10 +93,16 @@ async function setup(
     callTool: (name, args) => {
       calls.push({ name, args });
       if (name === "harness.runs.list") {
+        if (input.listCall !== undefined) {
+          return input.listCall(args);
+        }
         if (input.listError === true) {
           return Promise.reject(new Error("SYNTHETIC_BRIDGE_CANARY"));
         }
         return Promise.resolve({ structuredContent: input.list ?? runList() });
+      }
+      if (input.detailCall !== undefined) {
+        return input.detailCall(args);
       }
       return Promise.resolve({ structuredContent: input.detail ?? runDetail() });
     },
@@ -171,7 +193,7 @@ describe("runs console view", () => {
     await vi.waitFor(() => {
       expect(calls).toContainEqual({
         name: "harness.runs.list",
-        args: { status: "failed" },
+        args: { limit: 20, status: "failed" },
       });
     });
     document.querySelector("button")?.click();
@@ -227,6 +249,262 @@ describe("runs console view", () => {
     expect(document.body.textContent).toContain("12");
     expect(document.body.textContent).not.toContain(canary);
     expect(JSON.stringify(emitted)).not.toContain(canary);
+    view.dispose();
+  });
+
+  it("preserves a focused row action and horizontal scroll position across polling", async () => {
+    const { view } = await setup({ list: runList(1, 1) });
+    const wrapper = document.querySelector<HTMLElement>(".table-scroll");
+    const approvalButton = document.querySelector<HTMLButtonElement>(
+      'button[data-run-action="approval"]',
+    );
+    if (wrapper === null || approvalButton === null) {
+      throw new Error("Expected the scroll wrapper and approval action.");
+    }
+    wrapper.scrollLeft = 47;
+    approvalButton.focus();
+
+    await view.refresh();
+
+    expect(document.activeElement).toBe(
+      document.querySelector('button[data-run-action="approval"]'),
+    );
+    expect(document.querySelector<HTMLElement>(".table-scroll")?.scrollLeft).toBe(47);
+    view.dispose();
+  });
+
+  it("moves focus to the list region when its focused run disappears", async () => {
+    let currentList = runList(1, 1);
+    const { view } = await setup({
+      listCall: () => Promise.resolve({ structuredContent: currentList }),
+    });
+    document.querySelector<HTMLButtonElement>('button[data-run-action="approval"]')?.focus();
+    currentList = { runs: [] };
+
+    await view.refresh();
+
+    expect(document.activeElement).toBe(document.querySelector('main section[aria-label="Runs"]'));
+    view.dispose();
+  });
+
+  it("ignores an earlier detail response that resolves after the latest selection", async () => {
+    const first = deferred<{ readonly structuredContent?: unknown }>();
+    const second = deferred<{ readonly structuredContent?: unknown }>();
+    const firstRun = runList(1).runs[0];
+    if (firstRun === undefined) {
+      throw new Error("Expected the first run.");
+    }
+    const runs: RunConsoleList = {
+      runs: [
+        {
+          ...firstRun,
+        },
+        {
+          ...firstRun,
+          runId: secondRunId,
+        },
+      ],
+    };
+    const { view } = await setup({
+      list: runs,
+      detailCall: (args) => (args.runId === firstRunId ? first.promise : second.promise),
+    });
+    document
+      .querySelector<HTMLButtonElement>(
+        `tr[data-run-id="${firstRunId}"] [data-run-action="details"]`,
+      )
+      ?.click();
+    document
+      .querySelector<HTMLButtonElement>(
+        `tr[data-run-id="${secondRunId}"] [data-run-action="details"]`,
+      )
+      ?.click();
+    second.resolve({
+      structuredContent: {
+        ...runDetail(),
+        runId: secondRunId,
+        usage: { inputTokens: 200, outputTokens: 3, costMicros: 4 },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector("dl")?.textContent).toContain("200");
+    });
+    first.resolve({
+      structuredContent: {
+        ...runDetail(),
+        usage: { inputTokens: 100, outputTokens: 3, costMicros: 4 },
+      },
+    });
+    await Promise.resolve();
+
+    expect(document.querySelector("dl")?.textContent).toContain("200");
+    expect(document.querySelector("dl")?.textContent).not.toContain("100");
+    view.dispose();
+  });
+
+  it("ignores an obsolete detail failure after a newer selection succeeds", async () => {
+    const first = deferred<{ readonly structuredContent?: unknown }>();
+    const second = deferred<{ readonly structuredContent?: unknown }>();
+    const firstRun = runList(1).runs[0];
+    if (firstRun === undefined) {
+      throw new Error("Expected the first run.");
+    }
+    const { view } = await setup({
+      list: {
+        runs: [{ ...firstRun }, { ...firstRun, runId: secondRunId }],
+      },
+      detailCall: (args) => (args.runId === firstRunId ? first.promise : second.promise),
+    });
+    document
+      .querySelector<HTMLButtonElement>(
+        `tr[data-run-id="${firstRunId}"] [data-run-action="details"]`,
+      )
+      ?.click();
+    document
+      .querySelector<HTMLButtonElement>(
+        `tr[data-run-id="${secondRunId}"] [data-run-action="details"]`,
+      )
+      ?.click();
+    second.resolve({
+      structuredContent: {
+        ...runDetail(),
+        runId: secondRunId,
+        usage: { inputTokens: 200, outputTokens: 3, costMicros: 4 },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector("dl")?.textContent).toContain("200");
+    });
+    first.reject(new Error("SYNTHETIC_STALE_DETAIL_ERROR"));
+    await Promise.resolve();
+
+    expect(document.querySelector("dl")?.textContent).toContain("200");
+    expect(document.body.textContent).not.toContain("temporarily unavailable");
+    view.dispose();
+  });
+
+  it("loads past empty intermediate pages until a visible page is available", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const firstRun = runList(1).runs[0];
+    if (firstRun === undefined) {
+      throw new Error("Expected a test run.");
+    }
+    const pages = new Map<string, RunConsoleList>([
+      ["", { runs: runList(1).runs, nextCursor: "cursor-1" }],
+      ["cursor-1", { runs: [], nextCursor: "cursor-2" }],
+      ["cursor-2", { runs: [{ ...firstRun, runId: secondRunId }] }],
+    ]);
+    const { view } = await setup({
+      listCall: (args) => {
+        calls.push(args);
+        const cursor = typeof args.cursor === "string" ? args.cursor : "";
+        const page = pages.get(cursor);
+        if (page === undefined) {
+          throw new Error("Unexpected cursor.");
+        }
+        return Promise.resolve({ structuredContent: page });
+      },
+    });
+    document.querySelector<HTMLButtonElement>("button:nth-of-type(2)")?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll("tbody tr")).toHaveLength(2);
+    });
+
+    expect(calls.map((args) => args.cursor)).toEqual([undefined, "cursor-1", "cursor-2"]);
+    view.dispose();
+  });
+
+  it("buffers the first render span until the telemetry bridge activates", async () => {
+    const hostReady = deferred<undefined>();
+    const emitted: unknown[] = [];
+    const telemetry: TestTelemetry = createAppTelemetry({
+      bridge: {
+        callTool: (_name, args) => {
+          emitted.push(...args.spans);
+          return Promise.resolve({ content: [] });
+        },
+      },
+      hostReady: hostReady.promise,
+      manifest: { spans },
+    });
+    const view = createRunsConsoleView(document.body, {
+      bridge: {
+        callTool: () => Promise.resolve({ structuredContent: runList() }),
+        openApproval: () => Promise.resolve(),
+      },
+      telemetry,
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Run list updated.");
+    });
+    expect(emitted).toEqual([]);
+    hostReady.resolve(undefined);
+    await vi.waitFor(() => {
+      expect(emitted).toContainEqual(expect.objectContaining({ name: "ui.render" }));
+    });
+    view.dispose();
+    await telemetry.dispose();
+  });
+
+  it("ignores a delayed list response after the status filter changes", async () => {
+    const initial = deferred<{ readonly structuredContent?: unknown }>();
+    const calls: Record<string, unknown>[] = [];
+    const { view } = await setup({
+      listCall: (args) => {
+        calls.push(args);
+        return calls.length === 1
+          ? initial.promise
+          : Promise.resolve({
+              structuredContent: {
+                runs: [{ ...runList(1).runs[0], status: "failed" }],
+              },
+            });
+      },
+    });
+    const filter = document.querySelector("select");
+    if (filter === null) {
+      throw new Error("Expected the status filter.");
+    }
+    filter.value = "failed";
+    filter.dispatchEvent(new Event("change"));
+    initial.resolve({ structuredContent: { runs: runList(1).runs } });
+
+    await vi.waitFor(() => {
+      expect(document.querySelector(".status-danger")?.textContent).toBe("failed");
+    });
+    expect(calls.map((args) => args.status)).toEqual([undefined, "failed"]);
+    expect(document.querySelector(".status-info")).toBeNull();
+    view.dispose();
+  });
+
+  it("ignores a delayed list error after the status filter changes", async () => {
+    const initial = deferred<{ readonly structuredContent?: unknown }>();
+    const calls: Record<string, unknown>[] = [];
+    const { view } = await setup({
+      listCall: (args) => {
+        calls.push(args);
+        return calls.length === 1
+          ? initial.promise
+          : Promise.resolve({
+              structuredContent: {
+                runs: [{ ...runList(1).runs[0], status: "failed" }],
+              },
+            });
+      },
+    });
+    const filter = document.querySelector("select");
+    if (filter === null) {
+      throw new Error("Expected the status filter.");
+    }
+    filter.value = "failed";
+    filter.dispatchEvent(new Event("change"));
+    initial.reject(new Error("SYNTHETIC_STALE_FILTER_ERROR"));
+
+    await vi.waitFor(() => {
+      expect(document.querySelector(".status-danger")?.textContent).toBe("failed");
+    });
+    expect(document.body.textContent).not.toContain("temporarily unavailable");
+    expect(calls.map((args) => args.status)).toEqual([undefined, "failed"]);
     view.dispose();
   });
 

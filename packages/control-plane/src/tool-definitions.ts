@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   type ControlPlaneAuthScope,
+  ApprovalAppGetRequestSchema,
+  ApprovalAppInputSchema,
   JsonValue,
   ResolveRequest,
   ResolveResponse,
@@ -30,6 +32,14 @@ import {
 export function toolDefinitions(): Tool[] {
   return [
     ...runToolDefinitions(),
+    {
+      name: "harness.approvals.get",
+      description: "Load one pending approval into its human review view.",
+      inputSchema: objectInputSchema(ApprovalAppGetRequestSchema),
+      outputSchema: z.toJSONSchema(ApprovalAppInputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: APPROVAL_RESOURCE_URI } },
+    },
     {
       name: "approve",
       description: "Approve a pending approval without resuming its run.",
@@ -139,7 +149,12 @@ export function toolScope(name: string): ControlPlaneAuthScope {
   ) {
     return "read";
   }
-  if (name === "approve" || name === "deny" || name === "harness.approvals.resolve") {
+  if (
+    name === "approve" ||
+    name === "deny" ||
+    name === "harness.approvals.get" ||
+    name === "harness.approvals.resolve"
+  ) {
     return "approve";
   }
   if (name === "harness.approvals.reveal") {
