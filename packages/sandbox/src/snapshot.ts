@@ -8,6 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { HarnessError, Id, WorkspaceRef } from "@harness/schemas";
 import type { KeyProvider } from "@harness/schemas";
 import { ensureRunWorkspace } from "./workspace.js";
+import { createEmptyWorkspaceArchive } from "./snapshot-empty.js";
 import {
   createWorkspaceArchive,
   assertWorkspaceArchiveLimits,
@@ -324,6 +325,9 @@ export class WorkspaceSnapshotter {
 
   async #createArchiveSource(runId: Id): Promise<Readable> {
     if (this.options.remoteWorkspace !== undefined) {
+      if (!(await this.options.remoteWorkspace.hasWorkspace(runId))) {
+        return createEmptyWorkspaceArchive(runId);
+      }
       return this.options.remoteWorkspace.createArchive(
         runId,
         this.#maxFileBytes,
