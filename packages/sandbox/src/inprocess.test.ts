@@ -69,7 +69,8 @@ function processHasExited(pid: number): boolean {
 }
 
 async function waitForProcessExit(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 500; attempt += 1) {
+  // 15 s: a SIGKILLed child can take seconds to be reaped on a loaded CI agent.
+  for (let attempt = 0; attempt < 1500; attempt += 1) {
     if (processHasExited(pid)) {
       return true;
     }
