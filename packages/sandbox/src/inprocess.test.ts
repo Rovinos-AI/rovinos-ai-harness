@@ -284,13 +284,23 @@ describe("InProcessBackend", () => {
   it("kills the process group when aborted", async () => {
     const backend = createBackend();
     const controller = new AbortController();
-    const parentScript = "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)";
+    // The child announces itself through a file in its working directory, so the test aborts only
+    // after the child is really running; a fixed delay raced slow child starts on a busy agent.
+    const parentScript =
+      'require("node:fs").writeFileSync("child.pid", String(process.pid)); ' +
+      "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)";
     const execution = backend.exec(
       runId,
-      makeSpec([process.execPath, "-e", parentScript], { timeoutMs: 5000 }),
+      makeSpec([process.execPath, "-e", parentScript], { timeoutMs: 20_000 }),
       controller.signal,
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const pidFile = join(workspaceRoot, runId, "project", "child.pid");
+    await vi.waitFor(
+      async () => {
+        expect(await readFile(pidFile, "utf8")).not.toBe("");
+      },
+      { timeout: 15_000, interval: 20 },
+    );
     controller.abort();
     const result = await execution;
     const childPid = Number(result.stdout);
@@ -298,7 +308,7 @@ describe("InProcessBackend", () => {
     expect(result.timedOut).toBe(false);
     expect(result.signal).toBe("SIGKILL");
     expect(await waitForProcessExit(childPid)).toBe(true);
-  });
+  }, 30_000);
 
   it("does not spawn a process when the signal is already aborted", async () => {
     const backend = createBackend();
