@@ -99,6 +99,8 @@ const configuration = [
       "**/node_modules/**",
       "docs/api/**",
       "**/*.generated.*",
+      // Scratch space (for example the quickstart doc-test repository copy); never lint it.
+      ".tmp/**",
     ],
   },
   {
