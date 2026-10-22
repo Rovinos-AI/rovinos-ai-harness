@@ -315,14 +315,16 @@ describe("AnthropicAdapter", () => {
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
       baseURL: "https://provider.test",
-      fetch: () => Promise.resolve(streamedSseResponse(frames, 5)),
+      // ~72 frames 40 ms apart run ~3 s, well past the idle timeout, so only keep-alive and thinking
+      // frames keep the stream alive; the 25x margin tolerates a loaded CI agent.
+      fetch: () => Promise.resolve(streamedSseResponse(frames, 40)),
     });
     const progress: unknown[] = [];
     const signal = new AbortController().signal;
     const result = await collectProviderStream({
       stream: (streamSignal) => adapter.stream(baseRequest, context(streamSignal)),
       signal,
-      idleTimeoutMs: 50,
+      idleTimeoutMs: 1_000,
       requestId,
       onProgress: (update) => progress.push(update),
     });

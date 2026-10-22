@@ -27,6 +27,10 @@ services:
       - sandbox
   presidio-analyzer:
     image: mcr.microsoft.com/presidio-analyzer:2.2.362
+    environment:
+      # gunicorn 25's control-server thread fails on the read-only root and can leave a lock held
+      # across fork, so the worker sometimes hangs before loading the model (#536).
+      GUNICORN_CMD_ARGS: --no-control-socket
     init: true
     read_only: true
     tmpfs:
