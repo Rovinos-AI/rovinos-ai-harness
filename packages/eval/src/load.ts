@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ContractError, parseJson, parseYaml } from "@harness/schemas";
@@ -9,6 +9,7 @@ import { EvalSuiteSchema } from "./schema.js";
 import type { EvalSuite, GraderSpec } from "./schema.js";
 
 const LoadSuiteOptionsSchema = z.object({ cwd: z.string().optional() }).strict();
+const MAX_SUITE_BYTES = 1_048_576;
 
 /** Options for resolving a suite path. */
 export type LoadSuiteOptions = z.infer<typeof LoadSuiteOptionsSchema>;
@@ -92,6 +93,30 @@ function resolveSuitePaths(suite: EvalSuite, suiteDirectory: string): EvalSuite 
   };
 }
 
+async function readSuiteFile(path: string): Promise<string> {
+  const chunks: Buffer[] = [];
+  let bytesRead = 0;
+  try {
+    for await (const rawChunk of createReadStream(path)) {
+      const chunk: unknown = rawChunk;
+      if (!Buffer.isBuffer(chunk)) {
+        throw new ContractError([{ path: [], code: "suite_file_invalid" }]);
+      }
+      bytesRead += chunk.byteLength;
+      if (bytesRead > MAX_SUITE_BYTES) {
+        throw new ContractError([{ path: [], code: "size_limit_exceeded" }]);
+      }
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    if (error instanceof ContractError) {
+      throw error;
+    }
+    throw new ContractError([{ path: [], code: "suite_file_unavailable" }]);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 /**
  * Validates an in-memory eval suite.
  *
@@ -142,12 +167,7 @@ export async function loadSuite(path: string, options: LoadSuiteOptions = {}): P
     }
     suite = parseSuite(moduleSuite(imported));
   } else if (extension === ".json" || extension === ".yaml" || extension === ".yml") {
-    let content: string;
-    try {
-      content = await readFile(absolutePath, { encoding: "utf8" });
-    } catch {
-      throw new ContractError([{ path: [], code: "suite_file_unavailable" }]);
-    }
+    const content = await readSuiteFile(absolutePath);
     suite =
       extension === ".json"
         ? parseJson(EvalSuiteSchema, content)

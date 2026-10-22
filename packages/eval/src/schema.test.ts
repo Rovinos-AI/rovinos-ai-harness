@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ContractError } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import basicSuite from "../../../examples/evals/basic.suite.js";
+import { suite as basicSuite } from "../../../examples/evals/basic.suite.js";
 import {
   defineSuite,
   EvalSuiteSchema,
@@ -29,10 +29,10 @@ function expectContractError(action: () => unknown): ContractError {
   try {
     action();
   } catch (error) {
-    expect(error).toBeInstanceOf(ContractError);
-    if (error instanceof ContractError) {
-      return error;
+    if (!(error instanceof ContractError)) {
+      throw new Error("Expected a contract validation error.");
     }
+    return error;
   }
   throw new Error("Expected a contract validation error.");
 }

@@ -78,7 +78,7 @@ export const GraderSpecSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("schema_valid"),
-      schemaRef: z.string().regex(/^.+#[A-Za-z_$][A-Za-z0-9_$]*$/u),
+      schemaRef: z.string().regex(/^.+#(?!\d)[$\w]+$/u),
     })
     .strict(),
   z

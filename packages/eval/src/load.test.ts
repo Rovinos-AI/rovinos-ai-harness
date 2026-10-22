@@ -45,6 +45,13 @@ tasks:
       - synthetic
 `;
 
+function requireContractError(error: unknown): ContractError {
+  if (!(error instanceof ContractError)) {
+    throw new Error("Expected a contract validation error.");
+  }
+  return error;
+}
+
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true })));
 });
@@ -110,38 +117,24 @@ describe("loadSuite", () => {
       JSON.stringify({ schemaVersion: 1, tasks: [{ ...task, id: "Bad Code" }] }),
     );
 
-    let caught: unknown;
-    try {
-      await loadSuite(path);
-    } catch (error) {
-      caught = error;
-    }
+    const error = requireContractError(await loadSuite(path).catch((caught: unknown) => caught));
 
-    expect(caught).toBeInstanceOf(ContractError);
-    if (caught instanceof ContractError) {
-      expect(caught.issues).toContainEqual({ path: ["tasks", 0, "id"], code: "invalid_format" });
-    }
+    expect(error.issues).toContainEqual({ path: ["tasks", 0, "id"], code: "invalid_format" });
   });
 
   it("returns value-free errors for unreadable and unsupported suite files", async () => {
     const directory = await createSuiteDirectory();
     const missingPath = join(directory, "missing.json");
     const unsupportedPath = join(directory, "suite.txt");
-    const readIssues = await loadSuite(missingPath).catch((error: unknown) => {
-      if (error instanceof ContractError) {
-        return error.issues;
-      }
-      throw error;
-    });
-    const unsupportedIssues = await loadSuite(unsupportedPath).catch((error: unknown) => {
-      if (error instanceof ContractError) {
-        return error.issues;
-      }
-      throw error;
-    });
+    const readError = requireContractError(
+      await loadSuite(missingPath).catch((error: unknown) => error),
+    );
+    const unsupportedError = requireContractError(
+      await loadSuite(unsupportedPath).catch((error: unknown) => error),
+    );
 
-    expect(readIssues).toEqual([{ path: [], code: "suite_file_unavailable" }]);
-    expect(unsupportedIssues).toEqual([{ path: [], code: "suite_format_unsupported" }]);
+    expect(readError.issues).toEqual([{ path: [], code: "suite_file_unavailable" }]);
+    expect(unsupportedError.issues).toEqual([{ path: [], code: "suite_format_unsupported" }]);
   });
 
   it("reports a safe issue when a TypeScript suite fails to load", async () => {
@@ -149,13 +142,10 @@ describe("loadSuite", () => {
     const path = join(directory, "invalid.suite.ts");
     await writeFile(path, `throw new Error("synthetic private content");`);
 
-    const error = await loadSuite(path).catch((caught: unknown) => caught);
+    const error = requireContractError(await loadSuite(path).catch((caught: unknown) => caught));
 
-    expect(error).toBeInstanceOf(ContractError);
-    if (error instanceof ContractError) {
-      expect(error.issues).toEqual([{ path: [], code: "suite_module_load_failed" }]);
-      expect(error.message).not.toContain("synthetic private content");
-    }
+    expect(error.issues).toEqual([{ path: [], code: "suite_module_load_failed" }]);
+    expect(error.message).not.toContain("synthetic private content");
   });
 
   it("uses the current directory option for relative suite paths", async () => {
@@ -173,14 +163,21 @@ describe("loadSuite", () => {
     const path = join(directory, "invalid.json");
     await writeFile(path, "{");
 
-    const pathError = await loadSuite("").catch((error: unknown) => error);
-    const jsonError = await loadSuite(path).catch((error: unknown) => error);
+    const pathError = requireContractError(await loadSuite("").catch((error: unknown) => error));
+    const jsonError = requireContractError(await loadSuite(path).catch((error: unknown) => error));
 
-    expect(pathError).toBeInstanceOf(ContractError);
-    expect(jsonError).toBeInstanceOf(ContractError);
-    if (jsonError instanceof ContractError) {
-      expect(jsonError.issues).toEqual([{ path: [], code: "invalid_json" }]);
-    }
+    expect(pathError.issues).toEqual([{ path: [], code: "too_small" }]);
+    expect(jsonError.issues).toEqual([{ path: [], code: "invalid_json" }]);
+  });
+
+  it("rejects oversized data suites while reading", async () => {
+    const directory = await createSuiteDirectory();
+    const path = join(directory, "large.json");
+    await writeFile(path, " ".repeat(1_048_577), "utf8");
+
+    const error = requireContractError(await loadSuite(path).catch((caught: unknown) => caught));
+
+    expect(error.issues).toEqual([{ path: [], code: "size_limit_exceeded" }]);
   });
 
   it("can read the expected fixture path after resolution", async () => {

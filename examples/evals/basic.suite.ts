@@ -2,7 +2,7 @@
 // This example uses synthetic data only.
 import { defineSuite } from "@harness/eval";
 
-export default defineSuite({
+export const suite = defineSuite({
   schemaVersion: 1,
   tasks: [
     {
