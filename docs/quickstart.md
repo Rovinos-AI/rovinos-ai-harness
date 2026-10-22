@@ -31,7 +31,8 @@ harness() { compose run --rm --no-deps harness "$@"; }
 
 ```bash
 cp examples/quickstart/.env.example examples/quickstart/.env
-compose build harness sandbox-runner
+compose build harness
+compose build sandbox-runner
 key="$(harness keys generate | sed -n '1p')"
 test -n "$key"
 while IFS= read -r line; do

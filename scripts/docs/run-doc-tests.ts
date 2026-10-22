@@ -187,6 +187,7 @@ export async function runQuickstartDocTests(): Promise<void> {
       env: {
         ...process.env,
         HARNESS_IMAGE: "harness:local",
+        HARNESS_SANDBOX_IMAGE: "harness-sandbox:local",
         COMPOSE_PROJECT_NAME: `harness-quickstart-${String(process.pid)}-${randomUUID()}`,
       },
     });
