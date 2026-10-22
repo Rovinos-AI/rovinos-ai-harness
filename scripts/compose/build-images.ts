@@ -68,32 +68,33 @@ export function setup(): void {
     return;
   }
   acquireBuildLock();
-  let build: ReturnType<typeof spawnSync>;
   try {
-    build = spawnSync(
-      "docker",
-      [
-        "compose",
-        "--env-file",
-        "infra/collector/VERSION",
-        "--profile",
-        "sandbox",
-        "--profile",
-        "sandbox-egress",
-        "--file",
-        "infra/compose/docker-compose.yml",
-        "build",
-        // sandbox-runner and sandbox-egress-proxy share the harness-sandbox:local tag; building both
-        // services would build that image twice in parallel and race. One service per image.
-        "harness",
-        "sandbox-runner",
-      ],
-      { stdio: "inherit", timeout: BUILD_TIMEOUT_MS },
-    );
+    // sandbox-runner and sandbox-egress-proxy share the harness-sandbox:local tag, so one service per
+    // image. Build them one at a time: two parallel `yarn build`s ran the 4 GiB CI Docker VM out of
+    // memory (the kernel OOM-killed node inside the build, 2026-10-22).
+    for (const service of ["harness", "sandbox-runner"]) {
+      const build = spawnSync(
+        "docker",
+        [
+          "compose",
+          "--env-file",
+          "infra/collector/VERSION",
+          "--profile",
+          "sandbox",
+          "--profile",
+          "sandbox-egress",
+          "--file",
+          "infra/compose/docker-compose.yml",
+          "build",
+          service,
+        ],
+        { stdio: "inherit", timeout: BUILD_TIMEOUT_MS },
+      );
+      if (build.status !== 0) {
+        throw new Error("compose_image_build_failed");
+      }
+    }
   } finally {
     releaseBuildLock();
-  }
-  if (build.status !== 0) {
-    throw new Error("compose_image_build_failed");
   }
 }
