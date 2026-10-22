@@ -147,4 +147,72 @@ describe("planDanglingIntents", () => {
       errorCode: "pii_blocked",
     });
   });
+
+  it("retries resolved input rounds once, then applies idempotency after a sent retry", () => {
+    const request = EventSchema.parse({
+      runId,
+      seq: 10,
+      ts: 2,
+      v: 1,
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      segmentId,
+      type: "input_requested",
+      requestId: "55555555555555555555555555",
+      source: "mcp_mrtr",
+      serverId: "mcp_test",
+      callId: callIds.non_idempotent_tool,
+      inputKey: "server-key",
+      round: 1,
+      mode: "form",
+      message: "tokenized",
+      schema: {
+        type: "object",
+        properties: { answer: { type: "string" } },
+      },
+      requestState: "opaque",
+    });
+    const resolution = EventSchema.parse({
+      runId,
+      seq: 11,
+      ts: 3,
+      v: 1,
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      segmentId,
+      type: "input_resolved",
+      requestId: "55555555555555555555555555",
+      source: "mcp_mrtr",
+      mode: "form",
+      round: 1,
+      action: "accept",
+      decidedBy: "human",
+      approverId: "cli.test",
+      waitMs: 1,
+      answer: { answer: "Ada" },
+    });
+    if (request.type !== "input_requested" || resolution.type !== "input_resolved") {
+      throw new Error("Expected input lifecycle events.");
+    }
+    const state = testState();
+    const withResolvedInput = {
+      ...state,
+      inputRequests: new Map([[request.requestId, request]]),
+      resolvedInputs: new Map([[resolution.requestId, resolution]]),
+      toolExecutionAttempts: new Map([[callIds.non_idempotent_tool, 1]]),
+    };
+    expect(planDanglingIntents(withResolvedInput, toolPort)[1]).toEqual({
+      kind: "retry_input",
+      callId: callIds.non_idempotent_tool,
+    });
+    expect(
+      planDanglingIntents(
+        {
+          ...withResolvedInput,
+          toolExecutionAttempts: new Map([[callIds.non_idempotent_tool, 2]]),
+        },
+        toolPort,
+      )[1],
+    ).toEqual({ kind: "escalate", callId: callIds.non_idempotent_tool });
+  });
 });

@@ -89,6 +89,7 @@ import {
   ResumeConflictError,
   RunAlreadyTerminalError,
   RunAwaitingApprovalError,
+  RunAwaitingInputError,
   resumeRun,
 } from "./resume.js";
 import type { ResumeRunOptions } from "./resume.js";
@@ -3041,6 +3042,52 @@ describe("runLoop", () => {
       expect(tool.calls.map(({ call }) => call.callId)).toEqual([modelCallId]);
       expect(stored.filter(({ type }) => type === "tool_intent")).toHaveLength(1);
       expect(stored.filter(({ type }) => type === "tool_result")).toHaveLength(1);
+    });
+
+    it("keeps a run with unresolved MCP input suspended without advancing its log", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      await createRunHistory(store, clock, [
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: modelCallId,
+          toolId: "input_tool",
+          idempotent: false,
+          policyDecision: "allow",
+          argsHash: "c".repeat(64),
+          args: { value: 1 },
+        },
+        {
+          type: "input_requested",
+          v: 1,
+          requestId: "55555555555555555555555555",
+          source: "mcp_mrtr",
+          serverId: "mcp_test",
+          callId: modelCallId,
+          inputKey: "server-key",
+          round: 1,
+          mode: "form",
+          message: "tokenized",
+          schema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+          },
+          requestState: "opaque",
+        },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "running",
+          to: "suspended",
+          reason: "awaiting_input",
+        },
+      ]);
+      const options = createResumeOptions(store, clock);
+      const headBeforeBlockedResume = await store.head(runId);
+
+      await expect(resumeRun(options)).rejects.toBeInstanceOf(RunAwaitingInputError);
+      await expect(store.head(runId)).resolves.toBe(headBeforeBlockedResume);
     });
 
     it.each(["approve", "deny"] as const)(

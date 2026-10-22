@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { PiiConfigSchema, type PiiActionSummary, type JsonValue } from "@harness/schemas";
+import {
+  HarnessError,
+  PiiConfigSchema,
+  type PiiActionSummary,
+  type JsonValue,
+} from "@harness/schemas";
 import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@harness/vault";
 import { PiiToolPort, type PiiToolPortLike, type PiiToolCall } from "./pii-tool-port.js";
 import { Tokenizer } from "./tokenizer.js";
@@ -105,7 +110,7 @@ function fixture(
       audits.push(audit);
     }),
   });
-  return { port, context, execute, summaries, inner, vault, audits };
+  return { port, context, execute, summaries, inner, vault, audits, tokenizer };
 }
 
 describe("PiiToolPort", () => {
@@ -396,5 +401,119 @@ describe("PiiToolPort", () => {
       errorCode: "pii_vault_failed",
       result: null,
     });
+  });
+
+  it("does not dispatch an answer when its durable vault audit fails", async () => {
+    const { port, context, execute, tokenizer, vault } = fixture();
+    class AuditRecordingFailure extends HarnessError {
+      readonly code = "run_event_record_failed";
+
+      constructor() {
+        super("Audit persistence failed.");
+      }
+    }
+    const failure = new AuditRecordingFailure();
+    const inputKey = await tokenizer.tokenizeOpaqueValue(runId, "input@example.test");
+    const requestState = await tokenizer.tokenizeOpaqueValue(runId, "opaque-state-canary");
+    const answer = await vault.put(runId, "email", "human@example.test");
+    let auditCount = 0;
+    const auditedContext = {
+      ...context,
+      inputRetry: {
+        inputResponses: {
+          [inputKey]: { action: "accept" as const, answer: { email: answer } },
+        },
+        round: 1,
+        requestState,
+      },
+      recordVaultAudit: () => {
+        auditCount++;
+        if (auditCount === 2) {
+          return Promise.reject(failure);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    await expect(port.execute({ ...call, args: {} }, auditedContext)).rejects.toBe(failure);
+    expect(auditCount).toBe(2);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("restores declined input responses without an opaque request state", async () => {
+    const { port, context, execute, tokenizer } = fixture();
+    const inputKey = await tokenizer.tokenizeOpaqueValue(runId, "input-key");
+
+    await port.execute(
+      { ...call, args: {} },
+      {
+        ...context,
+        inputRetry: {
+          inputResponses: { [inputKey]: { action: "decline" } },
+          round: 1,
+        },
+      },
+    );
+
+    expect(execute.mock.calls[0]?.[1].inputRetry).toEqual({
+      inputResponses: { "input-key": { action: "decline" } },
+      round: 1,
+    });
+  });
+
+  it("rejects input retries with unprotected keys or malformed opaque state", async () => {
+    const unprotected = fixture();
+    await expect(
+      unprotected.port.execute(
+        { ...call, args: {} },
+        {
+          ...unprotected.context,
+          inputRetry: {
+            inputResponses: { "raw-input-key": { action: "decline" } },
+            round: 1,
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ outcome: "error", errorCode: "pii_vault_failed" });
+    expect(unprotected.execute).not.toHaveBeenCalled();
+
+    const malformed = fixture();
+    const inputKey = await malformed.tokenizer.tokenizeOpaqueValue(runId, "input-key");
+    const requestState = await malformed.vault.put(runId, "mcp_input", "not-wrapped");
+    await expect(
+      malformed.port.execute(
+        { ...call, args: {} },
+        {
+          ...malformed.context,
+          inputRetry: {
+            inputResponses: { [inputKey]: { action: "decline" } },
+            round: 1,
+            requestState,
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ outcome: "error", errorCode: "pii_vault_failed" });
+    expect(malformed.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch an answer containing an unresolved token", async () => {
+    const { port, context, execute, tokenizer } = fixture();
+    const inputKey = await tokenizer.tokenizeOpaqueValue(runId, "input-key");
+
+    await expect(
+      port.execute(
+        { ...call, args: {} },
+        {
+          ...context,
+          inputRetry: {
+            inputResponses: {
+              [inputKey]: { action: "accept", answer: { answer: "<EMAIL_99>" } },
+            },
+            round: 1,
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ outcome: "error", errorCode: "pii_vault_failed" });
+    expect(execute).not.toHaveBeenCalled();
   });
 });

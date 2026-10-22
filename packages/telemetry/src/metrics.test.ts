@@ -6,12 +6,14 @@ import {
   TELEMETRY_METRIC_STRING_ATTRIBUTES,
   HOST_APP_REJECTED_REASONS,
   POLICY_DECISIONS,
+  MCP_INPUT_REQUEST_OUTCOMES,
   WORKER_JOB_OUTCOMES,
   METRIC_ALLOWLIST,
   countHostAppRejected,
   countHostAppSpansAccepted,
   countModelUsage,
   countMcpDiscoveryFailed,
+  countMcpInputRequest,
   countPiiBlobHit,
   countPiiDetectorDegraded,
   countPolicyDecision,
@@ -199,6 +201,24 @@ describe("countDroppedTelemetry", () => {
     expectAddCallsAreAllowlisted("harness.mcp.discovery_failed");
   });
 
+  it("counts MCP input outcomes without server identifiers", () => {
+    for (const outcome of MCP_INPUT_REQUEST_OUTCOMES) {
+      countMcpInputRequest(outcome);
+    }
+
+    expect(createCounter).toHaveBeenCalledWith("harness.mcp.input_requests");
+    expect(add.mock.calls).toEqual(
+      MCP_INPUT_REQUEST_OUTCOMES.map((outcome) => [
+        1,
+        { "harness.mcp.input_requests.outcome": outcome },
+      ]),
+    );
+    expect(TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.mcp.input_requests.outcome"]).toEqual(
+      MCP_INPUT_REQUEST_OUTCOMES,
+    );
+    expectAddCallsAreAllowlisted("harness.mcp.input_requests");
+  });
+
   it("uses only closed-enum string attributes for metric instruments", () => {
     expect(HOST_APP_REJECTED_REASONS).toEqual([
       "schema",
@@ -217,6 +237,7 @@ describe("countDroppedTelemetry", () => {
       "harness.telemetry.dropped.reason": dropReasons,
       "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
       "harness.policy.decision": POLICY_DECISIONS,
+      "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
       "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
     });
     expect(

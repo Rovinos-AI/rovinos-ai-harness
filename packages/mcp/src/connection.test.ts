@@ -404,7 +404,7 @@ describe("McpConnection", () => {
     expect(connection.state).toBe("unavailable");
 
     await expect(
-      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema),
+      connection.callTool({ params: { name: "tool-1", arguments: { value: "ok" } }, inputSchema }),
     ).resolves.toMatchObject({ content: [{ text: "called" }] });
     expect(connection.state).toBe("ready");
     expect(delays).toEqual([250]);
@@ -439,7 +439,7 @@ describe("McpConnection", () => {
     await connection.connect();
 
     await expect(
-      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema),
+      connection.callTool({ params: { name: "tool-1", arguments: { value: "ok" } }, inputSchema }),
     ).resolves.toMatchObject({ content: [{ text: "retried" }] });
     expect(calls).toBe(2);
     for (const peer of peers) {
@@ -465,7 +465,7 @@ describe("McpConnection", () => {
     await connection.connect();
 
     await expect(
-      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema),
+      connection.callTool({ params: { name: "tool-1", arguments: { value: "ok" } }, inputSchema }),
     ).rejects.toMatchObject({ code: "mcp_connection_lost" });
     expect(calls).toBe(1);
     await connection.close();
@@ -476,7 +476,7 @@ describe("McpConnection", () => {
     const connection = connectionFor(config(), createTransport);
 
     await expect(
-      connection.callTool({ name: "tool-1", arguments: {} }, inputSchema),
+      connection.callTool({ params: { name: "tool-1", arguments: {} }, inputSchema }),
     ).rejects.toMatchObject({ code: "mcp_tool_arguments_invalid" });
     expect(createTransport).not.toHaveBeenCalled();
   });
@@ -526,8 +526,10 @@ describe("McpConnection", () => {
     );
 
     await expect(
-      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema, {
-        signal: controller.signal,
+      connection.callTool({
+        params: { name: "tool-1", arguments: { value: "ok" } },
+        inputSchema,
+        options: { signal: controller.signal },
       }),
     ).rejects.toMatchObject({ code: "mcp_connect_timeout" });
     expect(attempts).toBe(0);
@@ -541,7 +543,7 @@ describe("McpConnection", () => {
     await connection.connect();
 
     await expect(
-      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema),
+      connection.callTool({ params: { name: "tool-1", arguments: { value: "ok" } }, inputSchema }),
     ).rejects.toMatchObject({ code: "mcp_protocol_error", protocolCode: -32603 });
     expect(connection.state).toBe("ready");
     await connection.close();
@@ -563,8 +565,8 @@ describe("McpConnection", () => {
 
     try {
       await trace.getTracer("mcp-test").startActiveSpan("harness.mcp_call", async (span) => {
-        await trustedConnection.callTool(
-          {
+        await trustedConnection.callTool({
+          params: {
             name: "tool-1",
             arguments: { value: "ok" },
             _meta: {
@@ -575,7 +577,7 @@ describe("McpConnection", () => {
             },
           },
           inputSchema,
-        );
+        });
         expect(receivedMeta).toEqual([
           {
             progressToken: "progress-1",
@@ -601,8 +603,8 @@ describe("McpConnection", () => {
 
     try {
       await connection.connect();
-      await connection.callTool(
-        {
+      await connection.callTool({
+        params: {
           name: "tool-1",
           arguments: { value: "ok" },
           _meta: {
@@ -613,7 +615,7 @@ describe("McpConnection", () => {
           },
         },
         inputSchema,
-      );
+      });
       expect(receivedMeta).toEqual([{ progressToken: "progress-1" }]);
     } finally {
       await connection.close();
@@ -726,12 +728,11 @@ describe("McpConnection", () => {
       if (listedTool === undefined) {
         throw new Error("missing header tool");
       }
-      await connection.callTool(
-        { name: listedTool.name, arguments: { region: "<EMAIL_1>" } },
-        headerSchema,
-        undefined,
-        listedTool,
-      );
+      await connection.callTool({
+        params: { name: listedTool.name, arguments: { region: "<EMAIL_1>" } },
+        inputSchema: headerSchema,
+        toolDefinition: listedTool,
+      });
       expect(requestHeaders.at(-1)?.get("Mcp-Param-Region")).toBe("<EMAIL_1>");
     } finally {
       await connection.close();
@@ -859,7 +860,10 @@ describe("McpConnection", () => {
     await connection.connect();
 
     await expect(
-      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, true),
+      connection.callTool({
+        params: { name: "tool-1", arguments: { value: "ok" } },
+        inputSchema: true,
+      }),
     ).resolves.toMatchObject({ content: [{ type: "text", text: "called" }] });
     await connection.close();
     await peer.serverTransport.close();

@@ -57,3 +57,9 @@ export {
 } from "./registry.js";
 export { UNREGISTERED_TOOL_ID } from "./registry.js";
 export { buildRequestMeta } from "./trace-injection.js";
+export {
+  type ElicitationInputOutcome,
+  type ElicitationInputRequired,
+  type ElicitationPort,
+  type ElicitationRetry,
+} from "./elicitation/mrtr.js";

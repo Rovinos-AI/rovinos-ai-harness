@@ -77,6 +77,23 @@ interface TokenizationContext {
 export class Tokenizer {
   constructor(private readonly dependencies: TokenizerDependencies) {}
 
+  /** Stores an opaque protocol value as one run-scoped vault token without inspection. */
+  async tokenizeOpaqueValue(runId: Id, value: string): Promise<string> {
+    try {
+      const token = await this.dependencies.vault.put(
+        this.scopeOf(runId),
+        "mcp_input",
+        `\u0000${value}\u0000`,
+      );
+      if (!isToken(token)) {
+        throw new PiiTokenizerError("pii_vault_failed");
+      }
+      return token;
+    } catch {
+      throw new PiiTokenizerError("pii_vault_failed");
+    }
+  }
+
   /**
    * Apply policy to detected entities in text.
    *

@@ -16,6 +16,7 @@ import {
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
 import { invokeMcpTool } from "./mcp-call.js";
+import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
 import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
@@ -35,6 +36,14 @@ import {
 export type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
 export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
 export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
+
+interface ConnectionToolCall {
+  readonly params: CallToolRequest["params"];
+  readonly inputSchema: unknown;
+  readonly options?: CallToolRequestOptions;
+  readonly toolDefinition?: McpTool;
+  readonly inputRetry?: ElicitationRetry;
+}
 
 /**
  * Manages one MCP SDK client, its transport, tool discovery, and reconnection.
@@ -310,17 +319,11 @@ export class McpConnection {
 
   /**
    * Validates tool arguments before network I/O and calls the remote tool.
-   * @param params - Native tool name, arguments, and optional request metadata.
-   * @param inputSchema - Untrusted JSON Schema supplied by the tool registry.
-   * @param options - SDK request options such as the cancellation signal.
+   * @param request - Native tool request and its schema and retry options.
    * @returns The remote tool result.
    */
-  async callTool(
-    params: CallToolRequest["params"],
-    inputSchema: unknown,
-    options?: CallToolRequestOptions,
-    toolDefinition?: McpTool,
-  ): Promise<CallToolResult> {
+  async callTool(request: ConnectionToolCall): Promise<CallToolResult> {
+    const { params, inputSchema, options, toolDefinition, inputRetry } = request;
     try {
       const validate = getOrCreateValidator(inputSchema);
       validate(params.arguments ?? {});
@@ -330,7 +333,7 @@ export class McpConnection {
 
     await this.#ensureReady(options?.signal);
     try {
-      return await this.#invoke(params, options, toolDefinition);
+      return await this.#invoke(params, options, toolDefinition, inputRetry);
     } catch (error) {
       if (error instanceof McpAuthRequiredError) {
         this.#markUnavailable();
@@ -351,7 +354,7 @@ export class McpConnection {
       }
       await this.#reconnect(options?.signal);
       try {
-        return await this.#invoke(params, options, toolDefinition);
+        return await this.#invoke(params, options, toolDefinition, inputRetry);
       } catch (retryError) {
         if (retryError instanceof McpProtocolError) {
           throw retryError;
@@ -365,6 +368,7 @@ export class McpConnection {
     params: CallToolRequest["params"],
     options?: CallToolRequestOptions,
     toolDefinition?: McpTool,
+    inputRetry?: ElicitationRetry,
   ): Promise<CallToolResult> {
     const client = this.#client;
     if (client === undefined || this.#state !== "ready") {
@@ -379,6 +383,7 @@ export class McpConnection {
           params,
           ...(options === undefined ? {} : { requestOptions: options }),
           ...(toolDefinition === undefined ? {} : { toolDefinition }),
+          ...(inputRetry === undefined ? {} : { inputRetry }),
         }),
     );
   }
