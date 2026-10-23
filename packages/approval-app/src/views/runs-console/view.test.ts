@@ -308,6 +308,37 @@ describe("runs console view", () => {
     await telemetry.dispose();
   });
 
+  it("resumes polling when a run subscription closes", async () => {
+    vi.useFakeTimers();
+    let onClose: (() => void) | undefined;
+    const calls: string[] = [];
+    const { telemetry } = createTelemetry();
+    const view = createRunsConsoleView(document.body, {
+      bridge: {
+        callTool: (name) => {
+          calls.push(name);
+          return Promise.resolve({ structuredContent: runList() });
+        },
+        subscribeRuns: (_onUpdate, onError) => {
+          onClose = onError;
+          return () => undefined;
+        },
+        openApproval: () => Promise.resolve(),
+      },
+      telemetry,
+    });
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+
+    onClose?.();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(calls).toHaveLength(2);
+    view.dispose();
+    await telemetry.dispose();
+  });
+
   it("falls back to polling when the host cannot establish run subscriptions", async () => {
     vi.useFakeTimers();
     const calls: string[] = [];

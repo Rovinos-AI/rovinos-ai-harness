@@ -34,8 +34,8 @@ export interface RunsConsoleBridge {
     readonly isError?: boolean | undefined;
     readonly structuredContent?: unknown;
   }>;
-  /** Registers an optional run-resource update listener and returns its disposer. */
-  subscribeRuns?(onUpdate: () => void): () => void;
+  /** Registers an optional run-resource listener and reports when it is lost. */
+  subscribeRuns?(onUpdate: () => void, onError: () => void): () => void;
   openApproval(approvalId: string): Promise<void>;
 }
 
@@ -98,10 +98,25 @@ class RunsConsoleController implements RunsConsoleView {
     this.layout.loadMoreButton.addEventListener("click", this.loadMoreClicked);
     this.layout.filter.addEventListener("change", this.filterChanged);
     this.document.addEventListener("visibilitychange", this.visibilityChanged);
+    let unsubscribeReady = false;
+    let subscriptionFailed = false;
     try {
-      this.unsubscribeRuns = options.bridge.subscribeRuns?.(() => {
-        void this.refresh();
-      });
+      this.unsubscribeRuns = options.bridge.subscribeRuns?.(
+        () => {
+          void this.refresh();
+        },
+        () => {
+          if (unsubscribeReady) {
+            this.subscriptionFailed();
+          } else {
+            subscriptionFailed = true;
+          }
+        },
+      );
+      unsubscribeReady = true;
+      if (subscriptionFailed) {
+        this.subscriptionFailed();
+      }
     } catch {
       this.unsubscribeRuns = undefined;
     }
@@ -157,6 +172,18 @@ class RunsConsoleController implements RunsConsoleView {
       this.window.clearTimeout(this.timer);
       this.timer = undefined;
     }
+  }
+
+  private subscriptionFailed(): void {
+    const unsubscribe = this.unsubscribeRuns;
+    this.unsubscribeRuns = undefined;
+    try {
+      unsubscribe?.();
+    } catch {
+      this.schedule(this.pollDelay);
+      return;
+    }
+    this.schedule(this.pollDelay);
   }
 
   private currentFilter(): string | undefined {
