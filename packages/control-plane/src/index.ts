@@ -28,12 +28,19 @@ export {
 } from "./auth.js";
 export {
   ConfirmationGate,
+  type HumanInputRequest,
+  type HumanInputResult,
   type ConfirmationGateOptions,
   type ConfirmationGateResult,
   type ConfirmationRequest,
 } from "./confirmation-gate.js";
 export { RunSupervisor, type RunSupervisorOptions } from "./run-supervisor.js";
 export { registerApproveTool, type ApproveToolOptions } from "./tools/approve.js";
+export {
+  elicitDecision,
+  registerReviewApprovalTool,
+  type ReviewApprovalToolOptions,
+} from "./tools/review-approval.js";
 export { registerDenyTool, type DenyToolOptions } from "./tools/deny.js";
 export { registerResumeRunTool, type ResumeRunToolOptions } from "./tools/resume-run.js";
 export { registerCancelRunTool, type CancelRunToolOptions } from "./tools/cancel-run.js";
@@ -65,6 +72,11 @@ export {
   getRunOutputSchema,
   approveInputSchema,
   denyInputSchema,
+  approvalDenyReasonCodes,
+  approvalDenyReasonSchema,
+  reviewApprovalInputSchema,
+  reviewApprovalDecisionSchema,
+  reviewApprovalOutputSchema,
   runLifecycleInputSchema,
   decisionOutputSchema,
   resumeRunOutputSchema,
@@ -78,6 +90,10 @@ export {
   type GetRunOutput,
   type ApproveInput,
   type DenyInput,
+  type ApprovalDenyReason,
+  type ReviewApprovalInput,
+  type ReviewApprovalDecision,
+  type ReviewApprovalOutput,
   type DecisionOutput,
   type ResumeRunOutput,
   type StartRunInput,
