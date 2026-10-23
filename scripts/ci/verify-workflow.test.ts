@@ -135,6 +135,7 @@ describe("CI workflow", () => {
     expect(unit?.run).toContain("--reporter=junit");
     expect(unit?.run).toContain("--coverage.reportOnFailure");
     expect(unit?.run).toContain("--coverage.reporter=cobertura");
+    expect(unit?.run).toContain("--maxWorkers=2");
     const upload = jobSteps("unit").find((step) => step.name === "Upload unit reports");
     expect(upload?.if).toBe("success() || failure()");
   });

@@ -89,12 +89,15 @@ jobs:
       - uses: ./.github/actions/node-setup
       - name: Build detector packages for the PII report
         run: yarn build
+      # Two workers on the 4-vCPU hosted runner, keeping the Mac agent's ratio (4 workers on 10
+      # cores). Four workers plus coverage saturate the runner, and CPU-heavy tests (TypeScript
+      # emit, type-aware ESLint) then overran their timeouts (#565, #567).
       - name: Unit tests
         run: >
           yarn test:unit
           --reporter=default --reporter=junit
           --outputFile.junit=reports/junit.xml
-          --maxWorkers=4
+          --maxWorkers=2
           --coverage
           --coverage.reportOnFailure
           --coverage.reporter=text-summary --coverage.reporter=cobertura
