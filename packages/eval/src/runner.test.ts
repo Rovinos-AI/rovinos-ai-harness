@@ -42,7 +42,9 @@ function resultFor(trial: TrialSpec, status: TrialResult["status"] = "completed"
 }
 
 afterEach(async () => {
-  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 describe("runEval", () => {
@@ -72,12 +74,12 @@ describe("runEval", () => {
         }
       },
     };
-    const results = await runEval(
-      makeSuite(),
-      [{ id: "baseline" }],
-      executor,
-      { outDir, concurrency: 2, trials: 2, seed: 7 },
-    );
+    const results = await runEval(makeSuite(), [{ id: "baseline" }], executor, {
+      outDir,
+      concurrency: 2,
+      trials: 2,
+      seed: 7,
+    });
     const lines = (await readFile(join(outDir, "trials.jsonl"), "utf8"))
       .trim()
       .split("\n")

@@ -83,7 +83,10 @@ async function runContainer({
   });
   const completion = child.then(
     ({ exitCode }) => ({ exitCode: exitCode ?? null, timedOut: false }),
-    () => Promise.reject(Object.assign(new Error("docker_process_failed"), { code: "docker_process_failed" })),
+    () =>
+      Promise.reject(
+        Object.assign(new Error("docker_process_failed"), { code: "docker_process_failed" }),
+      ),
   );
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const outcome = await Promise.race([
@@ -206,7 +209,9 @@ export class DockerExecutor implements TrialExecutor {
     const startedAt = performance.now();
     const prepared = await prepareTrial(trial);
     if (trial.workDir.includes(",")) {
-      throw Object.assign(new Error("docker_mount_path_invalid"), { code: "docker_mount_path_invalid" });
+      throw Object.assign(new Error("docker_mount_path_invalid"), {
+        code: "docker_mount_path_invalid",
+      });
     }
     const name = codeFromTrial(trial);
     const args = [
@@ -242,11 +247,7 @@ export class DockerExecutor implements TrialExecutor {
       key: prepared.key,
     });
     const durationMs = Math.max(0, Math.floor(performance.now() - startedAt));
-    const storedResult = await readRunResult(
-      prepared.dbPath,
-      prepared.workspaceDir,
-      durationMs,
-    );
+    const storedResult = await readRunResult(prepared.dbPath, prepared.workspaceDir, durationMs);
     if (outcome.timedOut) {
       return TrialResultSchema.parse({
         ...storedResult,

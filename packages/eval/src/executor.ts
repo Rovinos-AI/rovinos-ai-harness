@@ -80,10 +80,7 @@ function runtimeConfig(config: TrialConfig): RuntimeConfig {
   };
 }
 
-function trialBudgets(
-  task: EvalTask,
-  variant: EvalVariant,
-): z.input<typeof RunBudgetsSchema> {
+function trialBudgets(task: EvalTask, variant: EvalVariant): z.input<typeof RunBudgetsSchema> {
   return { ...task.budgets, ...variant.budgets };
 }
 
@@ -93,10 +90,7 @@ function configForTrial(task: EvalTask, variant: EvalVariant, keyId: string): Tr
   const contextStrategy = variant.contextStrategy ?? task.contextStrategy;
   return TrialConfigSchema.parse({
     run: RunConfigSchema.parse({ budgets }),
-    roles:
-      contextStrategy === undefined
-        ? []
-        : [{ id: "eval", tools: "*", contextStrategy }],
+    roles: contextStrategy === undefined ? [] : [{ id: "eval", tools: "*", contextStrategy }],
     store: StoreConfigSchema.parse({ dialect: "sqlite" }),
     keys: KeysConfigSchema.parse({
       currentKeyId: keyId,
@@ -105,9 +99,7 @@ function configForTrial(task: EvalTask, variant: EvalVariant, keyId: string): Tr
     models: ModelsConfigSchema.parse({
       routing: { default: variant.models ?? task.models ?? [] },
     }),
-    policy: PolicyConfigSchema.parse(
-      policyFile === undefined ? {} : { file: "policy.yaml" },
-    ),
+    policy: PolicyConfigSchema.parse(policyFile === undefined ? {} : { file: "policy.yaml" }),
     pii: PiiConfigSchema.parse({}),
     vault: VaultConfigSchema.parse({ backend: "sqlite" }),
   });

@@ -22,7 +22,14 @@ const directories: string[] = [];
 function makeTrial(workDir: string): TrialSpec {
   const suite = defineSuite({
     schemaVersion: 1,
-    tasks: [{ id: "docker_smoke", input: { goal: "A synthetic integration goal." }, graders: [], tags: [] }],
+    tasks: [
+      {
+        id: "docker_smoke",
+        input: { goal: "A synthetic integration goal." },
+        graders: [],
+        tags: [],
+      },
+    ],
   });
   const task = suite.tasks[0];
   if (task === undefined) {

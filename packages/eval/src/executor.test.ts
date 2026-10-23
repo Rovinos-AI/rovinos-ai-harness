@@ -51,7 +51,9 @@ function trial(workDir: string, fixtureDir?: string, policyFile?: string): Trial
 }
 
 afterEach(async () => {
-  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 describe("prepareTrial", () => {

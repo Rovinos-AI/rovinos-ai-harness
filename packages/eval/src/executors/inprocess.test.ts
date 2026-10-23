@@ -48,7 +48,9 @@ function makeTrial(workDir: string): TrialSpec {
 }
 
 afterEach(async () => {
-  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 describe("InProcessExecutor", () => {

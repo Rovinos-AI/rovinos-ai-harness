@@ -46,7 +46,13 @@ function errorCodeFrom(error: unknown): string {
 }
 
 function outputPaths(outDir: string, taskId: string, variantId: string, trialIndex: number) {
-  return join(outDir, "trials", pathComponent(taskId), pathComponent(variantId), String(trialIndex));
+  return join(
+    outDir,
+    "trials",
+    pathComponent(taskId),
+    pathComponent(variantId),
+    String(trialIndex),
+  );
 }
 
 function makePlan(
@@ -146,9 +152,7 @@ export async function runEval(
         });
       }
       results.set(index, result);
-      writeChain = writeChain.then(() =>
-        output.appendFile(`${JSON.stringify(result)}\n`, "utf8"),
-      );
+      writeChain = writeChain.then(() => output.appendFile(`${JSON.stringify(result)}\n`, "utf8"));
       await writeChain;
     }
   }

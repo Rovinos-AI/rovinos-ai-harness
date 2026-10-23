@@ -29,15 +29,12 @@ function pendingProcess(): Promise<{ exitCode: number }> & { kill: ReturnType<ty
   const promise = new Promise<{ exitCode: number }>((resolve) => {
     finish = resolve;
   });
-  return Object.assign(
-    promise,
-    {
-      kill: vi.fn(() => {
-        finish({ exitCode: 143 });
-        return true;
-      }),
-    },
-  );
+  return Object.assign(promise, {
+    kill: vi.fn(() => {
+      finish({ exitCode: 143 });
+      return true;
+    }),
+  });
 }
 
 async function createDirectory(): Promise<string> {
@@ -122,7 +119,9 @@ async function createRun(workDir: string, key: string, run: boolean): Promise<vo
 afterEach(async () => {
   mocks.execa.mockReset();
   vi.useRealTimers();
-  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 describe("DockerExecutor", () => {
@@ -132,26 +131,22 @@ describe("DockerExecutor", () => {
     let invocation: { args: string[]; input: string | undefined } | undefined;
     mocks.execa.mockImplementation(
       (_command: string, args: string[], options: { env?: NodeJS.ProcessEnv; input?: string }) => {
-      invocation = { args, input: options.input };
-      const key = options.env?.HARNESS_EVAL_KEY;
-      if (key === undefined) {
-        throw new Error("synthetic_key_missing");
-      }
-      return createRun(workDir, key, true).then(() => ({ exitCode: 0 }));
+        invocation = { args, input: options.input };
+        const key = options.env?.HARNESS_EVAL_KEY;
+        if (key === undefined) {
+          throw new Error("synthetic_key_missing");
+        }
+        return createRun(workDir, key, true).then(() => ({ exitCode: 0 }));
       },
     );
 
-    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
-      makeTrial(workDir),
-    );
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(workDir));
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeDefined();
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2, costMicros: 0 });
     expect(result.exitCode).toBe(0);
-    expect(invocation?.args).toEqual(
-      expect.arrayContaining(["--network", "none", "--input", "-"]),
-    );
+    expect(invocation?.args).toEqual(expect.arrayContaining(["--network", "none", "--input", "-"]));
     expect(invocation?.input).toBe(JSON.stringify({ goal: "A synthetic goal." }));
     expect(JSON.stringify(invocation?.args)).not.toContain("A synthetic goal.");
   });
@@ -160,9 +155,7 @@ describe("DockerExecutor", () => {
     const workDir = join(await createDirectory(), "trial");
     mocks.execa.mockImplementation(() => completedProcess(17));
 
-    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
-      makeTrial(workDir),
-    );
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(workDir));
 
     expect(result).toMatchObject({
       status: "error",

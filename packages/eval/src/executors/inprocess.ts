@@ -50,7 +50,9 @@ export class InProcessExecutor implements TrialExecutor {
         resolve: (reference) =>
           reference === "env:HARNESS_EVAL_KEY"
             ? Promise.resolve({ reveal: () => prepared.key })
-            : Promise.reject(Object.assign(new Error("secret_unavailable"), { code: "secret_unavailable" })),
+            : Promise.reject(
+                Object.assign(new Error("secret_unavailable"), { code: "secret_unavailable" }),
+              ),
       },
     });
 
