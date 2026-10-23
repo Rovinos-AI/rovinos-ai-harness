@@ -214,7 +214,7 @@ describe("RunnerPool", () => {
     await pool.releaseLease(runId);
   });
 
-  it("releases runner leases when the pool closes and safely ignores an unleased run", async () => {
+  it("releases runner leases when the pool closes and safely ignores a run without a lease", async () => {
     const assigned = runner();
     const pool = new RunnerPool({ runners: [assigned] });
 

@@ -155,7 +155,7 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
-  it("leases a pooled runner for run, suspension, and failure lifecycles", async () => {
+  it("leases a pooled runner through run, suspension, and failure", async () => {
     const createPooledRunner = () => {
       const runner: RunnerPoolRunner = {
         healthCheck: vi.fn(() => Promise.resolve(true)),
