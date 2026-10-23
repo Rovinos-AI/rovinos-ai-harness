@@ -259,19 +259,35 @@ export class ConfirmationGate {
       return { status: "denied", code: Code.parse("confirmation_state_mismatch") };
     }
 
-    const answer = acceptedContent(
+    return parseHumanAnswer(
       context.mcpReq.inputResponses,
       elicitation.key,
       elicitation.answerSchema,
     );
-    if (answer === undefined || answer === null) {
-      return { status: "declined" };
-    }
-    const parsedAnswer = elicitation.answerSchema.safeParse(answer);
-    return parsedAnswer.success
-      ? { status: "accepted", content: parsedAnswer.data }
-      : { status: "declined" };
   }
+}
+
+function parseHumanAnswer<S extends z.ZodType>(
+  inputResponses: ServerContext["mcpReq"]["inputResponses"],
+  key: string,
+  answerSchema: S,
+): HumanInputResult<z.output<S>> {
+  const responses = z.record(z.string(), z.unknown()).safeParse(inputResponses);
+  const response = responses.success ? responses.data[key] : undefined;
+  const action = z
+    .looseObject({ action: z.enum(["accept", "decline", "cancel"]) })
+    .safeParse(response);
+  if (!action.success || action.data.action !== "accept") {
+    return { status: "declined" };
+  }
+  const answer = acceptedContent(inputResponses, key, answerSchema);
+  if (answer === undefined || answer === null) {
+    return { status: "denied", code: Code.parse("human_input_invalid") };
+  }
+  const parsedAnswer = answerSchema.safeParse(answer);
+  return parsedAnswer.success
+    ? { status: "accepted", content: parsedAnswer.data }
+    : { status: "denied", code: Code.parse("human_input_invalid") };
 }
 
 function supportsFormElicitation(

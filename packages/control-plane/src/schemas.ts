@@ -44,11 +44,21 @@ export const approveInputSchema = z
   })
   .strict();
 
+/** Closed set of supported denial reasons accepted by control-plane decision tools. */
+export const approvalDenyReasonCodes = [
+  "reviewed",
+  "not_approved",
+  "policy_violation",
+  "risk_unacceptable",
+] as const;
+/** Validates the closed denial reason codes accepted by control-plane tools. */
+export const approvalDenyReasonSchema = z.enum(approvalDenyReasonCodes);
+
 /** Validated input for the `deny` tool. */
 export const denyInputSchema = z
   .object({
     approvalId: Id,
-    reason: Code.optional(),
+    reason: approvalDenyReasonSchema.optional(),
   })
   .strict();
 
@@ -59,7 +69,7 @@ export const reviewApprovalInputSchema = z.object({ approvalId: Id }).strict();
 export const reviewApprovalDecisionSchema = z
   .object({
     decision: z.enum(["approve", "deny"]),
-    reason: Code.optional(),
+    reason: approvalDenyReasonSchema.optional(),
   })
   .strict();
 
@@ -158,6 +168,8 @@ export type GetRunOutput = z.infer<typeof getRunOutputSchema>;
 export type ApproveInput = z.input<typeof approveInputSchema>;
 /** Inferred input for `deny`. */
 export type DenyInput = z.input<typeof denyInputSchema>;
+/** Inferred denial reason accepted by control-plane decision tools. */
+export type ApprovalDenyReason = z.infer<typeof approvalDenyReasonSchema>;
 /** Inferred input for `review_approval`. */
 export type ReviewApprovalInput = z.infer<typeof reviewApprovalInputSchema>;
 /** Inferred human decision for `review_approval`. */

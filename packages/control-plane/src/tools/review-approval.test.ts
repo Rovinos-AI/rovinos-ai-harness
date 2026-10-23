@@ -156,7 +156,9 @@ async function resolutionCount(store: InMemoryEventStore, runId: Id): Promise<nu
   return count;
 }
 
-function textContent<T extends { readonly type: string }>(content: readonly T[]): string {
+function textContent(
+  content: readonly { readonly type: string; readonly text?: string }[],
+): string {
   const textBlock = content.find(({ type }) => type === "text");
   return textBlock !== undefined && "text" in textBlock && typeof textBlock.text === "string"
     ? textBlock.text
@@ -210,7 +212,10 @@ describe("review_approval", () => {
             type: "object",
             properties: {
               decision: { type: "string", enum: ["approve", "deny"] },
-              reason: { type: "string" },
+              reason: {
+                type: "string",
+                enum: ["reviewed", "not_approved", "policy_violation", "risk_unacceptable"],
+              },
             },
             required: ["decision"],
           },
@@ -219,6 +224,52 @@ describe("review_approval", () => {
       expect(JSON.stringify(receivedElicitations[0])).not.toContain("edits");
     },
   );
+
+  it("adds fixed edit guidance to elicitation for editable approvals", async () => {
+    const store = new InMemoryEventStore();
+    const approval = await createApproval(store, true);
+    const { client, receivedElicitations } = await connect(store, {
+      response: { action: "cancel" },
+    });
+
+    const result = await client.callTool({
+      name: "review_approval",
+      arguments: { approvalId: approval.approvalId },
+    });
+
+    expect(result.structuredContent).toEqual({ resolved: false });
+    const requests = receivedElicitations[0];
+    expect(requests).toMatchObject({
+      params: {
+        message:
+          "Review tokenized request for tool.synthetic. Edits are not available in this form; use the CLI with --edit <json-file> or the approval app.",
+      },
+    });
+    expect(JSON.stringify(requests)).not.toContain(RAW_CANARY);
+  });
+
+  it("rejects accepted answers with a reason outside the closed enum", async () => {
+    const store = new InMemoryEventStore();
+    const approval = await createApproval(store);
+    const resolveApproval = vi.fn(resolutionOperation(store));
+    const { client } = await connect(store, {
+      response: {
+        action: "accept",
+        content: { decision: "deny", reason: "free text reason" },
+      },
+      resolveApproval,
+    });
+
+    const result = await client.callTool({
+      name: "review_approval",
+      arguments: { approvalId: approval.approvalId },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(textContent(result.content)).toBe("human_input_invalid");
+    expect(resolveApproval).not.toHaveBeenCalled();
+    expect(await resolutionCount(store, approval.runId)).toBe(0);
+  });
 
   it.each(["decline", "cancel"] as const)(
     "leaves approval state unchanged when the human chooses %s",
