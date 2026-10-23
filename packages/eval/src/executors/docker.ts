@@ -13,22 +13,48 @@ import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
 
+const DockerMemorySchema = z
+  .string()
+  .min(1)
+  .max(16)
+  .refine((value) => {
+    const match = /^(\d+)([a-z]?)$/iu.exec(value);
+    const amount = Number(match?.[1]);
+    const unit = match?.[2]?.toLowerCase() ?? "";
+    return (
+      match !== null &&
+      Number.isSafeInteger(amount) &&
+      amount > 0 &&
+      ["", "b", "k", "m", "g"].includes(unit)
+    );
+  });
+
+const DockerTmpfsSizeSchema = z
+  .string()
+  .min(1)
+  .max(16)
+  .refine((value) => {
+    const match = /^(\d+)([a-z])$/iu.exec(value);
+    const amount = Number(match?.[1]);
+    const unit = match?.[2]?.toLowerCase();
+    return (
+      match !== null &&
+      Number.isSafeInteger(amount) &&
+      amount > 0 &&
+      ["k", "m", "g"].includes(unit ?? "")
+    );
+  });
+
 const DockerOptionsSchema = z
   .object({
     image: z.string().min(1),
     dockerPath: z.string().min(1).default("docker"),
     network: z.string().min(1).default("none"),
     timeoutMs: z.number().int().positive().default(3_600_000),
-    memory: z
-      .string()
-      .regex(/^\d+[bkmg]?$/iu)
-      .default("1g"),
+    memory: DockerMemorySchema.default("1g"),
     cpus: z.number().positive().default(1),
     pidsLimit: z.number().int().positive().default(256),
-    tmpfsSize: z
-      .string()
-      .regex(/^\d+[kmg]$/iu)
-      .default("64m"),
+    tmpfsSize: DockerTmpfsSizeSchema.default("64m"),
     user: z
       .string()
       .regex(/^[1-9]\d*:[1-9]\d*$/u)

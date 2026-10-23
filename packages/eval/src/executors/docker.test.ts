@@ -200,6 +200,39 @@ describe("DockerExecutor", () => {
     expect(containerName).toMatch(/^harness-eval-/u);
   });
 
+  it("accepts bounded resource overrides while requiring a non-root user", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    let args: string[] = [];
+    mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
+      args = [...options.args];
+      return Promise.resolve({ exitCode: 1, timedOut: false });
+    });
+
+    await new DockerExecutor({
+      image: "synthetic/harness",
+      memory: "512m",
+      cpus: 2,
+      pidsLimit: 64,
+      tmpfsSize: "128m",
+      user: "1001:1001",
+    }).run(makeTrial(workDir));
+
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "/tmp:size=128m,noexec,nosuid,nodev",
+        "--user",
+        "1001:1001",
+        "--memory",
+        "512m",
+        "--cpus",
+        "2",
+        "--pids-limit",
+        "64",
+      ]),
+    );
+    expect(() => new DockerExecutor({ image: "synthetic/harness", user: "0:0" })).toThrow();
+  });
+
   it("returns typed process errors without leaking details", async () => {
     const workDir = join(await createDirectory(), "trial");
     mocks.runDockerProcess.mockRejectedValueOnce(new Error("synthetic private path"));
