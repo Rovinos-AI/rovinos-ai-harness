@@ -481,7 +481,8 @@ beforeAll(async () => {
         version: () => Promise.resolve(canaryAvailable ? 1 : 0),
       }),
       undefined,
-      { maxPrepareMs: 1_000 },
+      // Test budgets (see test/canary/telemetry.ts, #555).
+      { maxPrepareMs: 1_000, maxScanMs: 1_000 },
     ),
     telemetry: {
       sentinel: { minValueLength: 6, enabled: true },
