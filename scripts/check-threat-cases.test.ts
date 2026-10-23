@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,11 +46,13 @@ function createFixture(
   const root = mkdtempSync(join(tmpdir(), "check-threat-cases-"));
   temporaryDirectories.push(root);
   const catalogPath = join(root, "test/sandbox/cases.json");
-  const progressPath = join(root, "docs/progress.json");
+  const progressPath = join(root, "docs/progress");
   mkdirSync(join(root, "test/sandbox"), { recursive: true });
-  mkdirSync(join(root, "docs"), { recursive: true });
+  mkdirSync(progressPath, { recursive: true });
   writeFileSync(catalogPath, JSON.stringify(validCatalog()));
-  writeFileSync(progressPath, JSON.stringify({ completed: options.completed ?? ["19.1"] }));
+  for (const taskId of options.completed ?? ["19.1"]) {
+    writeFileSync(join(progressPath, taskId), "");
+  }
 
   const fixtureFiles: Record<string, string> = { ...options.otherFiles };
   if (options.testContents !== undefined) {
@@ -99,6 +101,13 @@ describe("findThreatCoverageIssues", () => {
 });
 
 describe("checkThreatCases", () => {
+  it("rejects progress entries that are not task ids", async () => {
+    const root = createFixture();
+    writeFileSync(join(root, "docs/progress/invalid"), "");
+
+    await expect(checkThreatCases(root)).rejects.toThrow();
+  });
+
   it("checks markers in the declared nested test file, not unrelated source files", async () => {
     const root = createFixture({
       testContents: "// threat: T-01\n",
@@ -157,6 +166,43 @@ describe("threat coverage CLI", () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
+  });
+});
+
+describe("task progress markers", () => {
+  it("allows parallel task additions to merge without conflicts", () => {
+    const root = mkdtempSync(join(tmpdir(), "task-progress-"));
+    temporaryDirectories.push(root);
+    const runGit = (...args: string[]): void => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      if (result.status !== 0) {
+        throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+      }
+    };
+
+    runGit("init", "--quiet");
+    runGit("config", "user.name", "Task progress test");
+    runGit("config", "user.email", "task-progress@example.invalid");
+    runGit("checkout", "-b", "main");
+    mkdirSync(join(root, "docs/progress"), { recursive: true });
+    writeFileSync(join(root, "docs/progress/1.24"), "");
+    runGit("add", "docs/progress/1.24");
+    runGit("commit", "--quiet", "-m", "baseline");
+
+    runGit("checkout", "-b", "task-one");
+    writeFileSync(join(root, "docs/progress/1.25"), "");
+    runGit("add", "docs/progress/1.25");
+    runGit("commit", "--quiet", "-m", "complete task one");
+
+    runGit("checkout", "main");
+    runGit("checkout", "-b", "task-two");
+    writeFileSync(join(root, "docs/progress/1.26"), "");
+    runGit("add", "docs/progress/1.26");
+    runGit("commit", "--quiet", "-m", "complete task two");
+    runGit("merge", "--quiet", "--no-edit", "task-one");
+
+    expect(readFileSync(join(root, "docs/progress/1.25"), "utf8")).toBe("");
+    expect(readFileSync(join(root, "docs/progress/1.26"), "utf8")).toBe("");
   });
 });
 

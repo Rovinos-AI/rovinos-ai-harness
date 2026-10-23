@@ -952,7 +952,7 @@ gantt
 | 24 | Run service, SDK, and horizontal scaling | 8 | [epic-24](packages/sdk/epic-24-run-service-and-scaling.md) |
 | 25 | Elicitation and human input | 8 | [epic-25](packages/mcp/epic-25-elicitation-and-human-input.md) |
 
-The full index is [`docs/engineering/tasks/README.md`](docs/engineering/tasks/README.md), and the shared rules are in [`docs/engineering/CONVENTIONS.md`](docs/engineering/CONVENTIONS.md). Completed task ids are tracked in [`docs/progress.json`](docs/progress.json).
+The full index is [`docs/engineering/tasks/README.md`](docs/engineering/tasks/README.md), and the shared rules are in [`docs/engineering/CONVENTIONS.md`](docs/engineering/CONVENTIONS.md). Completed task ids are tracked as marker files in [`docs/progress/`](docs/progress/).
 
 ---
 
