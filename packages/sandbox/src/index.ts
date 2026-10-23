@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 export { createSandboxBackend } from "./factory.js";
 export type { SandboxBackendDependencies } from "./factory.js";
+export { DockerProcessError, isDockerAvailable, runDockerProcess } from "./docker-process.js";
+export type {
+  DockerProcessErrorCode,
+  DockerProcessOptions,
+  DockerProcessResult,
+} from "./docker-process.js";
 export {
   createFsTools,
   FsEditInputSchema,
