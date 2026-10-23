@@ -19,7 +19,6 @@ import { cliApprovalMetadata } from "../command.js";
 import { waitForShutdown } from "../serve.js";
 import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
 import { withApprovalRuntime } from "./approval-runtime.js";
-import { runApprovalSweep } from "./approval-sweep.js";
 import { assertResumeStatus } from "./resume.js";
 
 class ApprovalsCodeError extends HarnessError {
@@ -392,7 +391,11 @@ function registerSweep(approvals: Command, context: CliContext): void {
       withApprovalRuntime(
         context,
         undefined,
-        (runtime, config) => runApprovalSweep(runtime, context, config),
+        async (runtime, config) => {
+          // Loaded on demand: the sweep imports @harness/core, which `approvals` must not load eagerly.
+          const { runApprovalSweep } = await import("./approval-sweep.js");
+          await runApprovalSweep(runtime, context, config);
+        },
         { useQueue: true },
       ),
     );
