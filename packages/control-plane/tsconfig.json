@@ -3,10 +3,6 @@
   "compilerOptions": {
     "composite": false,
     "customConditions": ["source"],
-    "paths": {
-      "eventsource": ["../../node_modules/eventsource/dist/index.d.ts"],
-      "eventsource-parser": ["../../node_modules/eventsource-parser/dist/index.d.ts"]
-    },
     "noEmit": true
   },
   "exclude": []
