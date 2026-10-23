@@ -812,7 +812,7 @@ Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log
 
 ## CI/CD
 
-Azure Pipelines runs the stages below. Results are published as JUnit and coverage as Cobertura. Secrets come only from variable groups or Key Vault.
+GitHub Actions (`.github/workflows/ci.yml`) runs the stages below on GitHub-hosted runners for every pull request that is ready for review. JUnit results and Cobertura coverage are uploaded as run artifacts. The workflow has a read-only token and no secrets. The Azure pipeline (`azure-pipelines.yml`) runs the same stages in parallel until it is retired.
 
 ```mermaid
 flowchart LR
