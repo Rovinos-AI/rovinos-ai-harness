@@ -97,25 +97,26 @@ describe("replay command", () => {
     );
 
     await expect(
-      main(
-        [
-          "replay",
-          "--run",
-          rootRunId,
-          "--strict",
-          "--golden",
-          "baseline.json",
-          "--update-baseline",
-          "--report",
-          "report.json",
-        ],
-        harness.context,
-        [replayCommand],
-      ),
+      main(["replay", "--run", rootRunId], harness.context, [replayCommand]),
     ).resolves.toBe(ExitCode.ok);
     expect(harness.stdout.join("")).toContain(rootRunId);
     expect(harness.stdout.join("")).not.toContain(contentCanary);
     expect(harness.close).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["--strict"],
+    ["--golden", "baseline.json"],
+    ["--update-baseline"],
+    ["--report", "report.json"],
+  ])("rejects unimplemented replay option %s", async (...option) => {
+    const harness = await createHarness(new Map([[rootRunId, [createdEvent(rootRunId)]]]));
+
+    await expect(
+      main(["replay", "--run", rootRunId, ...option], harness.context, [replayCommand]),
+    ).resolves.toBe(ExitCode.replayFailed);
+    expect(harness.stderr).toEqual(["replay_option_unavailable\n"]);
+    expect(harness.close).not.toHaveBeenCalled();
   });
 
   it("resolves a traceparent and prints the root and subagent ids", async () => {

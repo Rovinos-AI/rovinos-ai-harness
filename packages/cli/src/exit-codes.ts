@@ -47,6 +47,7 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   run_already_terminal: ExitCode.failure,
   run_not_terminal: ExitCode.failure,
   replay_input_invalid: ExitCode.usage,
+  replay_option_unavailable: ExitCode.replayFailed,
   trace_ambiguous: ExitCode.replayFailed,
   replay_too_large: ExitCode.replayFailed,
   corrupt_log: ExitCode.replayFailed,

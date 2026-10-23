@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { resolveRun, ReplayInputError } from "@harness/replay";
-import { Id } from "@harness/schemas";
+import { HarnessError, Id } from "@harness/schemas";
 import { z } from "zod";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
@@ -18,6 +18,14 @@ const ReplayCommandResultSchema = z
       .array(),
   })
   .strict();
+
+class ReplayOptionUnavailableError extends HarnessError {
+  override readonly code = "replay_option_unavailable";
+
+  constructor() {
+    super("Replay execution options are not available yet.");
+  }
+}
 
 /** Registers the `harness replay` run-resolution command. */
 export const replayCommand: CommandModule = {
@@ -44,6 +52,14 @@ export const replayCommand: CommandModule = {
         }) => {
           if ((options.run === undefined) === (options.trace === undefined)) {
             throw new ReplayInputError();
+          }
+          if (
+            options.strict === true ||
+            options.golden !== undefined ||
+            options.updateBaseline === true ||
+            options.report !== undefined
+          ) {
+            throw new ReplayOptionUnavailableError();
           }
           const config = await context.loadConfig();
           const runtime = await createCommandRuntime(context, config);

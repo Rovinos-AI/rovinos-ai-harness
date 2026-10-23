@@ -156,6 +156,55 @@ async function readRun(
   };
 }
 
+function referencedChildRunIds(run: LoadedRun): RunId[] {
+  return [
+    ...new Set(
+      run.events.flatMap((event) =>
+        event.type === "subagent_spawned" || event.type === "subagent_completed"
+          ? [event.childRunId]
+          : [],
+      ),
+    ),
+  ];
+}
+
+async function readRunTree(
+  store: ResolveRunInput["store"],
+  rootRunId: RunId,
+): Promise<LoadedRun[]> {
+  const runs: LoadedRun[] = [];
+  const pending: { readonly runId: RunId; readonly parentRunId?: RunId }[] = [{ runId: rootRunId }];
+  const expectedParents = new Map<RunId, RunId | undefined>([[rootRunId, undefined]]);
+  const visited = new Set<RunId>();
+  let totalEvents = 0;
+
+  for (const next of pending) {
+    if (visited.has(next.runId)) {
+      continue;
+    }
+    visited.add(next.runId);
+    const run = await readRun(store, next.runId, totalEvents);
+    if (next.parentRunId !== undefined && run.parentRunId !== next.parentRunId) {
+      throw new CorruptLogError();
+    }
+    runs.push(run);
+    totalEvents += run.events.length;
+
+    for (const childRunId of referencedChildRunIds(run)) {
+      const existingParent = expectedParents.get(childRunId);
+      if (expectedParents.has(childRunId)) {
+        if (existingParent !== run.runId) {
+          throw new CorruptLogError();
+        }
+        continue;
+      }
+      expectedParents.set(childRunId, run.runId);
+      pending.push({ runId: childRunId, parentRunId: run.runId });
+    }
+  }
+  return runs;
+}
+
 function asResolvedEntry(run: LoadedRun, role: "root" | "subagent"): ResolvedRun["runs"][number] {
   return {
     runId: run.runId,
@@ -163,6 +212,62 @@ function asResolvedEntry(run: LoadedRun, role: "root" | "subagent"): ResolvedRun
     ...(run.parentRunId === undefined ? {} : { parentRunId: run.parentRunId }),
     events: run.events,
   };
+}
+
+async function resolveTraceRun(
+  store: ResolveRunInput["store"],
+  traceInput: string,
+): Promise<ResolvedRun> {
+  const traceId = parseTraceId(traceInput);
+  const matchedRunIds = [...new Set(await store.findRunsByTrace(traceId))];
+  if (matchedRunIds.length === 0) {
+    throw new RunNotFoundError();
+  }
+
+  let totalEvents = 0;
+  const runs: LoadedRun[] = [];
+  for (const runId of matchedRunIds) {
+    const run = await readRun(store, runId, totalEvents);
+    runs.push(run);
+    totalEvents += run.events.length;
+  }
+
+  const roots = runs.filter((run) => run.parentRunId === undefined);
+  if (roots.length !== 1) {
+    throw new TraceAmbiguousError(matchedRunIds);
+  }
+  const root = roots[0];
+  if (root === undefined) {
+    throw new TraceAmbiguousError(matchedRunIds);
+  }
+  const runsById = new Map(runs.map((run) => [run.runId, run]));
+  for (const run of runs) {
+    if (run.runId === root.runId) {
+      continue;
+    }
+    let current = run;
+    const ancestors = new Set<RunId>();
+    while (current.runId !== root.runId) {
+      if (ancestors.has(current.runId) || current.parentRunId === undefined) {
+        throw new TraceAmbiguousError(matchedRunIds);
+      }
+      ancestors.add(current.runId);
+      const parent = runsById.get(current.parentRunId);
+      if (parent === undefined) {
+        throw new TraceAmbiguousError(matchedRunIds);
+      }
+      current = parent;
+    }
+  }
+  return {
+    rootRunId: root.runId,
+    runs: [
+      asResolvedEntry(root, "root"),
+      ...runs
+        .filter((run) => run.runId !== root.runId)
+        .map((run) => asResolvedEntry(run, "subagent")),
+    ],
+  } satisfies ResolvedRun;
 }
 
 /**
@@ -188,42 +293,13 @@ export async function resolveRun(input: ResolveRunInput): Promise<ResolvedRun> {
     if (!parsedRunId.success) {
       throw new ReplayInputError();
     }
-    const run = await readRun(input.store, parsedRunId.data);
-    return ResolvedRunSchema.parse({
-      rootRunId: run.runId,
-      runs: [asResolvedEntry(run, "root")],
-    });
+    const runs = await readRunTree(input.store, parsedRunId.data);
+    const result = {
+      rootRunId: parsedRunId.data,
+      runs: runs.map((run, index) => asResolvedEntry(run, index === 0 ? "root" : "subagent")),
+    } satisfies ResolvedRun;
+    return result;
   }
 
-  const traceId = parseTraceId(input.traceId ?? "");
-  const matchedRunIds = [...new Set(await input.store.findRunsByTrace(traceId))];
-  if (matchedRunIds.length === 0) {
-    throw new RunNotFoundError();
-  }
-
-  let totalEvents = 0;
-  const runs: LoadedRun[] = [];
-  for (const runId of matchedRunIds) {
-    const run = await readRun(input.store, runId, totalEvents);
-    runs.push(run);
-    totalEvents += run.events.length;
-  }
-
-  const roots = runs.filter((run) => run.parentRunId === undefined);
-  if (runs.length > 1 && roots.length !== 1) {
-    throw new TraceAmbiguousError(matchedRunIds);
-  }
-  const root = roots[0] ?? runs[0];
-  if (root === undefined) {
-    throw new RunNotFoundError();
-  }
-  return ResolvedRunSchema.parse({
-    rootRunId: root.runId,
-    runs: [
-      asResolvedEntry(root, "root"),
-      ...runs
-        .filter((run) => run.runId !== root.runId)
-        .map((run) => asResolvedEntry(run, "subagent")),
-    ],
-  });
+  return resolveTraceRun(input.store, input.traceId ?? "");
 }

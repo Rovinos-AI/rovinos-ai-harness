@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import { Event as EventSchema, Id, type Event, type Id as RunId } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
-import { resolveRun } from "./index.js";
+import { ResolvedRunSchema, resolveRun } from "./index.js";
 
 const traceId = "1234567890abcdef1234567890abcdef";
 const spanId = "1234567890abcdef";
@@ -42,6 +42,21 @@ function inputEvent(id: RunId, seq: number, input = "synthetic replay content"):
   });
 }
 
+function spawnEvent(parentRunId: RunId, referencedChildRunId: RunId, seq: number): Event {
+  return EventSchema.parse({
+    runId: parentRunId,
+    seq,
+    ts: seq + 1,
+    v: 1,
+    traceId,
+    spanId,
+    segmentId: parentRunId,
+    type: "subagent_spawned",
+    childRunId: referencedChildRunId,
+    role: "worker",
+  });
+}
+
 function createStore(
   logs: ReadonlyMap<RunId, readonly Event[]>,
   matches: readonly RunId[] = [],
@@ -60,10 +75,61 @@ describe("resolveRun", () => {
       runId,
     });
 
+    expect(ResolvedRunSchema.safeParse(result).success).toBe(true);
     expect(result).toEqual({
       rootRunId: runId,
       runs: [{ runId, role: "root", events }],
     });
+  });
+
+  it("loads the referenced subagent tree when resolving a run id", async () => {
+    const rootEvents = [createdEvent(runId), spawnEvent(runId, childRunId, 1)];
+    const childEvents = [createdEvent(childRunId, runId)];
+    const result = await resolveRun({
+      store: createStore(
+        new Map([
+          [runId, rootEvents],
+          [childRunId, childEvents],
+        ]),
+      ),
+      runId,
+    });
+
+    expect(result).toEqual({
+      rootRunId: runId,
+      runs: [
+        { runId, role: "root", events: rootEvents },
+        { runId: childRunId, role: "subagent", parentRunId: runId, events: childEvents },
+      ],
+    });
+  });
+
+  it("loads nested subagents recursively", async () => {
+    const grandchildRunId = Id.parse("00000000000000000000000003");
+    const rootEvents = [createdEvent(runId), spawnEvent(runId, childRunId, 1)];
+    const childEvents = [
+      createdEvent(childRunId, runId),
+      spawnEvent(childRunId, grandchildRunId, 1),
+    ];
+    const grandchildEvents = [createdEvent(grandchildRunId, childRunId)];
+    const result = await resolveRun({
+      store: createStore(
+        new Map([
+          [runId, rootEvents],
+          [childRunId, childEvents],
+          [grandchildRunId, grandchildEvents],
+        ]),
+      ),
+      runId,
+    });
+
+    expect(
+      result.runs.map(({ runId: id, role, parentRunId }) => ({ id, role, parentRunId })),
+    ).toEqual([
+      { id: runId, role: "root", parentRunId: undefined },
+      { id: childRunId, role: "subagent", parentRunId: runId },
+      { id: grandchildRunId, role: "subagent", parentRunId: childRunId },
+    ]);
   });
 
   it.each([
@@ -120,6 +186,33 @@ describe("resolveRun", () => {
       new Map([
         [runId, [createdEvent(runId, childRunId)]],
         [childRunId, [createdEvent(childRunId, runId)]],
+      ]),
+      [runId, childRunId],
+    );
+
+    await expect(resolveRun({ store, traceId })).rejects.toMatchObject({
+      code: "trace_ambiguous",
+      runIds: [runId, childRunId],
+    });
+  });
+
+  it("rejects a trace containing only a subagent", async () => {
+    const store = createStore(new Map([[childRunId, [createdEvent(childRunId, runId)]]]), [
+      childRunId,
+    ]);
+
+    await expect(resolveRun({ store, traceId })).rejects.toMatchObject({
+      code: "trace_ambiguous",
+      runIds: [childRunId],
+    });
+  });
+
+  it("rejects a trace subagent whose parent is not among the matches", async () => {
+    const otherRunId = Id.parse("00000000000000000000000003");
+    const store = createStore(
+      new Map([
+        [runId, [createdEvent(runId)]],
+        [childRunId, [createdEvent(childRunId, otherRunId)]],
       ]),
       [runId, childRunId],
     );

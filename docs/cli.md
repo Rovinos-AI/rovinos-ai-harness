@@ -213,8 +213,8 @@ tokenization in tasks 13.4 and 13.7 lands, run goals and event content are store
 `harness replay (--run <id> | --trace <trace-id-or-traceparent>) [--strict] [--golden <file>]
 [--update-baseline] [--report <path>] [--json]` resolves a recorded run and loads its validated event
 log. Trace lookup includes matching subagent runs. This task only prints the root and matching run IDs
-and roles; replay execution and baseline/report actions are not implemented yet. Event content is
-never printed.
+and roles; options for replay execution and baseline/report actions are not implemented yet and are
+rejected with `replay_option_unavailable`. Event content is never printed.
 
 ## `harness cancel`
 
@@ -294,4 +294,5 @@ never included in CLI error output.
 | `budget_exceeded` | `6` |
 | `not_found_or_resolved`, `approval_not_found`, `approval_already_resolved`, `approval_run_not_suspended`, `input_not_found`, `input_already_resolved` | `7` |
 | `replay_failed` | `8` |
+| `replay_option_unavailable` | `8` |
 | `quota_exceeded` | `9` |
