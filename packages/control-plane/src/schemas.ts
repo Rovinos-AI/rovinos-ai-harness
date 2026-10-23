@@ -44,13 +44,37 @@ export const approveInputSchema = z
   })
   .strict();
 
+/** Closed set of supported denial reasons accepted by control-plane decision tools. */
+export const approvalDenyReasonCodes = [
+  "reviewed",
+  "not_approved",
+  "policy_violation",
+  "risk_unacceptable",
+] as const;
+/** Validates the closed denial reason codes accepted by control-plane tools. */
+export const approvalDenyReasonSchema = z.enum(approvalDenyReasonCodes);
+
 /** Validated input for the `deny` tool. */
 export const denyInputSchema = z
   .object({
     approvalId: Id,
-    reason: Code.optional(),
+    reason: approvalDenyReasonSchema.optional(),
   })
   .strict();
+
+/** Validated input for `review_approval`. */
+export const reviewApprovalInputSchema = z.object({ approvalId: Id }).strict();
+
+/** Validated decision returned by approval elicitation. */
+export const reviewApprovalDecisionSchema = z
+  .object({
+    decision: z.enum(["approve", "deny"]),
+    reason: approvalDenyReasonSchema.optional(),
+  })
+  .strict();
+
+/** Metadata-only output for `review_approval`. */
+export const reviewApprovalOutputSchema = z.object({ resolved: z.boolean() }).strict();
 
 /** Validated input for run lifecycle tools. */
 export const runLifecycleInputSchema = z.object({ runId: Id }).strict();
@@ -144,6 +168,14 @@ export type GetRunOutput = z.infer<typeof getRunOutputSchema>;
 export type ApproveInput = z.input<typeof approveInputSchema>;
 /** Inferred input for `deny`. */
 export type DenyInput = z.input<typeof denyInputSchema>;
+/** Inferred denial reason accepted by control-plane decision tools. */
+export type ApprovalDenyReason = z.infer<typeof approvalDenyReasonSchema>;
+/** Inferred input for `review_approval`. */
+export type ReviewApprovalInput = z.infer<typeof reviewApprovalInputSchema>;
+/** Inferred human decision for `review_approval`. */
+export type ReviewApprovalDecision = z.infer<typeof reviewApprovalDecisionSchema>;
+/** Inferred output for `review_approval`. */
+export type ReviewApprovalOutput = z.infer<typeof reviewApprovalOutputSchema>;
 /** Inferred metadata-only decision output. */
 export type DecisionOutput = z.infer<typeof decisionOutputSchema>;
 /** Inferred metadata-only resume output. */

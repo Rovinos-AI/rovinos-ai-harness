@@ -16,6 +16,7 @@ describe("control-plane tool definitions", () => {
       "harness.approvals.resolve": "approve",
       "harness.approvals.reveal": "reveal",
       deny: "approve",
+      review_approval: "approve",
       start_run: "run",
       continue_run: "run",
       resume_run: "run",
