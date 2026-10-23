@@ -6,7 +6,7 @@ processors:
     error_mode: "ignore"
     traces:
       span:
-        - "not (name == \"harness.app_content\" or name == \"harness.approval_wait\" or name == \"harness.checkpoint\" or name == \"harness.compaction\" or name == \"harness.model_call\" or name == \"harness.run\" or name == \"harness.tool_call\" or name == \"harness.ui.decision\" or name == \"harness.ui.error\" or name == \"harness.ui.interaction\" or name == \"harness.ui.render\" or name == \"harness.ui_session\" or name == \"mcp.client.call\")"
+        - "not (name == \"harness.app_content\" or name == \"harness.approval_wait\" or name == \"harness.checkpoint\" or name == \"harness.compaction\" or name == \"harness.input_wait\" or name == \"harness.model_call\" or name == \"harness.run\" or name == \"harness.tool_call\" or name == \"harness.ui.decision\" or name == \"harness.ui.error\" or name == \"harness.ui.interaction\" or name == \"harness.ui.render\" or name == \"harness.ui_session\" or name == \"mcp.client.call\")"
   filter/drop_span_events:
     error_mode: "ignore"
     traces:
@@ -21,6 +21,7 @@ processors:
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.run.id\"]) where span.name == \"harness.approval_wait\""
       - "keep_keys(span.attributes, [\"harness.checkpoint.reason\", \"harness.error.code\", \"harness.event.seq\", \"harness.run.id\"]) where span.name == \"harness.checkpoint\""
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.run.id\"]) where span.name == \"harness.compaction\""
+      - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.input.action\", \"harness.input.mode\", \"harness.input.round\", \"harness.input.source\", \"harness.run.id\", \"harness.wait_ms\"]) where span.name == \"harness.input_wait\""
       - "keep_keys(span.attributes, [\"harness.context.estimated_tokens\", \"harness.context.message_count\", \"harness.context.strategy\", \"harness.context.strategy_version\", \"harness.error.code\", \"harness.event.seq\", \"harness.model.attempts\", \"harness.model.cache_read_tokens\", \"harness.model.cache_write_tokens\", \"harness.model.cost_micros\", \"harness.model.input_tokens\", \"harness.model.output_tokens\", \"harness.model.repair_attempts\", \"harness.run.id\"]) where span.name == \"harness.model_call\""
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.run.continuation_of\", \"harness.run.depth\", \"harness.run.id\", \"harness.run.parent_id\", \"harness.segment.id\"]) where span.name == \"harness.run\""
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.policy.decision\", \"harness.policy.rule_id\", \"harness.run.id\", \"harness.subagent.completion_record_failed\"]) where span.name == \"harness.tool_call\""
