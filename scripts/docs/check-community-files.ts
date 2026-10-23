@@ -16,24 +16,20 @@ const markdownLinkDefinition = /^\s*\[[^\]]+\]:\s*(<[^>]+>|\S+)/gmu;
 /** Community-file validation results; messages contain paths and headings, not file contents. */
 export interface CommunityFileCheck {
   readonly errors: readonly string[];
-  readonly warnings: readonly string[];
 }
 
 /**
  * Checks required community policy files and reports unresolved uppercase placeholders.
  *
  * @param files - File contents keyed by repository-relative file name.
- * @param release - Whether unresolved placeholders must fail the check.
  * @param existingPaths - Paths of relative Markdown links that resolve to repository files.
- * @returns Validation errors and non-release warnings.
+ * @returns Validation errors.
  */
 export function evaluateCommunityFiles(
   files: Partial<Record<CommunityFile, string>>,
-  release: boolean,
   existingPaths: ReadonlySet<string>,
 ): CommunityFileCheck {
   const errors: string[] = [];
-  const warnings: string[] = [];
 
   for (const [file, headings] of requiredHeadings) {
     const contents = files[file];
@@ -47,12 +43,7 @@ export function evaluateCommunityFiles(
       }
     }
     for (const placeholder of new Set(contents.match(/<[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*>/gu) ?? [])) {
-      const message = `Unresolved placeholder ${placeholder} in ${file}`;
-      if (release) {
-        errors.push(message);
-      } else {
-        warnings.push(message);
-      }
+      errors.push(`Unresolved placeholder ${placeholder} in ${file}`);
     }
     for (const target of markdownLinkTargets(file, contents)) {
       if (!existingPaths.has(target)) {
@@ -61,7 +52,7 @@ export function evaluateCommunityFiles(
     }
   }
 
-  return { errors, warnings };
+  return { errors };
 }
 
 function markdownLinkTargets(file: CommunityFile, contents: string): string[] {
@@ -136,14 +127,7 @@ function existingLinkedPaths(
 function runCheck(): void {
   const rootDirectory = process.cwd();
   const files = readCommunityFiles(rootDirectory);
-  const result = evaluateCommunityFiles(
-    files,
-    process.env.RELEASE === "1",
-    existingLinkedPaths(rootDirectory, files),
-  );
-  for (const warning of result.warnings) {
-    process.stderr.write(`Warning: ${warning}\n`);
-  }
+  const result = evaluateCommunityFiles(files, existingLinkedPaths(rootDirectory, files));
   for (const error of result.errors) {
     process.stderr.write(`Error: ${error}\n`);
   }
