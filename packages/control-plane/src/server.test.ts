@@ -219,7 +219,7 @@ afterEach(async () => {
 });
 
 describe("control-plane inspection tools", () => {
-  it("registers both read-only tools with structured schemas and safe annotations", async () => {
+  it("registers the public tools with structured schemas and safe annotations", async () => {
     const store = new InMemoryEventStore();
     const { client } = await connect(store);
 
@@ -231,6 +231,7 @@ describe("control-plane inspection tools", () => {
       "get_run",
       "list_runs",
       "resume_run",
+      "review_approval",
       "start_run",
     ]);
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({

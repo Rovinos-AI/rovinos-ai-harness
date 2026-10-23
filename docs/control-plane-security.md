@@ -1,13 +1,17 @@
 # Control-plane security
 
 `approve` and `deny` are marked app-only so a compliant MCP Apps host can keep them out of the
-model's tool list. That visibility metadata is enforced by the host, not by the MCP server. A host
-that exposes these tools to a model does not satisfy the control-plane trust assumption.
+model's tool list. `review_approval` is model-visible, but accepts a decision only after MCP form
+elicitation; clients without elicitation receive CLI instructions instead. Visibility metadata is
+enforced by the host, not by the MCP server. A host that exposes the app-only tools to a model does
+not satisfy the control-plane trust assumption.
+The optional `ControlPlaneServerOptions.consoleUrl` is included in those fallback instructions
+when a hosted console is configured.
 
 Decision tools assume a human-facing MCP client. Form elicitation is a user-interface request, not
-proof of a human decision: an automated client that advertises `elicitation.form` and submits
-`confirm: true` can bypass the intended human review. Only connect trusted human-facing clients to
-the decision tools.
+proof of a human decision: an automated client that advertises `elicitation.form` and submits an
+accepted answer can bypass the intended human review. Only connect trusted human-facing clients to
+decision tools.
 
 ## HTTP authentication and network binding
 
@@ -35,7 +39,8 @@ remote address. Limits are local to one server process.
 ## Scopes, runs, and audit
 
 `read` grants `list_runs`, `get_run`, and the metadata-only `harness://runs` resources; `approve`
-grants `approve`, `deny`, and `harness.approvals.resolve`; `run` grants `start_run`, `continue_run`, `resume_run`, and
+grants `approve`, `deny`, `review_approval`, and `harness.approvals.resolve`; `run` grants
+`start_run`, `continue_run`, `resume_run`, and
 `cancel_run`; and `reveal` grants `harness.approvals.reveal`. `read_content` is reserved for the
 tokenized run-inspector content operation in task 18.8. `admin` grants all current scopes.
 `tools/list` omits tools outside the token's scopes. A token with `runIds` can list only those runs
