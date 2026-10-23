@@ -273,6 +273,99 @@ describe("runs console view", () => {
     view.dispose();
   });
 
+  it("refreshes on run subscriptions without scheduling polling and unsubscribes on dispose", async () => {
+    vi.useFakeTimers();
+    let onUpdate: (() => void) | undefined;
+    const unsubscribe = vi.fn();
+    const calls: string[] = [];
+    const { telemetry } = createTelemetry();
+    const view = createRunsConsoleView(document.body, {
+      bridge: {
+        callTool: (name) => {
+          calls.push(name);
+          return Promise.resolve({ structuredContent: runList() });
+        },
+        subscribeRuns: (callback) => {
+          onUpdate = callback;
+          return unsubscribe;
+        },
+        openApproval: () => Promise.resolve(),
+      },
+      telemetry,
+    });
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(calls).toHaveLength(1);
+    onUpdate?.();
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    view.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    await telemetry.dispose();
+  });
+
+  it("resumes polling when a run subscription closes", async () => {
+    vi.useFakeTimers();
+    let onClose: (() => void) | undefined;
+    const calls: string[] = [];
+    const { telemetry } = createTelemetry();
+    const view = createRunsConsoleView(document.body, {
+      bridge: {
+        callTool: (name) => {
+          calls.push(name);
+          return Promise.resolve({ structuredContent: runList() });
+        },
+        subscribeRuns: (_onUpdate, onError) => {
+          onClose = onError;
+          return () => undefined;
+        },
+        openApproval: () => Promise.resolve(),
+      },
+      telemetry,
+    });
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+
+    onClose?.();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(calls).toHaveLength(2);
+    view.dispose();
+    await telemetry.dispose();
+  });
+
+  it("falls back to polling when the host cannot establish run subscriptions", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const { telemetry } = createTelemetry();
+    const view = createRunsConsoleView(document.body, {
+      bridge: {
+        callTool: (name) => {
+          calls.push(name);
+          return Promise.resolve({ structuredContent: runList() });
+        },
+        subscribeRuns: () => {
+          throw new Error("subscription_unavailable");
+        },
+        openApproval: () => Promise.resolve(),
+      },
+      telemetry,
+    });
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(calls).toHaveLength(2);
+    view.dispose();
+    await telemetry.dispose();
+  });
+
   it("moves focus to the list region when its focused run disappears", async () => {
     let currentList = runList(1, 1);
     const { view } = await setup({

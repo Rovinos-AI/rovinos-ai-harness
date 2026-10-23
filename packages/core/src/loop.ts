@@ -29,6 +29,7 @@ import type {
   NewRunMetadata,
   PolicyPort,
   RunContinuationMetadata,
+  RunContext,
   ToolPort,
 } from "./ports.js";
 import type { WorkspaceSnapshotPort } from "@harness/sandbox";
@@ -52,6 +53,7 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly signal: AbortSignal;
   /** Called after the initial event batch has been durably appended. */
   readonly onStarted?: () => void;
+  readonly onProgress?: RunContext["onProgress"];
   /** Checks durable startup preconditions before the first execution step. */
   readonly shouldContinue?: (events: Event[]) => Promise<boolean>;
   /** Per-run limits sourced from the validated run configuration. */
@@ -241,6 +243,7 @@ async function runLoopSteps(
         ...(options.role === undefined ? {} : { role: options.role }),
         ...(options.provider === undefined ? {} : { provider: options.provider }),
         ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+        ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
         ...quotaHooks,
       },
       options.context,

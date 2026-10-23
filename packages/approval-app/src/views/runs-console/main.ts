@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { App } from "@modelcontextprotocol/ext-apps";
+import { z } from "zod";
 import { createAppTelemetry } from "@harness/app-telemetry";
 import { ApprovalAppInputSchema } from "@harness/schemas/browser";
 import { applyHostContext } from "../../kit/theme.js";
@@ -8,10 +9,26 @@ import { showApprovalTransition } from "./approval-transition.js";
 import { createRunsConsoleView } from "./view.js";
 
 const app = new App({ name: "harness-runs-console", version: "0.0.0" }, {}, { autoResize: false });
+const RUNS_RESOURCE_URI = "harness://runs";
+const SUBSCRIPTION_RESULT_SCHEMA = z.object({ subscribed: z.boolean() }).strict();
+const SUBSCRIPTION_CLOSED_SCHEMA = z.object({ resourceUri: z.literal(RUNS_RESOURCE_URI) }).strict();
 let hostContext = applyHostContext(document.documentElement, app.getHostContext());
 const locale = (): string => hostContext.locale;
 document.title = getStrings(locale()).runsConsoleTitle;
 const connection = app.connect();
+let onRunsUpdate: (() => void) | undefined;
+let onRunsSubscriptionError: (() => void) | undefined;
+app.setNotificationHandler("notifications/resources/updated", ({ params }) => {
+  if (params.uri === RUNS_RESOURCE_URI) {
+    onRunsUpdate?.();
+  }
+});
+app.setNotificationHandler(
+  "harness/resources/subscription_closed",
+  { params: SUBSCRIPTION_CLOSED_SCHEMA },
+  () => onRunsSubscriptionError?.(),
+);
+app.onclose = () => onRunsSubscriptionError?.();
 let disposeApproval: (() => void) | undefined;
 let showingApproval = false;
 const telemetry = createAppTelemetry({
@@ -29,6 +46,40 @@ const runsView = createRunsConsoleView(document.body, {
     callTool: async (name, args) => {
       await connection;
       return app.callServerTool({ name, arguments: args });
+    },
+    subscribeRuns: (onUpdate, onError) => {
+      onRunsUpdate = onUpdate;
+      onRunsSubscriptionError = onError;
+      let active = true;
+      void connection
+        .then(() =>
+          app.request(
+            {
+              method: "harness/resources/subscribe",
+              params: { resourceUri: RUNS_RESOURCE_URI },
+            },
+            SUBSCRIPTION_RESULT_SCHEMA,
+          ),
+        )
+        .then(
+          ({ subscribed }) => {
+            if (active && !subscribed) {
+              onError();
+            }
+          },
+          () => {
+            if (active) {
+              onError();
+            }
+          },
+        );
+      return () => {
+        active = false;
+        if (onRunsUpdate === onUpdate) {
+          onRunsUpdate = undefined;
+          onRunsSubscriptionError = undefined;
+        }
+      };
     },
     openApproval: async (approvalId) => {
       await connection;

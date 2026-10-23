@@ -36,6 +36,7 @@ export interface ModelStepOptions {
   readonly messages: Message[];
   readonly tools?: readonly ToolSpec[];
   readonly signal: AbortSignal;
+  readonly onProgress?: RunContext["onProgress"];
   /** Epoch-millisecond deadline from the run's wall-clock budget. */
   readonly deadlineTs?: number;
   readonly role?: Code;
@@ -94,6 +95,7 @@ function modelRunContext(options: ModelStepOptions): RunContext {
   return {
     runId: options.runId,
     signal: options.signal,
+    ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
     ...(options.deadlineTs === undefined ? {} : { deadlineTs: options.deadlineTs }),
     ...(options.outputSchema === undefined ? {} : { outputSchema: options.outputSchema }),
     ...(options.valueTransform === undefined ? {} : { valueTransform: options.valueTransform }),
