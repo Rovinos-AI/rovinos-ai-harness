@@ -39,4 +39,11 @@ export {
   type DockerExecutorErrorCode,
   type DockerExecutorOptions,
 } from "./executors/docker.js";
-export { runEval, type EvalRunResult, type RunnerOptions } from "./runner.js";
+export {
+  EvalRunnerError,
+  runEval,
+  type EvalRunnerErrorCode,
+  type EvalRunResult,
+  type RunnerDependencies,
+  type RunnerOptions,
+} from "./runner.js";

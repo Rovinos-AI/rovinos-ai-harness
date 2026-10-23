@@ -5,8 +5,9 @@ import { join, resolve, sep } from "node:path";
 import { EvalSuiteSchema } from "./schema.js";
 import { EvalVariantSchema, TrialResultSchema, TrialSpecSchema } from "./trial.js";
 import type { EvalVariant, TrialResult, TrialSpec } from "./trial.js";
-import type { TrialExecutor } from "./executor.js";
-import { Code } from "@harness/schemas";
+import { systemClock, type TrialExecutor } from "./executor.js";
+import type { Clock } from "@harness/core";
+import { Code, HarnessError } from "@harness/schemas";
 import { z } from "zod";
 
 const RunnerOptionsSchema = z
@@ -20,6 +21,26 @@ const RunnerOptionsSchema = z
 
 /** Valid options for one suite run. */
 export type RunnerOptions = z.input<typeof RunnerOptionsSchema>;
+
+/** Closed error codes raised while planning or collecting a suite run. */
+export type EvalRunnerErrorCode =
+  "eval_variant_id_duplicate" | "trial_workdir_outside_output" | "eval_result_missing";
+
+/** Typed failure of the suite runner itself (trial failures are recorded as results instead). */
+export class EvalRunnerError extends HarnessError {
+  readonly code: EvalRunnerErrorCode;
+
+  constructor(code: EvalRunnerErrorCode) {
+    super(code);
+    this.name = "EvalRunnerError";
+    this.code = code;
+  }
+}
+
+/** Injectable runner dependencies; production uses the system clock. */
+export interface RunnerDependencies {
+  readonly clock?: Clock;
+}
 
 /** Result of every planned task/variant/trial combination, in plan order. */
 export type EvalRunResult = readonly TrialResult[];
@@ -92,21 +113,22 @@ function makePlan(
  * @param suite - Validated eval suite.
  * @param variants - Variants to apply to each task.
  * @param executor - In-process or Docker executor.
- * @param options - Output directory, trial count, seed, and concurrency.
+ * @param options - Output directory, trial count, seed, concurrency, and an optional clock.
  * @returns Results ordered by task, variant, and trial index.
  */
 export async function runEval(
   suite: unknown,
   variants: readonly unknown[],
   executor: TrialExecutor,
-  options: RunnerOptions,
+  options: RunnerOptions & RunnerDependencies,
 ): Promise<EvalRunResult> {
+  const { clock = systemClock, ...runnerOptions } = options;
   const parsedSuite = EvalSuiteSchema.parse(suite);
   const parsedVariants = variants.map((variant) => EvalVariantSchema.parse(variant));
   if (new Set(parsedVariants.map(({ id }) => id)).size !== parsedVariants.length) {
-    throw new Error("eval_variant_id_duplicate");
+    throw new EvalRunnerError("eval_variant_id_duplicate");
   }
-  const parsedOptions = RunnerOptionsSchema.parse(options);
+  const parsedOptions = RunnerOptionsSchema.parse(runnerOptions);
   const outDir = resolve(parsedOptions.outDir);
   const trials = makePlan(parsedSuite, parsedVariants, parsedOptions);
   const trialsRoot = join(outDir, "trials");
@@ -118,7 +140,7 @@ export async function runEval(
     trials.map(async (trial) => {
       const workDir = resolve(trial.workDir);
       if (!workDir.startsWith(`${root}${sep}`)) {
-        throw new Error("trial_workdir_outside_output");
+        throw new EvalRunnerError("trial_workdir_outside_output");
       }
       await rm(workDir, { recursive: true, force: true });
     }),
@@ -136,7 +158,7 @@ export async function runEval(
       if (trial === undefined) {
         return;
       }
-      const start = performance.now();
+      const start = clock.now();
       let result: TrialResult;
       try {
         result = TrialResultSchema.parse(await executor.run(trial));
@@ -145,7 +167,7 @@ export async function runEval(
           status: "error",
           dbPath: join(trial.workDir, "data", "harness.db"),
           workspaceDir: join(trial.workDir, "workspace"),
-          durationMs: Math.max(0, Math.floor(performance.now() - start)),
+          durationMs: Math.max(0, Math.floor(clock.now() - start)),
           usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
           exitCode: 1,
           errorCode: errorCodeFrom(error),
@@ -168,7 +190,7 @@ export async function runEval(
   return trials.map((_, index) => {
     const result = results.get(index);
     if (result === undefined) {
-      throw new Error("eval_result_missing");
+      throw new EvalRunnerError("eval_result_missing");
     }
     return result;
   });

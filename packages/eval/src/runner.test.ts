@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Id, parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { defineSuite } from "./load.js";
-import { runEval } from "./runner.js";
+import { EvalRunnerError, runEval } from "./runner.js";
 import type { TrialExecutor } from "./executor.js";
 import { TrialResultSchema } from "./trial.js";
 import type { TrialResult, TrialSpec } from "./trial.js";
@@ -107,6 +107,33 @@ describe("runEval", () => {
         { run: (trial) => Promise.resolve(resultFor(trial)) },
         { outDir: await createDirectory() },
       ),
-    ).rejects.toThrow("eval_variant_id_duplicate");
+    ).rejects.toMatchObject({ code: "eval_variant_id_duplicate" });
+    await expect(
+      runEval(
+        makeSuite(),
+        [{ id: "same" }, { id: "same" }],
+        { run: (trial) => Promise.resolve(resultFor(trial)) },
+        { outDir: await createDirectory() },
+      ),
+    ).rejects.toBeInstanceOf(EvalRunnerError);
+  });
+
+  it("measures a failed trial's duration with the injected clock", async () => {
+    let now = 1_000;
+    const results = await runEval(
+      makeSuite(),
+      [{ id: "baseline" }],
+      {
+        run: () => {
+          now += 250;
+          return Promise.reject(
+            Object.assign(new Error("synthetic failure"), { code: "synthetic_crash" }),
+          );
+        },
+      },
+      { outDir: await createDirectory(), concurrency: 1, clock: { now: () => now } },
+    );
+
+    expect(results.map(({ durationMs }) => durationMs)).toEqual([250, 250]);
   });
 });
