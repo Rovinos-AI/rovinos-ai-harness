@@ -106,15 +106,16 @@ export async function createRuntimeModelAndStore(options: {
     policyVersion: options.policyVersion,
     clock: options.clock,
   });
-  const requestSanitizer: RequestSanitizer | undefined = options.piiConfig.enabled
-    ? (request, target, context) =>
-        piiRuntime.messageSanitizer.sanitizeRequest(request, target, context.runId, {
-          ...(context.recordPiiAction === undefined
-            ? {}
-            : { recordPiiAction: context.recordPiiAction }),
-          signal: context.signal,
-        })
-    : undefined;
+  const requestSanitizer: RequestSanitizer | undefined =
+    options.piiConfig.enabled && options.overrides.alreadyTokenized !== true
+      ? (request, target, context) =>
+          piiRuntime.messageSanitizer.sanitizeRequest(request, target, context.runId, {
+            ...(context.recordPiiAction === undefined
+              ? {}
+              : { recordPiiAction: context.recordPiiAction }),
+            signal: context.signal,
+          })
+      : undefined;
   const model = await createRuntimeModel(options.config, options.overrides, {
     ids: options.ids,
     clock: options.clock,
