@@ -1,20 +1,13 @@
-# Azure Pipelines setup
+# Azure Key Vault nightly test
 
-1. Create an Azure DevOps project and connect this GitHub repository with the
-   Azure Pipelines GitHub App and a GitHub service connection.
-2. Create a YAML pipeline named `Rovinos AI Harness CI` from
-   `/azure-pipelines.yml` and authorize its repository access.
-3. Run the pipeline once and confirm the `static` and `unit` stages appear.
-   The `unit` stage publishes JUnit results and Cobertura coverage; a later run
-   should report a cache hit for the Yarn cache.
-4. Confirm the GitHub check is named **Azure Pipelines / Rovinos AI Harness CI**.
-   Require that check for `main` as described in
-   [branch protection](branch-protection.md).
-5. Create a separate pipeline from `/azure-pipelines-nightly.yml`. Configure
-   `HARNESS_AKV_SERVICE_CONNECTION` with its Azure service connection name and
-   `HARNESS_LIVE_AKV` with a reference to the dedicated non-production test
-   secret, as described in [Azure Key Vault secrets](../secrets-azure.md).
+GitHub Actions (`.github/workflows/ci.yml`) is the only pull request CI. The
+Azure pipeline is retained only for the scheduled live Key Vault test.
 
-The check name combines the Azure Pipelines GitHub App and the Azure DevOps
-pipeline name. Keep both stable; if either changes, update the required check in
-branch protection.
+Create an Azure DevOps pipeline from `/azure-pipelines-nightly.yml` and configure
+`HARNESS_AKV_SERVICE_CONNECTION` with its Azure service connection name and
+`HARNESS_LIVE_AKV` with a reference to the dedicated non-production test secret,
+as described in [Azure Key Vault secrets](../secrets-azure.md).
+
+This nightly pipeline does not create a required branch-protection check. Require
+the GitHub Actions `gates` job as described in
+[branch protection](branch-protection.md).

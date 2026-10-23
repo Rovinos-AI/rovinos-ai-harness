@@ -91,12 +91,12 @@ it("keeps the Node major aligned across mise, engines, types, and the runtime im
   expect([miseMajor, engineMajor, typesMajor, dockerMajor]).toEqual(["26", "26", "26", "26"]);
 });
 
-it("adds the mise-installed ShellCheck binary to the Azure Pipelines path", () => {
-  const pipelineSetup = readFileSync(join(root, "pipelines/templates/node-setup.yml"), "utf8");
+it("adds the mise-installed ShellCheck binary to the GitHub Actions path", () => {
+  const setup = readFileSync(join(root, ".github/actions/node-setup/action.yml"), "utf8");
 
-  expect(pipelineSetup).toContain('shellcheck_bin="$(mise which shellcheck)"');
-  expect(pipelineSetup).toContain('$(dirname "$shellcheck_bin")');
-  expect(pipelineSetup).toContain("##vso[task.prependpath]");
+  expect(setup).toContain('shellcheck_bin="$(mise which shellcheck)"');
+  expect(setup).toContain('$(dirname "$shellcheck_bin")');
+  expect(setup).toContain('echo "$(dirname "$shellcheck_bin")" >> "$GITHUB_PATH"');
 });
 
 it("pins Yarn 4 with Corepack's integrity hash", () => {

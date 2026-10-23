@@ -131,20 +131,20 @@ Vitest workspace projects (defined in task 1.1):
 
 | Project | File pattern | Runs in |
 | --- | --- | --- |
-| unit | `*.test.ts` | `yarn test:unit` (Azure stage `unit`) |
-| integration | `*.int.test.ts` | `yarn test:integration` (stage `integration`, needs compose services) |
-| canary | `*.canary.test.ts` | `yarn test:canary` (stage `gates`) |
-| replay | `*.replay.test.ts` | `yarn test:replay` (stage `gates`) |
+| unit | `*.test.ts` | `yarn test:unit` (CI job `unit`) |
+| integration | `*.int.test.ts` | `yarn test:integration` (job `integration`, needs compose services) |
+| canary | `*.canary.test.ts` | `yarn test:canary` (job `gates`) |
+| replay | `*.replay.test.ts` | `yarn test:replay` (job `gates`) |
 
 Rules: unit tests do no network or disk outside a temp dir and use fake clock/ids. Tests are co-located (`foo.ts` + `foo.test.ts`) except cross-package tests in `test/`. Use table-driven tests for pure logic. Golden files live in `__golden__/` next to the test and are updated only via `UPDATE_GOLDEN=1`. Coverage floor 85% lines for new packages (enforced in task 1.4 once packages exist). Every bug fix adds a regression test.
 
-## 7. Azure Pipelines stage map
+## 7. GitHub Actions CI job map
 
-`static` (lint, typecheck, SPDX, DCO, license scan) -> `unit` -> `integration` -> `gates` (canary, replay) -> `release` (tags only). Test results published as JUnit; coverage as Cobertura. Secrets only from variable groups or Key Vault, never in repo or logs. Emulator-based tests need no secrets; live-cloud tests are tagged `LIVE` and run only on the nightly schedule.
+`static` (lint, typecheck, SPDX, DCO, license scan) -> `unit` -> `integration` -> `gates` (canary, replay). GitHub Actions is the only PR CI; `gates` is the required branch-protection check. Test results are uploaded as JUnit artifacts and coverage as Cobertura. Emulator-based tests need no secrets; live-cloud tests are tagged `LIVE` and run only on the nightly schedule.
 
 ## 8. Definition of done (every task)
 
-- [ ] Acceptance criteria all met; tests listed in the task exist and pass in Azure Pipelines.
+- [ ] Acceptance criteria all met; tests listed in the task exist and pass in CI.
 - [ ] `yarn lint` passes with **zero errors and zero warnings**; no lint rule relaxed; any new suppression uses the `-- <reason>` format and is listed in the PR description.
 - [ ] `yarn typecheck` passes; SPDX headers present; commits signed off.
 - [ ] New data contracts follow §3.10 (one Zod schema, inferred types, typed parsing).

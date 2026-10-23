@@ -839,7 +839,7 @@ Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs the stages below on GitHub-hosted runners for every pull request that is ready for review. JUnit results and Cobertura coverage are uploaded as run artifacts. The workflow has a read-only token and no secrets. The Azure pipeline (`azure-pipelines.yml`) runs the same stages in parallel until it is retired.
+GitHub Actions (`.github/workflows/ci.yml`) is the only pull request CI and runs the jobs below on GitHub-hosted runners for every pull request that is ready for review. Branch protection requires the `gates` job. JUnit results and Cobertura coverage are uploaded as run artifacts. The workflow has a read-only token and no secrets. Azure Pipelines is retained only for the scheduled live Azure Key Vault test.
 
 ```mermaid
 flowchart LR
@@ -850,7 +850,7 @@ flowchart LR
   GATES --> REL{"tag v*?"}
   REL -- yes --> RELEASE["release: publish packages, build + scan + SBOM + sign images, GitHub Release"]
   REL -- "no (PR)" --> DRY["release dry run"]
-  NIGHTLY(["Nightly 03:00"]) --> NE["eval replay + live (cost-capped), benchmarks + soak, full-history secret scan, vuln rescan, external links, LIVE cloud tests"]
+  NIGHTLY(["Nightly 03:00"]) --> NE["Azure Key Vault LIVE test"]
 ```
 
 ---
@@ -962,7 +962,7 @@ The full index is [`docs/engineering/tasks/README.md`](docs/engineering/tasks/RE
 packages/        @harness/* libraries and apps (specs live next to the code: epic-*.md)
 infra/           compose, collector, Kusto, dashboards, alerts, k8s examples
 security/        scanner rules and policies
-pipelines/       Azure Pipelines templates
+pipelines/       Azure Key Vault nightly pipeline configuration
 scripts/         CI checks and generators
 test/            cross-package, canary, replay, and security tests
 examples/        runnable examples (synthetic data only)

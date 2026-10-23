@@ -73,7 +73,7 @@ it("accepts clean Markdown and rejects untagged code fences", () => {
 
 it("wires every extended linter into the static lint command", () => {
   const manifest = readFileSync(resolve(rootDirectory, "package.json"), "utf8");
-  const pipeline = readFileSync(resolve(rootDirectory, "azure-pipelines.yml"), "utf8");
+  const workflow = readFileSync(resolve(rootDirectory, ".github/workflows/ci.yml"), "utf8");
   const lintCommand = /"lint": "([^"]+)"/u.exec(manifest)?.[1];
 
   for (const name of ["md", "yaml", "sh", "docker", "editorconfig", "spell", "ts"]) {
@@ -82,9 +82,9 @@ it("wires every extended linter into the static lint command", () => {
   // Type-aware ESLint runs in bounded per-package batches (scripts/lint-ts.ts); one `eslint .`
   // process peaked at 5.1-5.4 GB and occasionally passed its 8 GB heap limit (2026-10-20).
   expect(/"lint:ts": "([^"]+)"/u.exec(manifest)?.[1]).toMatch(/ scripts\/lint-ts\.ts$/u);
-  expect(pipeline).toContain("- script: yarn lint");
-  expect(pipeline).toContain('LINT_PULL_IMAGES: "1"');
-  expect(pipeline).not.toContain("LINT_SKIP_CONTAINERS");
+  expect(workflow).toContain("run: yarn lint");
+  expect(workflow).toContain('LINT_PULL_IMAGES: "1"');
+  expect(workflow).not.toContain("LINT_SKIP_CONTAINERS");
 });
 
 it("accepts valid YAML and rejects duplicate keys through ESLint", () => {

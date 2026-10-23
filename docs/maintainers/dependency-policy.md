@@ -13,10 +13,10 @@ pull request. Keep Yarn package-manager updates ignored; update the `packageMana
 field through a separately reviewed change.
 
 Major Node Docker image updates are ignored to keep the image aligned with the
-Node version pinned in `mise.toml`. The mise Docker image, its `MISE_VERSION` and
-`MISE_SHA256` pins in `pipelines/templates/node-setup.yml`, and the tools in
-`mise.toml` must be updated manually together in one change. The pinned Debian
-packages in the Dockerfile are updated together with the mise base image digest.
+Node version pinned in `mise.toml`. The `MISE_VERSION` and `MISE_SHA256` pins in
+`.github/actions/node-setup/action.yml` and the tools in `mise.toml` must be
+updated manually together in one change. The pinned Debian packages in the
+Dockerfile are updated together with the mise version.
 
 The DCO check requires a valid `Signed-off-by` trailer on ordinary commits.
 Dependabot's exemption in `config/dco-exemptions.json` is limited to its exact

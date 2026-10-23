@@ -1,6 +1,6 @@
 # AGENTS.md: pipelines
 
-Azure Pipelines templates used by `azure-pipelines.yml` and the nightly pipeline. Pull request CI has moved to GitHub Actions (`.github/workflows/ci.yml`, task 1.21); keep this pipeline in step with the workflow until it is retired.
+The Azure Pipelines configuration is retained only for the nightly Azure Key Vault live test. GitHub Actions (`.github/workflows/ci.yml`) is the only pull request CI.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
@@ -16,11 +16,9 @@ Azure Pipelines templates used by `azure-pipelines.yml` and the nightly pipeline
 
 ## Rules
 
-- Stage names are fixed: `static`, `unit`, `integration`, `gates`, `release`. Add steps, never rename stages.
-- No literal secrets; use variable groups and Key Vault tasks.
-- Teardown steps use `condition: always()`; test results use `succeededOrFailed()`.
-- Required status check names are documented in `docs/maintainers/branch-protection.md`; changing them breaks branch protection.
+- The nightly pipeline runs only the live Azure Key Vault test; it does not run on pull requests.
+- No literal secrets; use pipeline variables and Azure service connections.
 
 ## Testing
 
-- `scripts/ci/verify-pipeline.test.ts` parses the YAML and asserts structure.
+- `scripts/ci/verify-nightly.test.ts` parses the YAML and asserts the scheduled live test configuration.
