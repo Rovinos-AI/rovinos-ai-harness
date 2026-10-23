@@ -34,3 +34,21 @@ must set `unsafeAutoApprove: true`; the schema rejects implicit auto-approval.
 `loadSuite` reads a supported suite file and returns a validated suite with its
 relative file references resolved. Validation failures are `ContractError`s with
 path and code issues, not the rejected input values.
+
+## Running trials
+
+`runEval(suite, variants, executor, { outDir })` runs every task/variant/trial
+combination with a default concurrency of two. Its return value is ordered by suite,
+variant, and trial index; `trials.jsonl` is appended as trials settle so interrupted
+runs retain completed metadata. Trial workspaces, SQLite stores, and vaults live in
+separate directories under `outDir/trials`.
+
+`InProcessExecutor` accepts per-trial model, tool, and policy factories. Use these
+factories for fakes or cassette-backed providers so trial state is not shared.
+`DockerExecutor` uses the harness image with `--network none` by default, passes the
+goal through container stdin, and enforces a wall-clock timeout. Containers drop all
+capabilities, use a read-only root with a bounded no-exec `/tmp`, run as a non-root
+user, and have configurable memory, CPU, and process-count limits. Generated configs
+contain only secret references; each trial receives a fresh key through the
+executor boundary. The runner is a package API; the shipped `harness eval` command
+is tracked separately.

@@ -7,12 +7,11 @@ import { expect, it } from "vitest";
 import { composeIntegrationSuites } from "../../vitest.config.js";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
-// A suite starts Compose stacks directly, or through the documentation runner (the quickstart), or
-// builds images (`docker build`).
+// A suite starts a Docker/Compose container, through the documentation runner, or builds images.
 const startsCompose =
-  /"compose"|runNetworkIsolationCompose|composeArgs|runQuickstartDocTests|run-doc-tests|runDocker\(\[\s*"build"/u;
+  /"compose"|runNetworkIsolationCompose|composeArgs|runQuickstartDocTests|run-doc-tests|new DockerExecutor|runDocker\(\[\s*"build"/u;
 
-it("lists every integration suite that starts a Compose stack or builds images", () => {
+it("lists every integration suite that starts a container or builds images", () => {
   const suites = execFileSync("git", ["ls-files", "*.int.test.ts"], { cwd: root, encoding: "utf8" })
     .split("\n")
     .filter((path) => path !== "" && startsCompose.test(readFileSync(resolve(root, path), "utf8")));

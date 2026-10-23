@@ -100,6 +100,37 @@ afterEach(async () => {
 });
 
 describe("createRuntime PII composition", () => {
+  it("rejects replay-only tokenization bypass unless replay ports and isolated storage are supplied", async () => {
+    const incompleteOverrides = [
+      {
+        model: scriptedModel({ value: email }),
+        tool: makeTool([], null),
+        transientVault: true,
+      },
+      {
+        store: new InMemoryEventStore(),
+        tool: makeTool([], null),
+        transientVault: true,
+      },
+      {
+        store: new InMemoryEventStore(),
+        model: scriptedModel({ value: email }),
+        transientVault: true,
+      },
+      {
+        store: new InMemoryEventStore(),
+        model: scriptedModel({ value: email }),
+        tool: makeTool([], null),
+      },
+    ];
+
+    for (const overrides of incompleteOverrides) {
+      await expect(
+        createRuntime(config(), { ...overrides, alreadyTokenized: true }),
+      ).rejects.toMatchObject({ code: "already_tokenized_requires_replay_ports" });
+    }
+  });
+
   it("preserves overlapping runtime detections until policy evaluation", async () => {
     const input = `prefix ${email} suffix`;
     const pii = PiiConfigSchema.parse({
@@ -146,7 +177,7 @@ describe("createRuntime PII composition", () => {
         },
       },
       {
-        provider: "hosted",
+        provider: Code.parse("hosted"),
         kind: "openai",
         complete: (request) => {
           hostedRequests.push(request);
@@ -378,6 +409,65 @@ describe("createRuntime PII composition", () => {
         persistedEvents.push(event);
       }
       expect(JSON.stringify(persistedEvents)).not.toContain(email);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("tokenizes live model requests and tool arguments without replay mode", async () => {
+    const requests: ModelRequest[] = [];
+    const received: JsonValue[] = [];
+    let callIndex = 0;
+    const model = ModelsConfigSchema.parse({
+      providers: [{ id: "hosted", kind: "openai", trust: "hosted" }],
+      routing: { default: [{ provider: "hosted", model: "test-model" }] },
+    });
+    const runtime = await createRuntime(
+      { run: runConfig, keys, models: model, pii: PiiConfigSchema.parse({}) },
+      {
+        dataDir: await dataDirectory(),
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        tool: makeTool(received, null),
+        providerAdapters: [
+          {
+            provider: "hosted",
+            kind: "openai",
+            complete: (request) => {
+              requests.push(request);
+              callIndex += 1;
+              return Promise.resolve({
+                parts:
+                  callIndex === 1
+                    ? [
+                        {
+                          type: "tool_call",
+                          callId: Id.parse("11111111111111111111111111"),
+                          toolId,
+                          args: { value: email },
+                        },
+                      ]
+                    : [{ type: "text", text: "completed" }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: callIndex === 1 ? "tool_calls" : "stop",
+                latencyMs: 0,
+              });
+            },
+          },
+        ],
+        policy: allowAllPolicy,
+        secretResolver,
+      },
+    );
+
+    try {
+      const result = await runtime.run(email);
+
+      expect(result.status).toBe("completed");
+      expect(JSON.stringify(requests)).not.toContain(email);
+      expect(JSON.stringify(requests)).toContain("<EMAIL_1>");
+      expect(JSON.stringify(received)).not.toContain(email);
+      expect(JSON.stringify(received)).toContain("<EMAIL_1>");
     } finally {
       await runtime.close();
     }

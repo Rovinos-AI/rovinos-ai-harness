@@ -1803,7 +1803,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/eval@workspace:packages/eval"
   dependencies:
+    "@harness/core": "workspace:^"
     "@harness/policy": "workspace:^"
+    "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.7"
@@ -1905,8 +1907,13 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/replay@workspace:packages/replay"
   dependencies:
+    "@harness/core": "workspace:^"
+    "@harness/models": "workspace:^"
+    "@harness/pii": "workspace:^"
+    "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
+    "@harness/vault": "workspace:^"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.7"
   languageName: unknown

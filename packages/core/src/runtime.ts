@@ -68,6 +68,14 @@ class ApprovalEditUnavailableError extends HarnessError {
   }
 }
 
+class AlreadyTokenizedRequiresReplayPortsError extends HarnessError {
+  readonly code = "already_tokenized_requires_replay_ports";
+
+  constructor() {
+    super("alreadyTokenized is only available with isolated replay ports.");
+  }
+}
+
 const defaultProcessLike: ShutdownProcessLike = {
   on: (signal, listener) => process.on(signal, listener),
   removeListener: (signal, listener) => process.removeListener(signal, listener),
@@ -389,5 +397,14 @@ export async function createRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
+  if (
+    overrides.alreadyTokenized === true &&
+    (overrides.transientVault !== true ||
+      overrides.store === undefined ||
+      overrides.model === undefined ||
+      overrides.tool === undefined)
+  ) {
+    throw new AlreadyTokenizedRequiresReplayPortsError();
+  }
   return composeRuntime(await setupRuntime(config, overrides));
 }
