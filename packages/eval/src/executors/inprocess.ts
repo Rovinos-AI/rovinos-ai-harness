@@ -4,11 +4,11 @@ import { createRuntime } from "@harness/core";
 import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
 import { TrialResultSchema } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
-import { prepareTrial } from "../executor.js";
-import type { TrialExecutor } from "../executor.js";
+import { prepareTrial, systemClock } from "../executor.js";
+import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
 
 /** Factories for isolated model, tool, and policy ports. */
-export interface InProcessExecutorOptions {
+export interface InProcessExecutorOptions extends TrialExecutionDependencies {
   readonly model: (trial: TrialSpec) => ModelPort;
   readonly tool?: (trial: TrialSpec) => ToolPort;
   readonly policy?: (trial: TrialSpec) => PolicyPort;
@@ -36,8 +36,9 @@ export class InProcessExecutor implements TrialExecutor {
 
   /** {@inheritDoc TrialExecutor.run} */
   async run(trial: TrialSpec): Promise<TrialResult> {
-    const prepared = await prepareTrial(trial);
-    const startedAt = performance.now();
+    const clock = this.options.clock ?? systemClock;
+    const startedAt = clock.now();
+    const prepared = await prepareTrial(trial, this.options);
     const runtime = await createRuntime(prepared.runtimeConfig, {
       dataDir: prepared.dataDir,
       transientVault: false,
@@ -65,7 +66,7 @@ export class InProcessExecutor implements TrialExecutor {
         trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
       const run = await runtime.run(goal, hasContextStrategy ? { role: "eval" } : {});
       const runId = run.events[0]?.runId;
-      const durationMs = Math.max(0, Math.floor(performance.now() - startedAt));
+      const durationMs = Math.max(0, Math.floor(clock.now() - startedAt));
       const result: TrialResult = {
         status: resultStatus(run.status),
         ...(runId === undefined ? {} : { runId }),

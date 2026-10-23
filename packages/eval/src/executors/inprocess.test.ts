@@ -2,7 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Id } from "@harness/schemas";
 import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
 import { afterEach, describe, expect, it } from "vitest";
@@ -119,7 +119,16 @@ describe("InProcessExecutor", () => {
 
   it("creates separate data stores and fresh providers for repeated trials", async () => {
     let providerCreations = 0;
+    let randomValue = 0;
+    const generatedKeys: string[] = [];
     const executor = new InProcessExecutor({
+      clock: { now: () => 1_700_000_000_000 + providerCreations },
+      randomBytes: (size) => {
+        randomValue += 1;
+        const bytes = new Uint8Array(size).fill(randomValue);
+        generatedKeys.push(Buffer.from(bytes).toString("base64"));
+        return bytes;
+      },
       model: () => {
         providerCreations += 1;
         return {
@@ -145,6 +154,13 @@ describe("InProcessExecutor", () => {
 
     expect(first.dbPath).not.toBe(second.dbPath);
     expect(first.workspaceDir).not.toBe(second.workspaceDir);
+    const firstVaultPath = join(dirname(first.dbPath), "vault.db");
+    const secondVaultPath = join(dirname(second.dbPath), "vault.db");
+    expect(firstVaultPath).not.toBe(secondVaultPath);
+    expect(existsSync(firstVaultPath)).toBe(true);
+    expect(existsSync(secondVaultPath)).toBe(true);
+    expect(generatedKeys).toHaveLength(2);
+    expect(new Set(generatedKeys).size).toBe(2);
     expect(providerCreations).toBe(2);
   });
 

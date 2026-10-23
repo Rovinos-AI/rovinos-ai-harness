@@ -1,21 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { execa } from "execa";
+import { isDockerAvailable } from "@harness/sandbox";
 import { afterAll, describe, expect, it } from "vitest";
 import { defineSuite } from "../load.js";
 import { DockerExecutor } from "./docker.js";
 import type { TrialSpec } from "../trial.js";
 
 const image = process.env.HARNESS_EVAL_IMAGE ?? "harness:local";
-const dockerAvailable = await execa("docker", ["info"], {
-  reject: false,
-  stdout: "ignore",
-  stderr: "ignore",
-}).then(
-  ({ exitCode }) => exitCode === 0,
-  () => false,
-);
+const dockerAvailable = isDockerAvailable();
 const testRoot = join(process.cwd(), ".tmp", "eval-docker-integration");
 const directories: string[] = [];
 
@@ -56,7 +49,10 @@ describe.skipIf(!dockerAvailable)("@docker DockerExecutor", () => {
     await mkdir(testRoot, { recursive: true });
     const root = await mkdtemp(join(testRoot, "trial-"));
     directories.push(root);
-    const result = await new DockerExecutor({ image }).run(makeTrial(join(root, "run")));
+    const uid = process.getuid?.() ?? 65532;
+    const gid = process.getgid?.() ?? 65532;
+    const user = `${String(uid > 0 ? uid : 65532)}:${String(gid > 0 ? gid : 65532)}`;
+    const result = await new DockerExecutor({ image, user }).run(makeTrial(join(root, "run")));
 
     expect(result.dbPath).toBe(join(root, "run", "data", "harness.db"));
     expect(result.workspaceDir).toBe(join(root, "run", "workspace"));

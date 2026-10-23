@@ -4,6 +4,7 @@ import { cp, mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   Code,
+  HarnessError,
   KeysConfigSchema,
   ModelsConfigSchema,
   PiiConfigSchema,
@@ -15,7 +16,7 @@ import {
 } from "@harness/schemas";
 import type { RunBudgetsSchema } from "@harness/schemas";
 import { z } from "zod";
-import type { RuntimeConfig } from "@harness/core";
+import type { Clock, RuntimeConfig } from "@harness/core";
 import type { EvalTask } from "./schema.js";
 import { EvalCassetteModeSchema } from "./trial.js";
 import type { EvalVariant, TrialResult, TrialSpec } from "./trial.js";
@@ -59,6 +60,27 @@ export interface PreparedTrial {
   readonly workspaceDir: string;
   readonly policyPath?: string;
   readonly key: string;
+}
+
+/** Injectable time and cryptographic randomness used for trial resources. */
+export interface TrialExecutionDependencies {
+  readonly clock?: Clock;
+  readonly randomBytes?: (size: number) => Uint8Array;
+}
+
+/** System clock used for elapsed-time measurements. */
+export const systemClock: Clock = Object.freeze({ now: () => Date.now() });
+
+/** Cryptographic random source used for fresh per-trial key material. */
+export const systemRandomBytes = (size: number): Uint8Array => randomBytes(size);
+
+class TrialSetupError extends HarnessError {
+  readonly code: "trial_workdir_invalid" | "trial_random_source_invalid";
+
+  constructor(code: "trial_workdir_invalid" | "trial_random_source_invalid") {
+    super(code);
+    this.code = code;
+  }
 }
 
 /** Executor that runs one isolated eval trial. */
@@ -109,8 +131,12 @@ function keyIdFor(trial: TrialSpec): string {
   return `trial_${trial.seed.toString(16)}`;
 }
 
-function secretForTrial(): string {
-  return randomBytes(32).toString("base64");
+function secretForTrial(randomSource: (size: number) => Uint8Array): string {
+  const bytes = randomSource(32);
+  if (bytes.byteLength !== 32) {
+    throw new TrialSetupError("trial_random_source_invalid");
+  }
+  return Buffer.from(bytes).toString("base64");
 }
 
 /**
@@ -119,10 +145,13 @@ function secretForTrial(): string {
  * @param trial - Validated trial and variant.
  * @returns Paths and runtime configuration isolated to the trial.
  */
-export async function prepareTrial(trial: TrialSpec): Promise<PreparedTrial> {
+export async function prepareTrial(
+  trial: TrialSpec,
+  dependencies: TrialExecutionDependencies = {},
+): Promise<PreparedTrial> {
   const workDir = resolve(trial.workDir);
   if (basename(workDir) === "" || workDir === resolve(workDir, "..")) {
-    throw new Error("trial_workdir_invalid");
+    throw new TrialSetupError("trial_workdir_invalid");
   }
   await mkdir(dirname(workDir), { recursive: true });
   await mkdir(workDir, { recursive: false });
@@ -142,7 +171,7 @@ export async function prepareTrial(trial: TrialSpec): Promise<PreparedTrial> {
     await cp(policySource, policyPath);
   }
 
-  const key = secretForTrial();
+  const key = secretForTrial(dependencies.randomBytes ?? systemRandomBytes);
   const config = configForTrial(trial.task, trial.variant, keyIdFor(trial));
   const configPath = join(workDir, "harness.config.json");
   await writeFile(configPath, `${JSON.stringify(config)}\n`, { encoding: "utf8", flag: "wx" });

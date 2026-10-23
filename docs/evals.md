@@ -46,7 +46,9 @@ separate directories under `outDir/trials`.
 `InProcessExecutor` accepts per-trial model, tool, and policy factories. Use these
 factories for fakes or cassette-backed providers so trial state is not shared.
 `DockerExecutor` uses the harness image with `--network none` by default, passes the
-goal through container stdin, and enforces a wall-clock timeout. Generated configs
+goal through container stdin, and enforces a wall-clock timeout. Containers drop all
+capabilities, use a read-only root with a bounded no-exec `/tmp`, run as a non-root
+user, and have configurable memory, CPU, and process-count limits. Generated configs
 contain only secret references; each trial receives a fresh key through the
 executor boundary. The runner is a package API; the shipped `harness eval` command
 is tracked separately.

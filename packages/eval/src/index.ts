@@ -30,7 +30,13 @@ export {
   type TrialConfig,
   type TrialEvalOptions,
   type TrialExecutor,
+  type TrialExecutionDependencies,
 } from "./executor.js";
 export { InProcessExecutor, type InProcessExecutorOptions } from "./executors/inprocess.js";
-export { DockerExecutor, type DockerExecutorOptions } from "./executors/docker.js";
+export {
+  DockerExecutor,
+  DockerExecutorError,
+  type DockerExecutorErrorCode,
+  type DockerExecutorOptions,
+} from "./executors/docker.js";
 export { runEval, type EvalRunResult, type RunnerOptions } from "./runner.js";

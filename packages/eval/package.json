@@ -20,11 +20,8 @@
   "dependencies": {
     "@harness/core": "workspace:^",
     "@harness/policy": "workspace:^",
+    "@harness/sandbox": "workspace:^",
     "@harness/schemas": "workspace:^",
-    "@harness/store": "workspace:^",
-    "@harness/store-sqlite": "workspace:^",
-    "@harness/vault": "workspace:^",
-    "execa": "10.1.1",
     "zod": "4.6.7"
   },
   "devDependencies": {

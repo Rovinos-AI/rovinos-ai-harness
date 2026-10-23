@@ -65,7 +65,6 @@
     "telemetry",
     "crypto",
     "store",
-    "store-sqlite",
     "vault",
     "pii",
     "models",
