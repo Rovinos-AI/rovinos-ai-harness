@@ -2,13 +2,14 @@
 import {
   Code,
   Id,
+  type Event as StoredEvent,
   PiiPolicySchema,
   type Detection,
   type InputRequest,
   type InputResponse,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { InMemoryVault } from "@harness/vault";
+import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { Tokenizer } from "@harness/pii";
 import { describe, expect, it, vi } from "vitest";
 import { INPUT_WAIT_SPAN } from "../spans.js";
@@ -28,7 +29,7 @@ const email = "display-canary@example.test";
 const schema = {
   type: "object" as const,
   properties: {
-    email: { type: "string" as const, format: "email" as const, default: "<EMAIL_2>" },
+    email: { type: "string" as const, format: "email" as const },
   },
   required: ["email"],
 };
@@ -55,7 +56,22 @@ function tokenizer(): Tokenizer {
   });
 }
 
-async function pendingStore(): Promise<InMemoryEventStore> {
+function schemaResolver(): AuditingVaultResolver {
+  return new AuditingVaultResolver(
+    {
+      resolve: (_runId, token) => Promise.resolve(token === "<EMAIL_2>" ? email : undefined),
+    },
+    () => undefined,
+  );
+}
+
+async function pendingStore(
+  options: {
+    readonly schema?: InputRequest["schema"];
+    readonly separationOfDuties?: boolean;
+    readonly requestedBy?: string;
+  } = {},
+): Promise<InMemoryEventStore> {
   const store = new InMemoryEventStore();
   await store.append(
     runId,
@@ -70,6 +86,7 @@ async function pendingStore(): Promise<InMemoryEventStore> {
         segmentId: runId,
         configHash: "a".repeat(64),
         policyVersion: "test.policy",
+        ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
         depth: 0,
       },
       {
@@ -96,6 +113,7 @@ async function pendingStore(): Promise<InMemoryEventStore> {
         toolId: "mcp.echo",
         idempotent: true,
         policyDecision: "allow",
+        ...(options.separationOfDuties === true ? { policySeparationOfDuties: true } : {}),
         argsHash: "a".repeat(64),
         args: {},
       },
@@ -115,7 +133,7 @@ async function pendingStore(): Promise<InMemoryEventStore> {
         round: 1,
         mode: "form",
         message: "Contact <EMAIL_1>",
-        schema,
+        schema: options.schema ?? schema,
       },
       {
         type: "run_status_changed",
@@ -232,12 +250,108 @@ describe("HumanInputBroker", () => {
       store: await pendingStore(),
       channels: [winner, waiting],
       tokenizer: tokenizer(),
+      clock: { now: () => 500 },
     });
 
     const resolution = await broker.present(runId, requestId, new AbortController().signal);
 
     expect(resolution.approverId).toBe("cli.winner");
     expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it("keeps tokenized schema values out of the channel while validating originals", async () => {
+    const store = await pendingStore({
+      schema: {
+        type: "object",
+        properties: {
+          email: {
+            type: "string",
+            format: "email",
+            enum: ["<EMAIL_2>"],
+          },
+        },
+        required: ["email"],
+      },
+    });
+    const present = vi.fn<HumanInputChannel["present"]>((request) => {
+      expect(request.schema).toMatchObject({
+        properties: { email: { enum: ["<EMAIL_2>"] } },
+      });
+      return Promise.resolve({
+        action: "accept",
+        answer: { email },
+        principal: Code.parse("cli.human"),
+      });
+    });
+    const broker = new HumanInputBroker({
+      store,
+      channels: [channel("channel.cli", present)],
+      tokenizer: tokenizer(),
+      resolver: schemaResolver(),
+      clock: { now: () => 500 },
+    });
+
+    const resolution = await broker.present(runId, requestId, new AbortController().signal);
+
+    expect(resolution.answer).toEqual({ email: "<EMAIL_1>" });
+  });
+
+  it("does not let an ineligible requester cancel eligible channels", async () => {
+    const store = await pendingStore({
+      separationOfDuties: true,
+      requestedBy: "cli.requester",
+    });
+    const rejected = vi.fn<HumanInputChannel["present"]>().mockResolvedValue({
+      action: "accept",
+      answer: { email },
+      principal: Code.parse("cli.requester"),
+    });
+    const eligible = channel("channel.eligible", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return {
+        action: "accept",
+        answer: { email },
+        principal: Code.parse("cli.approver"),
+      };
+    });
+    const broker = new HumanInputBroker({
+      store,
+      channels: [channel("channel.requester", rejected), eligible],
+      tokenizer: tokenizer(),
+      clock: { now: () => 500 },
+    });
+
+    const resolution = await broker.present(runId, requestId, new AbortController().signal);
+
+    expect(rejected).toHaveBeenCalledTimes(2);
+    expect(resolution.approverId).toBe("cli.approver");
+  });
+
+  it("does not resolve an answer after caller cancellation", async () => {
+    const store = await pendingStore();
+    const controller = new AbortController();
+    const reason = new Error("presentation cancelled");
+    const broker = new HumanInputBroker({
+      store,
+      channels: [
+        channel("channel.cli", () => {
+          controller.abort(reason);
+          return Promise.resolve({
+            action: "accept",
+            answer: { email },
+            principal: Code.parse("cli.human"),
+          });
+        }),
+      ],
+      tokenizer: tokenizer(),
+    });
+
+    await expect(broker.present(runId, requestId, controller.signal)).rejects.toBe(reason);
+    const events: StoredEvent[] = [];
+    for await (const event of store.read(runId)) {
+      events.push(event);
+    }
+    expect(events.some((event) => event.type === "input_resolved")).toBe(false);
   });
 });
 

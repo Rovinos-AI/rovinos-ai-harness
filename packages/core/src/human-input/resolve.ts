@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  HarnessError,
-  InputRequestSchema,
   InputResponseSchema,
   JsonValue as JsonValueSchema,
   Principal,
@@ -15,11 +13,30 @@ import {
 import { formSchemaToZod } from "@harness/schemas";
 import { LeaseLostError, RunRecorder, type Clock } from "../recorder.js";
 import { assertApproverMayResolve } from "../approval-principals.js";
-import { foldRunState, type InputRequestedEvent, type ToolIntentEvent } from "../run-state.js";
+import type { InputRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
 import { INPUT_WAIT_SPAN } from "../spans.js";
 import { ensureTracing } from "../runtime-tracing-init.js";
 import type { Tokenizer } from "@harness/pii";
+import type { AuditingVaultResolver } from "@harness/vault";
 import type { EventStore, RunQueue } from "@harness/store";
+import { pendingRequest, readRunLog } from "./resolve-log.js";
+import {
+  inputDestination,
+  inputRequestForValidation,
+  requestForValidation,
+} from "./resolve-validation.js";
+import {
+  InputAlreadyResolvedError,
+  InputAnswerInvalidError,
+  InputExpiredError,
+  InputNotFoundError,
+  InputNotExpiredError,
+  InputPrincipalInvalidError,
+  InputResolutionConflictError,
+  InputTokenizerUnavailableError,
+} from "./resolve-errors.js";
+
+export * from "./resolve-errors.js";
 
 /** Options supplied by a human channel when resolving an input. */
 export interface InputResolution {
@@ -30,75 +47,18 @@ export interface InputResolution {
 
 /** Dependencies needed to durably resolve an input from any process. */
 export interface InputResolutionDependencies {
-  readonly tokenizer: Pick<Tokenizer, "tokenizeJson">;
+  readonly tokenizer?: Pick<Tokenizer, "tokenizeJson">;
+  readonly resolver?: AuditingVaultResolver;
   readonly clock?: Clock;
   readonly queue?: Pick<RunQueue, "enqueue">;
+  readonly expiresAfterMs?: number;
 }
 
 /** A human resolution and the runtime dependencies needed to persist it. */
 export interface InputResolutionOptions extends InputResolution, InputResolutionDependencies {}
 
-/** Error raised when an input request does not exist in the run log. */
-export class InputNotFoundError extends HarnessError {
-  readonly code = "input_not_found";
-
-  constructor() {
-    super("Input request was not found.");
-    this.name = "InputNotFoundError";
-  }
-}
-
-/** Error raised when an input request has already been resolved. */
-export class InputAlreadyResolvedError extends HarnessError {
-  readonly code = "input_already_resolved";
-
-  constructor() {
-    super("Input request was already resolved.");
-    this.name = "InputAlreadyResolvedError";
-  }
-}
-
-/** Error raised when the selected answer does not satisfy its request schema. */
-export class InputAnswerInvalidError extends HarnessError {
-  readonly code = "input_answer_invalid";
-
-  constructor() {
-    super("Input answer does not satisfy the request schema.");
-    this.name = "InputAnswerInvalidError";
-  }
-}
-
-/** Error raised when a channel's principal is not a valid human principal. */
-export class InputPrincipalInvalidError extends HarnessError {
-  readonly code = "input_principal_invalid";
-
-  constructor() {
-    super("Input resolution requires a valid human principal.");
-    this.name = "InputPrincipalInvalidError";
-  }
-}
-
-/** Error raised when the input has not reached its configured expiry. */
-export class InputNotExpiredError extends HarnessError {
-  readonly code = "input_not_expired";
-
-  constructor() {
-    super("Input request has not expired.");
-    this.name = "InputNotExpiredError";
-  }
-}
-
-/** Error raised when concurrent writers prevent a durable input resolution. */
-export class InputResolutionConflictError extends HarnessError {
-  readonly code = "input_resolution_conflict";
-
-  constructor() {
-    super("Input resolution conflicted with concurrent run events.");
-    this.name = "InputResolutionConflictError";
-  }
-}
-
 const systemClock: Clock = { now: Date.now };
+const DEFAULT_INPUT_EXPIRY_MS = 604_800_000;
 
 /** Validates a channel response without exposing schema errors or answer content. */
 export function validateInputResponse(request: InputRequest, response: unknown): InputResponse {
@@ -125,65 +85,6 @@ export function validateInputResponse(request: InputRequest, response: unknown):
   return { action: "accept", answer: JsonValueSchema.parse(answer.data) };
 }
 
-interface RunLog {
-  readonly events: readonly Event[];
-  readonly state: ReturnType<typeof foldRunState>;
-  readonly lastEvent: Event;
-}
-
-async function readRunLog(store: EventStore, runId: Id): Promise<RunLog> {
-  const events: Event[] = [];
-  for await (const event of store.read(runId)) {
-    events.push(event);
-  }
-  const lastEvent = events.at(-1);
-  if (lastEvent === undefined) {
-    throw new InputNotFoundError();
-  }
-  return { events, state: foldRunState(events), lastEvent };
-}
-
-function pendingRequest(
-  state: ReturnType<typeof foldRunState>,
-  requestId: Id,
-): InputRequestedEvent {
-  const request = state.pendingInputs.get(requestId);
-  if (request !== undefined) {
-    return request;
-  }
-  if (state.inputRequests.has(requestId)) {
-    throw new InputAlreadyResolvedError();
-  }
-  throw new InputNotFoundError();
-}
-
-function requestForValidation(event: InputRequestedEvent): InputRequest {
-  return InputRequestSchema.parse({
-    requestId: event.requestId,
-    source: event.source,
-    ...(event.serverId === undefined ? {} : { serverId: event.serverId }),
-    ...(event.callId === undefined ? {} : { callId: event.callId }),
-    ...(event.inputKey === undefined ? {} : { inputKey: event.inputKey }),
-    round: event.round,
-    mode: event.mode,
-    message: event.message,
-    ...(event.schema === undefined ? {} : { schema: event.schema }),
-    ...(event.url === undefined ? {} : { url: event.url }),
-    ...(event.expiresAt === undefined ? {} : { expiresAt: event.expiresAt }),
-  });
-}
-
-function inputDestination(
-  request: InputRequestedEvent,
-  state: ReturnType<typeof foldRunState>,
-): { readonly tool: Code } | "any" {
-  if (request.source === "agent" || request.callId === undefined) {
-    return "any";
-  }
-  const intent = state.pendingToolCalls.get(request.callId);
-  return intent === undefined ? "any" : { tool: intent.toolId };
-}
-
 async function enqueueResume(
   queue: Pick<RunQueue, "enqueue"> | undefined,
   runId: Id,
@@ -191,6 +92,18 @@ async function enqueueResume(
   if (queue !== undefined) {
     await queue.enqueue({ kind: "resume", runId });
   }
+}
+
+async function enqueueResumeForActiveRun(
+  store: EventStore,
+  queue: Pick<RunQueue, "enqueue"> | undefined,
+  runId: Id,
+): Promise<void> {
+  if (queue === undefined) {
+    return;
+  }
+  await readRunLog(store, runId);
+  await enqueueResume(queue, runId);
 }
 
 interface PendingInputResolutionOptions {
@@ -211,7 +124,7 @@ interface RecordInputResolutionOptions {
   readonly decidedBy: Extract<Event, { type: "input_resolved" }>["decidedBy"];
   readonly approverId?: string;
   readonly answer?: JsonValue;
-  readonly state: ReturnType<typeof foldRunState>;
+  readonly state: RunState;
   readonly lastEvent: Event;
   readonly resolvedAt: number;
   readonly waitMs: number;
@@ -278,71 +191,161 @@ function inputApprover(
 }
 
 function responseForResolution(
-  request: InputRequestedEvent,
+  request: InputRequest,
   resolution: PendingInputResolutionOptions["resolution"],
 ): InputResponse {
   if (!("principal" in resolution)) {
     return { action: resolution.action };
   }
-  return validateInputResponse(requestForValidation(request), {
+  return validateInputResponse(request, {
     action: resolution.action,
     ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
   });
 }
 
-async function resolvePendingInput(
+function inputExpired(
+  request: InputRequestedEvent,
+  now: number,
+  expiresAfterMs: number | undefined,
+): boolean {
+  return request.expiresAt !== undefined
+    ? request.expiresAt <= now
+    : now - request.ts >= (expiresAfterMs ?? DEFAULT_INPUT_EXPIRY_MS);
+}
+
+function isHumanResolution(
+  resolution: PendingInputResolutionOptions["resolution"],
+): resolution is InputResolution {
+  return "principal" in resolution;
+}
+
+function needsAnswerValidation(
+  resolution: PendingInputResolutionOptions["resolution"],
+): resolution is InputResolution {
+  return (
+    isHumanResolution(resolution) &&
+    resolution.action === "accept" &&
+    resolution.answer !== undefined
+  );
+}
+
+async function rejectExpiredHumanAnswer(
+  options: PendingInputResolutionOptions,
+  request: InputRequestedEvent,
+  now: number,
+): Promise<void> {
+  if (
+    isHumanResolution(options.resolution) &&
+    inputExpired(request, now, options.dependencies.expiresAfterMs)
+  ) {
+    await resolvePendingInput({
+      ...options,
+      resolution: { action: "cancel", decidedBy: "expiry" },
+    });
+    throw new InputExpiredError();
+  }
+}
+
+async function resolvePendingInputAttempt(
   options: PendingInputResolutionOptions,
 ): Promise<Extract<Event, { type: "input_resolved" }>> {
   const { store, runId, requestId, resolution, dependencies } = options;
   const clock = dependencies.clock ?? systemClock;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { events, state, lastEvent } = await readRunLog(store, runId);
-    const request = pendingRequest(state, requestId);
-    const decidedBy = "decidedBy" in resolution ? resolution.decidedBy : "human";
-    const intent =
-      request.callId === undefined ? undefined : state.pendingToolCalls.get(request.callId);
-    const approverId = inputApprover(events, intent, resolution);
-    const response = responseForResolution(request, resolution);
-    let answer = response.answer;
-    if (answer !== undefined) {
-      const tokenized = await dependencies.tokenizer.tokenizeJson(runId, answer, {
-        boundary: "tool_input",
-        destination: inputDestination(request, state),
-      });
-      answer = tokenized.value;
+  const { events, state, lastEvent } = await readRunLog(store, runId);
+  const request = pendingRequest(state, requestId);
+  const decidedBy = "decidedBy" in resolution ? resolution.decidedBy : "human";
+  const intent =
+    request.callId === undefined ? undefined : state.pendingToolCalls.get(request.callId);
+  await rejectExpiredHumanAnswer(options, request, clock.now());
+  const destination = needsAnswerValidation(resolution)
+    ? inputDestination(request, state)
+    : undefined;
+  const approverId = inputApprover(events, intent, resolution);
+  const recordedRequest = requestForValidation(request);
+  const validationRequest = needsAnswerValidation(resolution)
+    ? await inputRequestForValidation(runId, recordedRequest, intent, dependencies.resolver)
+    : recordedRequest;
+  const response = responseForResolution(validationRequest, resolution);
+  let answer = response.answer;
+  if (answer !== undefined) {
+    const tokenizer = dependencies.tokenizer;
+    if (tokenizer === undefined) {
+      throw new InputTokenizerUnavailableError();
     }
+    const tokenized = await tokenizer.tokenizeJson(runId, answer, {
+      boundary: "tool_input",
+      destination: destination ?? inputDestination(request, state),
+      allowRaw: false,
+    });
+    answer = tokenized.value;
+  }
 
-    const resolvedAt = Math.max(0, Math.floor(clock.now()));
-    const waitMs = Math.max(0, resolvedAt - request.ts);
+  const resolvedAt = Math.max(0, Math.floor(clock.now()));
+  await rejectExpiredHumanAnswer(options, request, resolvedAt);
+  const event = await recordInputResolution({
+    store,
+    runId,
+    requestId,
+    request,
+    response,
+    decidedBy,
+    ...(approverId === undefined ? {} : { approverId }),
+    ...(answer === undefined ? {} : { answer }),
+    state,
+    lastEvent,
+    resolvedAt,
+    waitMs: Math.max(0, resolvedAt - request.ts),
+  });
+  await enqueueResumeForActiveRun(store, dependencies.queue, runId);
+  return event;
+}
+
+async function resolvePendingInput(
+  options: PendingInputResolutionOptions,
+): Promise<Extract<Event, { type: "input_resolved" }>> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const event = await recordInputResolution({
-        store,
-        runId,
-        requestId,
-        request,
-        response,
-        decidedBy,
-        ...(approverId === undefined ? {} : { approverId }),
-        ...(answer === undefined ? {} : { answer }),
-        state,
-        lastEvent,
-        resolvedAt,
-        waitMs,
-      });
-      await enqueueResume(dependencies.queue, runId);
-      return event;
+      return await resolvePendingInputAttempt(options);
     } catch (error) {
       if (!(error instanceof LeaseLostError)) {
         throw error;
       }
       if (attempt === 2) {
-        const latest = await readRunLog(store, runId);
-        pendingRequest(latest.state, requestId);
+        const latest = await readRunLog(options.store, options.runId);
+        pendingRequest(latest.state, options.requestId);
         throw new InputResolutionConflictError();
       }
     }
   }
   throw new InputResolutionConflictError();
+}
+
+interface ResumeRecoveryOptions {
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly requestId: Id;
+  readonly dependencies: InputResolutionDependencies;
+  readonly resolve: () => Promise<Extract<Event, { type: "input_resolved" }>>;
+}
+
+async function resolveWithResumeRecovery({
+  store,
+  runId,
+  requestId,
+  dependencies,
+  resolve,
+}: ResumeRecoveryOptions): Promise<Extract<Event, { type: "input_resolved" }>> {
+  try {
+    return await resolve();
+  } catch (error) {
+    if (error instanceof InputAlreadyResolvedError) {
+      const { state } = await readRunLog(store, runId);
+      if (state.inputRequests.has(requestId)) {
+        await enqueueResume(dependencies.queue, runId);
+      }
+    }
+    throw error;
+  }
 }
 
 /**
@@ -361,12 +364,19 @@ export function resolveInput(
   requestId: Id,
   resolution: InputResolutionOptions,
 ): Promise<Extract<Event, { type: "input_resolved" }>> {
-  return resolvePendingInput({
+  return resolveWithResumeRecovery({
     store,
     runId,
     requestId,
-    resolution,
     dependencies: resolution,
+    resolve: () =>
+      resolvePendingInput({
+        store,
+        runId,
+        requestId,
+        resolution,
+        dependencies: resolution,
+      }),
   });
 }
 
@@ -386,21 +396,25 @@ export async function expireInput(
   dependencies: InputResolutionDependencies & { readonly expiresAfterMs: number },
 ): Promise<Extract<Event, { type: "input_resolved" }>> {
   const clock = dependencies.clock ?? systemClock;
-  const { state } = await readRunLog(store, runId);
-  const request = pendingRequest(state, requestId);
-  const now = Math.max(0, Math.floor(clock.now()));
-  const expired =
-    request.expiresAt !== undefined
-      ? request.expiresAt <= now
-      : now - request.ts >= dependencies.expiresAfterMs;
-  if (!expired) {
-    throw new InputNotExpiredError();
-  }
-  return resolvePendingInput({
+  return resolveWithResumeRecovery({
     store,
     runId,
     requestId,
-    resolution: { action: "cancel", decidedBy: "expiry" },
     dependencies,
+    resolve: async () => {
+      const { state } = await readRunLog(store, runId);
+      const request = pendingRequest(state, requestId);
+      const now = Math.max(0, Math.floor(clock.now()));
+      if (!inputExpired(request, now, dependencies.expiresAfterMs)) {
+        throw new InputNotExpiredError();
+      }
+      return resolvePendingInput({
+        store,
+        runId,
+        requestId,
+        resolution: { action: "cancel", decidedBy: "expiry" },
+        dependencies,
+      });
+    },
   });
 }

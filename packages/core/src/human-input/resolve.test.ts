@@ -5,10 +5,11 @@ import {
   PiiPolicySchema,
   type Detection,
   type Event,
+  type InputRequest,
   type NewEvent,
 } from "@harness/schemas";
 import { InMemoryEventStore, RunQueueJobSchema, SeqConflictError } from "@harness/store";
-import { InMemoryVault } from "@harness/vault";
+import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { Tokenizer } from "@harness/pii";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -28,27 +29,51 @@ const email = "answer-canary@example.test";
 const form = {
   type: "object" as const,
   properties: {
-    email: { type: "string" as const, format: "email" as const, default: "<EMAIL_1>" },
+    email: { type: "string" as const, format: "email" as const },
   },
   required: ["email"],
 };
 
 class ConflictingEventStore extends InMemoryEventStore {
   conflictWrites = false;
+  cancelOnConflict = false;
 
-  override append(
+  override async append(
     eventRunId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
-    return this.conflictWrites
-      ? Promise.reject(new SeqConflictError(expectedSeq, expectedSeq + 1))
-      : super.append(eventRunId, events, expectedSeq, leaseOwner);
+    if (!this.conflictWrites) {
+      return super.append(eventRunId, events, expectedSeq, leaseOwner);
+    }
+    if (!this.cancelOnConflict) {
+      throw new SeqConflictError(expectedSeq, expectedSeq + 1);
+    }
+    this.conflictWrites = false;
+    await super.append(
+      eventRunId,
+      [
+        {
+          type: "run_status_changed",
+          v: 1,
+          runId: eventRunId,
+          ts: 200,
+          traceId,
+          spanId,
+          segmentId,
+          from: "suspended",
+          to: "cancelled",
+          reason: "cancelled",
+        },
+      ],
+      expectedSeq,
+    );
+    throw new SeqConflictError(expectedSeq, expectedSeq + 1);
   }
 }
 
-function tokenizer(): Tokenizer {
+function tokenizer(policy = PiiPolicySchema.parse({})): Tokenizer {
   const detect = (text: string): readonly Detection[] => {
     const start = text.indexOf(email);
     return start < 0
@@ -65,18 +90,27 @@ function tokenizer(): Tokenizer {
   };
   return new Tokenizer({
     detectors: { detect },
-    policy: PiiPolicySchema.parse({}),
+    policy,
     vault: new InMemoryVault(),
   });
 }
 
+function schemaResolver(): AuditingVaultResolver {
+  return new AuditingVaultResolver(
+    { resolve: (_runId, token) => Promise.resolve(token === "<EMAIL_1>" ? email : undefined) },
+    () => undefined,
+  );
+}
+
 async function makePendingInput(
   options: {
-    readonly source?: "mcp_mrtr" | "agent";
+    readonly source?: "mcp_mrtr" | "mcp_legacy" | "agent";
     readonly mode?: "form" | "url";
     readonly expiresAt?: number;
     readonly separationOfDuties?: boolean;
     readonly requestedBy?: string;
+    readonly withoutToolIntent?: boolean;
+    readonly schema?: InputRequest["schema"];
   } = {},
   store = new InMemoryEventStore(),
 ): Promise<InMemoryEventStore> {
@@ -134,13 +168,13 @@ async function makePendingInput(
       segmentId,
       requestId,
       source,
-      ...(source === "mcp_mrtr" ? { serverId: "mcp.server" } : {}),
-      callId,
+      ...(source === "mcp_mrtr" || source === "mcp_legacy" ? { serverId: "mcp.server" } : {}),
+      ...(source === "mcp_legacy" ? {} : { callId }),
       ...(source === "mcp_mrtr" ? { inputKey: "account" } : {}),
       round: 1,
       mode,
       ...(mode === "form"
-        ? { schema: form, message: "Contact <EMAIL_1>" }
+        ? { schema: options.schema ?? form, message: "Contact <EMAIL_1>" }
         : { url: "https://example.test", message: "Confirm <EMAIL_1>" }),
       ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
     },
@@ -157,7 +191,13 @@ async function makePendingInput(
       reason: "awaiting_input",
     },
   ];
-  await store.append(runId, events, 0);
+  await store.append(
+    runId,
+    options.withoutToolIntent === true
+      ? events.filter((event) => event.type !== "tool_intent")
+      : events,
+    0,
+  );
   return store;
 }
 
@@ -167,6 +207,26 @@ async function readEvents(store: InMemoryEventStore): Promise<Event[]> {
     events.push(event);
   }
   return events;
+}
+
+function resumeQueue(
+  enqueue = vi.fn(() =>
+    Promise.resolve(
+      RunQueueJobSchema.parse({
+        jobId: "D".repeat(26),
+        kind: "resume",
+        runId,
+        priority: 0,
+        availableAt: 0,
+        attempts: 0,
+        maxAttempts: 5,
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    ),
+  ),
+) {
+  return { enqueue };
 }
 
 describe("resolveInput", () => {
@@ -199,9 +259,38 @@ describe("resolveInput", () => {
         answer: {},
         principal: Code.parse("cli.human"),
         tokenizer: tokenizer(),
+        clock: { now: () => 500 },
       }),
     ).rejects.toBeInstanceOf(InputAnswerInvalidError);
     expect((await readEvents(store)).some((event) => event.type === "input_resolved")).toBe(false);
+  });
+
+  it("validates tokenized defaults and enums against their protected original values", async () => {
+    const store = await makePendingInput({
+      schema: {
+        type: "object",
+        properties: {
+          email: {
+            type: "string",
+            format: "email",
+            enum: ["<EMAIL_1>"],
+            default: "<EMAIL_1>",
+          },
+        },
+      },
+    });
+
+    const resolution = await resolveInput(store, runId, requestId, {
+      action: "accept",
+      answer: {},
+      principal: Code.parse("cli.human"),
+      tokenizer: tokenizer(),
+      resolver: schemaResolver(),
+      clock: { now: () => 500 },
+    });
+
+    expect(resolution.answer).toEqual({ email: "<EMAIL_1>" });
+    expect(JSON.stringify(await readEvents(store))).not.toContain(email);
   });
 
   it("rejects an invalid human principal", async () => {
@@ -212,6 +301,7 @@ describe("resolveInput", () => {
         action: "decline",
         principal: Code.parse("system.other"),
         tokenizer: tokenizer(),
+        clock: { now: () => 500 },
       }),
     ).rejects.toMatchObject({ code: "input_principal_invalid" });
   });
@@ -224,6 +314,7 @@ describe("resolveInput", () => {
         action: "cancel",
         principal: Code.parse("cli.human"),
         tokenizer: tokenizer(),
+        clock: { now: () => 500 },
       }),
     ).rejects.toMatchObject({ code: "input_not_found" });
   });
@@ -235,6 +326,7 @@ describe("resolveInput", () => {
       answer: { email },
       principal: Code.parse("cli.human"),
       tokenizer: tokenizer(),
+      clock: { now: () => 500 },
     };
     await resolveInput(store, runId, requestId, resolution);
 
@@ -269,6 +361,7 @@ describe("resolveInput", () => {
       principal: Code.parse("cli.human"),
       tokenizer: tokenizer(),
       queue,
+      clock: { now: () => 500 },
     });
 
     expect(queue.enqueue).toHaveBeenCalledWith({ kind: "resume", runId });
@@ -286,8 +379,93 @@ describe("resolveInput", () => {
         answer: { email },
         principal: Code.parse("cli.requester"),
         tokenizer: tokenizer(),
+        clock: { now: () => 500 },
       }),
     ).rejects.toMatchObject({ code: "approver_is_requester" });
+  });
+
+  it("tokenizes an answer even when tool_input policy allows it raw", async () => {
+    const store = await makePendingInput();
+    const piiTokenizer = tokenizer(
+      PiiPolicySchema.parse({
+        rules: [
+          {
+            entities: ["email"],
+            boundaries: ["tool_input"],
+            destinations: [{ tool: "mcp.echo" }],
+            action: "allow",
+          },
+        ],
+      }),
+    );
+
+    const resolution = await resolveInput(store, runId, requestId, {
+      action: "accept",
+      answer: { email },
+      principal: Code.parse("cli.human"),
+      tokenizer: piiTokenizer,
+      clock: { now: () => 500 },
+    });
+
+    expect(resolution.answer).toEqual({ email: "<EMAIL_1>" });
+    expect(JSON.stringify(await readEvents(store))).not.toContain(email);
+  });
+
+  it("rejects an MCP answer with no pending tool destination", async () => {
+    const store = await makePendingInput({ source: "mcp_legacy", withoutToolIntent: true });
+
+    await expect(
+      resolveInput(store, runId, requestId, {
+        action: "accept",
+        answer: { email },
+        principal: Code.parse("cli.human"),
+        tokenizer: tokenizer(),
+        clock: { now: () => 500 },
+      }),
+    ).rejects.toMatchObject({ code: "input_destination_unavailable" });
+    expect((await readEvents(store)).some((event) => event.type === "input_resolved")).toBe(false);
+  });
+
+  it("records a late absolute-deadline answer as expiry and rejects it", async () => {
+    const store = await makePendingInput({ expiresAt: 200 });
+
+    await expect(
+      resolveInput(store, runId, requestId, {
+        action: "accept",
+        answer: { email },
+        principal: Code.parse("cli.human"),
+        tokenizer: tokenizer(),
+        clock: { now: () => 200 },
+      }),
+    ).rejects.toMatchObject({ code: "input_expired" });
+
+    expect((await readEvents(store)).at(-1)).toMatchObject({
+      type: "input_resolved",
+      action: "cancel",
+      decidedBy: "expiry",
+    });
+    expect(JSON.stringify(await readEvents(store))).not.toContain(email);
+  });
+
+  it("uses the configured age deadline when rejecting a late answer", async () => {
+    const store = await makePendingInput({ source: "agent" });
+
+    await expect(
+      resolveInput(store, runId, requestId, {
+        action: "accept",
+        answer: { email },
+        principal: Code.parse("cli.human"),
+        tokenizer: tokenizer(),
+        clock: { now: () => 1_103 },
+        expiresAfterMs: 1_000,
+      }),
+    ).rejects.toMatchObject({ code: "input_expired" });
+
+    expect((await readEvents(store)).at(-1)).toMatchObject({
+      type: "input_resolved",
+      action: "cancel",
+      decidedBy: "expiry",
+    });
   });
 
   it("resolves URL consent without an answer", async () => {
@@ -297,6 +475,7 @@ describe("resolveInput", () => {
       action: "accept",
       principal: Code.parse("cli.human"),
       tokenizer: tokenizer(),
+      clock: { now: () => 500 },
     });
 
     expect(resolution).toMatchObject({ action: "accept" });
@@ -354,13 +533,104 @@ describe("resolveInput", () => {
       answer: { email },
       principal: Code.parse("cli.human"),
       tokenizer: piiTokenizer,
+      clock: { now: () => 500 },
     });
 
     expect(tokenizeJson).toHaveBeenCalledWith(
       runId,
       { email },
-      { boundary: "tool_input", destination: "any" },
+      { boundary: "tool_input", destination: "any", allowRaw: false },
     );
+  });
+
+  it("rejects resolutions after cancellation", async () => {
+    const store = await makePendingInput();
+    const events = await readEvents(store);
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new Error("Expected pending input events.");
+    }
+    await store.append(
+      runId,
+      [
+        {
+          type: "run_status_changed",
+          v: 1,
+          runId,
+          ts: 200,
+          traceId,
+          spanId,
+          segmentId,
+          from: "suspended",
+          to: "cancelled",
+          reason: "cancelled",
+        },
+      ],
+      events.length,
+    );
+
+    await expect(
+      resolveInput(store, runId, requestId, {
+        action: "accept",
+        answer: { email },
+        principal: Code.parse("cli.human"),
+        tokenizer: tokenizer(),
+      }),
+    ).rejects.toMatchObject({ code: "input_run_terminal" });
+    expect((await readEvents(store)).some((event) => event.type === "input_resolved")).toBe(false);
+  });
+
+  it("re-reads terminal state after a sequence conflict", async () => {
+    const store = new ConflictingEventStore();
+    await makePendingInput({}, store);
+    store.conflictWrites = true;
+    store.cancelOnConflict = true;
+
+    await expect(
+      resolveInput(store, runId, requestId, {
+        action: "decline",
+        principal: Code.parse("cli.human"),
+        tokenizer: tokenizer(),
+      }),
+    ).rejects.toMatchObject({ code: "input_run_terminal" });
+  });
+
+  it("recovers a failed resume enqueue on a resolved-input retry", async () => {
+    const store = await makePendingInput();
+    const queue = resumeQueue();
+    queue.enqueue.mockRejectedValueOnce(new Error("Synthetic queue failure."));
+    const resolution = {
+      action: "accept" as const,
+      answer: { email },
+      principal: Code.parse("cli.human"),
+      tokenizer: tokenizer(),
+      queue,
+      clock: { now: () => 500 },
+    };
+
+    await expect(resolveInput(store, runId, requestId, resolution)).rejects.toThrow();
+    await expect(resolveInput(store, runId, requestId, resolution)).rejects.toMatchObject({
+      code: "input_already_resolved",
+    });
+    expect(queue.enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers a failed expiry resume enqueue on an expired-input retry", async () => {
+    const store = await makePendingInput({ source: "agent" });
+    const queue = resumeQueue();
+    queue.enqueue.mockRejectedValueOnce(new Error("Synthetic queue failure."));
+    const dependencies = {
+      tokenizer: tokenizer(),
+      queue,
+      clock: { now: () => 1_103 },
+      expiresAfterMs: 1_000,
+    };
+
+    await expect(expireInput(store, runId, requestId, dependencies)).rejects.toThrow();
+    await expect(expireInput(store, runId, requestId, dependencies)).rejects.toMatchObject({
+      code: "input_already_resolved",
+    });
+    expect(queue.enqueue).toHaveBeenCalledTimes(2);
   });
 
   it("stops after bounded sequence conflicts and re-reads the pending request", async () => {
@@ -373,6 +643,7 @@ describe("resolveInput", () => {
         action: "decline",
         principal: Code.parse("cli.human"),
         tokenizer: tokenizer(),
+        clock: { now: () => 500 },
       }),
     ).rejects.toMatchObject({ code: "input_resolution_conflict" });
   });

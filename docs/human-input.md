@@ -54,12 +54,19 @@ channels are cancelled, and an invalid form answer may be requested once more.
 Pending requests remain listable when no channel is currently connected.
 
 `resolveInput(store, runId, requestId, { action, answer?, principal, tokenizer,
-clock?, queue? })` can be called from a separate process. It verifies that the
-request is pending, validates accepted form answers with `formSchemaToZod`,
-applies separation of duties, and tokenizes answers at the `tool_input`
-boundary before appending the `input_resolved` event. A configured run queue
-receives a resume job after the resolution is durable. `expireInput` records an
-expired request as cancelled with `decidedBy: "expiry"`.
+resolver?, clock?, queue?, expiresAfterMs? })` can be called from a separate
+process. It verifies that the request is pending and its run is not already
+completed, failed, or cancelled.
+When the stored schema contains tokens, an audited resolver restores the
+original constraints and defaults only in memory; channel-facing schemas and
+recorded events remain tokenized. It validates accepted form answers with
+`formSchemaToZod`, applies separation of duties, and tokenizes answers at the
+`tool_input` boundary with raw disclosure disabled before appending the
+`input_resolved` event. Answers received after an absolute or configured age
+deadline are rejected, while the event is recorded as cancelled by expiry. A
+configured run queue receives a resume job after resolution; retries can
+recover a missed wake-up. The approval sweep also expires pending inputs and
+enqueues their resume jobs.
 
 Request messages, schemas, URLs, opaque request state, and answers are event
 content; the `harness.input_wait` span carries only source, mode, round, action,

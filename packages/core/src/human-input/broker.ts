@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, Principal, type Event, type Id, type InputRequest } from "@harness/schemas";
+import {
+  HarnessError,
+  Principal,
+  type Code,
+  type Event,
+  type Id,
+  type InputRequest,
+} from "@harness/schemas";
 import type { Tokenizer } from "@harness/pii";
 import type { EventStore, RunQueue } from "@harness/store";
-import { foldRunState, type InputRequestedEvent } from "../run-state.js";
+import { assertApproverMayResolve } from "../approval-principals.js";
+import { foldRunState, type InputRequestedEvent, type ToolIntentEvent } from "../run-state.js";
 import type { Clock } from "../recorder.js";
 import type { HumanInputChannel } from "./channels.js";
 import {
@@ -11,8 +19,10 @@ import {
   InputNotFoundError,
   resolveInput,
   validateInputResponse,
+  type InputResolutionDependencies,
   type InputResolution,
 } from "./resolve.js";
+import { inputRequestForValidation } from "./resolve-validation.js";
 
 /** Error raised when no registered channel can present a pending request. */
 export class InputChannelUnavailableError extends HarnessError {
@@ -39,8 +49,10 @@ export interface HumanInputBrokerOptions {
   readonly store: EventStore;
   readonly channels: readonly HumanInputChannel[];
   readonly tokenizer: Pick<Tokenizer, "tokenizeJson">;
+  readonly resolver?: InputResolutionDependencies["resolver"];
   readonly clock?: Clock;
   readonly queue?: Pick<RunQueue, "enqueue">;
+  readonly expiresAfterMs?: number;
 }
 
 async function readRunEvents(store: EventStore, runId: Id): Promise<Event[]> {
@@ -82,12 +94,23 @@ function pendingRequest(events: readonly Event[], requestId: Id): InputRequested
   throw new InputNotFoundError();
 }
 
-async function presentChannel(
-  channel: HumanInputChannel,
-  request: InputRequest,
-  signal: AbortSignal,
-  index: number,
-): Promise<{ readonly index: number; readonly response: InputResolution }> {
+interface PresentChannelOptions {
+  readonly channel: HumanInputChannel;
+  readonly request: InputRequest;
+  readonly validationRequest: InputRequest;
+  readonly signal: AbortSignal;
+  readonly index: number;
+  readonly eligible: (principal: Code) => boolean;
+}
+
+async function presentChannel({
+  channel,
+  request,
+  validationRequest,
+  signal,
+  index,
+  eligible,
+}: PresentChannelOptions): Promise<{ readonly index: number; readonly response: InputResolution }> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response: unknown = await channel.present(request, signal);
     if (typeof response !== "object" || response === null || Array.isArray(response)) {
@@ -102,7 +125,10 @@ async function presentChannel(
       continue;
     }
     try {
-      const validated = validateInputResponse(request, candidate);
+      const validated = validateInputResponse(validationRequest, candidate);
+      if (!eligible(parsedPrincipal.data)) {
+        continue;
+      }
       return { index, response: { ...validated, principal: parsedPrincipal.data } };
     } catch (error) {
       if (!(error instanceof InputAnswerInvalidError)) {
@@ -113,11 +139,21 @@ async function presentChannel(
   throw new InputPresentationFailedError();
 }
 
-async function presentToFirstChannel(
-  request: InputRequest,
-  channels: readonly HumanInputChannel[],
-  signal: AbortSignal,
-): Promise<InputResolution> {
+interface PresentToFirstChannelOptions {
+  readonly request: InputRequest;
+  readonly validationRequest: InputRequest;
+  readonly channels: readonly HumanInputChannel[];
+  readonly signal: AbortSignal;
+  readonly eligible: (principal: Code) => boolean;
+}
+
+async function presentToFirstChannel({
+  request,
+  validationRequest,
+  channels,
+  signal,
+  eligible,
+}: PresentToFirstChannelOptions): Promise<InputResolution> {
   if (signal.aborted) {
     throw signal.reason;
   }
@@ -126,7 +162,14 @@ async function presentToFirstChannel(
     controller: new AbortController(),
   }));
   const candidates = activeChannels.map(({ channel, controller }, index) => {
-    return presentChannel(channel, request, AbortSignal.any([signal, controller.signal]), index);
+    return presentChannel({
+      channel,
+      request,
+      validationRequest,
+      signal: AbortSignal.any([signal, controller.signal]),
+      index,
+      eligible,
+    });
   });
   let winner: Awaited<(typeof candidates)[number]>;
   try {
@@ -143,6 +186,7 @@ async function presentToFirstChannel(
       controller.abort();
     }
   }
+  signal.throwIfAborted();
   return winner.response;
 }
 
@@ -171,16 +215,47 @@ export class HumanInputBroker {
     signal: AbortSignal,
   ): Promise<Extract<Event, { type: "input_resolved" }>> {
     const events = await readRunEvents(this.options.store, runId);
-    const request = humanRequest(pendingRequest(events, requestId));
+    const requestEvent = pendingRequest(events, requestId);
+    const request = humanRequest(requestEvent);
+    const state = foldRunState(events);
+    const intent: ToolIntentEvent | undefined =
+      requestEvent.callId === undefined
+        ? undefined
+        : state.pendingToolCalls.get(requestEvent.callId);
     const channels = this.options.channels.filter((channel) => channel.available(request));
     if (channels.length === 0) {
       throw new InputChannelUnavailableError();
     }
-    const winner = await presentToFirstChannel(request, channels, signal);
+    const validationRequest = await inputRequestForValidation(
+      runId,
+      request,
+      intent,
+      this.options.resolver,
+    );
+    const eligible = (principal: Code): boolean => {
+      try {
+        assertApproverMayResolve(events[0], intent, { decidedBy: "human", approverId: principal });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const winner = await presentToFirstChannel({
+      request,
+      validationRequest,
+      channels,
+      signal,
+      eligible,
+    });
+    signal.throwIfAborted();
     return resolveInput(this.options.store, runId, requestId, {
       ...winner,
       tokenizer: this.options.tokenizer,
+      ...(this.options.resolver === undefined ? {} : { resolver: this.options.resolver }),
       ...(this.options.clock === undefined ? {} : { clock: this.options.clock }),
+      ...(this.options.expiresAfterMs === undefined
+        ? {}
+        : { expiresAfterMs: this.options.expiresAfterMs }),
       ...(this.options.queue === undefined ? {} : { queue: this.options.queue }),
     });
   }
