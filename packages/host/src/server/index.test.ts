@@ -106,6 +106,7 @@ function makeServer(
     readonly closeError?: Error;
     readonly readResource?: (uri: string) => Promise<unknown>;
     readonly onAppCall?: ReferenceHostDependencies["onAppCall"];
+    readonly onAppCallApproval?: ReferenceHostDependencies["onAppCallApproval"];
     readonly onTelemetryEmit?: ReferenceHostDependencies["onTelemetryEmit"];
     readonly onAppToolsList?: ReferenceHostDependencies["onAppToolsList"];
     readonly isIdOwnedByRun?: ReferenceHostDependencies["isIdOwnedByRun"];
@@ -155,6 +156,9 @@ function makeServer(
     readResource: options.readResource ?? (() => Promise.resolve(resource)),
     onCode: options.onCode ?? (() => undefined),
     ...(options.onAppCall === undefined ? {} : { onAppCall: options.onAppCall }),
+    ...(options.onAppCallApproval === undefined
+      ? {}
+      : { onAppCallApproval: options.onAppCallApproval }),
     ...(options.onTelemetryEmit === undefined ? {} : { onTelemetryEmit: options.onTelemetryEmit }),
     ...(options.onAppToolsList === undefined ? {} : { onAppToolsList: options.onAppToolsList }),
     ...(options.isIdOwnedByRun === undefined ? {} : { isIdOwnedByRun: options.isIdOwnedByRun }),
@@ -360,6 +364,76 @@ describe("createReferenceHost", () => {
     } finally {
       await host.close();
     }
+  });
+
+  it("routes policy asks through the configured approval handler", async () => {
+    const onAppCallApproval = vi.fn(() =>
+      Promise.resolve(
+        CallToolResultSchema.parse({ content: [{ type: "text", text: "resumed result" }] }),
+      ),
+    );
+    const execute = vi.fn(() =>
+      Promise.resolve({ outcome: "ok" as const, result: { executed: true } }),
+    );
+    const fixture = makeServer({
+      policy: {
+        version: Code.parse("host.ask_test"),
+        decide: (_call, policyContext) => {
+          expect(policyContext).toEqual({ subagent: false, app: Code.parse("approval") });
+          return {
+            decision: "ask",
+            ruleId: Code.parse("host.ask_rule"),
+            reason: Code.parse("host.ask_reason"),
+            editable: [],
+          };
+        },
+      },
+      tool: {
+        prepare: (call) => Promise.resolve({ ...call, args: { value: "<PATH_1>" } }),
+        describe: (toolId) =>
+          toolId === "approve" ? { idempotent: true, timeoutMs: 1_000 } : undefined,
+        execute,
+      },
+      onAppCallApproval,
+      idGenerator: () => sessionId,
+    });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+
+    const response = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: "approve",
+        arguments: { value: "synthetic raw input" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toBe('{"content":[{"type":"text","text":"resumed result"}]}');
+    expect(onAppCallApproval).toHaveBeenCalledWith(
+      {
+        callId: sessionId,
+        toolId: Code.parse("approve"),
+        args: { value: "<PATH_1>" },
+      },
+      expect.objectContaining({
+        decision: "ask",
+        ruleId: Code.parse("host.ask_rule"),
+        reason: Code.parse("host.ask_reason"),
+        editable: [],
+      }),
+      {
+        runId: sessionId,
+        policyContext: { subagent: false, app: Code.parse("approval") },
+      },
+    );
+    expect(JSON.stringify(onAppCallApproval.mock.calls)).not.toContain("synthetic raw input");
+    expect(execute).not.toHaveBeenCalled();
+    await host.close();
   });
 
   it("routes app telemetry locally, enforces policy context, filters discovery, and rejects cross-run ids", async () => {

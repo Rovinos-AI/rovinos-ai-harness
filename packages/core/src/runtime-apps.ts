@@ -14,6 +14,7 @@ import { RunRecorder } from "./recorder.js";
 import type { RunState } from "./run-state.js";
 import { foldRunState } from "./run-state.js";
 import { APP_CONTENT_SPAN } from "./spans.js";
+import { createAppApprovalHandler, type AppApprovalDependencies } from "./runtime-app-approval.js";
 
 /** Tokenizer callback required to accept app content at the model-input boundary. */
 export type AppContentTokenize = (
@@ -30,6 +31,7 @@ export type RuntimeAppContent = Pick<
 
 /** Runtime-owned app callbacks for approval-state checks and untrusted content. */
 export interface RuntimeAppCallbacks {
+  readonly onAppCallApproval: ReturnType<typeof createAppApprovalHandler>;
   readonly hasPendingApproval: (runId: Id) => Promise<boolean>;
   readonly tokenizeAppContent: AppContentTokenize;
   readonly onAppContent: (content: RuntimeAppContent) => Promise<void>;
@@ -130,8 +132,10 @@ export function createRuntimeAppCallbacks(options: {
   readonly store: EventStore;
   readonly clock: Clock;
   readonly tokenize?: AppContentTokenize;
+  readonly approval?: AppApprovalDependencies;
 }): RuntimeAppCallbacks {
   return {
+    onAppCallApproval: createAppApprovalHandler(options),
     hasPendingApproval: async (runId) => {
       try {
         const state = foldedState(await runEvents(options.store, Id.parse(runId)));

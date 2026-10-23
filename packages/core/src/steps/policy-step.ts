@@ -139,6 +139,7 @@ export async function requestPolicyApproval(options: {
   readonly call: ModelToolCall;
   readonly decision: PolicyDecision;
   readonly intent?: Extract<EventPartial, { type: "tool_intent" }>;
+  readonly app?: Code;
 }): Promise<{ readonly events: readonly Event[]; readonly checkpoint: Event }> {
   const { recorder, ids, checkpointer, state, clock, call, decision, intent } = options;
   const approvalPayload = buildApprovalPayload({
@@ -160,6 +161,7 @@ export async function requestPolicyApproval(options: {
     state,
     checkpointer,
     ...(intent === undefined ? {} : { intent }),
+    ...(options.app === undefined ? {} : { app: options.app }),
   });
   const checkpoint = result.events.at(-1);
   if (checkpoint === undefined) {

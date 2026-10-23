@@ -4,7 +4,11 @@ import { Code, Id } from "@harness/schemas";
 import type { HostDiagnosticCode } from "./resource.js";
 import type { UiSession, UiSessionContext } from "./ui-session.js";
 import { z } from "zod";
-import type { AppCallExecutionContext, AppCallRejectedReason } from "./app-calls.js";
+import type {
+  AppCallApprovalHandler,
+  AppCallExecutionContext,
+  AppCallRejectedReason,
+} from "./app-calls.js";
 import type { AppContentEnvelope, AppContentTokenizer } from "./app-requests.js";
 import type { PolicyPort, ToolPort } from "@harness/core";
 
@@ -85,6 +89,8 @@ export interface ReferenceHostDependencies {
   readonly onCode: (code: HostDiagnosticCode) => void;
   /** Routes allowlisted app calls through the host's policy-aware handler. */
   readonly onAppCall?: (call: AppCall, context: AppCallExecutionContext) => Promise<CallToolResult>;
+  /** Reuses durable core approval/resume for policy `ask`; absent hosts fail closed. */
+  readonly onAppCallApproval?: AppCallApprovalHandler;
   /** Policy and tool ports used by the default app-call handler when both are supplied. */
   readonly policy?: PolicyPort;
   readonly tool?: ToolPort;
