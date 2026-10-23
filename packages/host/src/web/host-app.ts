@@ -5,6 +5,7 @@ import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
 import { AppRequestResultSchema } from "../shared/app-request.js";
 import { z } from "zod";
 import { createAppBridge, type AppBridgeHandlers, type AppToolCall } from "./bridge.js";
+import { subscribeRunsResource } from "./runs-subscription.js";
 import {
   MAX_FRAME_HEIGHT,
   MAX_FRAME_WIDTH,
@@ -122,6 +123,7 @@ function createAppBridgeHandlers(
   root: HostPagePort,
   appRequest: ReturnType<typeof createAppRequest>,
   getHostContext: () => ReturnType<HostPagePort["getHostContext"]>,
+  subscribeResourceUpdates: NonNullable<AppBridgeHandlers["subscribeResourceUpdates"]>,
 ): AppBridgeHandlers {
   return {
     hostContext: getHostContext(),
@@ -170,6 +172,7 @@ function createAppBridgeHandlers(
       const size = clampAppSize(width, height, maxWidth, maxHeight);
       root.resizeFrame(size.width, size.height);
     },
+    subscribeResourceUpdates,
   };
 }
 
@@ -191,20 +194,38 @@ async function connectAppFrame(options: ConnectAppFrameOptions): Promise<void> {
     frame.setAttribute("allow", app.permissions.join("; "));
   }
   let removeContextListener = (): void => undefined;
+  let closeBridge = (): void => undefined;
   root.onFrameRemoved(() => {
     removeContextListener();
+    closeBridge();
     endSession();
   });
   root.attachFrame();
   let hostContext = root.getHostContext();
   const appRequest = createAppRequest({ app, launch, request });
-  const handlers = createAppBridgeHandlers(root, appRequest, () => hostContext);
+  const handlers = createAppBridgeHandlers(
+    root,
+    appRequest,
+    () => hostContext,
+    (resourceUri, onUpdate, onClose) =>
+      subscribeRunsResource({
+        sessionId: app.sessionId,
+        launch,
+        request,
+        resourceUri,
+        onUpdate,
+        onClose,
+      }),
+  );
   const bridge = createAppBridge(
     frame,
     (call) => routeToolCall(call, app, launch, request),
     (cursor) => routeToolList(cursor, app.sessionId, launch.token, request),
     handlers,
   );
+  closeBridge = () => {
+    void bridge.close();
+  };
   await bridge.connect();
   const loaded = waitForFrameLoad(frame);
   frame.srcdoc = createSandboxDocument(app.html, app.csp);

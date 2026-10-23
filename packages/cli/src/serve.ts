@@ -190,6 +190,7 @@ async function startControlPlaneRun(
     idempotencyKey,
     requestedBy,
     allowedExistingRunIds,
+    onProgress,
   }: Parameters<NonNullable<ControlPlaneOperations["startRun"]>>[0],
 ): Promise<{ readonly runId: Id; readonly status: RunStatus }> {
   const keyHash =
@@ -229,6 +230,7 @@ async function startControlPlaneRun(
     runId,
     requestedBy,
     ...(role === undefined ? {} : { role }),
+    ...(onProgress === undefined ? {} : { onProgress }),
   });
   void started.completion.catch(() => undefined);
   try {
@@ -238,6 +240,10 @@ async function startControlPlaneRun(
       await releaseFailedStart(runtime, keyHash, runId);
     }
     throw error;
+  }
+  if (onProgress !== undefined) {
+    const completion = await started.completion;
+    return { runId, status: completion.status };
   }
   return { runId, status: "pending" };
 }
