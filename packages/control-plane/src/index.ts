@@ -53,6 +53,11 @@ export {
   loadApprovalHtml,
   registerApprovalResource,
 } from "./resources/approval.js";
+export {
+  RUNS_CONSOLE_RESOURCE_URI,
+  loadRunsConsoleHtml,
+  registerRunsConsoleResource,
+} from "./resources/runs-console.js";
 export { getRun, getRunText, registerGetRunTool } from "./tools/get-run.js";
 export { listRuns, registerListRunsTool } from "./tools/list-runs.js";
 export {

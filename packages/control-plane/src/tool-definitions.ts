@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   type ControlPlaneAuthScope,
+  ApprovalAppGetRequestSchema,
+  ApprovalAppInputSchema,
   JsonValue,
   ResolveRequest,
   ResolveResponse,
@@ -10,6 +12,7 @@ import {
 import type { Tool } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { APPROVAL_RESOURCE_URI } from "./resources/approval.js";
+import { RUNS_CONSOLE_RESOURCE_URI } from "./resources/runs-console.js";
 import {
   approveInputSchema,
   continueRunInputSchema,
@@ -28,19 +31,14 @@ import {
 /** Returns public MCP tool definitions in the order used by `tools/list`. */
 export function toolDefinitions(): Tool[] {
   return [
+    ...runToolDefinitions(),
     {
-      name: "list_runs",
-      description: "List run status and metadata counts.",
-      inputSchema: objectInputSchema(listRunsInputSchema),
-      outputSchema: z.toJSONSchema(listRunsOutputSchema),
+      name: "harness.approvals.get",
+      description: "Load one pending approval into its human review view.",
+      inputSchema: objectInputSchema(ApprovalAppGetRequestSchema),
+      outputSchema: z.toJSONSchema(ApprovalAppInputSchema),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-    },
-    {
-      name: "get_run",
-      description: "Get run status, usage, approvals, and recent safe event metadata.",
-      inputSchema: objectInputSchema(getRunInputSchema),
-      outputSchema: z.toJSONSchema(getRunOutputSchema),
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: APPROVAL_RESOURCE_URI } },
     },
     {
       name: "approve",
@@ -105,12 +103,58 @@ export function toolDefinitions(): Tool[] {
   ];
 }
 
+function runToolDefinitions(): Tool[] {
+  return [
+    {
+      name: "list_runs",
+      description: "List run status and metadata counts.",
+      inputSchema: objectInputSchema(listRunsInputSchema),
+      outputSchema: z.toJSONSchema(listRunsOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
+    },
+    {
+      name: "get_run",
+      description: "Get run status, usage, approvals, and recent safe event metadata.",
+      inputSchema: objectInputSchema(getRunInputSchema),
+      outputSchema: z.toJSONSchema(getRunOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "harness.runs.list",
+      description: "List run status and metadata counts for the runs console.",
+      inputSchema: objectInputSchema(listRunsInputSchema),
+      outputSchema: z.toJSONSchema(listRunsOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
+    },
+    {
+      name: "harness.runs.get",
+      description: "Get run metadata for the runs console detail panel.",
+      inputSchema: objectInputSchema(getRunInputSchema),
+      outputSchema: z.toJSONSchema(getRunOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
+    },
+  ];
+}
+
 /** Returns the authorization scope required by a control-plane tool. */
 export function toolScope(name: string): ControlPlaneAuthScope {
-  if (name === "list_runs" || name === "get_run") {
+  if (
+    name === "list_runs" ||
+    name === "get_run" ||
+    name === "harness.runs.list" ||
+    name === "harness.runs.get"
+  ) {
     return "read";
   }
-  if (name === "approve" || name === "deny" || name === "harness.approvals.resolve") {
+  if (
+    name === "approve" ||
+    name === "deny" ||
+    name === "harness.approvals.get" ||
+    name === "harness.approvals.resolve"
+  ) {
     return "approve";
   }
   if (name === "harness.approvals.reveal") {

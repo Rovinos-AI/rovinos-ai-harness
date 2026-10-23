@@ -76,7 +76,8 @@ async function readInput(path: string): Promise<RunInput> {
   return parseJson(RunInputSchema, content);
 }
 
-async function readFakeModel(path: string): Promise<ScriptedModel> {
+/** Loads a schema-validated scripted model for commands that support offline runs. */
+export async function readFakeModel(path: string): Promise<ScriptedModel> {
   const content = await readFile(path, { encoding: "utf8" });
   return new ScriptedModel(parseJson(FakeModelScriptSchema, content));
 }

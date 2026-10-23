@@ -1,4 +1,4 @@
 {
   "Version": "v4.0.2",
-  "Exclude": ["(^|/)(coverage|dist|node_modules|\\.yarn)(/|$)", "\\.tsbuildinfo$"]
+  "Exclude": ["(^|/)(coverage|dist|node_modules|\\.yarn)(/|$)", "\\.tsbuildinfo$", "^\\.tmp/"]
 }
