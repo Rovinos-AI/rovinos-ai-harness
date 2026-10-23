@@ -287,24 +287,26 @@ describe("InProcessBackend", () => {
     const controller = new AbortController();
     // The child announces itself through a file in its working directory, so the test aborts only
     // after the child is really running; a fixed delay raced slow child starts on a busy agent.
+    // The PID comes from that file, not stdout: on macOS a pipe write is asynchronous, so the kill
+    // can land before stdout is flushed (#550).
     const parentScript =
-      'require("node:fs").writeFileSync("child.pid", String(process.pid)); ' +
-      "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)";
+      'require("node:fs").writeFileSync("child.pid", String(process.pid)); setInterval(() => {}, 1000)';
     const execution = backend.exec(
       runId,
       makeSpec([process.execPath, "-e", parentScript], { timeoutMs: 20_000 }),
       controller.signal,
     );
     const pidFile = join(workspaceRoot, runId, "project", "child.pid");
-    await vi.waitFor(
+    const childPid = await vi.waitFor(
       async () => {
-        expect(await readFile(pidFile, "utf8")).not.toBe("");
+        const pid = Number(await readFile(pidFile, "utf8"));
+        expect(Number.isInteger(pid) && pid > 0).toBe(true);
+        return pid;
       },
       { timeout: 15_000, interval: 20 },
     );
     controller.abort();
     const result = await execution;
-    const childPid = Number(result.stdout);
 
     expect(result.timedOut).toBe(false);
     expect(result.signal).toBe("SIGKILL");
