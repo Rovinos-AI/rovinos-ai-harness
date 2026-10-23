@@ -23,6 +23,16 @@ export const ApprovalAppInputSchema = z
 /** Inferred input delivered to the approval app. */
 export type ApprovalAppInput = z.infer<typeof ApprovalAppInputSchema>;
 
+/** Input to fetch one pending approval payload for the human approval app. */
+export const ApprovalAppGetRequestSchema = z
+  .object({
+    approvalId: Id,
+  })
+  .strict();
+
+/** Inferred input to fetch an approval payload for the app. */
+export type ApprovalAppGetRequest = z.infer<typeof ApprovalAppGetRequestSchema>;
+
 /** Input to the host-local approval resolve tool. */
 export const ResolveRequest = z
   .object({
