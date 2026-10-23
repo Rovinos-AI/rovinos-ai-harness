@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Runtime, RunLoopResult } from "@harness/core";
-import { HarnessError, type Event, type Id } from "@harness/schemas";
+import type { ApprovalDecision, ApprovalResolutionMetadata } from "@harness/core";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import type { ResolvedRun } from "../resolve.js";
 
 type ResolvedApproval = Extract<Event, { type: "approval_resolved" }>;
+
+interface ReplayApprovalRuntime {
+  resolveApproval(
+    runId: Id,
+    approvalId: Id,
+    decision: ApprovalDecision,
+    options?: { readonly edits?: JsonValue; readonly metadata?: ApprovalResolutionMetadata },
+  ): Promise<unknown>;
+  resume(runId: Id): Promise<unknown>;
+}
 
 /** Replays recorded approval decisions through the runtime's normal resolve-and-resume path. */
 export class ReplayHuman {
@@ -37,7 +47,7 @@ export class ReplayHuman {
    * @param callId - Tool call whose recorded approval decision should be applied.
    * @returns The resumed run-loop outcome.
    */
-  async resolveAndResume(runtime: Runtime, runId: Id, callId: Id): Promise<RunLoopResult> {
+  async resolveAndResume(runtime: ReplayApprovalRuntime, runId: Id, callId: Id): Promise<void> {
     const index = this.positions.get(callId) ?? 0;
     const recorded = this.approvals.get(callId)?.[index];
     if (recorded === undefined) {
@@ -52,7 +62,7 @@ export class ReplayHuman {
         ...(recorded.reason === undefined ? {} : { reason: recorded.reason }),
       },
     });
-    return runtime.resume(runId);
+    await runtime.resume(runId);
   }
 }
 

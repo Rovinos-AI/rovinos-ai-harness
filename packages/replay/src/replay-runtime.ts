@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createRuntime } from "@harness/core";
 import type { Runtime, RuntimeConfig, ToolPort } from "@harness/core";
-import { PiiConfigSchema, ResolvedRunSchema } from "@harness/schemas";
+import { PiiConfigSchema, VaultConfigSchema } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import type { SandboxBackend } from "@harness/sandbox";
 import { z } from "zod";
+import { ResolvedRunSchema } from "./resolve.js";
 import type { ResolvedRun } from "./resolve.js";
 import { ReplayClock } from "./ports/replay-clock.js";
 import { ReplayHuman } from "./ports/replay-human.js";
@@ -31,16 +32,11 @@ export interface ReplayRuntime {
 
 /** Optional read-only registry data used to preserve the recorded model tool definitions. */
 export interface BuildReplayRuntimeOptions {
-  readonly toolRegistry?: Pick<
-    ToolPort,
-    "describe" | "getToolSpecs" | "validateInputSchema"
-  >;
+  readonly toolRegistry?: Pick<ToolPort, "describe" | "getToolSpecs" | "validateInputSchema">;
 }
 
 function rootEvents(resolved: ResolvedRun) {
-  return (
-    resolved.runs.find(({ runId }) => runId === resolved.rootRunId)?.events ?? []
-  );
+  return resolved.runs.find(({ runId }) => runId === resolved.rootRunId)?.events ?? [];
 }
 
 /**
@@ -58,7 +54,7 @@ export async function buildReplayRuntime(
   const resolved = ResolvedRunSchema.parse(input);
   const events = rootEvents(resolved);
   const clock = new ReplayClock(events);
-  const diagnostics: ("replay_ids_exhausted")[] = [];
+  const diagnostics: "replay_ids_exhausted"[] = [];
   const ids = new ReplayIdGenerator(events, resolved.rootRunId, () => {
     if (!diagnostics.includes("replay_ids_exhausted")) {
       diagnostics.push("replay_ids_exhausted");
@@ -69,12 +65,12 @@ export async function buildReplayRuntime(
     exec: () => Promise.reject(new ReplayExternalAccessError()),
   };
   const replayConfig: RuntimeConfig = {
-    ...config,
+    run: config.run,
     pii: PiiConfigSchema.parse({ ...config.pii, enabled: true }),
-    store: undefined,
-    vault: { backend: "sqlite" },
-    keys: undefined,
-    servers: undefined,
+    vault: VaultConfigSchema.parse({ backend: "sqlite" }),
+    ...(config.roles === undefined ? {} : { roles: config.roles }),
+    ...(config.policy === undefined ? {} : { policy: config.policy }),
+    ...(config.quotas === undefined ? {} : { quotas: config.quotas }),
   };
   const runtime = await createRuntime(replayConfig, {
     alreadyTokenized: true,

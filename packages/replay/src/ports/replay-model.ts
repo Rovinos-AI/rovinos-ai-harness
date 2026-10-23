@@ -7,7 +7,7 @@ import {
   EventLogCassetteStore,
   ModelGateway,
 } from "@harness/models";
-import type { ModelPort, RunContext } from "@harness/core";
+import type { ModelCompletion, ModelPort, RunContext } from "@harness/core";
 import { HarnessError, type Event, type ModelRequest } from "@harness/schemas";
 import type { ResolvedRun } from "../resolve.js";
 
@@ -15,9 +15,15 @@ import type { ResolvedRun } from "../resolve.js";
 export class ReplayDivergenceError extends HarnessError {
   readonly code = "replay_divergence";
 
-  /** @param seq - Sequence of the recorded request. */
-  constructor(readonly seq: number) {
-    super("The replay request hash differs from the recording.");
+  /**
+   * @param seq - Sequence of the recorded request.
+   * @param hashMismatchCode - Closed category describing which hash differed.
+   */
+  constructor(
+    readonly seq: number,
+    readonly hashMismatchCode: "model_request_hash_mismatch" | "tool_args_hash_mismatch",
+  ) {
+    super("The replay hash differs from the recording.");
   }
 }
 
@@ -61,13 +67,12 @@ export class ReplayModelPort implements ModelPort {
       providerTrust: { cassette: "local" },
     });
     this.requests = events.filter(
-      (event): event is Extract<Event, { type: "model_request" }> =>
-        event.type === "model_request",
+      (event): event is Extract<Event, { type: "model_request" }> => event.type === "model_request",
     );
   }
 
   /** Serves the next cassette response after verifying its full stable request hash. */
-  async complete(request: ModelRequest, context: RunContext) {
+  async complete(request: ModelRequest, context: RunContext): Promise<ModelCompletion> {
     const recorded = this.requests[this.requestIndex];
     const seq = recorded?.seq ?? 0;
     try {
@@ -79,7 +84,7 @@ export class ReplayModelPort implements ModelPort {
       return response;
     } catch (error) {
       if (error instanceof CassetteDivergenceError) {
-        throw new ReplayDivergenceError(seq);
+        throw new ReplayDivergenceError(seq, "model_request_hash_mismatch");
       }
       if (error instanceof CassetteMissError) {
         throw new ReplayMissingResultError(seq);

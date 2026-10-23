@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { Code, HarnessError, Sha256Hex, type Event, type Id, type JsonValue } from "@harness/schemas";
+import {
+  Code,
+  HarnessError,
+  Sha256Hex,
+  type Event,
+  type Id,
+  type JsonValue,
+} from "@harness/schemas";
 import type {
   ModelToolCall,
   RunContext,
@@ -100,24 +107,24 @@ export class ReplayToolPort implements ToolPort {
   }
 
   /** Returns the recorded result or fails closed on missing or divergent input. */
-  async execute(call: ModelToolCall, _context: RunContext): Promise<ToolExecutionResult> {
+  execute(call: ModelToolCall, _context: RunContext): Promise<ToolExecutionResult> {
     const intent = this.intents.get(call.callId);
     const result = this.results.get(call.callId);
     if (intent === undefined || result === undefined) {
-      throw new ReplayMissingResultError(intent?.seq);
+      return Promise.reject(new ReplayMissingResultError(intent?.seq));
     }
     if (hashArgs(call.args) !== intent.argsHash) {
-      throw new ReplayDivergenceError(intent.seq);
+      return Promise.reject(new ReplayDivergenceError(intent.seq, "tool_args_hash_mismatch"));
     }
     const outcome = result.outcome === "ok" ? "ok" : "error";
     const errorCode =
       result.errorCode ??
       (result.outcome === "timeout" ? Code.parse("tool_timeout") : Code.parse("tool_failed"));
-    return {
+    return Promise.resolve({
       outcome,
       result: result.result,
       ...(outcome === "error" ? { errorCode } : {}),
-    };
+    });
   }
 }
 
