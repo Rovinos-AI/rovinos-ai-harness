@@ -18,8 +18,12 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@harness/core": "workspace:^",
     "@harness/policy": "workspace:^",
     "@harness/schemas": "workspace:^",
+    "@harness/store": "workspace:^",
+    "@harness/store-sqlite": "workspace:^",
+    "@harness/vault": "workspace:^",
     "zod": "4.6.7"
   },
   "devDependencies": {

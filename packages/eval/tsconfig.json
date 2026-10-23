@@ -3,6 +3,7 @@
   "compilerOptions": {
     "composite": false,
     "customConditions": ["source"],
+    "types": ["node"],
     "noEmit": true
   },
   "include": ["src/**/*.ts"],

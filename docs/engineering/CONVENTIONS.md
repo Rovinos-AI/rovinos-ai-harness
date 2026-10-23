@@ -76,7 +76,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `host` | `schemas`, `telemetry`, `core` |
 | `control-plane` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `replay` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
-| `eval` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
+| `eval` | `schemas`, `telemetry`, `crypto`, `store`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `cli` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config`, `control-plane`, `host` |
 | `sdk` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config` |
 <!-- END GENERATED: agents-index -->
