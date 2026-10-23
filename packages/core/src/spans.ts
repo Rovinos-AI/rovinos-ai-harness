@@ -79,6 +79,20 @@ export const APPROVAL_WAIT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpa
   { taskId: "4.1", packageName: "@harness/core" },
 );
 
+/** Span for resolving one human input request. */
+export const INPUT_WAIT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
+  "harness.input_wait",
+  {
+    ...commonAttributes,
+    "harness.input.source": attr.enum(["mcp_mrtr", "mcp_legacy", "agent"]),
+    "harness.input.mode": attr.enum(["form", "url"]),
+    "harness.input.round": attr.nonnegativeInt(),
+    "harness.input.action": attr.enum(["accept", "decline", "cancel"]),
+    "harness.wait_ms": attr.nonnegativeInt(),
+  },
+  { taskId: "25.3", packageName: "@harness/core" },
+);
+
 /** Span for recording content submitted by an untrusted app. */
 export const APP_CONTENT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.app_content",

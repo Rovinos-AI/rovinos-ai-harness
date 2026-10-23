@@ -49,10 +49,37 @@ export {
   APP_CONTENT_SPAN,
   CHECKPOINT_SPAN,
   COMPACTION_SPAN,
+  INPUT_WAIT_SPAN,
   MODEL_CALL_SPAN,
   RUN_SPAN,
   TOOL_CALL_SPAN,
 } from "./spans.js";
+export {
+  HumanInputBroker,
+  InputChannelUnavailableError,
+  InputPresentationFailedError,
+  type HumanInputBrokerOptions,
+} from "./human-input/broker.js";
+export type { HumanInputChannel } from "./human-input/channels.js";
+export {
+  expireInput,
+  InputAlreadyResolvedError,
+  InputAnswerInvalidError,
+  InputDestinationUnavailableError,
+  InputExpiredError,
+  InputNotExpiredError,
+  InputNotFoundError,
+  InputPrincipalInvalidError,
+  InputResolutionConflictError,
+  InputRunTerminalError,
+  InputSchemaUnavailableError,
+  InputTokenizerUnavailableError,
+  resolveInput,
+  validateInputResponse,
+  type InputResolution,
+  type InputResolutionDependencies,
+  type InputResolutionOptions,
+} from "./human-input/resolve.js";
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 export {
   ContinuationChainTooLongError,
