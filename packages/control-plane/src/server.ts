@@ -22,6 +22,7 @@ import {
 import { RunSupervisor } from "./run-supervisor.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
 import { registerApproveTool } from "./tools/approve.js";
+import { registerReviewApprovalTool } from "./tools/review-approval.js";
 import { registerCancelRunTool } from "./tools/cancel-run.js";
 import { registerDenyTool } from "./tools/deny.js";
 import { registerGetRunTool } from "./tools/get-run.js";
@@ -113,6 +114,8 @@ export interface ControlPlaneServerOptions {
   readonly approvalHtml?: string;
   /** Built runs-console MCP App HTML; injectable for in-memory server tests. */
   readonly runsConsoleHtml?: string;
+  /** Optional URL shown to text-only clients as an approval fallback. */
+  readonly consoleUrl?: string;
 }
 
 /** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
@@ -245,6 +248,14 @@ function registerLifecycleTools(input: {
     confirmationGate: input.confirmationGate,
     ...(resolveApproval === undefined ? {} : { resolveApproval }),
     clientCapabilities: input.clientCapabilities,
+    ...(onAudit === undefined ? {} : { onAudit }),
+  });
+  registerReviewApprovalTool(input.server, {
+    store: input.store,
+    confirmationGate: input.confirmationGate,
+    ...(resolveApproval === undefined ? {} : { resolveApproval }),
+    clientCapabilities: input.clientCapabilities,
+    ...(input.options.consoleUrl === undefined ? {} : { consoleUrl: input.options.consoleUrl }),
     ...(onAudit === undefined ? {} : { onAudit }),
   });
   registerResumeRunTool(input.server, {

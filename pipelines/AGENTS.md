@@ -1,6 +1,6 @@
 # AGENTS.md: pipelines
 
-Azure Pipelines templates used by `azure-pipelines.yml` and the nightly pipeline.
+Azure Pipelines templates used by `azure-pipelines.yml` and the nightly pipeline. Pull request CI has moved to GitHub Actions (`.github/workflows/ci.yml`, task 1.21); keep this pipeline in step with the workflow until it is retired.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 

@@ -23,6 +23,8 @@ import {
   listRunsInputSchema,
   listRunsOutputSchema,
   resumeRunOutputSchema,
+  reviewApprovalInputSchema,
+  reviewApprovalOutputSchema,
   startRunInputSchema,
   startRunOutputSchema,
   runLifecycleInputSchema,
@@ -39,6 +41,13 @@ export function toolDefinitions(): Tool[] {
       outputSchema: z.toJSONSchema(ApprovalAppInputSchema),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"], resourceUri: APPROVAL_RESOURCE_URI } },
+    },
+    {
+      name: "review_approval",
+      description: "Ask a human to approve or deny a pending approval.",
+      inputSchema: objectInputSchema(reviewApprovalInputSchema),
+      outputSchema: z.toJSONSchema(reviewApprovalOutputSchema),
+      annotations: { openWorldHint: false },
     },
     {
       name: "approve",
@@ -152,6 +161,7 @@ export function toolScope(name: string): ControlPlaneAuthScope {
   if (
     name === "approve" ||
     name === "deny" ||
+    name === "review_approval" ||
     name === "harness.approvals.get" ||
     name === "harness.approvals.resolve"
   ) {
