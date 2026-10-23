@@ -104,7 +104,9 @@ function renewHeartbeat(shared: SharedHeartbeat): void {
   }
 }
 
-async function createSharedHeartbeat(options: InstanceOptions): Promise<SharedHeartbeat | undefined> {
+async function createSharedHeartbeat(
+  options: InstanceOptions,
+): Promise<SharedHeartbeat | undefined> {
   const databasePath = resolve(options.databasePath);
   const heartbeatPath = `${databasePath}.instances`;
   migrateSqliteFile(heartbeatPath, { appliedAt: options.now() });

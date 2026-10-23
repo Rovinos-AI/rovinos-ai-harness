@@ -13,11 +13,14 @@ export class DeploymentStartupError extends HarnessError {
 }
 
 /** Validates that multi-instance topology uses shared durable Postgres adapters. */
-export function validateDeploymentTopology(config: {
-  readonly deployment?: DeploymentConfig;
-  readonly store?: StoreConfig;
-  readonly vault?: VaultConfig;
-}, queueConfigured = false): void {
+export function validateDeploymentTopology(
+  config: {
+    readonly deployment?: DeploymentConfig;
+    readonly store?: StoreConfig;
+    readonly vault?: VaultConfig;
+  },
+  queueConfigured = false,
+): void {
   const deployment = DeploymentConfigSchema.parse(config.deployment ?? {});
   if (
     deployment.mode === "multi" &&

@@ -22,9 +22,7 @@ function instanceCount(databasePath: string): number {
   const database = new Database(`${databasePath}.instances`);
   try {
     const row = database.prepare("SELECT COUNT(*) AS count FROM instances").get();
-    return typeof row === "object" && row !== null && "count" in row
-      ? Number(row.count)
-      : 0;
+    return typeof row === "object" && row !== null && "count" in row ? Number(row.count) : 0;
   } finally {
     database.close();
   }
@@ -127,10 +125,10 @@ describe("validateDeploymentTopology", () => {
       let second: Awaited<ReturnType<typeof createRuntime>> | undefined;
       try {
         second = await createRuntime(config, {
-            dataDir: secondDataDir,
-            clock: new FakeClock(100),
-            ids: new SequentialIdGenerator(),
-          });
+          dataDir: secondDataDir,
+          clock: new FakeClock(100),
+          ids: new SequentialIdGenerator(),
+        });
         expect(instanceCount(join(firstDataDir, "harness.db"))).toBe(1);
         expect(instanceCount(join(secondDataDir, "harness.db"))).toBe(1);
         expect(instanceCount(join(vaultDataDir, "vault.db"))).toBe(1);

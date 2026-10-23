@@ -229,9 +229,7 @@ function createTerminalAwareRunControl({
         flushTelemetry,
         processLike: overrides.processLike ?? defaultProcessLike,
         graceMs: config.run.shutdownGraceMs,
-        ...(instanceHeartbeat === undefined
-          ? {}
-          : { ownershipSignal: instanceHeartbeat.signal }),
+        ...(instanceHeartbeat === undefined ? {} : { ownershipSignal: instanceHeartbeat.signal }),
         operation,
       }),
     );

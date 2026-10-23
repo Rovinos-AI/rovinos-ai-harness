@@ -64,9 +64,9 @@ describe("RemoteSandboxBackend", () => {
       new URL("http://sandbox-runner:8080/healthz"),
       expect.objectContaining({ method: "GET", redirect: "error" }),
     );
-    await expect(
-      backend(() => Promise.resolve(response({}, 503))).healthCheck(),
-    ).resolves.toBe(false);
+    await expect(backend(() => Promise.resolve(response({}, 503))).healthCheck()).resolves.toBe(
+      false,
+    );
     await expect(
       backend(() => Promise.resolve(response({ status: "bad" }))).healthCheck(),
     ).resolves.toBe(false);

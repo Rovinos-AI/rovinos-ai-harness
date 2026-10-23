@@ -168,7 +168,7 @@ describe("createRuntime sandbox composition", () => {
             status: 200,
             contentType: "text/plain",
             truncated: false,
-            untrusted: true,
+            untrusted: true as const,
             text: "",
             hiddenTextDropped: 0,
           }),
@@ -510,7 +510,10 @@ describe("createRuntime sandbox composition", () => {
   );
 
   it("does not advertise web.fetch without a configured allowlist or a remote runner", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ status: "ok" }))));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(Response.json({ status: "ok" }))),
+    );
     const emptyAllowlistModel = textModel();
     const emptyAllowlistRuntime = await createRuntime(
       { run, sandbox: remoteSandbox([]) },
@@ -550,7 +553,10 @@ describe("createRuntime sandbox composition", () => {
   });
 
   it("advertises web.fetch with a remote runner and allowlist alongside createTool tools", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ status: "ok" }))));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(Response.json({ status: "ok" }))),
+    );
     const modelPort = textModel();
     const customTool = {
       describe: (id: Code) => (id === toolId ? { idempotent: true, timeoutMs: 1_000 } : undefined),
@@ -715,7 +721,9 @@ describe("createRuntime sandbox composition", () => {
         toolId: "web.fetch",
         policyDecision: "deny",
       });
-      expect(fetcher.mock.calls.map(([input]) => requestUrl(input).pathname)).not.toContain("/fetch");
+      expect(fetcher.mock.calls.map(([input]) => requestUrl(input).pathname)).not.toContain(
+        "/fetch",
+      );
       expect(policy.decide).toHaveBeenCalledOnce();
     } finally {
       await runtime.close();
@@ -728,14 +736,14 @@ describe("createRuntime sandbox composition", () => {
         Response.json(
           requestUrl(input).pathname === "/fetch"
             ? {
-          url: "https://docs.example.test/image",
-          status: 200,
-          contentType: "image/png",
-          binary: true,
-          bytes: [0, 255],
-          truncated: false,
-          untrusted: true,
-            }
+                url: "https://docs.example.test/image",
+                status: 200,
+                contentType: "image/png",
+                binary: true,
+                bytes: [0, 255],
+                truncated: false,
+                untrusted: true,
+              }
             : { status: "ok" },
         ),
       ),

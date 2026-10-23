@@ -12,9 +12,7 @@ import { openSqliteInstanceHeartbeat } from "./instance-heartbeat.js";
 
 const firstId = Id.parse("00000000000000000000000001");
 const secondId = Id.parse("00000000000000000000000002");
-const instancesSchema = z.array(
-  z.object({ id: z.string(), heartbeat: z.number().int() }).strict(),
-);
+const instancesSchema = z.array(z.object({ id: z.string(), heartbeat: z.number().int() }).strict());
 let directory: string;
 
 function heartbeatPath(databasePath: string): string {
@@ -73,11 +71,9 @@ describe("openSqliteInstanceHeartbeat", () => {
       staleAfterMs: 50,
     });
     const database = new Database(heartbeatPath(databasePath));
-    database.prepare("UPDATE instances SET id = ?, heartbeat = ? WHERE id = ?").run(
-      secondId,
-      now,
-      firstId,
-    );
+    database
+      .prepare("UPDATE instances SET id = ?, heartbeat = ? WHERE id = ?")
+      .run(secondId, now, firstId);
     database.close();
 
     now = 100_010;
@@ -93,9 +89,7 @@ describe("openSqliteInstanceHeartbeat", () => {
     const databasePath = await createDirectory();
     migrateSqliteFile(heartbeatPath(databasePath), { appliedAt: 100_000 });
     const database = new Database(heartbeatPath(databasePath));
-    database
-      .prepare("INSERT INTO instances (id, heartbeat) VALUES (?, ?)")
-      .run(secondId, 100_000);
+    database.prepare("INSERT INTO instances (id, heartbeat) VALUES (?, ?)").run(secondId, 100_000);
     database.close();
 
     await expect(
