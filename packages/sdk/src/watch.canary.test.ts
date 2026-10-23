@@ -64,6 +64,8 @@ describe("SDK safe-event canary", () => {
     }
 
     expect(watched.length).toBeGreaterThan(0);
+    const sequences = watched.map((event) => event.seq);
+    expect(sequences).toEqual([...sequences].sort((left, right) => left - right));
     expect(JSON.stringify(watched)).not.toContain(contentCanary);
     expect(JSON.stringify(watched)).not.toContain("run_input");
   });

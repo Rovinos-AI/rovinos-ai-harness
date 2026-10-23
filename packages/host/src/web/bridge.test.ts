@@ -13,6 +13,9 @@ const bridgeMocks = vi.hoisted(() => ({
   handleCall:
     vi.fn<(call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>>(),
   handleListTools: vi.fn<(params: { readonly cursor?: string } | undefined) => Promise<unknown>>(),
+  handleSubscribe: vi.fn<(params: { readonly resourceUri: string }) => Promise<unknown>>(),
+  notification: vi.fn<(notification: unknown) => Promise<void>>(),
+  close: vi.fn<() => Promise<void>>(),
   handleDisplayMode: vi.fn<(params: { readonly mode: string }) => Promise<unknown>>(),
 }));
 
@@ -24,13 +27,25 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
       bridgeMocks.handleCall.mockImplementation(handler);
     }
     setRequestHandler(
-      _method: string,
+      method: string,
       _schemas: unknown,
-      handler: (params: { readonly cursor?: string } | undefined) => Promise<unknown>,
+      handler: (
+        params: { readonly cursor?: string } | { readonly resourceUri: string } | undefined,
+      ) => Promise<unknown>,
     ) {
-      bridgeMocks.handleListTools.mockImplementation(handler);
+      if (method === "tools/list") {
+        bridgeMocks.handleListTools.mockImplementation(
+          handler as (params: { readonly cursor?: string } | undefined) => Promise<unknown>,
+        );
+      } else {
+        bridgeMocks.handleSubscribe.mockImplementation(
+          handler as (params: { readonly resourceUri: string }) => Promise<unknown>,
+        );
+      }
     }
     connect = bridgeMocks.connect;
+    notification = bridgeMocks.notification;
+    close = bridgeMocks.close;
     sendToolInput = bridgeMocks.sendInput;
     sendToolResult = bridgeMocks.sendResult;
     addEventListener = bridgeMocks.addEventListener;
@@ -115,6 +130,58 @@ describe("createAppBridge", () => {
     expect(target.removeEventListener).toHaveBeenCalledOnce();
     expect(removed).toBe(true);
     expect(closed).toHaveBeenCalledOnce();
+  });
+
+  it("relays run resource updates to the view and disposes the subscription", async () => {
+    let update: (() => void) | undefined;
+    let closeSubscription: (() => void) | undefined;
+    const unsubscribe = vi.fn();
+    bridgeMocks.handleSubscribe.mockReset();
+    bridgeMocks.notification.mockReset().mockResolvedValue();
+    bridgeMocks.close.mockReset().mockResolvedValue();
+    bridgeMocks.connect.mockResolvedValue();
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      postMessage: vi.fn(),
+    });
+    const bridge = createAppBridge(
+      { contentWindow: window },
+      () => Promise.resolve({ content: [] }),
+      () => Promise.resolve({ tools: [] }),
+      {
+        hostContext: {},
+        onOpenLink: () => Promise.resolve(false),
+        onMessage: () => Promise.resolve(false),
+        onUpdateModelContext: () => Promise.resolve(false),
+        onRequestDisplayMode: (mode) => Promise.resolve(mode),
+        getCurrentDisplayMode: () => "inline",
+        onSizeChange: () => undefined,
+        subscribeResourceUpdates: (_uri, onUpdate, onClose) => {
+          update = onUpdate;
+          closeSubscription = onClose;
+          return Promise.resolve(unsubscribe);
+        },
+      },
+    );
+    await bridge.connect();
+    await expect(bridgeMocks.handleSubscribe({ resourceUri: "harness://runs" })).resolves.toEqual({
+      subscribed: true,
+    });
+
+    update?.();
+    closeSubscription?.();
+    expect(bridgeMocks.notification).toHaveBeenNthCalledWith(1, {
+      method: "notifications/resources/updated",
+      params: { uri: "harness://runs" },
+    });
+    expect(bridgeMocks.notification).toHaveBeenNthCalledWith(2, {
+      method: "harness/resources/subscription_closed",
+      params: { resourceUri: "harness://runs" },
+    });
+    await bridge.close();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(bridgeMocks.close).toHaveBeenCalledOnce();
   });
 
   it("refuses to connect when the iframe has no content window", () => {

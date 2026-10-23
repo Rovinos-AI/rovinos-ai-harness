@@ -23,8 +23,13 @@ import { AppCallRouterError } from "./app-calls.js";
 import type { AppCallRouter } from "./app-calls.js";
 import { AppRequestSchema, type AppRequestRouter } from "./app-requests.js";
 import type { AppRateLimiter } from "./app-limits.js";
+import { z } from "zod";
 
 const MAX_CALL_BYTES = 32_768;
+const RUNS_RESOURCE_URI = "harness://runs";
+const ResourceUpdateSubscriptionSchema = z
+  .object({ resourceUri: z.literal(RUNS_RESOURCE_URI), sessionId: Id })
+  .strict();
 
 interface RequestHandlerOptions {
   readonly config: HostConfig;
@@ -42,6 +47,9 @@ interface RequestHandlerOptions {
   readonly expectedOrigin: () => string;
   readonly expectedHosts: () => readonly string[];
 }
+type StatefulRequestHandlerOptions = RequestHandlerOptions & {
+  readonly resourceUpdateSubscriptions: Map<string, () => void>;
+};
 
 const HOST_PAGE_CSP =
   "default-src 'none'; script-src 'self' 'unsafe-inline' http: https:; style-src 'unsafe-inline' http: https:; img-src data: http: https:; font-src data: http: https:; connect-src 'self' http: https:; media-src data: http: https:; frame-src 'self'; child-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -80,7 +88,11 @@ async function handleStaticRequest(
   return true;
 }
 
-function sendAppEvents(url: URL, response: HostResponse, options: RequestHandlerOptions): void {
+function sendAppEvents(
+  url: URL,
+  response: HostResponse,
+  options: StatefulRequestHandlerOptions,
+): void {
   const resourceUri = url.searchParams.get("resourceUri");
   const app = resourceUri === null ? undefined : options.apps.get(resourceUri);
   if (app === undefined) {
@@ -102,6 +114,8 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
   // Explicit end, expiry, and host close all funnel through this callback.
   const end = (): void => {
     cancelExpiry();
+    options.resourceUpdateSubscriptions.get(sessionId)?.();
+    options.resourceUpdateSubscriptions.delete(sessionId);
     uiSession?.end();
     if (options.sessions.get(sessionId)?.end === end) {
       options.sessions.delete(sessionId);
@@ -190,15 +204,107 @@ async function sendAppResource(
   }
 }
 
-function endAppSession(url: URL, response: HostResponse, options: RequestHandlerOptions): void {
+function endAppSession(
+  url: URL,
+  response: HostResponse,
+  options: StatefulRequestHandlerOptions,
+): void {
   const sessionId = url.searchParams.get("sessionId");
   const instance = sessionId === null ? undefined : options.sessions.get(sessionId);
   if (instance === undefined) {
     writeError(response, 404, "app_unknown");
     return;
   }
+  options.resourceUpdateSubscriptions.get(instance.sessionId)?.();
+  options.resourceUpdateSubscriptions.delete(instance.sessionId);
   instance.end();
   writeJson(response, 200, {});
+}
+
+async function subscribeResourceUpdates(
+  request: HostRequest,
+  response: HostResponse,
+  options: StatefulRequestHandlerOptions,
+): Promise<void> {
+  const body = await readBody(request, MAX_CALL_BYTES);
+  if (body === undefined) {
+    writeError(response, 413, "app_request_too_large");
+    return;
+  }
+  let subscription: z.infer<typeof ResourceUpdateSubscriptionSchema>;
+  try {
+    subscription = parseJson(ResourceUpdateSubscriptionSchema, body, {
+      maxBytes: MAX_CALL_BYTES,
+    });
+  } catch {
+    writeError(response, 400, "app_request_invalid");
+    return;
+  }
+  const instance = options.sessions.get(subscription.sessionId);
+  if (instance === undefined) {
+    writeError(response, 404, "app_unknown");
+    return;
+  }
+  const subscribe = options.dependencies.subscribeResourceUpdates;
+  if (subscribe === undefined) {
+    writeError(response, 503, "resource_updates_unavailable");
+    return;
+  }
+
+  options.resourceUpdateSubscriptions.get(instance.sessionId)?.();
+  let writeReady = false;
+  let updatePending = false;
+  let closed = false;
+  let unsubscribe: (() => void) | undefined;
+  const writeUpdate = (): void => {
+    if (!closed && writeReady) {
+      response.write(`data: ${JSON.stringify({ uri: subscription.resourceUri })}\n\n`);
+    } else if (!closed) {
+      updatePending = true;
+    }
+  };
+  const close = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    options.resourceUpdateSubscriptions.delete(instance.sessionId);
+    unsubscribe?.();
+    response.end();
+  };
+  try {
+    unsubscribe = subscribe(subscription.resourceUri, writeUpdate, close);
+  } catch {
+    writeError(response, 503, "resource_updates_unavailable");
+    return;
+  }
+  if (unsubscribe === undefined) {
+    writeError(response, 503, "resource_updates_unavailable");
+    return;
+  }
+  options.resourceUpdateSubscriptions.set(instance.sessionId, close);
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+    "x-content-type-options": "nosniff",
+  });
+  response.write(": subscribed\n\n");
+  writeReady = true;
+  if (updatePending) {
+    writeUpdate();
+  }
+  const removeCloseListener = response.onClose?.(close);
+  if (removeCloseListener === undefined) {
+    return;
+  }
+  const unsubscribeAndRemoveListener = options.resourceUpdateSubscriptions.get(instance.sessionId);
+  if (unsubscribeAndRemoveListener !== undefined) {
+    options.resourceUpdateSubscriptions.set(instance.sessionId, () => {
+      removeCloseListener();
+      unsubscribeAndRemoveListener();
+    });
+  }
 }
 
 async function routeAppCall(
@@ -318,9 +424,13 @@ export function createRequestHandler(
   options: RequestHandlerOptions,
 ): (request: HostRequest, response: HostResponse) => Promise<void> {
   const readStatic = options.dependencies.readStatic ?? readStaticAsset;
+  const requestOptions = {
+    ...options,
+    resourceUpdateSubscriptions: new Map<string, () => void>(),
+  };
   return async (request, response) => {
     try {
-      if (!options.expectedHosts().includes(request.headers.host ?? "")) {
+      if (!requestOptions.expectedHosts().includes(request.headers.host ?? "")) {
         writeError(response, 403, "app_host_invalid");
         return;
       }
@@ -332,28 +442,31 @@ export function createRequestHandler(
         writeError(response, 404, "not_found");
         return;
       }
-      if (!isAuthorizedApiRequest(request, options)) {
+      if (!isAuthorizedApiRequest(request, requestOptions)) {
         writeError(response, 403, "app_unauthorized");
         return;
       }
       switch (`${request.method ?? ""} ${url.pathname}`) {
         case "GET /api/events":
-          sendAppEvents(url, response, options);
+          sendAppEvents(url, response, requestOptions);
           return;
         case "GET /api/app":
-          await sendAppResource(url, response, options);
+          await sendAppResource(url, response, requestOptions);
           return;
         case "POST /api/call":
-          await routeAppCall(request, response, options);
+          await routeAppCall(request, response, requestOptions);
           return;
         case "POST /api/request":
-          await routeAppRequest(request, response, options);
+          await routeAppRequest(request, response, requestOptions);
           return;
         case "GET /api/tools":
-          await routeAppToolsList(url, response, options);
+          await routeAppToolsList(url, response, requestOptions);
+          return;
+        case "POST /api/resource-updates":
+          await subscribeResourceUpdates(request, response, requestOptions);
           return;
         case "POST /api/session/end":
-          endAppSession(url, response, options);
+          endAppSession(url, response, requestOptions);
           return;
         default:
           writeError(response, 404, "not_found");

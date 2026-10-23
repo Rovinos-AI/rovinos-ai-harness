@@ -20,6 +20,7 @@ import type {
   ListToolsResult,
   Transport,
 } from "@modelcontextprotocol/client";
+import { z } from "zod";
 
 /** A tool-call message received from the untrusted app iframe. */
 export type AppToolCall = CallToolRequest["params"];
@@ -31,6 +32,7 @@ export interface ReferenceAppBridge {
   sendToolInput(input: Readonly<Record<string, unknown>>): Promise<void>;
   sendToolResult(result: CallToolResult): Promise<void>;
   setHostContext(context: McpUiHostContext): void;
+  close(): Promise<void>;
 }
 
 /** Trusted host-page handlers for requests and notifications received from an app. */
@@ -46,6 +48,11 @@ export interface AppBridgeHandlers {
   ) => Promise<McpUiRequestDisplayModeRequest["params"]["mode"]>;
   readonly getCurrentDisplayMode: () => McpUiRequestDisplayModeRequest["params"]["mode"];
   readonly onSizeChange: (params: { readonly width?: number; readonly height?: number }) => void;
+  readonly subscribeResourceUpdates?: (
+    resourceUri: string,
+    onUpdate: () => void,
+    onClose: () => void,
+  ) => Promise<(() => void) | undefined>;
 }
 
 /** Minimal iframe surface needed to establish the SDK's host-side transport. */
@@ -131,6 +138,7 @@ export function createAppBridge(
     capabilities,
     handlers === undefined ? undefined : { hostContext: handlers.hostContext },
   );
+  let unsubscribeResourceUpdates: (() => void) | undefined;
   bridge.oncalltool = (params) => onToolCall(params);
   bridge.onopenlink = async (params: McpUiOpenLinkRequest["params"]) => {
     const allowed = await handlers?.onOpenLink(params.url);
@@ -164,6 +172,42 @@ export function createAppBridge(
     },
     (params) => onListTools(params?.cursor),
   );
+  bridge.setRequestHandler(
+    "harness/resources/subscribe",
+    {
+      params: z.object({ resourceUri: z.literal("harness://runs") }).strict(),
+      result: z.object({ subscribed: z.boolean() }).strict(),
+    },
+    async ({ resourceUri }) => {
+      unsubscribeResourceUpdates?.();
+      unsubscribeResourceUpdates = undefined;
+      try {
+        unsubscribeResourceUpdates =
+          (await handlers?.subscribeResourceUpdates?.(
+            resourceUri,
+            () => {
+              void bridge
+                .notification({
+                  method: "notifications/resources/updated",
+                  params: { uri: resourceUri },
+                })
+                .catch(() => undefined);
+            },
+            () => {
+              void bridge
+                .notification({
+                  method: "harness/resources/subscription_closed",
+                  params: { resourceUri },
+                })
+                .catch(() => undefined);
+            },
+          )) ?? undefined;
+      } catch {
+        return { subscribed: false };
+      }
+      return { subscribed: unsubscribeResourceUpdates !== undefined };
+    },
+  );
   const transport = new AppPostMessageTransport(target);
   const initialized = new Promise<void>((resolve) => {
     bridge.addEventListener("initialized", () => {
@@ -177,6 +221,11 @@ export function createAppBridge(
     sendToolResult: (result) => bridge.sendToolResult(result),
     setHostContext: (hostContext) => {
       bridge.setHostContext(hostContext);
+    },
+    async close() {
+      unsubscribeResourceUpdates?.();
+      unsubscribeResourceUpdates = undefined;
+      await bridge.close();
     },
   };
 }

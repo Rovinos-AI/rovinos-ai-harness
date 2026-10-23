@@ -39,7 +39,10 @@ import {
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
 import { registerRunResources } from "./resources/runs.js";
-import { startRunResourceUpdates } from "./resources/run-updates.js";
+import {
+  startRunResourceUpdates,
+  type RunResourceUpdatesError,
+} from "./resources/run-updates.js";
 import type { ModelProgress } from "@harness/models";
 import {
   controlPlanePrincipal,
@@ -121,6 +124,8 @@ export interface ControlPlaneServerOptions {
   readonly onResourceUpdated?: (uri: string) => void;
   /** Defaults to true; HTTP transport owns one shared watch instead of one per session. */
   readonly subscribeRunUpdates?: boolean;
+  /** Receives typed failures when live run watchers exceed their configured bound. */
+  readonly onRunResourceUpdateError?: (error: RunResourceUpdatesError) => void;
 }
 
 /** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
@@ -150,7 +155,11 @@ export function createControlPlaneServer(
           .notification({ method: "notifications/resources/updated", params: { uri } })
           .catch(() => undefined);
       });
-    const resourceUpdates = startRunResourceUpdates(store, notifyResourceUpdated);
+    const resourceUpdates = startRunResourceUpdates(store, notifyResourceUpdated, {
+      ...(options.onRunResourceUpdateError === undefined
+        ? {}
+        : { onError: options.onRunResourceUpdateError }),
+    });
     server.server.onclose = () => {
       void resourceUpdates.close();
     };

@@ -3,10 +3,7 @@ import { Id } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { describe, expect, it, vi } from "vitest";
-import {
-  RunResourceUpdatesError,
-  startRunResourceUpdates,
-} from "./run-updates.js";
+import { RunResourceUpdatesError, startRunResourceUpdates } from "./run-updates.js";
 
 async function appendRunningRun(store: InMemoryEventStore, runId: Id): Promise<number> {
   const builders = createEventBuilders();

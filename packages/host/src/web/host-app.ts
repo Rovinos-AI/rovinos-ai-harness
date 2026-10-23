@@ -53,6 +53,7 @@ const AppCallErrorSchema = z
   })
   .strict();
 const HostReadySchema = z.object({ appId: Code, sessionId: Id }).strict();
+const ResourceUpdateSchema = z.object({ uri: z.literal("harness://runs") }).strict();
 type AppPayload = z.infer<typeof AppPayloadSchema>;
 
 function toolResultForApp(
@@ -122,6 +123,7 @@ function createAppBridgeHandlers(
   root: HostPagePort,
   appRequest: ReturnType<typeof createAppRequest>,
   getHostContext: () => ReturnType<HostPagePort["getHostContext"]>,
+  subscribeResourceUpdates: NonNullable<AppBridgeHandlers["subscribeResourceUpdates"]>,
 ): AppBridgeHandlers {
   return {
     hostContext: getHostContext(),
@@ -170,6 +172,79 @@ function createAppBridgeHandlers(
       const size = clampAppSize(width, height, maxWidth, maxHeight);
       root.resizeFrame(size.width, size.height);
     },
+    subscribeResourceUpdates,
+  };
+}
+
+async function subscribeRunsResource(
+  app: AppPayload,
+  launch: LaunchDetails,
+  request: typeof fetch,
+  resourceUri: string,
+  onUpdate: () => void,
+  onClose: () => void,
+): Promise<(() => void) | undefined> {
+  if (resourceUri !== "harness://runs") {
+    return undefined;
+  }
+  const controller = new AbortController();
+  let stream: ReadableStreamDefaultReader<Uint8Array>;
+  let active = true;
+  try {
+    const response = await request.call(globalThis, "/api/resource-updates", {
+      method: "POST",
+      headers: {
+        ...authorizedHeaders(launch.token),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ resourceUri, sessionId: app.sessionId }),
+      signal: controller.signal,
+    });
+    if (!response.ok || response.body === null) {
+      return undefined;
+    }
+    stream = response.body.getReader();
+  } catch {
+    return undefined;
+  }
+  void (async () => {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (active) {
+      const next = await stream.read();
+      if (next.done) {
+        break;
+      }
+      buffer += decoder.decode(next.value, { stream: true });
+      let frameEnd = buffer.indexOf("\n\n");
+      while (frameEnd !== -1) {
+        const frame = buffer.slice(0, frameEnd);
+        buffer = buffer.slice(frameEnd + 2);
+        const data = frame
+          .split("\n")
+          .find((line) => line.startsWith("data: "))
+          ?.slice("data: ".length);
+        if (data !== undefined) {
+          const update = parseJson(ResourceUpdateSchema, data);
+          if (update.uri === resourceUri) {
+            onUpdate();
+          }
+        }
+        frameEnd = buffer.indexOf("\n\n");
+      }
+    }
+    if (active) {
+      onClose();
+    }
+  })().catch(() => {
+    if (active) {
+      onClose();
+    }
+  });
+  return () => {
+    active = false;
+    controller.abort();
+    void stream.cancel().catch(() => undefined);
   };
 }
 
@@ -198,13 +273,26 @@ async function connectAppFrame(options: ConnectAppFrameOptions): Promise<void> {
   root.attachFrame();
   let hostContext = root.getHostContext();
   const appRequest = createAppRequest({ app, launch, request });
-  const handlers = createAppBridgeHandlers(root, appRequest, () => hostContext);
+  const handlers = createAppBridgeHandlers(
+    root,
+    appRequest,
+    () => hostContext,
+    (resourceUri, onUpdate, onClose) =>
+      subscribeRunsResource(app, launch, request, resourceUri, onUpdate, onClose),
+  );
   const bridge = createAppBridge(
     frame,
     (call) => routeToolCall(call, app, launch, request),
     (cursor) => routeToolList(cursor, app.sessionId, launch.token, request),
     handlers,
   );
+  let closeBridge = (): void => undefined;
+  root.onFrameRemoved(() => {
+    closeBridge();
+  });
+  closeBridge = () => {
+    void bridge.close();
+  };
   await bridge.connect();
   const loaded = waitForFrameLoad(frame);
   frame.srcdoc = createSandboxDocument(app.html, app.csp);

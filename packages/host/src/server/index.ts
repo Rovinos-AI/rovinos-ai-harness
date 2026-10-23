@@ -21,6 +21,7 @@ import type {
   ReferenceHostDependencies,
   RequestListener,
   HostRequest,
+  HostResponse,
 } from "./types.js";
 
 export { REFERENCE_CSP, AppRateLimiter };
@@ -138,8 +139,31 @@ function createHttpServer(listener: RequestListener): HttpServerPort {
         }
       },
     };
-    void listener(hostRequest, response).catch(() => {
-      writeRequestFailure(response);
+    const hostResponse: HostResponse = {
+      get headersSent() {
+        return response.headersSent;
+      },
+      onClose(listener) {
+        response.once("close", listener);
+        return () => {
+          response.removeListener("close", listener);
+        };
+      },
+      writeHead(status, headers) {
+        response.writeHead(status, headers);
+      },
+      write(value) {
+        return response.write(value);
+      },
+      end(value) {
+        response.end(value);
+      },
+      destroy(error) {
+        response.destroy(error);
+      },
+    };
+    void listener(hostRequest, hostResponse).catch(() => {
+      writeRequestFailure(hostResponse);
     });
   });
 }
