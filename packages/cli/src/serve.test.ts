@@ -135,6 +135,7 @@ function createContext() {
     hasPendingApproval: () => Promise.resolve(false),
     tokenizeAppContent: (_runId, content) => Promise.resolve(content),
     onAppContent: () => Promise.resolve(),
+    onAppCallApproval: () => Promise.reject(new Error("App approval is not used by serve tests.")),
     close: closeRuntime,
   };
   const context: CliContext = {

@@ -4,7 +4,13 @@ import { countHostAppRejected, type HostAppRejectedReason } from "@harness/telem
 import type { CallToolResult, ListToolsResult, Tool } from "@modelcontextprotocol/client";
 import { ToolSchema } from "@modelcontextprotocol/core";
 import { isToolVisibilityModelOnly } from "@modelcontextprotocol/ext-apps/app-bridge";
-import type { ModelToolCall, PolicyPort, RunContext, ToolPort } from "@harness/core";
+import type {
+  ModelToolCall,
+  PolicyDecision,
+  PolicyPort,
+  RunContext,
+  ToolPort,
+} from "@harness/core";
 import { z } from "zod";
 import { AppSpanBatchSchema } from "./app-telemetry.js";
 import type { AppCall, AppInstance } from "./types.js";
@@ -28,6 +34,13 @@ export interface AppCallPolicyContext {
   readonly subagent: false;
   readonly app: Code;
 }
+
+/** Suspends an app call for durable approval and returns its resumed tool result. */
+export type AppCallApprovalHandler = (
+  call: ModelToolCall,
+  decision: PolicyDecision,
+  context: AppCallExecutionContext,
+) => Promise<CallToolResult>;
 
 /** Host-controlled execution context passed to app-call handlers. */
 export interface AppCallExecutionContext {
@@ -90,6 +103,11 @@ export interface PolicyCheckedAppCallHandlerOptions {
   readonly policy: PolicyPort;
   readonly tool: ToolPort;
   readonly nextCallId: () => Id;
+  /**
+   * Persists the approval and suspends/resumes the run before returning the app result.
+   * When omitted, the host cannot suspend and fails closed with `app_call_requires_approval`.
+   */
+  readonly onAppCallApproval?: AppCallApprovalHandler;
 }
 
 function callError(code: string): CallToolResult {
@@ -155,8 +173,8 @@ async function executeAllowedAppToolCall(
 /**
  * Creates the host-side app handler that prepares arguments and applies policy before execution.
  *
- * Policy `ask` decisions fail closed with `app_call_requires_approval`; suspending a run for app
- * calls is intentionally deferred until the host can provide an approval flow.
+ * Policy `ask` decisions use the supplied durable approval handler. Hosts without one fail closed
+ * with `app_call_requires_approval`.
  *
  * @param options - Policy, tool pipeline, and injected call ID generator.
  * @returns An app-call handler suitable for {@link AppCallRouterOptions.onAppCall}.
@@ -192,7 +210,13 @@ export function createPolicyCheckedAppCallHandler(
       return callError(decision.reason);
     }
     if (decision.decision === "ask") {
-      return callError("app_call_requires_approval");
+      if (options.tool.prepare === undefined) {
+        return callError("app_call_requires_approval");
+      }
+      return (
+        (await options.onAppCallApproval?.(prepared, decision, context)) ??
+        callError("app_call_requires_approval")
+      );
     }
     return executeAllowedAppToolCall(options.tool, prepared, runContext);
   };

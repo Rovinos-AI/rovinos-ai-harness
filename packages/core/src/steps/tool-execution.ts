@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import type { ElicitationInputOutcome } from "@harness/mcp";
-import { Code, HarnessError, Sha256Hex, type Event, type JsonValue } from "@harness/schemas";
+import {
+  Code,
+  HarnessError,
+  Sha256Hex,
+  type Event,
+  type Id,
+  type JsonValue,
+} from "@harness/schemas";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
 import { setActiveSpanAttribute } from "@harness/telemetry";
@@ -23,6 +30,17 @@ import { SummaryRecordingError } from "./prepare-tool.js";
 
 /** Internal timeout marker; only the closed tool_timeout code is recorded. */
 export class ToolTimeoutError extends Error {}
+
+/** Shared execution dependencies for new and resumed tool calls. */
+export interface ToolStepExecutionOptions {
+  readonly recorder: RunRecorder;
+  readonly tool: ToolPort;
+  readonly clock: Clock;
+  readonly runId: Id;
+  readonly signal: AbortSignal;
+  readonly depth?: number;
+  readonly app?: Code;
+}
 
 function invalidElicitationOutcome(): ElicitationInputOutcome {
   return { kind: "error", errorCode: "mcp_input_request_invalid" };

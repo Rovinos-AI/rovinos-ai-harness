@@ -43,7 +43,7 @@ import type { RunLoopResult } from "./loop.js";
 import type { CancelRunResult } from "./cancel.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ApprovalDecision, ApprovalResolutionMetadata } from "./approvals.js";
-import type { AppContentTokenize, RuntimeAppContent } from "./runtime-apps.js";
+import type { AppContentTokenize, RuntimeAppContent, RuntimeAppCallbacks } from "./runtime-apps.js";
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -164,6 +164,8 @@ export interface Runtime {
   tokenizeAppContent: AppContentTokenize;
   /** Records tokenized app content with an explicit untrusted label. */
   onAppContent(content: RuntimeAppContent): Promise<void>;
+  /** Suspends an app tool call using the run's durable approval and resume path. */
+  onAppCallApproval: RuntimeAppCallbacks["onAppCallApproval"];
   close(): Promise<void>;
 }
 

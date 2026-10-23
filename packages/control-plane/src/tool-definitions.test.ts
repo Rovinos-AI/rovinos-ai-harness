@@ -9,7 +9,10 @@ describe("control-plane tool definitions", () => {
     expect(scopes).toEqual({
       list_runs: "read",
       get_run: "read",
+      "harness.runs.list": "read",
+      "harness.runs.get": "read",
       approve: "approve",
+      "harness.approvals.get": "approve",
       "harness.approvals.resolve": "approve",
       "harness.approvals.reveal": "reveal",
       deny: "approve",

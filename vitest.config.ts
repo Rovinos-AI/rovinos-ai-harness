@@ -4,14 +4,16 @@ import { globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// Integration suites that start Docker Compose stacks. The `integration-compose` project runs them
-// one file at a time: parallel stacks starve the CI agent's Docker VM (2026-10-21, #523). The list
+// Integration suites that start Docker Compose stacks or build images. The `integration-compose`
+// project runs them one file at a time: parallel stacks and builds starve the CI agent's Docker VM
+// (2026-10-21, #523; 2026-10-22, #548). The list
 // lives here, not in an imported module, because tests load this config through Node's own loader.
-/** Repository-relative paths of the integration suites that start Compose stacks. */
+/** Repository-relative paths of the integration suites that start Compose stacks or build images. */
 export const composeIntegrationSuites = [
   "packages/sandbox/egress-proxy/src/proxy.int.test.ts",
   "packages/sandbox/runner/src/server.int.test.ts",
   "scripts/ci/docker-image.int.test.ts",
+  "scripts/ci/image-hardening.int.test.ts",
   "scripts/collector/validate.int.test.ts",
   "scripts/compose/presidio.int.test.ts",
   "scripts/compose/prod-like.int.test.ts",

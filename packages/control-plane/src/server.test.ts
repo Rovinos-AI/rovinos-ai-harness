@@ -112,7 +112,10 @@ const connections: MemoryConnection[] = [];
 
 async function connect(store: InMemoryEventStore, mcpApps = false): Promise<MemoryConnection> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createControlPlaneServer(store, { approvalHtml: "<html>test</html>" });
+  const server = createControlPlaneServer(store, {
+    approvalHtml: "<html>test</html>",
+    runsConsoleHtml: "<html>runs test</html>",
+  });
   const client = new Client(
     { name: "control-plane-test", version: "1.0.0" },
     mcpApps
@@ -222,6 +225,9 @@ describe("control-plane inspection tools", () => {
       "resume_run",
       "start_run",
     ]);
+    expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
+      ui: { resourceUri: "ui://harness/runs/v1" },
+    });
     expect(
       tools
         .filter(({ name }) => name === "list_runs" || name === "get_run")
@@ -255,6 +261,15 @@ describe("control-plane inspection tools", () => {
     expect(tools.find(({ name }) => name === "deny")?._meta).toEqual({
       ui: { visibility: ["app"] },
     });
+    expect(tools.find(({ name }) => name === "harness.runs.list")?._meta).toEqual({
+      ui: { visibility: ["app"], resourceUri: "ui://harness/runs/v1" },
+    });
+    expect(tools.find(({ name }) => name === "harness.runs.get")?._meta).toEqual({
+      ui: { visibility: ["app"], resourceUri: "ui://harness/runs/v1" },
+    });
+    expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
+      ui: { resourceUri: "ui://harness/runs/v1" },
+    });
   });
 
   it("lists metadata with pagination and status filtering", async () => {
@@ -269,6 +284,7 @@ describe("control-plane inspection tools", () => {
       name: "list_runs",
       arguments: { limit: 1 },
     });
+
     const first = listRunsOutputSchema.parse(firstPage.structuredContent);
     expect(first.runs).toHaveLength(1);
     expect(first.nextCursor).toBeDefined();
@@ -287,6 +303,25 @@ describe("control-plane inspection tools", () => {
     });
     const completed = listRunsOutputSchema.parse(completedPage.structuredContent);
     expect(completed.runs.map(({ runId }) => runId)).toEqual([completedId]);
+  });
+
+  it("exposes the app-visible copies alongside the model-visible list and get tools", async () => {
+    const store = new InMemoryEventStore();
+    const runId = await addRun(store, createEventBuilders());
+    const { client } = await connect(store, true);
+
+    const listed = await client.callTool({ name: "harness.runs.list", arguments: {} });
+    const detailed = await client.callTool({
+      name: "harness.runs.get",
+      arguments: { runId },
+    });
+    const names = (await client.listTools()).tools.map(({ name }) => name);
+
+    expect(listRunsOutputSchema.parse(listed.structuredContent).runs).toHaveLength(1);
+    expect(getRunOutputSchema.parse(detailed.structuredContent).runId).toBe(runId);
+    expect(names).toContain("list_runs");
+    expect(names).toContain("harness.runs.list");
+    expect(names).toContain("harness.runs.get");
   });
 
   it("filters a run allowlist before pagination and skips missing IDs", async () => {
@@ -456,13 +491,22 @@ describe("control-plane inspection tools", () => {
   it("does not expose content canaries in any tool output", async () => {
     const store = new InMemoryEventStore();
     const runId = await addRun(store, createEventBuilders(), { sensitive: true });
-    const { client } = await connect(store);
+    const { client } = await connect(store, true);
     const listed = await client.callTool({ name: "list_runs", arguments: {} });
     const detailed = await client.callTool({ name: "get_run", arguments: { runId } });
+    const appListed = await client.callTool({ name: "harness.runs.list", arguments: {} });
+    const appDetailed = await client.callTool({
+      name: "harness.runs.get",
+      arguments: { runId },
+    });
 
-    expect(`${JSON.stringify(listed)}${JSON.stringify(detailed)}`).not.toContain(CONTENT_CANARY);
+    expect(
+      `${JSON.stringify(listed)}${JSON.stringify(detailed)}${JSON.stringify(appListed)}${JSON.stringify(appDetailed)}`,
+    ).not.toContain(CONTENT_CANARY);
     expect(listRunsOutputSchema.safeParse(listed.structuredContent).success).toBe(true);
     expect(getRunOutputSchema.safeParse(detailed.structuredContent).success).toBe(true);
+    expect(listRunsOutputSchema.safeParse(appListed.structuredContent).success).toBe(true);
+    expect(getRunOutputSchema.safeParse(appDetailed.structuredContent).success).toBe(true);
   });
 
   it("keeps generated content canaries out of both tools across statuses and pages", async () => {
@@ -481,7 +525,7 @@ describe("control-plane inspection tools", () => {
           );
           await store.append(runId, eventsWithContentCanaries(runId, canaries), 0);
           await addRun(store, builders);
-          const { client } = await connect(store);
+          const { client } = await connect(store, true);
 
           const assertCanaryFree = (result: {
             readonly structuredContent?: unknown;
@@ -526,6 +570,15 @@ describe("control-plane inspection tools", () => {
             arguments: { runId },
           });
           assertCanaryFree(detailed);
+          assertCanaryFree(
+            await client.callTool({ name: "harness.runs.list", arguments: { limit: 1 } }),
+          );
+          assertCanaryFree(
+            await client.callTool({
+              name: "harness.runs.get",
+              arguments: { runId },
+            }),
+          );
         },
       ),
       { numRuns: 100 },

@@ -46,6 +46,7 @@ export {
   AppCallRouterError,
   AppTelemetryEmitArgsSchema,
   createPolicyCheckedAppCallHandler,
+  type AppCallApprovalHandler,
   type AppCallExecutionContext,
   type AppCallPolicyContext,
   type AppCallRejectedReason,
@@ -229,6 +230,9 @@ function createAppCallRouter(
           policy: dependencies.policy,
           tool: dependencies.tool,
           nextCallId: nextId,
+          ...(dependencies.onAppCallApproval === undefined
+            ? {}
+            : { onAppCallApproval: dependencies.onAppCallApproval }),
         })
       : undefined;
   const onAppCall = dependencies.onAppCall ?? defaultOnAppCall;

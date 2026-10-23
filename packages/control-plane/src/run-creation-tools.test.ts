@@ -22,6 +22,7 @@ async function connect(
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createControlPlaneServer(store, {
     approvalHtml: "<html>test</html>",
+    runsConsoleHtml: "<html>runs test</html>",
     confirmation: { key: Buffer.alloc(32, 23) },
     ...options,
   });

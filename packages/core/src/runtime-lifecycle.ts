@@ -1,10 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 // Runtime lifecycle helpers extracted from runtime.ts (keeps it under the max-lines limit).
-import { Code, type Id } from "@harness/schemas";
+import { Code, type Event, type Id } from "@harness/schemas";
 import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
 import type { SandboxBackend } from "@harness/sandbox";
 import type { EventStore } from "@harness/store";
 import type { RuntimeComposition, RuntimeOverrides } from "./runtime-config.js";
+import { appApprovalContext } from "./app-approval-context.js";
+import { foldRunState, type RunState } from "./run-state.js";
+import type { RunLoopResult } from "./loop.js";
+
+function isAppSuspension(state: RunState, events: readonly Event[]): boolean {
+  return (
+    state.status === "suspended" &&
+    [...state.pendingApprovals.values()].some((approval) => {
+      const intent = state.pendingToolCalls.get(approval.callId);
+      return intent !== undefined && appApprovalContext(intent, events) !== undefined;
+    })
+  );
+}
+
+/** Recovers only a verified durable cancellation or app suspension after a writer loses its lease. */
+export async function readRuntimeControlResult(
+  options: { readonly store: EventStore; readonly runId: Id; readonly firstNewSeq: number },
+  reason: "cancelled" | "app_approval",
+): Promise<RunLoopResult | undefined> {
+  const events: Event[] = [];
+  for await (const event of options.store.read(options.runId)) {
+    events.push(event);
+  }
+  const state = foldRunState(events);
+  const matches =
+    reason === "cancelled" ? state.status === "cancelled" : isAppSuspension(state, events);
+  if (!matches) {
+    return undefined;
+  }
+  return {
+    status: state.status,
+    approvalIds: Array.from(state.pendingApprovals.keys()),
+    state,
+    events: events.filter((event) => event.seq >= options.firstNewSeq),
+  };
+}
 
 /** Runs an operation while holding the backend's optional run-scoped lease. */
 export async function withSandboxLease<T>(

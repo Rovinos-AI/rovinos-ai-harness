@@ -86,6 +86,7 @@ const basePayload: ApprovalPayload = {
 
 let browser: Browser | undefined;
 let approvalHtml = "";
+let runsConsoleHtml = "";
 
 function createPayload(overrides: Partial<ApprovalPayload> = {}): ApprovalPayload {
   return ApprovalPayloadSchema.parse({ ...basePayload, ...overrides });
@@ -504,6 +505,10 @@ beforeAll(async () => {
     join(process.cwd(), "packages", "approval-app", "dist", "approval.html"),
     "utf8",
   );
+  runsConsoleHtml = await readFile(
+    join(process.cwd(), "packages", "approval-app", "dist", "runs-console.html"),
+    "utf8",
+  );
   browser = await chromium.launch({ headless: true });
 });
 
@@ -512,6 +517,104 @@ afterAll(async () => {
 });
 
 describe("approval app in the reference host", () => {
+  it("transitions from the run console to the selected approval in the same host iframe", async () => {
+    if (browser === undefined) {
+      throw new Error("Playwright browser was not initialized.");
+    }
+    const appCalls: string[] = [];
+    const host = await createReferenceHost(
+      {
+        apps: [
+          {
+            id: "runs-console",
+            resourceUri: "ui://harness/runs/v1",
+            telemetry: false,
+            allowedTools: [
+              Code.parse("harness.runs.list"),
+              Code.parse("harness.runs.get"),
+              Code.parse("harness.approvals.get"),
+              Code.parse("harness.approvals.resolve"),
+            ],
+          },
+        ],
+        listen: { host: "127.0.0.1", port: 0 },
+      },
+      {
+        onCode: () => undefined,
+        readResource: () =>
+          Promise.resolve({
+            contents: [{ mimeType: "text/html;profile=mcp-app", text: runsConsoleHtml }],
+          }),
+        idGenerator: () => "00000000000000000000000005",
+        runId,
+        isIdOwnedByRun: () => true,
+        onAppToolsList: (_appId, allowedTools) =>
+          Promise.resolve({
+            tools: allowedTools.map((name) => ({
+              name,
+              description: "Synthetic integration tool.",
+              inputSchema: { type: "object" },
+            })),
+          }),
+        onAppCall: (call: AppCall) => {
+          appCalls.push(call.toolName);
+          if (call.toolName === "harness.runs.list") {
+            return Promise.resolve(
+              toolResult({
+                runs: [
+                  {
+                    runId,
+                    status: "suspended",
+                    createdAt: 1_000,
+                    lastTs: 2_000,
+                    lastSeq: 3,
+                    steps: 1,
+                    pendingApprovals: 1,
+                  },
+                ],
+              }),
+            );
+          }
+          if (call.toolName === "harness.runs.get") {
+            return Promise.resolve(
+              toolResult({
+                runId,
+                status: "suspended",
+                steps: 1,
+                usage: { inputTokens: 1, outputTokens: 1, costMicros: 1 },
+                pendingApprovals: [{ approvalId, toolId: "mail.send", ruleId: "mail.review" }],
+              }),
+            );
+          }
+          if (call.toolName === "harness.approvals.get") {
+            return Promise.resolve(
+              toolResult({
+                approvalId,
+                payload: createPayload({ summary: "Approval selected from the run console" }),
+              }),
+            );
+          }
+          return Promise.resolve(toolResult({ ok: true }));
+        },
+      },
+    );
+    const page = await browser.newPage();
+    try {
+      await page.goto(host.url, { waitUntil: "domcontentloaded" });
+      const frame = page.frameLocator("iframe");
+      await frame.getByRole("button", { name: "Needs approval (1)" }).click();
+      await frame
+        .getByRole("heading", { name: "Approval selected from the run console" })
+        .waitFor();
+      await frame.getByRole("button", { name: "Approve", exact: true }).waitFor();
+
+      expect(appCalls).toEqual(["harness.runs.list", "harness.runs.get", "harness.approvals.get"]);
+    } finally {
+      await page.close();
+      await host.close();
+    }
+  }, 15_000);
+
   it("approves and resumes the run", async () => {
     await withFixture(createPayload(), { runtimeBacked: true }, async (fixture) => {
       await fixture.frame.getByRole("button", { name: "Approve", exact: true }).click();
