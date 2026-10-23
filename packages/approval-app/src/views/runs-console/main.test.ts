@@ -99,7 +99,9 @@ vi.mock("@modelcontextprotocol/ext-apps", () => ({
     readonly setNotificationHandler = vi.fn((method: string, ...args: unknown[]) => {
       const handler = args.at(-1);
       if (typeof handler === "function") {
-        this.notificationHandlers.set(method, handler as (notification: unknown) => void);
+        this.notificationHandlers.set(method, (notification) => {
+          Reflect.apply(handler, undefined, [notification]);
+        });
       }
     });
 

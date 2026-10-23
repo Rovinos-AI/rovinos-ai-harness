@@ -63,7 +63,7 @@ describe("SDK safe-event canary", () => {
       let runningStatusSeen = false;
       while (!runningStatusSeen) {
         const next = await iterator.next();
-        if (next.done) {
+        if (next.done === true) {
           break;
         }
         watched.push(next.value);
@@ -74,12 +74,14 @@ describe("SDK safe-event canary", () => {
       expect((await harness.getRun(runId)).status).toBe("running");
       releaseModel?.();
 
-      while (true) {
+      let watchComplete = false;
+      while (!watchComplete) {
         const next = await iterator.next();
-        if (next.done) {
-          break;
+        if (next.done === true) {
+          watchComplete = true;
+        } else {
+          watched.push(next.value);
         }
-        watched.push(next.value);
       }
 
       expect(watched.length).toBeGreaterThan(0);

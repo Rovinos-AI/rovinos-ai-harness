@@ -539,9 +539,9 @@ describe("control-plane inspection tools", () => {
     const { client, serverTransport } = await connect(store, false, {
       controlPlane: ControlPlaneConfigSchema.parse({ allowAgentStartedRuns: true }),
       operations: {
-        startRun: async ({ onProgress }) => {
+        startRun: ({ onProgress }) => {
           onProgress?.({ requestId, outputTokens: 7 });
-          return { runId, status: "pending" };
+          return Promise.resolve({ runId, status: "pending" });
         },
       },
     });
@@ -565,15 +565,10 @@ describe("control-plane inspection tools", () => {
         "method" in message &&
         message.method === "notifications/progress",
     );
-    expect(notification).toEqual(
-      expect.objectContaining({
-        method: "notifications/progress",
-        params: expect.objectContaining({
-          progressToken: "start-progress",
-          progress: 7,
-        }),
-      }),
-    );
+    expect(notification).toMatchObject({
+      method: "notifications/progress",
+      params: { progressToken: "start-progress", progress: 7 },
+    });
     expect(JSON.stringify(notification)).not.toContain("synthetic progress test");
   });
 

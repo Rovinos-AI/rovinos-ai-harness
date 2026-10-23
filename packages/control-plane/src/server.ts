@@ -39,7 +39,8 @@ import {
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
 import { registerRunResources } from "./resources/runs.js";
-import { startRunResourceUpdates, type RunResourceUpdatesError } from "./resources/run-updates.js";
+import type { RunResourceUpdatesError } from "./resources/run-updates.js";
+import { configureRunResourceUpdates } from "./resources/server-updates.js";
 import type { ModelProgress } from "@harness/models";
 import {
   controlPlanePrincipal,
@@ -144,23 +145,7 @@ export function createControlPlaneServer(
     { requestState: { verify: confirmationGate.verifyRequestState } },
   );
   server.server.registerCapabilities({ tools: {}, resources: { subscribe: true } });
-  if (options.subscribeRunUpdates !== false) {
-    const notifyResourceUpdated =
-      options.onResourceUpdated ??
-      ((uri: string) => {
-        void server.server
-          .notification({ method: "notifications/resources/updated", params: { uri } })
-          .catch(() => undefined);
-      });
-    const resourceUpdates = startRunResourceUpdates(store, notifyResourceUpdated, {
-      ...(options.onRunResourceUpdateError === undefined
-        ? {}
-        : { onError: options.onRunResourceUpdateError }),
-    });
-    server.server.onclose = () => {
-      void resourceUpdates.close();
-    };
-  }
+  configureRunResourceUpdates(server, store, options);
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);
   registerRunInspection(server, store, options);

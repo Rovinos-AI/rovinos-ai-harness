@@ -143,10 +143,10 @@ function createHttpServer(listener: RequestListener): HttpServerPort {
       get headersSent() {
         return response.headersSent;
       },
-      onClose(listener) {
-        response.once("close", listener);
+      onClose(onResponseClose) {
+        response.once("close", onResponseClose);
         return () => {
-          response.removeListener("close", listener);
+          response.removeListener("close", onResponseClose);
         };
       },
       writeHead(status, headers) {

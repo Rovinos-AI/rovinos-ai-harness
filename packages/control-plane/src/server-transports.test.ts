@@ -3,6 +3,7 @@ import { InMemoryEventStore } from "@harness/store";
 import { ControlPlaneConfigSchema, HarnessError, Id } from "@harness/schemas";
 import type * as McpServerModule from "@modelcontextprotocol/server";
 import type { ControlPlaneServerOptions } from "./server.js";
+import { MAX_CONTROL_PLANE_REQUEST_BYTES } from "./resources/run-resource-access.js";
 import { describe, expect, it, vi } from "vitest";
 
 interface MockRequest {
@@ -154,14 +155,22 @@ function request(
   url: string,
   headers: Record<string, string | undefined> = {},
   remoteAddress = "127.0.0.1",
+  body?: Uint8Array,
 ): MockRequest {
+  let sent = false;
   return {
     url,
     method: "POST",
     headers: { host: "127.0.0.1", authorization: AUTHORIZATION, ...headers },
     socket: { remoteAddress },
     [Symbol.asyncIterator]: () => ({
-      next: () => Promise.resolve({ done: true, value: undefined }),
+      next: () => {
+        if (body !== undefined && !sent) {
+          sent = true;
+          return Promise.resolve({ done: false, value: body });
+        }
+        return Promise.resolve({ done: true, value: undefined });
+      },
     }),
   };
 }
@@ -263,6 +272,28 @@ describe("control-plane transports", () => {
       maxSubscriptions: 50,
     });
     expect(mocks.createServer).toHaveBeenCalledOnce();
+  });
+
+  it("forwards bounded request bodies and rejects oversized bodies", async () => {
+    mocks.reset();
+    const handle = await startControlPlaneHttp(
+      new InMemoryEventStore(),
+      0,
+      httpOptions({ approvalHtml: "<html>test</html>" }),
+    );
+
+    mocks.dispatch(request("/mcp", {}, "127.0.0.1", Buffer.from("{}")), response());
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(mocks.httpRequestHandler).toHaveBeenCalledOnce();
+
+    const oversized = response();
+    mocks.dispatch(
+      request("/mcp", {}, "127.0.0.1", Buffer.alloc(MAX_CONTROL_PLANE_REQUEST_BYTES + 1)),
+      oversized,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(oversized.statusCode).toBe(413);
+    await handle.close();
   });
 
   it("audits rejected requests and rate-limits failed and authenticated requests", async () => {

@@ -5,6 +5,7 @@ import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
 import { AppRequestResultSchema } from "../shared/app-request.js";
 import { z } from "zod";
 import { createAppBridge, type AppBridgeHandlers, type AppToolCall } from "./bridge.js";
+import { subscribeRunsResource } from "./runs-subscription.js";
 import {
   MAX_FRAME_HEIGHT,
   MAX_FRAME_WIDTH,
@@ -53,7 +54,6 @@ const AppCallErrorSchema = z
   })
   .strict();
 const HostReadySchema = z.object({ appId: Code, sessionId: Id }).strict();
-const ResourceUpdateSchema = z.object({ uri: z.literal("harness://runs") }).strict();
 type AppPayload = z.infer<typeof AppPayloadSchema>;
 
 function toolResultForApp(
@@ -176,78 +176,6 @@ function createAppBridgeHandlers(
   };
 }
 
-async function subscribeRunsResource(
-  app: AppPayload,
-  launch: LaunchDetails,
-  request: typeof fetch,
-  resourceUri: string,
-  onUpdate: () => void,
-  onClose: () => void,
-): Promise<(() => void) | undefined> {
-  if (resourceUri !== "harness://runs") {
-    return undefined;
-  }
-  const controller = new AbortController();
-  let stream: ReadableStreamDefaultReader<Uint8Array>;
-  let active = true;
-  try {
-    const response = await request.call(globalThis, "/api/resource-updates", {
-      method: "POST",
-      headers: {
-        ...authorizedHeaders(launch.token),
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ resourceUri, sessionId: app.sessionId }),
-      signal: controller.signal,
-    });
-    if (!response.ok || response.body === null) {
-      return undefined;
-    }
-    stream = response.body.getReader();
-  } catch {
-    return undefined;
-  }
-  void (async () => {
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (active) {
-      const next = await stream.read();
-      if (next.done) {
-        break;
-      }
-      buffer += decoder.decode(next.value, { stream: true });
-      let frameEnd = buffer.indexOf("\n\n");
-      while (frameEnd !== -1) {
-        const frame = buffer.slice(0, frameEnd);
-        buffer = buffer.slice(frameEnd + 2);
-        const data = frame
-          .split("\n")
-          .find((line) => line.startsWith("data: "))
-          ?.slice("data: ".length);
-        if (data !== undefined) {
-          const update = parseJson(ResourceUpdateSchema, data);
-          if (update.uri === resourceUri) {
-            onUpdate();
-          }
-        }
-        frameEnd = buffer.indexOf("\n\n");
-      }
-    }
-    if (active) {
-      onClose();
-    }
-  })().catch(() => {
-    if (active) {
-      onClose();
-    }
-  });
-  return () => {
-    active = false;
-    controller.abort();
-    void stream.cancel().catch(() => undefined);
-  };
-}
-
 interface ConnectAppFrameOptions {
   readonly root: HostPagePort;
   readonly app: AppPayload;
@@ -280,7 +208,14 @@ async function connectAppFrame(options: ConnectAppFrameOptions): Promise<void> {
     appRequest,
     () => hostContext,
     (resourceUri, onUpdate, onClose) =>
-      subscribeRunsResource(app, launch, request, resourceUri, onUpdate, onClose),
+      subscribeRunsResource({
+        sessionId: app.sessionId,
+        launch,
+        request,
+        resourceUri,
+        onUpdate,
+        onClose,
+      }),
   );
   const bridge = createAppBridge(
     frame,

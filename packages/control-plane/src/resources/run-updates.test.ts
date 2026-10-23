@@ -23,7 +23,10 @@ describe("run resource updates", () => {
     const secondRunId = builders.nextRunId();
     await appendRunningRun(store, firstRunId);
     await appendRunningRun(store, secondRunId);
-    const onError = vi.fn();
+    const errors: RunResourceUpdatesError[] = [];
+    const onError = (error: RunResourceUpdatesError): void => {
+      errors.push(error);
+    };
     const updates = startRunResourceUpdates(store, () => undefined, {
       maxWatchers: 1,
       onError,
@@ -31,10 +34,14 @@ describe("run resource updates", () => {
 
     try {
       await vi.waitFor(() => {
-        expect(onError).toHaveBeenCalledOnce();
+        expect(errors).toHaveLength(1);
       });
-      expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(RunResourceUpdatesError);
-      expect(onError.mock.calls[0]?.[0].code).toBe("run_update_watch_limit_exceeded");
+      const error = errors[0];
+      expect(error).toBeInstanceOf(RunResourceUpdatesError);
+      if (error === undefined) {
+        throw new Error("Expected a watcher limit error.");
+      }
+      expect(error.code).toBe("run_update_watch_limit_exceeded");
     } finally {
       await updates.close();
       await store.close();

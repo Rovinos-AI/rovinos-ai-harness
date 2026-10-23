@@ -107,71 +107,11 @@ class AppPostMessageTransport implements Transport {
   }
 }
 
-/**
- * Connects an iframe to the official MCP Apps host bridge with only tool forwarding enabled.
- *
- * @param frame - The sandboxed MCP App iframe.
- * @param onToolCall - Handler that routes calls through the host's local channel.
- * @param onListTools - Lists only the tools exposed by the host to this app.
- * @returns Methods for connecting and delivering tool input and result notifications.
- */
-export function createAppBridge(
-  frame: AppIframe,
-  onToolCall: (call: AppToolCall) => Promise<CallToolResult>,
-  onListTools: (cursor: string | undefined) => Promise<ListToolsResult> = () =>
-    Promise.resolve({ tools: [] }),
-  handlers?: AppBridgeHandlers,
-): ReferenceAppBridge {
-  const target = frame.contentWindow;
-  if (target === null) {
-    throw new Error("The app iframe has no content window.");
-  }
-  const capabilities: McpUiHostCapabilities = {
-    serverTools: {},
-    openLinks: {},
-    message: { text: {} },
-    updateModelContext: { text: {}, structuredContent: {} },
-  };
-  const bridge = new AppBridge(
-    null,
-    { name: "Rovinos AI Harness", version: "0.0.0" },
-    capabilities,
-    handlers === undefined ? undefined : { hostContext: handlers.hostContext },
-  );
+function registerResourceSubscriptionHandler(
+  bridge: AppBridge,
+  handlers: AppBridgeHandlers | undefined,
+): () => void {
   let unsubscribeResourceUpdates: (() => void) | undefined;
-  bridge.oncalltool = (params) => onToolCall(params);
-  bridge.onopenlink = async (params: McpUiOpenLinkRequest["params"]) => {
-    const allowed = await handlers?.onOpenLink(params.url);
-    return { isError: allowed !== true };
-  };
-  bridge.onmessage = async (params) => {
-    const allowed = await handlers?.onMessage(params);
-    return { isError: allowed !== true };
-  };
-  bridge.onupdatemodelcontext = async (params) => {
-    if ((await handlers?.onUpdateModelContext(params)) !== true) {
-      throw new Error("app_request_rejected");
-    }
-    return {};
-  };
-  bridge.onrequestdisplaymode = async (params) => ({
-    mode:
-      bridge.getAppCapabilities()?.availableDisplayModes?.includes(params.mode) === true &&
-      handlers !== undefined
-        ? await handlers.onRequestDisplayMode(params.mode)
-        : (handlers?.getCurrentDisplayMode() ?? "inline"),
-  });
-  bridge.addEventListener("sizechange", (params) => {
-    handlers?.onSizeChange(params);
-  });
-  bridge.setRequestHandler(
-    "tools/list",
-    {
-      params: ListToolsRequestSchema.shape.params,
-      result: ListToolsResultSchema,
-    },
-    (params) => onListTools(params?.cursor),
-  );
   bridge.setRequestHandler(
     "harness/resources/subscribe",
     {
@@ -208,6 +148,77 @@ export function createAppBridge(
       return { subscribed: unsubscribeResourceUpdates !== undefined };
     },
   );
+  return () => {
+    unsubscribeResourceUpdates?.();
+    unsubscribeResourceUpdates = undefined;
+  };
+}
+
+/**
+ * Connects an iframe to the official MCP Apps host bridge with only tool forwarding enabled.
+ *
+ * @param frame - The sandboxed MCP App iframe.
+ * @param onToolCall - Handler that routes calls through the host's local channel.
+ * @param onListTools - Lists only the tools exposed by the host to this app.
+ * @returns Methods for connecting and delivering tool input and result notifications.
+ */
+export function createAppBridge(
+  frame: AppIframe,
+  onToolCall: (call: AppToolCall) => Promise<CallToolResult>,
+  onListTools: (cursor: string | undefined) => Promise<ListToolsResult> = () =>
+    Promise.resolve({ tools: [] }),
+  handlers?: AppBridgeHandlers,
+): ReferenceAppBridge {
+  const target = frame.contentWindow;
+  if (target === null) {
+    throw new Error("The app iframe has no content window.");
+  }
+  const capabilities: McpUiHostCapabilities = {
+    serverTools: {},
+    openLinks: {},
+    message: { text: {} },
+    updateModelContext: { text: {}, structuredContent: {} },
+  };
+  const bridge = new AppBridge(
+    null,
+    { name: "Rovinos AI Harness", version: "0.0.0" },
+    capabilities,
+    handlers === undefined ? undefined : { hostContext: handlers.hostContext },
+  );
+  const unsubscribeResourceUpdates = registerResourceSubscriptionHandler(bridge, handlers);
+  bridge.oncalltool = (params) => onToolCall(params);
+  bridge.onopenlink = async (params: McpUiOpenLinkRequest["params"]) => {
+    const allowed = await handlers?.onOpenLink(params.url);
+    return { isError: allowed !== true };
+  };
+  bridge.onmessage = async (params) => {
+    const allowed = await handlers?.onMessage(params);
+    return { isError: allowed !== true };
+  };
+  bridge.onupdatemodelcontext = async (params) => {
+    if ((await handlers?.onUpdateModelContext(params)) !== true) {
+      throw new Error("app_request_rejected");
+    }
+    return {};
+  };
+  bridge.onrequestdisplaymode = async (params) => ({
+    mode:
+      bridge.getAppCapabilities()?.availableDisplayModes?.includes(params.mode) === true &&
+      handlers !== undefined
+        ? await handlers.onRequestDisplayMode(params.mode)
+        : (handlers?.getCurrentDisplayMode() ?? "inline"),
+  });
+  bridge.addEventListener("sizechange", (params) => {
+    handlers?.onSizeChange(params);
+  });
+  bridge.setRequestHandler(
+    "tools/list",
+    {
+      params: ListToolsRequestSchema.shape.params,
+      result: ListToolsResultSchema,
+    },
+    (params) => onListTools(params?.cursor),
+  );
   const transport = new AppPostMessageTransport(target);
   const initialized = new Promise<void>((resolve) => {
     bridge.addEventListener("initialized", () => {
@@ -223,8 +234,7 @@ export function createAppBridge(
       bridge.setHostContext(hostContext);
     },
     async close() {
-      unsubscribeResourceUpdates?.();
-      unsubscribeResourceUpdates = undefined;
+      unsubscribeResourceUpdates();
       await bridge.close();
     },
   };

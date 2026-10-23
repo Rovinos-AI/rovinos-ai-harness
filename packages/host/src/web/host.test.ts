@@ -626,6 +626,13 @@ describe("reference app page", () => {
       .mockResolvedValueOnce(new Response("event stream"))
       .mockResolvedValueOnce(new Response("{"));
     expect(await mountReferenceApp(root, launchHash, malformed)).toBe(false);
+
+    const invalidReadyRoot = createFakeRoot();
+    const invalidReady = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('data: {"appId":"approval"}\n\n'));
+    expect(await mountReferenceApp(invalidReadyRoot.root, launchHash, invalidReady)).toBe(false);
+    expect(invalidReadyRoot.status()).toBe("app_session_invalid");
   });
 
   it("routes calls through the authenticated host channel and handles failures", async () => {
@@ -655,6 +662,10 @@ describe("reference app page", () => {
 
     request.mockResolvedValueOnce(new Response("", { status: 403 }));
     expect(await bridgeMock.toolCall({ name: "approve" })).toEqual({ content: [], isError: true });
+    request.mockResolvedValueOnce(
+      new Response('{"error":"app_tool_not_allowed"}', { status: 403 }),
+    );
+    await expect(bridgeMock.toolCall({ name: "approve" })).rejects.toThrow();
     request.mockResolvedValueOnce(
       new Response('{"error":"rate_limited"}', {
         status: 429,

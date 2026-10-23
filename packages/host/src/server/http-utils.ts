@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { HostRequest, HostResponse } from "./types.js";
 
+export const MAX_HOST_REQUEST_BYTES = 32_768;
+
 /** Checks the constant-time bearer-token comparison for an API request. */
 export function authorizationMatches(request: HostRequest, token: string): boolean {
   const authorization = request.headers.authorization;

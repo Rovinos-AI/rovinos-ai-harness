@@ -247,7 +247,7 @@ describe("control-plane HTTP transport", () => {
     const updates: string[] = [];
     client.setNotificationHandler(
       "notifications/resources/updated",
-      { params: z.object({ uri: z.string() }).passthrough() },
+      { params: z.object({ uri: z.string() }).loose() },
       ({ uri }) => {
         updates.push(uri);
       },
@@ -300,7 +300,7 @@ describe("control-plane HTTP transport", () => {
     const updates: string[] = [];
     client.setNotificationHandler(
       "notifications/resources/updated",
-      { params: z.object({ uri: z.string() }).passthrough() },
+      { params: z.object({ uri: z.string() }).loose() },
       ({ uri }) => {
         updates.push(uri);
       },

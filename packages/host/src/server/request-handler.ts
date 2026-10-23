@@ -13,6 +13,7 @@ import { readValidatedResource } from "./resource.js";
 import {
   authorizationMatches,
   isSameOrigin,
+  MAX_HOST_REQUEST_BYTES,
   readBody,
   readStaticAsset,
   writeError,
@@ -23,13 +24,7 @@ import { AppCallRouterError } from "./app-calls.js";
 import type { AppCallRouter } from "./app-calls.js";
 import { AppRequestSchema, type AppRequestRouter } from "./app-requests.js";
 import type { AppRateLimiter } from "./app-limits.js";
-import { z } from "zod";
-
-const MAX_CALL_BYTES = 32_768;
-const RUNS_RESOURCE_URI = "harness://runs";
-const ResourceUpdateSubscriptionSchema = z
-  .object({ resourceUri: z.literal(RUNS_RESOURCE_URI), sessionId: Id })
-  .strict();
+import { subscribeResourceUpdates } from "./resource-updates.js";
 
 interface RequestHandlerOptions {
   readonly config: HostConfig;
@@ -221,98 +216,12 @@ function endAppSession(
   writeJson(response, 200, {});
 }
 
-async function subscribeResourceUpdates(
-  request: HostRequest,
-  response: HostResponse,
-  options: StatefulRequestHandlerOptions,
-): Promise<void> {
-  const body = await readBody(request, MAX_CALL_BYTES);
-  if (body === undefined) {
-    writeError(response, 413, "app_request_too_large");
-    return;
-  }
-  let subscription: z.infer<typeof ResourceUpdateSubscriptionSchema>;
-  try {
-    subscription = parseJson(ResourceUpdateSubscriptionSchema, body, {
-      maxBytes: MAX_CALL_BYTES,
-    });
-  } catch {
-    writeError(response, 400, "app_request_invalid");
-    return;
-  }
-  const instance = options.sessions.get(subscription.sessionId);
-  if (instance === undefined) {
-    writeError(response, 404, "app_unknown");
-    return;
-  }
-  const subscribe = options.dependencies.subscribeResourceUpdates;
-  if (subscribe === undefined) {
-    writeError(response, 503, "resource_updates_unavailable");
-    return;
-  }
-
-  options.resourceUpdateSubscriptions.get(instance.sessionId)?.();
-  let writeReady = false;
-  let updatePending = false;
-  let closed = false;
-  let unsubscribe: (() => void) | undefined;
-  const writeUpdate = (): void => {
-    if (!closed && writeReady) {
-      response.write(`data: ${JSON.stringify({ uri: subscription.resourceUri })}\n\n`);
-    } else if (!closed) {
-      updatePending = true;
-    }
-  };
-  const close = (): void => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    options.resourceUpdateSubscriptions.delete(instance.sessionId);
-    unsubscribe?.();
-    response.end();
-  };
-  try {
-    unsubscribe = subscribe(subscription.resourceUri, writeUpdate, close);
-  } catch {
-    writeError(response, 503, "resource_updates_unavailable");
-    return;
-  }
-  if (unsubscribe === undefined) {
-    writeError(response, 503, "resource_updates_unavailable");
-    return;
-  }
-  options.resourceUpdateSubscriptions.set(instance.sessionId, close);
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store",
-    connection: "keep-alive",
-    "x-content-type-options": "nosniff",
-  });
-  response.write(": subscribed\n\n");
-  writeReady = true;
-  if (updatePending) {
-    writeUpdate();
-  }
-  const removeCloseListener = response.onClose?.(close);
-  if (removeCloseListener === undefined) {
-    return;
-  }
-  const unsubscribeAndRemoveListener = options.resourceUpdateSubscriptions.get(instance.sessionId);
-  if (unsubscribeAndRemoveListener !== undefined) {
-    options.resourceUpdateSubscriptions.set(instance.sessionId, () => {
-      removeCloseListener();
-      unsubscribeAndRemoveListener();
-    });
-  }
-}
-
 async function routeAppCall(
   request: HostRequest,
   response: HostResponse,
   options: RequestHandlerOptions,
 ): Promise<void> {
-  const body = await readBody(request, MAX_CALL_BYTES);
+  const body = await readBody(request, MAX_HOST_REQUEST_BYTES);
   if (body === undefined) {
     countHostAppRejected("size");
     try {
@@ -326,7 +235,7 @@ async function routeAppCall(
   }
   let call: AppCall;
   try {
-    call = parseJson(AppCallSchema, body, { maxBytes: MAX_CALL_BYTES });
+    call = parseJson(AppCallSchema, body, { maxBytes: MAX_HOST_REQUEST_BYTES });
   } catch {
     countHostAppRejected("schema");
     try {
@@ -391,7 +300,7 @@ async function routeAppRequest(
   response: HostResponse,
   options: RequestHandlerOptions,
 ): Promise<void> {
-  const body = await readBody(request, MAX_CALL_BYTES);
+  const body = await readBody(request, MAX_HOST_REQUEST_BYTES);
   if (body === undefined) {
     options.appRequestRouter.reject("request_invalid");
     writeError(response, 413, "app_request_too_large");
@@ -399,7 +308,7 @@ async function routeAppRequest(
   }
   let appRequest: ReturnType<typeof AppRequestSchema.parse>;
   try {
-    appRequest = parseJson(AppRequestSchema, body, { maxBytes: MAX_CALL_BYTES });
+    appRequest = parseJson(AppRequestSchema, body, { maxBytes: MAX_HOST_REQUEST_BYTES });
   } catch {
     options.appRequestRouter.reject("request_invalid");
     writeJson(response, 200, { allowed: false });
@@ -428,51 +337,67 @@ export function createRequestHandler(
     ...options,
     resourceUpdateSubscriptions: new Map<string, () => void>(),
   };
-  return async (request, response) => {
-    try {
-      if (!requestOptions.expectedHosts().includes(request.headers.host ?? "")) {
-        writeError(response, 403, "app_host_invalid");
-        return;
-      }
-      const url = new URL(request.url ?? "/", "http://127.0.0.1");
-      if (await handleStaticRequest(request, response, readStatic)) {
-        return;
-      }
-      if (!url.pathname.startsWith("/api/")) {
-        writeError(response, 404, "not_found");
-        return;
-      }
-      if (!isAuthorizedApiRequest(request, requestOptions)) {
-        writeError(response, 403, "app_unauthorized");
-        return;
-      }
-      switch (`${request.method ?? ""} ${url.pathname}`) {
-        case "GET /api/events":
-          sendAppEvents(url, response, requestOptions);
-          return;
-        case "GET /api/app":
-          await sendAppResource(url, response, requestOptions);
-          return;
-        case "POST /api/call":
-          await routeAppCall(request, response, requestOptions);
-          return;
-        case "POST /api/request":
-          await routeAppRequest(request, response, requestOptions);
-          return;
-        case "GET /api/tools":
-          await routeAppToolsList(url, response, requestOptions);
-          return;
-        case "POST /api/resource-updates":
-          await subscribeResourceUpdates(request, response, requestOptions);
-          return;
-        case "POST /api/session/end":
-          endAppSession(url, response, requestOptions);
-          return;
-        default:
-          writeError(response, 404, "not_found");
-      }
-    } catch {
-      writeError(response, 500, "app_host_request_failed");
+  return (request, response) => handleHostRequest(request, response, requestOptions, readStatic);
+}
+
+async function handleHostRequest(
+  request: HostRequest,
+  response: HostResponse,
+  options: StatefulRequestHandlerOptions,
+  readStatic: NonNullable<ReferenceHostDependencies["readStatic"]>,
+): Promise<void> {
+  try {
+    if (!options.expectedHosts().includes(request.headers.host ?? "")) {
+      writeError(response, 403, "app_host_invalid");
+      return;
     }
-  };
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (await handleStaticRequest(request, response, readStatic)) {
+      return;
+    }
+    if (!url.pathname.startsWith("/api/")) {
+      writeError(response, 404, "not_found");
+      return;
+    }
+    if (!isAuthorizedApiRequest(request, options)) {
+      writeError(response, 403, "app_unauthorized");
+      return;
+    }
+    await routeApiRequest(request, response, url, options);
+  } catch {
+    writeError(response, 500, "app_host_request_failed");
+  }
+}
+
+async function routeApiRequest(
+  request: HostRequest,
+  response: HostResponse,
+  url: URL,
+  options: StatefulRequestHandlerOptions,
+): Promise<void> {
+  switch (`${request.method ?? ""} ${url.pathname}`) {
+    case "GET /api/events":
+      sendAppEvents(url, response, options);
+      return;
+    case "GET /api/app":
+      await sendAppResource(url, response, options);
+      return;
+    case "POST /api/call":
+      await routeAppCall(request, response, options);
+      return;
+    case "POST /api/request":
+      await routeAppRequest(request, response, options);
+      return;
+    case "GET /api/tools":
+      await routeAppToolsList(url, response, options);
+      return;
+    case "POST /api/resource-updates":
+      await subscribeResourceUpdates(request, response, options);
+      return;
+    case "POST /api/session/end":
+      endAppSession(url, response, options);
+      return;
+    default:
+      writeError(response, 404, "not_found");
+  }
 }
