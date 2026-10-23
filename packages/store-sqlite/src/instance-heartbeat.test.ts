@@ -13,7 +13,7 @@ import { openSqliteInstanceHeartbeat } from "./instance-heartbeat.js";
 const firstId = Id.parse("00000000000000000000000001");
 const secondId = Id.parse("00000000000000000000000002");
 const instancesSchema = z.array(z.object({ id: z.string(), heartbeat: z.number().int() }).strict());
-let directory: string;
+let directory = "";
 
 function heartbeatPath(databasePath: string): string {
   return `${resolve(databasePath)}.instances`;
@@ -37,7 +37,7 @@ function readInstances(path: string): { id: string; heartbeat: number }[] {
 
 afterEach(async () => {
   vi.useRealTimers();
-  if (directory !== undefined) {
+  if (directory !== "") {
     await rm(directory, { recursive: true, force: true });
   }
 });

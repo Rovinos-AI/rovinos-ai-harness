@@ -1,41 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { isIP } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createMultiWorkerCompose } from "../scripts/compose/multi-worker.js";
 
 const projectName = `harness-multi-worker-${String(process.pid)}`;
-const composeArgs = [
-  "compose",
-  "--env-file",
-  "infra/collector/VERSION",
-  "--project-name",
-  projectName,
-  "--file",
-  "infra/compose/docker-compose.yml",
-  "--file",
-  "infra/compose/docker-compose.prod-like.yml",
-  "--profile",
-  "prod-like",
-];
-const composeEnvironment: NodeJS.ProcessEnv = {
-  ...process.env,
-  SANDBOX_EGRESS_SUBNET: "172.31.251.0/24",
-  SANDBOX_EGRESS_PROXY_IP: "172.31.251.3",
-  EGRESS_TEST_SUBNET: "198.51.103.0/24",
-  EGRESS_PROBE_IP: "198.51.103.3",
-};
-const dockerAvailable =
-  spawnSync("docker", ["info"], { stdio: "ignore", timeout: 5_000 }).status === 0;
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const runId = "00000000000000000000000001";
 const rawCanary = `multi-worker-${String(process.pid)}@example.test`;
 const firstWorkerContainer = `${projectName}-worker-1`;
 const secondWorkerContainer = `${projectName}-worker-2`;
-let scriptContainerSequence = 0;
 let secretDirectory = "";
 let runnerTokenFile = "";
 let controlPlaneTokenFile = "";
@@ -44,108 +20,15 @@ let storeUrlFile = "";
 let vaultUrlFile = "";
 let postgresPasswordFile = "";
 const workerContainers = [firstWorkerContainer, secondWorkerContainer];
-
-function compose(args: readonly string[], timeout = 300_000): string {
-  const environment = { ...composeEnvironment };
-  delete environment.SANDBOX_RUNNER_TOKEN;
-  environment.SANDBOX_RUNNER_TOKEN_SECRET_FILE = runnerTokenFile;
-  environment.CONTROL_PLANE_TOKEN_SECRET_FILE = controlPlaneTokenFile;
-  environment.HARNESS_MASTER_KEY_SECRET_FILE = masterKeyFile;
-  environment.HARNESS_STORE_DATABASE_URL_SECRET_FILE = storeUrlFile;
-  environment.HARNESS_VAULT_DATABASE_URL_SECRET_FILE = vaultUrlFile;
-  environment.POSTGRES_PASSWORD_SECRET_FILE = postgresPasswordFile;
-  return execFileSync("docker", [...composeArgs, ...args], {
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-    env: environment,
-    timeout,
-  });
-}
-
-function runHarnessScript(
-  script: string,
-  options: { readonly name?: string; readonly detach?: boolean } = {},
-): string {
-  const containerName =
-    options.name ??
-    `${projectName}-script-${String(process.pid)}-${String(++scriptContainerSequence)}`;
-  const postgresContainer = compose(["ps", "--quiet", "postgres"]).trim();
-  const postgresAddress = execFileSync(
-    "docker",
-    [
-      "inspect",
-      "--format",
-      `{{(index .NetworkSettings.Networks "${projectName}_internal").IPAddress}}`,
-      postgresContainer,
-    ],
-    { encoding: "utf8" },
-  ).trim();
-  expect(isIP(postgresAddress)).toBe(4);
-  const args = [
-    "create",
-    "--name",
-    containerName,
-    "--network",
-    `${projectName}_internal`,
-    "--add-host",
-    `postgres:${postgresAddress}`,
-    "--read-only",
-    "--tmpfs",
-    "/tmp:rw,noexec,nosuid,nodev,size=16m",
-    "--tmpfs",
-    "/var/lib/harness/event-store:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700",
-    "--cap-drop",
-    "ALL",
-    "--security-opt",
-    "no-new-privileges:true",
-    "--memory",
-    "1g",
-    "--cpus",
-    "2",
-    "--pids-limit",
-    "128",
-    "--env",
-    "HARNESS_CONFIG=/run/prod-like.yaml",
-    "--env",
-    "HARNESS_DATA_DIR=/var/lib/harness/event-store",
-    "--mount",
-    `type=bind,source=${join(root, "test/fixtures/prod-like-multi.yaml")},target=/run/prod-like.yaml,readonly`,
-    ...[
-      ["sandbox_runner_token", runnerTokenFile],
-      ["control_plane_token", controlPlaneTokenFile],
-      ["harness_master_key", masterKeyFile],
-      ["store_database_url", storeUrlFile],
-      ["vault_database_url", vaultUrlFile],
-      ["postgres_password", postgresPasswordFile],
-    ].flatMap(([name, path]) => [
-      "--mount",
-      `type=bind,source=${path},target=/run/secrets/${name},readonly`,
-    ]),
-    "--entrypoint",
-    "node",
-    "harness:local",
-    "--input-type=module",
-    "-e",
-    script,
-  ];
-  execFileSync("docker", args, { encoding: "utf8" });
-  execFileSync("docker", ["network", "connect", `${projectName}_sandbox`, containerName], {
-    encoding: "utf8",
-  });
-  if (options.detach === true) {
-    execFileSync("docker", ["start", containerName], { encoding: "utf8" });
-    return containerName;
-  }
-  try {
-    return execFileSync("docker", ["start", "--attach", containerName], {
-      encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 120_000,
-    });
-  } finally {
-    execFileSync("docker", ["rm", "-f", containerName], { encoding: "utf8" });
-  }
-}
+const secretFiles = {
+  runnerToken: runnerTokenFile,
+  controlPlaneToken: controlPlaneTokenFile,
+  masterKey: masterKeyFile,
+  storeUrl: storeUrlFile,
+  vaultUrl: vaultUrlFile,
+  postgresPassword: postgresPasswordFile,
+};
+const docker = createMultiWorkerCompose({ projectName, root, secretFiles });
 
 function workerScript(mode: "block" | "complete"): string {
   return [
@@ -199,30 +82,7 @@ function verificationScript(): string {
   ].join("\n");
 }
 
-async function waitForLog(
-  container: string,
-  expected: string,
-  timeoutMs = 30_000,
-): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const logs = execFileSync("docker", ["logs", container], {
-        encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      if (logs.includes(expected)) {
-        return logs;
-      }
-    } catch {
-      // The container may not have emitted logs yet.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-  }
-  throw new Error("multi_worker_container_timeout");
-}
-
-describe.skipIf(!dockerAvailable)("multi-worker deployment", () => {
+describe.skipIf(!docker.available)("multi-worker deployment", () => {
   beforeAll(async () => {
     const mountableTemp = join(root, ".tmp");
     await mkdir(mountableTemp, { recursive: true });
@@ -233,6 +93,12 @@ describe.skipIf(!dockerAvailable)("multi-worker deployment", () => {
     storeUrlFile = join(secretDirectory, "store_database_url");
     vaultUrlFile = join(secretDirectory, "vault_database_url");
     postgresPasswordFile = join(secretDirectory, "postgres_password");
+    secretFiles.runnerToken = runnerTokenFile;
+    secretFiles.controlPlaneToken = controlPlaneTokenFile;
+    secretFiles.masterKey = masterKeyFile;
+    secretFiles.storeUrl = storeUrlFile;
+    secretFiles.vaultUrl = vaultUrlFile;
+    secretFiles.postgresPassword = postgresPasswordFile;
     const runnerToken = randomBytes(32).toString("base64url");
     const postgresPassword = randomBytes(32).toString("base64url");
     await Promise.all([
@@ -247,7 +113,7 @@ describe.skipIf(!dockerAvailable)("multi-worker deployment", () => {
         mode: 0o444,
       }),
     ]);
-    compose(
+    docker.compose(
       [
         "up",
         "--detach",
@@ -265,13 +131,13 @@ describe.skipIf(!dockerAvailable)("multi-worker deployment", () => {
   afterAll(async () => {
     for (const container of workerContainers) {
       try {
-        execFileSync("docker", ["rm", "-f", container], { encoding: "utf8" });
+        docker.removeContainer(container);
       } catch {
         // Cleanup is best-effort after a failed startup or assertion.
       }
     }
     try {
-      compose(["down", "--volumes", "--remove-orphans"], 120_000);
+      docker.compose(["down", "--volumes", "--remove-orphans"], 120_000);
     } catch {
       // Cleanup is best-effort after a failed startup or assertion.
     }
@@ -281,7 +147,7 @@ describe.skipIf(!dockerAvailable)("multi-worker deployment", () => {
   }, 150_000);
 
   it("reclaims a killed worker's job without repeating a non-idempotent side effect", async () => {
-    compose([
+    docker.compose([
       "exec",
       "-T",
       "postgres",
@@ -315,34 +181,37 @@ describe.skipIf(!dockerAvailable)("multi-worker deployment", () => {
       "await queue.close();",
       "process.stdout.write('MULTI_RUN_SEEDED\\n');",
     ].join("\n");
-    runHarnessScript(seedScript);
+    docker.runHarnessScript(seedScript);
 
-    runHarnessScript(workerScript("block"), { name: firstWorkerContainer, detach: true });
-    await waitForLog(firstWorkerContainer, `WORKER_BLOCKED ${runId}`);
+    docker.runHarnessScript(workerScript("block"), { name: firstWorkerContainer, detach: true });
+    await docker.waitForLog(firstWorkerContainer, `WORKER_BLOCKED ${runId}`);
 
-    runHarnessScript(workerScript("complete"), { name: secondWorkerContainer, detach: true });
-    execFileSync("docker", ["kill", firstWorkerContainer], { encoding: "utf8" });
-    const logs = await waitForLog(secondWorkerContainer, `WORKER_RESULT completed`, 90_000);
+    docker.runHarnessScript(workerScript("complete"), {
+      name: secondWorkerContainer,
+      detach: true,
+    });
+    docker.killContainer(firstWorkerContainer);
+    const logs = await docker.waitForLog(secondWorkerContainer, `WORKER_RESULT completed`, 90_000);
     expect(logs).toContain(`WORKER_RESULT completed`);
 
-    const sideEffects = compose([
-      "exec",
-      "-T",
-      "postgres",
-      "psql",
-      "-U",
-      "harness",
-      "-d",
-      "harness",
-      "-Atc",
-      `SELECT executions FROM multi_worker_side_effects WHERE run_id = '${runId}'`,
-    ]).trim();
+    const sideEffects = docker
+      .compose([
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "-U",
+        "harness",
+        "-d",
+        "harness",
+        "-Atc",
+        `SELECT executions FROM multi_worker_side_effects WHERE run_id = '${runId}'`,
+      ])
+      .trim();
     expect(sideEffects).toBe("1");
 
-    const verification = runHarnessScript(verificationScript());
+    const verification = docker.runHarnessScript(verificationScript());
     expect(verification).toContain("MULTI_WORKER_VERIFY_OK");
-    execFileSync("docker", ["stop", "--time", "5", secondWorkerContainer], {
-      encoding: "utf8",
-    });
+    docker.stopContainer(secondWorkerContainer);
   }, 300_000);
 });

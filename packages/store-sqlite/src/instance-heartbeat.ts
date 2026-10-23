@@ -61,24 +61,27 @@ class HeartbeatHandle implements SqliteInstanceHeartbeat {
     return this.shared.ownershipController.signal;
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     if (this.#closed) {
-      return;
+      return Promise.resolve();
     }
     this.#closed = true;
     this.shared.references -= 1;
     if (this.shared.references > 0) {
-      return;
+      return Promise.resolve();
     }
     clearInterval(this.shared.timer);
     try {
       this.shared.database
         .prepare("DELETE FROM instances WHERE id = ?")
         .run(this.shared.instanceId);
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
     } finally {
       this.shared.database.close();
       activeInstances.delete(this.shared.databasePath);
     }
+    return Promise.resolve();
   }
 }
 
@@ -104,9 +107,7 @@ function renewHeartbeat(shared: SharedHeartbeat): void {
   }
 }
 
-async function createSharedHeartbeat(
-  options: InstanceOptions,
-): Promise<SharedHeartbeat | undefined> {
+function createSharedHeartbeat(options: InstanceOptions): SharedHeartbeat | undefined {
   const databasePath = resolve(options.databasePath);
   const heartbeatPath = `${databasePath}.instances`;
   migrateSqliteFile(heartbeatPath, { appliedAt: options.now() });
@@ -171,9 +172,9 @@ export async function openSqliteInstanceHeartbeat(
   }
   let opening = openingInstances.get(databasePath);
   if (opening === undefined) {
-    opening = createSharedHeartbeat(parsed.data).finally(() => {
-      openingInstances.delete(databasePath);
-    });
+    opening = Promise.resolve()
+      .then(() => createSharedHeartbeat(parsed.data))
+      .finally(() => openingInstances.delete(databasePath));
     openingInstances.set(databasePath, opening);
   }
   const shared = await opening;
