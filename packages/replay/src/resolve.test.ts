@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Event as EventSchema,
-  Id,
-  type Event,
-  type Id as RunId,
-} from "@harness/schemas";
+import { Readable } from "node:stream";
+import { Event as EventSchema, Id, type Event, type Id as RunId } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import { resolveRun } from "./index.js";
@@ -51,12 +47,8 @@ function createStore(
   matches: readonly RunId[] = [],
 ): Pick<EventStore, "findRunsByTrace" | "read"> {
   return {
-    findRunsByTrace: vi.fn(async () => [...matches]),
-    async *read(selectedRunId) {
-      for (const event of logs.get(selectedRunId) ?? []) {
-        yield event;
-      }
-    },
+    findRunsByTrace: vi.fn(() => Promise.resolve([...matches])),
+    read: (selectedRunId) => Readable.from(logs.get(selectedRunId) ?? []),
   };
 }
 
@@ -123,6 +115,21 @@ describe("resolveRun", () => {
     });
   });
 
+  it("reports all ids when a trace has no possible root", async () => {
+    const store = createStore(
+      new Map([
+        [runId, [createdEvent(runId, childRunId)]],
+        [childRunId, [createdEvent(childRunId, runId)]],
+      ]),
+      [runId, childRunId],
+    );
+
+    await expect(resolveRun({ store, traceId })).rejects.toMatchObject({
+      code: "trace_ambiguous",
+      runIds: [runId, childRunId],
+    });
+  });
+
   it("throws run_not_found for unknown run and trace ids", async () => {
     const store = createStore(new Map());
 
@@ -131,16 +138,23 @@ describe("resolveRun", () => {
   });
 
   it.each([
-    ["missing selector", {}],
-    ["both selectors", { runId, traceId }],
-    ["invalid run id", { runId: "not-a-run" }],
-    ["invalid trace id", { traceId: "not-a-trace" }],
-    ["zero trace id", { traceId: "0".repeat(32) }],
-    ["invalid traceparent", { traceId: `00-${"0".repeat(32)}-${spanId}-01` }],
-  ])("rejects %s", async (_description, selectors) => {
-    await expect(
-      resolveRun({ store: createStore(new Map()), ...selectors } as Parameters<typeof resolveRun>[0]),
-    ).rejects.toMatchObject({ code: "replay_input_invalid" });
+    { description: "missing selector", selectors: {} },
+    { description: "both selectors", selectors: { runId, traceId } },
+    { description: "invalid run id", selectors: { runId: "not-a-run" } },
+    { description: "invalid trace id", selectors: { traceId: "not-a-trace" } },
+    { description: "zero trace id", selectors: { traceId: "0".repeat(32) } },
+    {
+      description: "invalid traceparent",
+      selectors: { traceId: `00-${"0".repeat(32)}-${spanId}-01` },
+    },
+    {
+      description: "zero span id in traceparent",
+      selectors: { traceId: `00-${traceId}-${"0".repeat(16)}-01` },
+    },
+  ])("rejects $description", async ({ selectors }) => {
+    await expect(resolveRun({ store: createStore(new Map()), ...selectors })).rejects.toMatchObject(
+      { code: "replay_input_invalid" },
+    );
   });
 
   it("rejects a log whose sequence is not contiguous from zero", async () => {
@@ -155,16 +169,25 @@ describe("resolveRun", () => {
     await expect(resolveRun({ store, runId })).rejects.toMatchObject({ code: "corrupt_log" });
   });
 
+  it("rejects events stored under a different run id", async () => {
+    const store = createStore(new Map([[runId, [createdEvent(childRunId)]]]));
+
+    await expect(resolveRun({ store, runId })).rejects.toMatchObject({ code: "corrupt_log" });
+  });
+
   it("rejects more than one million events without buffering the excess", async () => {
     const store: Pick<EventStore, "findRunsByTrace" | "read"> = {
-      findRunsByTrace: async () => [],
-      async *read() {
-        yield createdEvent(runId);
-        const input = inputEvent(runId, 1);
-        for (let seq = 1; seq <= 1_000_000; seq += 1) {
-          yield { ...input, seq };
-        }
-      },
+      findRunsByTrace: () => Promise.resolve([]),
+      read: () =>
+        Readable.from(
+          (function* () {
+            yield createdEvent(runId);
+            const input = inputEvent(runId, 1);
+            for (let seq = 1; seq <= 1_000_000; seq += 1) {
+              yield { ...input, seq };
+            }
+          })(),
+        ),
     };
 
     await expect(resolveRun({ store, runId })).rejects.toMatchObject({

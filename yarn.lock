@@ -1690,6 +1690,7 @@ __metadata:
     "@harness/mcp": "workspace:^"
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
+    "@harness/replay": "workspace:^"
     "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
@@ -1896,6 +1897,17 @@ __metadata:
     fast-check: "npm:4.10.2"
     vitest: "npm:3.2.6"
     yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@harness/replay@workspace:^, @harness/replay@workspace:packages/replay":
+  version: 0.0.0-use.local
+  resolution: "@harness/replay@workspace:packages/replay"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
+    vitest: "npm:3.2.6"
     zod: "npm:4.6.7"
   languageName: unknown
   linkType: soft

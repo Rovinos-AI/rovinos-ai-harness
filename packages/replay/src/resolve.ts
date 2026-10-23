@@ -41,7 +41,7 @@ export interface ResolveRunInput {
   /** Event store to query and read. */
   readonly store: Pick<EventStore, "findRunsByTrace" | "read">;
   /** Run identifier to load. */
-  readonly runId?: RunId;
+  readonly runId?: string;
   /** Trace identifier or W3C traceparent to resolve. */
   readonly traceId?: string;
 }
@@ -122,11 +122,11 @@ interface LoadedRun {
 async function readRun(
   store: ResolveRunInput["store"],
   runId: RunId,
-  totalEvents: { count: number },
+  previousEventCount = 0,
 ): Promise<LoadedRun> {
   const events: EventValue[] = [];
   for await (const event of store.read(runId)) {
-    if (totalEvents.count >= MAX_EVENTS) {
+    if (previousEventCount + events.length >= MAX_EVENTS) {
       throw new ReplayTooLargeError();
     }
     const parsedEvent = Event.safeParse(event);
@@ -141,13 +141,12 @@ async function readRun(
       throw new CorruptLogError();
     }
     events.push(validEvent);
-    totalEvents.count += 1;
   }
   if (events.length === 0) {
     throw new RunNotFoundError();
   }
   const firstEvent = events[0];
-  if (firstEvent === undefined || firstEvent.type !== "run_created") {
+  if (firstEvent?.type !== "run_created") {
     throw new CorruptLogError();
   }
   return {
@@ -189,7 +188,7 @@ export async function resolveRun(input: ResolveRunInput): Promise<ResolvedRun> {
     if (!parsedRunId.success) {
       throw new ReplayInputError();
     }
-    const run = await readRun(input.store, parsedRunId.data, { count: 0 });
+    const run = await readRun(input.store, parsedRunId.data);
     return ResolvedRunSchema.parse({
       rootRunId: run.runId,
       runs: [asResolvedEntry(run, "root")],
@@ -202,10 +201,12 @@ export async function resolveRun(input: ResolveRunInput): Promise<ResolvedRun> {
     throw new RunNotFoundError();
   }
 
-  const totalEvents = { count: 0 };
+  let totalEvents = 0;
   const runs: LoadedRun[] = [];
   for (const runId of matchedRunIds) {
-    runs.push(await readRun(input.store, runId, totalEvents));
+    const run = await readRun(input.store, runId, totalEvents);
+    runs.push(run);
+    totalEvents += run.events.length;
   }
 
   const roots = runs.filter((run) => run.parentRunId === undefined);
@@ -220,7 +221,9 @@ export async function resolveRun(input: ResolveRunInput): Promise<ResolvedRun> {
     rootRunId: root.runId,
     runs: [
       asResolvedEntry(root, "root"),
-      ...runs.filter((run) => run.runId !== root.runId).map((run) => asResolvedEntry(run, "subagent")),
+      ...runs
+        .filter((run) => run.runId !== root.runId)
+        .map((run) => asResolvedEntry(run, "subagent")),
     ],
   });
 }

@@ -22,6 +22,7 @@ import { keysCommand } from "./commands/keys.js";
 import { policyCommand } from "./commands/policy.js";
 import { serversCommand } from "./commands/servers.js";
 import { storeCommand } from "./commands/store.js";
+import { replayCommand } from "./commands/replay.js";
 import { healthcheckCommand } from "./healthcheck.js";
 import { workerCommand } from "./commands/worker.js";
 
@@ -40,6 +41,7 @@ export const COMMANDS: CommandModule[] = [
   policyCommand,
   serversCommand,
   storeCommand,
+  replayCommand,
   healthcheckCommand,
   workerCommand,
 ];

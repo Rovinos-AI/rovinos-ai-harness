@@ -91,7 +91,8 @@
     "core",
     "config",
     "control-plane",
-    "host"
+    "host",
+    "replay"
   ],
   "sdk": [
     "schemas",

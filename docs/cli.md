@@ -208,6 +208,14 @@ default event summaries contain only their type and sequence number. `--show-con
 stored event content verbatim and writes a `content_may_be_sensitive` warning to stderr. Until PII
 tokenization in tasks 13.4 and 13.7 lands, run goals and event content are stored as provided.
 
+## `harness replay`
+
+`harness replay (--run <id> | --trace <trace-id-or-traceparent>) [--strict] [--golden <file>]
+[--update-baseline] [--report <path>] [--json]` resolves a recorded run and loads its validated event
+log. Trace lookup includes matching subagent runs. This task only prints the root and matching run IDs
+and roles; replay execution and baseline/report actions are not implemented yet. Event content is
+never printed.
+
 ## `harness cancel`
 
 `harness cancel <runId>` appends a cancellation request for a running or suspended run. Human output
