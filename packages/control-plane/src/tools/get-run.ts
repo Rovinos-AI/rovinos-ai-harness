@@ -19,9 +19,14 @@ export async function getRun(
   store: EventStore,
   input: GetRunInput,
 ): Promise<GetRunOutput | undefined> {
-  const { runId } = getRunInputSchema.parse(input);
+  const { runId, sinceSeq } = getRunInputSchema.parse(input);
   const run = await readRunState(store, runId);
   if (run === undefined) {
+    return undefined;
+  }
+  const firstEvent = run.events[0];
+  const lastEvent = run.events.at(-1);
+  if (firstEvent?.type !== "run_created" || lastEvent === undefined) {
     return undefined;
   }
   const pendingApprovals = Array.from(run.state.pendingApprovals.values(), (approval) => {
@@ -33,13 +38,20 @@ export async function getRun(
       ...(approval.expiresAt === undefined ? {} : { expiresAt: approval.expiresAt }),
     };
   });
-  const recentEvents = run.events.slice(-20).flatMap((event) => {
+  const events = sinceSeq === undefined ? run.events.slice(-20) : run.events;
+  const recentEvents = events.flatMap((event) => {
+    if (sinceSeq !== undefined && event.seq <= sinceSeq) {
+      return [];
+    }
     const safeEvent = toSafeEvent(event, run.policyVersion);
     return safeEvent === null ? [] : [safeEvent];
   });
   return getRunOutputSchema.parse({
     runId,
+    createdAt: firstEvent.ts,
     status: run.state.status,
+    lastSeq: lastEvent.seq,
+    lastTs: lastEvent.ts,
     steps: run.state.steps,
     usage: run.state.usage,
     ...(run.state.lastCheckpoint === undefined ? {} : { lastCheckpoint: run.state.lastCheckpoint }),

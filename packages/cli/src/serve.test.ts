@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@harness/config";
 import type * as ControlPlane from "@harness/control-plane";
-import { foldRunState, type Runtime } from "@harness/core";
+import { foldRunState, type RunLoopResult, type Runtime } from "@harness/core";
 import { Code, Id, Principal } from "@harness/schemas";
 import {
   IdempotencyKeyHashSchema,
@@ -171,6 +171,59 @@ afterEach(() => {
 });
 
 describe("serve command", () => {
+  it("keeps a progress-enabled start request open until its run settles", async () => {
+    const { runtime } = createContext();
+    const startRun = startOperation(createControlPlaneOperations(runtime));
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    await runtime.store.append(runId, [builders.runCreated(runId)], 0);
+    await runtime.store.append(
+      runId,
+      [
+        builders.runStatusChanged(runId, "pending", "running"),
+        builders.runStatusChanged(runId, "running", "completed"),
+      ],
+      1,
+    );
+    const events = [];
+    for await (const event of runtime.store.read(runId)) {
+      events.push(event);
+    }
+    const state = foldRunState(events);
+    let finish: (result: RunLoopResult) => void = () => undefined;
+    const completion = new Promise<RunLoopResult>((resolve) => {
+      finish = resolve;
+    });
+    const progress = vi.fn();
+    const start = vi.spyOn(runtime, "start").mockReturnValue({
+      runId,
+      started: Promise.resolve(),
+      completion,
+    });
+
+    const result = startRun({
+      goal: "synthetic progress-enabled start",
+      requestedBy: Principal.parse("token.progress"),
+      onProgress: progress,
+    });
+    let settled = false;
+    void result.then(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => {
+      expect(start).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ onProgress: progress }),
+      );
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finish({ status: "completed", approvalIds: [], state, events });
+
+    await expect(result).resolves.toEqual({ runId, status: "completed" });
+  });
+
   it("defaults to loopback HTTP and stops cleanly on SIGTERM", async () => {
     const { context, runtime, closeRuntime, closeQueue, stdout, stderr } = createContext();
     const sigtermListeners = process.listenerCount("SIGTERM");
