@@ -197,6 +197,12 @@ export type RuntimeSetup = RuntimeComposition & {
   readonly scopes: RunScopeRegistry;
 };
 
+interface RuntimeSetupResources {
+  vault?: RuntimeVault;
+  eventStore?: EventStore;
+  tools?: RuntimeTools;
+}
+
 class PiiDisabledInProductionError extends HarnessError {
   readonly code = "pii_disabled_in_production";
 
@@ -224,6 +230,121 @@ function validatePiiConfig(config: RuntimeConfig, overrides: RuntimeOverrides): 
   return pii;
 }
 
+async function openRuntimeInstanceHeartbeat(options: {
+  readonly config: RuntimeConfig;
+  readonly overrides: RuntimeOverrides;
+  readonly dataDir: string;
+  readonly ids: RuntimeComposition["ids"];
+  readonly clock: RuntimeComposition["clock"];
+}): Promise<RuntimeComposition["instanceHeartbeat"]> {
+  if (options.config.deployment?.mode === "multi" || options.overrides.readOnlyStore === true) {
+    return undefined;
+  }
+  const sqlitePaths = new Set<string>();
+  if (options.config.store?.dialect !== "postgres" && options.overrides.store === undefined) {
+    sqlitePaths.add(resolve(join(options.dataDir, "harness.db")));
+  }
+  if (options.config.vault?.backend !== "postgres" && options.overrides.transientVault !== true) {
+    sqlitePaths.add(resolve(join(resolveVaultDataDir(process.env, options.dataDir), "vault.db")));
+  }
+  if (sqlitePaths.size === 0) {
+    return undefined;
+  }
+  const heartbeats: SqliteInstanceHeartbeat[] = [];
+  try {
+    for (const databasePath of sqlitePaths) {
+      const heartbeat = await openSqliteInstanceHeartbeat({
+        databasePath,
+        instanceId: options.ids.next(),
+        now: () => options.clock.now(),
+      });
+      if (heartbeat === undefined) {
+        throw new DeploymentStartupError("deployment_single_instance_violation");
+      }
+      heartbeats.push(heartbeat);
+    }
+  } catch (error) {
+    await Promise.all(heartbeats.map((heartbeat) => heartbeat.close().catch(() => undefined)));
+    throw error;
+  }
+  return {
+    signal: AbortSignal.any(heartbeats.map(({ signal }) => signal)),
+    close: async () => {
+      await Promise.all(heartbeats.map((heartbeat) => heartbeat.close()));
+    },
+  };
+}
+
+async function composeRuntimeSetup(options: {
+  readonly config: RuntimeConfig;
+  readonly piiConfig: PiiConfig;
+  readonly overrides: RuntimeOverrides;
+  readonly clock: RuntimeComposition["clock"];
+  readonly ids: RuntimeComposition["ids"];
+  readonly keys: RuntimeComposition["keys"];
+  readonly dataDir: string;
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+  readonly resources: RuntimeSetupResources;
+}): Promise<RuntimeSetup> {
+  const { config, piiConfig, overrides, clock, ids, keys, dataDir, instanceHeartbeat, resources } =
+    options;
+  const runtimeVault = await createRuntimeVault({ dataDir, config, overrides, keys, clock });
+  resources.vault = runtimeVault;
+  const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
+  const policy = await createRuntimePolicy(config, overrides);
+  const tools = await createRuntimeTools(config, overrides, keys, dataDir);
+  resources.tools = tools;
+  const { tool, sandboxBackend } = tools;
+  const workspaceSnapshotter = createRuntimeWorkspaceSnapshotter({
+    dataDir,
+    config,
+    ids,
+    keys,
+    ...(sandboxBackend instanceof RemoteSandboxBackend || sandboxBackend instanceof RunnerPool
+      ? { remoteWorkspace: sandboxBackend }
+      : {}),
+  });
+  const roles = await createRuntimeRoles(config, overrides, tool);
+  const rawStore = await createRuntimeStore(config, overrides, clock);
+  resources.eventStore = rawStore;
+  const { piiRuntime, model, store } = await createRuntimeModelAndStore({
+    config,
+    piiConfig,
+    overrides,
+    ids,
+    clock,
+    vault: runtimeVault,
+    scopes,
+    store: rawStore,
+    policyVersion: policy.version,
+  });
+  const managedMcpToolPort = tools.mcpToolPort;
+  return {
+    config,
+    overrides,
+    clock,
+    ids,
+    store,
+    keys,
+    sandboxBackend,
+    workspaceSnapshotter,
+    ...(instanceHeartbeat === undefined ? {} : { instanceHeartbeat }),
+    vault: runtimeVault,
+    vaultResolver: piiRuntime.resolver,
+    pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
+    model,
+    tool,
+    ...(managedMcpToolPort === undefined
+      ? {}
+      : { closeToolPort: () => managedMcpToolPort.close() }),
+    policy,
+    policyVersion: policy.version,
+    context: overrides.context ?? new NaiveContext(),
+    roles,
+    scopes,
+  };
+}
+
 /**
  * Resolve validated runtime configuration and create owned storage dependencies.
  * @param config - Validated run configuration.
@@ -244,111 +365,33 @@ export async function setupRuntime(
   const clock = overrides.clock ?? systemClock;
   const ids = overrides.ids ?? new SystemIdGenerator(clock);
   const keys = await createKeysClosingSandbox(runtimeConfig, overrides);
-  let vault: RuntimeVault | undefined;
-  let eventStore: EventStore | undefined;
-  let tools: RuntimeTools | undefined;
+  const resources: RuntimeSetupResources = {};
   let instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
   try {
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    if (config.deployment?.mode !== "multi" && overrides.readOnlyStore !== true) {
-      const sqlitePaths = new Set<string>();
-      if (config.store?.dialect !== "postgres" && overrides.store === undefined) {
-        sqlitePaths.add(resolve(join(dataDir, "harness.db")));
-      }
-      if (config.vault?.backend !== "postgres" && overrides.transientVault !== true) {
-        sqlitePaths.add(resolve(join(resolveVaultDataDir(process.env, dataDir), "vault.db")));
-      }
-      const heartbeats: SqliteInstanceHeartbeat[] = [];
-      try {
-        for (const databasePath of sqlitePaths) {
-          const heartbeat = await openSqliteInstanceHeartbeat({
-            databasePath,
-            instanceId: ids.next(),
-            now: () => clock.now(),
-          });
-          if (heartbeat === undefined) {
-            throw new DeploymentStartupError("deployment_single_instance_violation");
-          }
-          heartbeats.push(heartbeat);
-        }
-      } catch (error) {
-        await Promise.all(heartbeats.map((heartbeat) => heartbeat.close().catch(() => undefined)));
-        throw error;
-      }
-      if (heartbeats.length > 0) {
-        instanceHeartbeat = {
-          signal: AbortSignal.any(heartbeats.map(({ signal }) => signal)),
-          close: async () => {
-            await Promise.all(heartbeats.map((heartbeat) => heartbeat.close()));
-          },
-        };
-      }
-    }
-    const runtimeVault = await createRuntimeVault({
-      dataDir,
+    instanceHeartbeat = await openRuntimeInstanceHeartbeat({
       config: runtimeConfig,
       overrides,
-      keys,
-      clock,
-    });
-    vault = runtimeVault;
-    const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
-    const policy = await createRuntimePolicy(runtimeConfig, overrides);
-    tools = await createRuntimeTools(runtimeConfig, overrides, keys, dataDir);
-    const { tool, sandboxBackend } = tools;
-    const workspaceSnapshotter = createRuntimeWorkspaceSnapshotter({
-      dataDir,
-      config: runtimeConfig,
       ids,
-      keys,
-      ...(sandboxBackend instanceof RemoteSandboxBackend || sandboxBackend instanceof RunnerPool
-        ? { remoteWorkspace: sandboxBackend }
-        : {}),
+      clock,
+      dataDir,
     });
-    const roles = await createRuntimeRoles(runtimeConfig, overrides, tool);
-    const rawStore = await createRuntimeStore(runtimeConfig, overrides, clock);
-    eventStore = rawStore;
-    const { piiRuntime, model, store } = await createRuntimeModelAndStore({
+    return await composeRuntimeSetup({
       config: runtimeConfig,
       piiConfig,
       overrides,
-      ids,
-      clock,
-      vault: runtimeVault,
-      scopes,
-      store: rawStore,
-      policyVersion: policy.version,
-    });
-    const managedMcpToolPort = tools.mcpToolPort;
-    return {
-      config: runtimeConfig,
-      overrides,
       clock,
       ids,
-      store,
       keys,
-      sandboxBackend,
-      workspaceSnapshotter,
-      ...(instanceHeartbeat === undefined ? {} : { instanceHeartbeat }),
-      vault: runtimeVault,
-      vaultResolver: piiRuntime.resolver,
-      pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
-      model,
-      tool,
-      ...(managedMcpToolPort === undefined
-        ? {}
-        : { closeToolPort: () => managedMcpToolPort.close() }),
-      policy,
-      policyVersion: policy.version,
-      context: overrides.context ?? new NaiveContext(),
-      roles,
-      scopes,
-    };
+      dataDir,
+      instanceHeartbeat,
+      resources,
+    });
   } catch (error) {
     await cleanupRuntimeSetupFailure({
-      tools,
-      eventStore,
-      vault,
+      tools: resources.tools,
+      eventStore: resources.eventStore,
+      vault: resources.vault,
       keys,
       overrides,
       instanceHeartbeat,

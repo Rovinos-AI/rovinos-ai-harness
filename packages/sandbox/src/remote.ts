@@ -24,6 +24,11 @@ import {
   WebFetchResultSchema,
 } from "./web-fetch-contracts.js";
 import type { WebFetchRequest, WebFetchResult } from "./web-fetch-contracts.js";
+import {
+  RunnerLeaseRequestSchema,
+  RunnerOkResponseSchema,
+  RunnerReleaseRequestSchema,
+} from "./runner-lease-contracts.js";
 
 const RemoteOptionsSchema = z
   .object({
@@ -32,15 +37,6 @@ const RemoteOptionsSchema = z
     timeoutGraceMs: z.number().int().nonnegative().max(10_000).optional(),
   })
   .strict();
-const RunnerLeaseResponseSchema = z.object({ status: z.literal("ok") }).strict();
-const RunnerHealthResponseSchema = z.object({ status: z.literal("ok") }).strict();
-const RunnerLeaseRequestSchema = z
-  .object({
-    runId: Id,
-    ttlMs: z.number().int().positive().max(600_000).optional(),
-  })
-  .strict();
-const RunnerReleaseRequestSchema = z.object({ runId: Id }).strict();
 /** Options for the authenticated HTTP sandbox backend. */
 export interface RemoteSandboxBackendOptions {
   /** Base URL of the internal runner service. */
@@ -51,10 +47,6 @@ export interface RemoteSandboxBackendOptions {
   readonly timeoutGraceMs?: number;
   /** Fetch implementation, injectable for tests. */
   readonly fetcher?: typeof fetch;
-}
-
-function wasAborted(candidate: AbortSignal): boolean {
-  return candidate.aborted;
 }
 
 function abortedResult(): ExecResult {
@@ -70,6 +62,8 @@ function abortedResult(): ExecResult {
     durationMs: 0,
   };
 }
+
+const wasAborted = (signal: AbortSignal): boolean => signal.aborted;
 
 async function readBoundedResponse(response: Response, maxBytes: number): Promise<string> {
   if (response.body === null) {
@@ -139,7 +133,9 @@ export class RemoteSandboxBackend
   /** Checks the runner's bounded health endpoint without exposing its token. */
   async healthCheck(): Promise<boolean> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, 5_000);
     try {
       const response = await this.#fetcher(new URL("/healthz", this.#url), {
         method: "GET",
@@ -150,7 +146,7 @@ export class RemoteSandboxBackend
       if (!response.ok) {
         return false;
       }
-      parseJson(RunnerHealthResponseSchema, await readBoundedResponse(response, 1024), {
+      parseJson(RunnerOkResponseSchema, await readBoundedResponse(response, 1024), {
         maxBytes: 1024,
       });
       return true;
@@ -227,7 +223,7 @@ export class RemoteSandboxBackend
         throw new RemoteSandboxError("sandbox_unavailable");
       }
       const text = await readBoundedResponse(response, 1024);
-      parseJson(RunnerLeaseResponseSchema, text, { maxBytes: 1024 });
+      parseJson(RunnerOkResponseSchema, text, { maxBytes: 1024 });
     } catch (error) {
       if (error instanceof RemoteSandboxError) {
         throw error;
@@ -240,7 +236,7 @@ export class RemoteSandboxBackend
 
   /** {@inheritDoc SandboxBackend.exec} */
   async exec(runId: Id, spec: ExecSpec, signal: AbortSignal): Promise<ExecResult> {
-    if (signal.aborted) {
+    if (wasAborted(signal)) {
       return abortedResult();
     }
     const controller = new AbortController();
@@ -308,7 +304,7 @@ export class RemoteSandboxBackend
     if (!parsed.success) {
       throw new RemoteSandboxError("sandbox_runner_config_invalid");
     }
-    if (signal.aborted) {
+    if (wasAborted(signal)) {
       throw new RemoteSandboxError("sandbox_timeout");
     }
     const controller = new AbortController();
@@ -377,7 +373,7 @@ export class RemoteSandboxBackend
     if (!parsed.success) {
       throw new WorkspaceFileError("fs_invalid_input");
     }
-    if (signal.aborted) {
+    if (wasAborted(signal)) {
       throw new RemoteSandboxError("sandbox_timeout");
     }
     const controller = new AbortController();

@@ -157,11 +157,23 @@ afterEach(() => {
 describe("createRuntime sandbox composition", () => {
   it("leases a pooled runner through run, suspension, and failure", async () => {
     const createPooledRunner = () => {
+      let acquireCount = 0;
+      let releaseCount = 0;
+      let execCount = 0;
       const runner: RunnerPoolRunner = {
         healthCheck: vi.fn(() => Promise.resolve(true)),
-        acquireLease: vi.fn(() => Promise.resolve()),
-        releaseLease: vi.fn(() => Promise.resolve()),
-        exec: vi.fn(() => Promise.resolve(result)),
+        acquireLease: () => {
+          acquireCount += 1;
+          return Promise.resolve();
+        },
+        releaseLease: () => {
+          releaseCount += 1;
+          return Promise.resolve();
+        },
+        exec: () => {
+          execCount += 1;
+          return Promise.resolve(result);
+        },
         fetch: vi.fn(() =>
           Promise.resolve({
             url: "https://example.test/",
@@ -178,7 +190,11 @@ describe("createRuntime sandbox composition", () => {
         restoreArchive: vi.fn(() => Promise.resolve()),
         hasWorkspace: vi.fn(() => Promise.resolve(false)),
       };
-      return { runner, pool: new RunnerPool({ runners: [runner] }) };
+      return {
+        runner,
+        pool: new RunnerPool({ runners: [runner] }),
+        counts: () => ({ acquireCount, releaseCount, execCount }),
+      };
     };
     const approvalPolicy = {
       version: Code.parse("test.approval"),
@@ -201,7 +217,7 @@ describe("createRuntime sandbox composition", () => {
     ] as const;
 
     for (const testCase of cases) {
-      const { runner, pool } = createPooledRunner();
+      const { pool, counts } = createPooledRunner();
       const runtime = await createRuntime(
         { run, pii: PiiConfigSchema.parse({ enabled: false }) },
         {
@@ -215,13 +231,11 @@ describe("createRuntime sandbox composition", () => {
       try {
         const runResult = await runtime.run("exercise the pooled sandbox");
         expect(runResult.status).toBe(testCase.expected);
-        expect(runner.acquireLease).toHaveBeenCalledOnce();
-        expect(runner.releaseLease).toHaveBeenCalledOnce();
-        if (testCase.executes) {
-          expect(runner.exec).toHaveBeenCalledOnce();
-        } else {
-          expect(runner.exec).not.toHaveBeenCalled();
-        }
+        expect(counts()).toEqual({
+          acquireCount: 1,
+          releaseCount: 1,
+          execCount: testCase.executes ? 1 : 0,
+        });
       } finally {
         await runtime.close();
       }
@@ -455,9 +469,9 @@ describe("createRuntime sandbox composition", () => {
     "passes one configured backend to the tool port and records only result metadata (remote=%s)",
     async (remote) => {
       vi.stubEnv("HARNESS_SANDBOX_CANARY", canary);
-      const fetcher = vi.fn((input: RequestInfo | URL) =>
+      const fetcher = vi.fn((_input: RequestInfo | URL) =>
         Promise.resolve(
-          Response.json(requestUrl(input).pathname === "/exec" ? result : { status: "ok" }),
+          Response.json(requestUrl(_input).pathname === "/exec" ? result : { status: "ok" }),
         ),
       );
       vi.stubGlobal("fetch", fetcher);
@@ -687,7 +701,7 @@ describe("createRuntime sandbox composition", () => {
 
   // threat: T-05
   it("does not call the runner when policy denies web.fetch", async () => {
-    const fetcher = vi.fn((input: RequestInfo | URL) =>
+    const fetcher = vi.fn((_input: RequestInfo | URL) =>
       Promise.resolve(Response.json({ status: "ok" })),
     );
     vi.stubGlobal("fetch", fetcher);

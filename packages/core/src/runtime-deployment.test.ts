@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Id,
@@ -19,12 +19,28 @@ import { DeploymentStartupError, validateDeploymentTopology } from "./runtime-de
 import { createRuntime } from "./runtime.js";
 
 function instanceCount(databasePath: string): number {
-  const database = new Database(`${databasePath}.instances`);
+  const database = new DatabaseSync(`${databasePath}.instances`);
   try {
-    const row = database.prepare("SELECT COUNT(*) AS count FROM instances").get();
-    return typeof row === "object" && row !== null && "count" in row ? Number(row.count) : 0;
+    const count = database.prepare("SELECT COUNT(*) AS count FROM instances").get()?.count;
+    return Number(count ?? 0);
   } finally {
     database.close();
+  }
+}
+
+function validateTopology(
+  config: Parameters<typeof validateDeploymentTopology>[0],
+  queueAvailable: boolean,
+): { readonly threw: boolean; readonly errorCode: unknown } {
+  try {
+    validateDeploymentTopology(config, queueAvailable);
+    return { threw: false, errorCode: undefined };
+  } catch (error) {
+    return {
+      threw: true,
+      errorCode:
+        typeof error === "object" && error !== null ? Reflect.get(error, "code") : undefined,
+    };
   }
 }
 
@@ -69,15 +85,13 @@ describe("validateDeploymentTopology", () => {
   ];
 
   it.each(cases)("validates topology $config", ({ config, supported }) => {
-    if (supported) {
-      expect(() =>
-        validateDeploymentTopology(config, config.deployment?.mode === "multi"),
-      ).not.toThrow();
-    } else {
-      expect(() =>
-        validateDeploymentTopology(config, config.store?.dialect === "postgres"),
-      ).toThrow(expect.objectContaining({ code: "deployment_requires_postgres" }));
-    }
+    const queueAvailable = supported
+      ? config.deployment?.mode === "multi"
+      : config.store?.dialect === "postgres";
+    expect(validateTopology(config, queueAvailable)).toEqual({
+      threw: !supported,
+      errorCode: supported ? undefined : "deployment_requires_postgres",
+    });
   });
 
   describe("single-instance SQLite ownership", () => {
@@ -154,12 +168,14 @@ describe("validateDeploymentTopology", () => {
         instanceId: Id.parse("00000000000000000000000002"),
         now: () => 100,
       });
-      const database = new Database(join(dataDir, "harness.db.instances"));
+      const database = new DatabaseSync(join(dataDir, "harness.db.instances"));
       database.prepare("UPDATE instances SET id = ?").run("00000000000000000000000003");
       database.close();
 
       try {
-        expect(() => heartbeat?.heartbeat()).toThrow();
+        expect(() => {
+          heartbeat?.heartbeat();
+        }).toThrow();
         await expect(runtime.run("must not be recorded")).rejects.toMatchObject({
           code: "deployment_single_instance_violation",
         });
@@ -172,13 +188,16 @@ describe("validateDeploymentTopology", () => {
   });
 
   it("requires a durable queue for multi-instance mode", () => {
-    expect(() =>
-      validateDeploymentTopology({
-        deployment: { mode: "multi" },
-        store: { dialect: "postgres" },
-        vault: postgresVault,
-      }),
-    ).toThrow(expect.objectContaining({ code: "deployment_requires_postgres" }));
+    expect(
+      validateTopology(
+        {
+          deployment: { mode: "multi" },
+          store: { dialect: "postgres" },
+          vault: postgresVault,
+        },
+        false,
+      ),
+    ).toEqual({ threw: true, errorCode: "deployment_requires_postgres" });
   });
 
   it("provides a typed refusal for a second live SQLite instance", () => {

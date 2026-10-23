@@ -152,6 +152,40 @@ export async function markTerminalBestEffort(
   }
 }
 
+/** Close sandbox resources while guaranteeing backend cleanup is attempted. */
+async function closeSandboxResources(options: {
+  readonly closeToolPort?: () => Promise<void>;
+  readonly sandboxBackend: RuntimeComposition["sandboxBackend"];
+}): Promise<void> {
+  try {
+    await options.closeToolPort?.();
+  } finally {
+    await options.sandboxBackend.close?.();
+  }
+}
+
+/** Close durable runtime resources while guaranteeing remaining cleanup is attempted. */
+async function closeStorageResources(options: {
+  readonly store: EventStore;
+  readonly vault: RuntimeComposition["vault"];
+  readonly keys: RuntimeComposition["keys"];
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+}): Promise<void> {
+  try {
+    await options.store.close();
+  } finally {
+    try {
+      await options.vault.close();
+    } finally {
+      try {
+        await options.instanceHeartbeat?.close();
+      } finally {
+        options.keys.dispose();
+      }
+    }
+  }
+}
+
 /** Flush telemetry and close owned resources, even if an earlier step fails. */
 export async function closeRuntimeResources(options: {
   readonly store: EventStore;
@@ -166,25 +200,9 @@ export async function closeRuntimeResources(options: {
     await options.flushTelemetry?.();
   } finally {
     try {
-      try {
-        await options.closeToolPort?.();
-      } finally {
-        await options.sandboxBackend.close?.();
-      }
+      await closeSandboxResources(options);
     } finally {
-      try {
-        await options.store.close();
-      } finally {
-        try {
-          await options.vault.close();
-        } finally {
-          try {
-            await options.instanceHeartbeat?.close();
-          } finally {
-            options.keys.dispose();
-          }
-        }
-      }
+      await closeStorageResources(options);
     }
   }
 }
