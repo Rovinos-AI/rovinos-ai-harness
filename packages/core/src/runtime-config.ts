@@ -60,7 +60,7 @@ export interface RuntimeOverrides {
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly model?: ModelPort;
-  /** Recorded port responses already contain tokenized content; keep storage sanitization enabled. */
+  /** Replay-only: recorded model and tool port responses are tokenized; storage sanitization stays enabled. */
   readonly alreadyTokenized?: boolean;
   /** Provider adapters and secret resolution can be supplied by tests or embedders. */
   readonly providerAdapters?: readonly ProviderAdapter[];

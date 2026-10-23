@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import { PiiEventStore } from "@harness/pii";
 import {
+  Code,
   Event as EventSchema,
   Id,
+  type NewEvent,
   RunConfigSchema,
   StoreConfigSchema,
   VaultConfigSchema,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { ExecSpecSchema } from "@harness/sandbox";
+import { InMemoryVault } from "@harness/vault";
 import { describe, expect, it, vi } from "vitest";
-import { ResolvedRunSchema } from "./resolve.js";
+import { resolveRun, ResolvedRunSchema } from "./resolve.js";
 import { buildReplayRuntime } from "./replay-runtime.js";
 
 const runId = Id.parse("00000000000000000000000001");
@@ -28,13 +31,69 @@ const event = EventSchema.parse({
 });
 
 describe("buildReplayRuntime", () => {
-  it("uses isolated storage, retains the storage PII decorator, and blocks sandbox execution", async () => {
+  it("isolates every original resource, sanitizes storage, and blocks sandbox execution", async () => {
     const originalStore = new InMemoryEventStore();
-    const originalStoreClose = vi.spyOn(originalStore, "close");
-    const resolved = ResolvedRunSchema.parse({
-      rootRunId: runId,
-      runs: [{ runId, role: "root", events: [event] }],
-    });
+    const originalVault = new InMemoryVault();
+    const rawCanary = "replay-storage-canary@example.test";
+    await originalStore.append(
+      runId,
+      [
+        {
+          runId,
+          ts: 100,
+          v: 1,
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          segmentId: event.segmentId,
+          type: "run_created",
+          configHash: "c".repeat(64),
+          policyVersion: "test",
+        },
+      ],
+      0,
+    );
+    await originalVault.put(runId, Code.parse("email"), rawCanary);
+    const resolved = await resolveRun({ store: originalStore, runId });
+    const originalStoreSpies = [
+      vi.spyOn(originalStore, "append"),
+      vi.spyOn(originalStore, "appendWithSnapshot"),
+      vi.spyOn(originalStore, "appendWithUsage"),
+      vi.spyOn(originalStore, "readUsageLedger"),
+      vi.spyOn(originalStore, "claimRunExecution"),
+      vi.spyOn(originalStore, "renewRunExecution"),
+      vi.spyOn(originalStore, "releaseRunExecution"),
+      vi.spyOn(originalStore, "latestSnapshot"),
+      vi.spyOn(originalStore, "retainedSnapshots"),
+      vi.spyOn(originalStore, "read"),
+      vi.spyOn(originalStore, "watch"),
+      vi.spyOn(originalStore, "watchRuns"),
+      vi.spyOn(originalStore, "head"),
+      vi.spyOn(originalStore, "deleteRun"),
+      vi.spyOn(originalStore, "listRuns"),
+      vi.spyOn(originalStore, "findRunsByTrace"),
+      vi.spyOn(originalStore, "fetchOutbox"),
+      vi.spyOn(originalStore, "ackOutbox"),
+      vi.spyOn(originalStore, "claimApprovalNotification"),
+      vi.spyOn(originalStore, "markApprovalNotificationSent"),
+      vi.spyOn(originalStore, "releaseApprovalNotification"),
+      vi.spyOn(originalStore, "consumeConfirmationState"),
+      vi.spyOn(originalStore, "claimIdempotencyKey"),
+      vi.spyOn(originalStore, "takeoverIdempotencyKey"),
+      vi.spyOn(originalStore, "releaseIdempotencyKey"),
+      vi.spyOn(originalStore, "close"),
+    ];
+    const originalVaultSpies = [
+      vi.spyOn(originalVault, "put"),
+      vi.spyOn(originalVault, "resolve"),
+      vi.spyOn(originalVault, "listRawValues"),
+      vi.spyOn(originalVault, "listRawValueEntries"),
+      vi.spyOn(originalVault, "version"),
+      vi.spyOn(originalVault, "markTerminal"),
+      vi.spyOn(originalVault, "listTerminalRunsBefore"),
+      vi.spyOn(originalVault, "purge"),
+      vi.spyOn(originalVault, "stats"),
+    ];
+    const replayInnerAppend = vi.spyOn(InMemoryEventStore.prototype, "append");
     const replay = await buildReplayRuntime(resolved, {
       run: RunConfigSchema.parse({}),
       store: StoreConfigSchema.parse({
@@ -49,6 +108,36 @@ describe("buildReplayRuntime", () => {
 
     expect(replay.runtime.store).not.toBe(originalStore);
     expect(replay.runtime.store).toBeInstanceOf(PiiEventStore);
+    const created: NewEvent = {
+      runId,
+      ts: 100,
+      v: 1,
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      segmentId: event.segmentId,
+      type: "run_created",
+      configHash: "c".repeat(64),
+      policyVersion: "test",
+    };
+    const rawInput: NewEvent = {
+      runId,
+      ts: 101,
+      v: 1,
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      segmentId: event.segmentId,
+      type: "run_input",
+      input: { goal: rawCanary },
+      inputKind: "initial",
+    };
+    await replay.runtime.store.append(runId, [created, rawInput], 0);
+    const storedEvents = [];
+    for await (const stored of replay.runtime.store.read(runId)) {
+      storedEvents.push(stored);
+    }
+    expect(JSON.stringify(storedEvents)).not.toContain(rawCanary);
+    expect(JSON.stringify(storedEvents)).toContain("<EMAIL_1>");
+    expect(JSON.stringify(replayInnerAppend.mock.calls)).not.toContain(rawCanary);
     expect(replay.runtime.ids.next()).toBe(runId);
     expect(replay.runtime.ids.next()).toBe(event.segmentId);
     const fallbackId = replay.runtime.ids.next();
@@ -67,8 +156,9 @@ describe("buildReplayRuntime", () => {
     ).rejects.toMatchObject({ code: "replay_external_access" });
 
     await replay.runtime.close();
-    expect(originalStoreClose).not.toHaveBeenCalled();
-    await originalStore.close();
+    for (const spy of [...originalStoreSpies, ...originalVaultSpies]) {
+      expect(spy).not.toHaveBeenCalled();
+    }
   });
 
   it("handles a validated resolution with no root events deterministically", async () => {
