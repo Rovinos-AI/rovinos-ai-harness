@@ -18,9 +18,8 @@ Do not open a public issue for an unpatched vulnerability. Include a clear
 description, impact, and minimal reproduction details; avoid real personal
 data, credentials, or production secrets.
 
-Maintainers will acknowledge reports within `<INITIAL_RESPONSE_TIME>` and
-provide an assessment or remediation plan within `<FOLLOW_UP_TIME>`. These
-response targets require maintainer confirmation.
+Maintainers will acknowledge reports within 5 business days and provide an
+assessment or remediation plan within 30 days.
 
 ## Scope and severity
 
@@ -45,5 +44,5 @@ is safe to do so.
 
 The project provides no compliance certification and does not certify that a
 deployment meets any regulatory or legal requirement. See
-[guarantees and known limits](docs/guarantees.md) for project assumptions and
-known gaps.
+[guarantees, best-effort measures, and known gaps](README.md#guarantees-best-effort-measures-and-known-gaps)
+for project assumptions and known gaps.

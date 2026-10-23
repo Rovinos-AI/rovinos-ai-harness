@@ -8,9 +8,11 @@ const completeFiles = {
   "SECURITY.md": "# Security\n\n## Supported versions\n\n## Reporting\n",
 } as const;
 
+const noExistingPaths = new Set<string>();
+
 describe("community policy file checker", () => {
   it("reports each missing required file", () => {
-    expect(evaluateCommunityFiles({}, false).errors).toEqual([
+    expect(evaluateCommunityFiles({}, false, noExistingPaths).errors).toEqual([
       "Missing required community file: CONTRIBUTING.md",
       "Missing required community file: CODE_OF_CONDUCT.md",
       "Missing required community file: SECURITY.md",
@@ -24,6 +26,7 @@ describe("community policy file checker", () => {
         "SECURITY.md": "# Security\n\n## Reporting\n",
       },
       false,
+      noExistingPaths,
     );
 
     expect(result.errors).toEqual([
@@ -35,14 +38,15 @@ describe("community policy file checker", () => {
     const result = evaluateCommunityFiles(
       {
         ...completeFiles,
-        "SECURITY.md": `${completeFiles["SECURITY.md"]}\nContact: <MAINTAINER_EMAIL>\n`,
+        "SECURITY.md": `${completeFiles["SECURITY.md"]}\nContact: <REVIEW_TARGET_2>\n`,
       },
       false,
+      noExistingPaths,
     );
 
     expect(result).toEqual({
       errors: [],
-      warnings: ["Unresolved placeholder <MAINTAINER_EMAIL> in SECURITY.md"],
+      warnings: ["Unresolved placeholder <REVIEW_TARGET_2> in SECURITY.md"],
     });
   });
 
@@ -50,19 +54,46 @@ describe("community policy file checker", () => {
     const result = evaluateCommunityFiles(
       {
         ...completeFiles,
-        "SECURITY.md": `${completeFiles["SECURITY.md"]}\nContact: <MAINTAINER_EMAIL>\n`,
+        "SECURITY.md": `${completeFiles["SECURITY.md"]}\nContact: <REVIEW_TARGET_2>\n`,
       },
       true,
+      noExistingPaths,
     );
 
     expect(result).toEqual({
-      errors: ["Unresolved placeholder <MAINTAINER_EMAIL> in SECURITY.md"],
+      errors: ["Unresolved placeholder <REVIEW_TARGET_2> in SECURITY.md"],
       warnings: [],
     });
   });
 
   it("passes all required files with no placeholders", () => {
-    expect(evaluateCommunityFiles(completeFiles, false)).toEqual({
+    expect(evaluateCommunityFiles(completeFiles, false, noExistingPaths)).toEqual({
+      errors: [],
+      warnings: [],
+    });
+  });
+
+  it.each(["CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md"] as const)(
+    "rejects missing relative links in %s",
+    (file) => {
+      const files = {
+        ...completeFiles,
+        [file]: `${completeFiles[file]}\n[missing policy](docs/missing.md#reporting)\n`,
+      };
+
+      expect(evaluateCommunityFiles(files, false, noExistingPaths).errors).toEqual([
+        `Broken relative link in ${file}`,
+      ]);
+    },
+  );
+
+  it("accepts relative links when their target exists", () => {
+    const files = {
+      ...completeFiles,
+      "SECURITY.md": `${completeFiles["SECURITY.md"]}\n[README](README.md#overview)\n`,
+    };
+
+    expect(evaluateCommunityFiles(files, false, new Set(["README.md"]))).toEqual({
       errors: [],
       warnings: [],
     });

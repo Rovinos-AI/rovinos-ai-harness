@@ -36,7 +36,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at `<MAINTAINER_EMAIL>`. All complaints will be reviewed and investigated promptly and fairly. All community leaders are obligated to respect the privacy and security of the reporter of any incident.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the maintainers on GitHub via [the maintainer profile](https://github.com/rovinoscr). For conduct issues that need privacy, report privately through a [GitHub Security Advisory](https://github.com/Rovinos-AI/rovinos-ai-harness/security/advisories/new). All complaints will be reviewed and investigated promptly and fairly. All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
 ## Enforcement Guidelines
 
