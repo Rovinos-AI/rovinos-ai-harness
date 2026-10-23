@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, Id, Principal, type RunStatus } from "@harness/schemas";
+import type { ModelProgress } from "@harness/models";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { controlPlanePrincipal, withControlPlaneAuthorization } from "../auth.js";
@@ -14,6 +15,7 @@ export interface StartRunToolOptions {
     input: StartRunInput & {
       readonly requestedBy: Principal;
       readonly allowedExistingRunIds?: readonly Id[];
+      readonly onProgress?: (progress: ModelProgress) => void;
     },
   ) => Promise<{ readonly runId: Id; readonly status: RunStatus }>;
   readonly checkRunQuota?: (requestedBy: Principal, role: Code | undefined) => Promise<void>;
@@ -63,6 +65,24 @@ export function registerStartRunTool(server: McpServer, options: StartRunToolOpt
 
           const principal = controlPlanePrincipal(context);
           const requestedBy = runRequester(context);
+          const progressToken = context.mcpReq._meta?.progressToken;
+          const progressByRequest = new Map<Id, number>();
+          const onProgress =
+            progressToken === undefined
+              ? undefined
+              : (progress: ModelProgress) => {
+                  progressByRequest.set(progress.requestId, progress.outputTokens);
+                  const totalOutputTokens = Array.from(progressByRequest.values()).reduce(
+                    (total, outputTokens) => total + outputTokens,
+                    0,
+                  );
+                  void context.mcpReq
+                    .notify({
+                      method: "notifications/progress",
+                      params: { progressToken, progress: totalOutputTokens },
+                    })
+                    .catch(() => undefined);
+                };
           try {
             await options.checkRunQuota?.(requestedBy, parsed.data.role);
             if (options.startRun === undefined) {
@@ -75,6 +95,7 @@ export function registerStartRunTool(server: McpServer, options: StartRunToolOpt
                 ...(principal?.runIds === undefined
                   ? {}
                   : { allowedExistingRunIds: principal.runIds }),
+                ...(onProgress === undefined ? {} : { onProgress }),
               }),
             );
           } catch (error) {

@@ -65,6 +65,7 @@ const AppReadySchema = z.object({ appId: z.string(), sessionId: z.string() }).st
 
 interface FakeResponse {
   readonly response: Response;
+  readonly close: () => void;
   readonly read: () => {
     readonly status: number;
     readonly headers: Record<string, string>;
@@ -76,11 +77,18 @@ function makeResponse(): FakeResponse {
   let status = 0;
   let headers: Record<string, string> = {};
   let body = "";
+  let closeListener: (() => void) | undefined;
   const destroy = vi.fn();
   return {
     response: {
       get headersSent() {
         return status !== 0;
+      },
+      onClose(listener) {
+        closeListener = listener;
+        return () => {
+          closeListener = undefined;
+        };
       },
       writeHead(code, responseHeaders) {
         status = code;
@@ -95,6 +103,7 @@ function makeResponse(): FakeResponse {
       },
       destroy,
     },
+    close: () => closeListener?.(),
     read: () => ({ status, headers, body }),
   };
 }
@@ -125,9 +134,11 @@ function makeServer(
     readonly uiSessionContext?: ReferenceHostDependencies["uiSessionContext"];
     readonly tokenizeAppContent?: ReferenceHostDependencies["tokenizeAppContent"];
     readonly onAppContent?: ReferenceHostDependencies["onAppContent"];
+    readonly subscribeResourceUpdates?: ReferenceHostDependencies["subscribeResourceUpdates"];
   } = {},
 ) {
   let listener: RequestListener | undefined;
+  let latestResponse: FakeResponse | undefined;
   let errorListener: ((error: Error) => void) | undefined;
   let hostArgument = "";
   let closed = false;
@@ -170,6 +181,9 @@ function makeServer(
       ? {}
       : { tokenizeAppContent: options.tokenizeAppContent }),
     ...(options.onAppContent === undefined ? {} : { onAppContent: options.onAppContent }),
+    ...(options.subscribeResourceUpdates === undefined
+      ? {}
+      : { subscribeResourceUpdates: options.subscribeResourceUpdates }),
     ...(options.onCode === undefined ? {} : { onCode: options.onCode }),
     ...(options.readStatic === undefined ? {} : { readStatic: options.readStatic }),
     ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
@@ -203,6 +217,9 @@ function makeServer(
     get closed() {
       return closed;
     },
+    get latestResponse() {
+      return latestResponse;
+    },
     request: async (
       method: string,
       url: string,
@@ -213,6 +230,7 @@ function makeServer(
         throw new Error("Server listener was not initialized.");
       }
       const response = makeResponse();
+      latestResponse = response;
       const request: Request = {
         method,
         url,
@@ -296,6 +314,65 @@ afterEach(() => {
 });
 
 describe("createReferenceHost", () => {
+  it("relays content-free resource updates to an authenticated app session", async () => {
+    let onUpdate: (() => void) | undefined;
+    const unsubscribe = vi.fn();
+    const host = await createReferenceHost(appConfig, {
+      readResource: () => Promise.resolve(resource),
+      subscribeResourceUpdates: (resourceUri, update) => {
+        expect(resourceUri).toBe("harness://runs");
+        onUpdate = update;
+        return unsubscribe;
+      },
+      onCode: () => undefined,
+      idGenerator: () => sessionId,
+    });
+    const controller = new AbortController();
+
+    try {
+      const events = await fetch(new URL(eventsPath, host.origin), {
+        headers: { authorization: ["Bearer", host.token].join(" "), origin: host.origin },
+      });
+      const eventLine = (await events.text()).split("\n").find((line) => line.startsWith("data: "));
+      if (eventLine === undefined) {
+        throw new Error("Host launch event is missing.");
+      }
+      const launchedSessionId = parseJson(
+        AppReadySchema,
+        eventLine.slice("data: ".length),
+      ).sessionId;
+      const response = await fetch(new URL("/api/resource-updates", host.origin), {
+        method: "POST",
+        headers: {
+          authorization: ["Bearer", host.token].join(" "),
+          origin: host.origin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ resourceUri: "harness://runs", sessionId: launchedSessionId }),
+        signal: controller.signal,
+      });
+      expect(response.status).toBe(200);
+      if (response.body === null) {
+        throw new Error("Resource update stream is missing.");
+      }
+      const reader = response.body.getReader();
+      const opened = await reader.read();
+      expect(new TextDecoder().decode(opened.value)).toBe(": subscribed\n\n");
+      const nextUpdate = reader.read();
+      onUpdate?.();
+      const update = await nextUpdate;
+      expect(new TextDecoder().decode(update.value)).toBe('data: {"uri":"harness://runs"}\n\n');
+
+      controller.abort();
+      await vi.waitFor(() => {
+        expect(unsubscribe).toHaveBeenCalledOnce();
+      });
+    } finally {
+      controller.abort();
+      await host.close();
+    }
+  });
+
   it("serves authenticated resources through the Node HTTP adapter", async () => {
     const host = await createReferenceHost(appConfig, {
       readStatic: (asset) =>

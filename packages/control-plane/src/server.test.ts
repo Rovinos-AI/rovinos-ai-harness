@@ -9,6 +9,7 @@ import {
   EVENT_FIELD_CLASS,
   EventSchema,
   Id,
+  ControlPlaneConfigSchema,
   eventSamples,
   type EventType,
   type NewEvent,
@@ -26,6 +27,8 @@ import {
   listRuns,
   listRunsInputSchema,
   listRunsOutputSchema,
+  RUN_RESOURCE_URI_TEMPLATE,
+  RUNS_RESOURCE_URI,
 } from "./index.js";
 import { createControlPlaneServer } from "./server.js";
 
@@ -110,9 +113,14 @@ interface MemoryConnection {
 
 const connections: MemoryConnection[] = [];
 
-async function connect(store: InMemoryEventStore, mcpApps = false): Promise<MemoryConnection> {
+async function connect(
+  store: InMemoryEventStore,
+  mcpApps = false,
+  options: Parameters<typeof createControlPlaneServer>[1] = {},
+): Promise<MemoryConnection> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createControlPlaneServer(store, {
+    ...options,
     approvalHtml: "<html>test</html>",
     runsConsoleHtml: "<html>runs test</html>",
   });
@@ -211,7 +219,7 @@ afterEach(async () => {
 });
 
 describe("control-plane inspection tools", () => {
-  it("registers both read-only tools with structured schemas and safe annotations", async () => {
+  it("registers the public tools with structured schemas and safe annotations", async () => {
     const store = new InMemoryEventStore();
     const { client } = await connect(store);
 
@@ -223,6 +231,7 @@ describe("control-plane inspection tools", () => {
       "get_run",
       "list_runs",
       "resume_run",
+      "review_approval",
       "start_run",
     ]);
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
@@ -435,6 +444,7 @@ describe("control-plane inspection tools", () => {
       name: "get_run",
       arguments: { runId },
     });
+
     const output = getRunOutputSchema.parse(result.structuredContent);
 
     expect(output).toMatchObject({
@@ -470,6 +480,97 @@ describe("control-plane inspection tools", () => {
       },
     ]);
     expect(JSON.stringify(result)).not.toContain(CONTENT_CANARY);
+  });
+
+  it("returns complete ordered event deltas after sinceSeq", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = await addRun(store, builders);
+    const events = Array.from({ length: 25 }, (_, index) =>
+      builders.checkpointWritten(runId, builders.nextRunId(), index + 2),
+    );
+    await store.append(runId, events, 2);
+
+    const delta = await getRun(store, { runId, sinceSeq: 1 });
+    const current = await getRun(store, { runId, sinceSeq: 26 });
+    const future = await getRun(store, { runId, sinceSeq: 100 });
+
+    expect(delta?.recentEvents).toHaveLength(25);
+    expect(delta?.recentEvents.map(({ seq }) => seq)).toEqual(
+      Array.from({ length: 25 }, (_, index) => index + 2),
+    );
+    expect(current?.recentEvents).toEqual([]);
+    expect(future?.recentEvents).toEqual([]);
+  });
+
+  it("serves content-free run resources and publishes ordered resource URI updates", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = await addRun(store, builders, { sensitive: true });
+    await addRun(store, builders, { status: "completed" });
+    const updates: string[] = [];
+    const { client } = await connect(store, false, {
+      onResourceUpdated: (uri) => updates.push(uri),
+    });
+
+    const runsResource = await client.readResource({ uri: RUNS_RESOURCE_URI });
+    const runUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", runId);
+    const runResource = await client.readResource({ uri: runUri });
+    await expect(
+      client.readResource({ uri: `${RUNS_RESOURCE_URI}/00000000000000000000000099` }),
+    ).rejects.toThrow();
+    await store.append(runId, [builders.modelRequest(runId, CONTENT_CANARY)], 6);
+    await vi.waitFor(() => {
+      expect(updates).toContain(runUri);
+    });
+
+    expect(JSON.stringify(runsResource)).not.toContain(CONTENT_CANARY);
+    expect(JSON.stringify(runResource)).not.toContain(CONTENT_CANARY);
+    const runUpdateIndex = updates.indexOf(runUri);
+    expect(runUpdateIndex).toBeGreaterThan(0);
+    expect(updates[runUpdateIndex - 1]).toBe(RUNS_RESOURCE_URI);
+    expect(JSON.stringify(updates)).not.toContain(CONTENT_CANARY);
+  });
+
+  it("relays count-only model progress when the request supplies a progress token", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    const requestId = builders.nextRunId();
+    const { client, serverTransport } = await connect(store, false, {
+      controlPlane: ControlPlaneConfigSchema.parse({ allowAgentStartedRuns: true }),
+      operations: {
+        startRun: ({ onProgress }) => {
+          onProgress?.({ requestId, outputTokens: 7 });
+          return Promise.resolve({ runId, status: "pending" });
+        },
+      },
+    });
+    const messages: unknown[] = [];
+    const send = serverTransport.send.bind(serverTransport);
+    vi.spyOn(serverTransport, "send").mockImplementation(async (message) => {
+      messages.push(message);
+      await send(message);
+    });
+
+    await client.callTool({
+      name: "start_run",
+      arguments: { goal: "synthetic progress test" },
+      _meta: { progressToken: "start-progress" },
+    });
+
+    const notification = messages.find(
+      (message) =>
+        typeof message === "object" &&
+        message !== null &&
+        "method" in message &&
+        message.method === "notifications/progress",
+    );
+    expect(notification).toMatchObject({
+      method: "notifications/progress",
+      params: { progressToken: "start-progress", progress: 7 },
+    });
+    expect(JSON.stringify(notification)).not.toContain("synthetic progress test");
   });
 
   it("returns an error containing only run_not_found for an unknown run", async () => {

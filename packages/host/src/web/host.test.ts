@@ -20,6 +20,7 @@ import type { AppBridgeHandlers } from "./bridge.js";
 const bridgeMock = vi.hoisted(() => ({
   connect: vi.fn<() => Promise<void>>(),
   initialized: vi.fn<() => Promise<void>>(),
+  close: vi.fn<() => Promise<void>>(),
   sendToolInput: vi.fn<(input: Readonly<Record<string, unknown>>) => Promise<void>>(),
   sendToolResult: vi.fn<(result: z.infer<typeof CallToolResultSchema>) => Promise<void>>(),
   setHostContext: vi.fn<(context: unknown) => void>(),
@@ -41,6 +42,7 @@ vi.mock("./bridge.js", () => ({
       return {
         connect: bridgeMock.connect,
         initialized: bridgeMock.initialized(),
+        close: bridgeMock.close,
         sendToolInput: bridgeMock.sendToolInput,
         sendToolResult: bridgeMock.sendToolResult,
         setHostContext: bridgeMock.setHostContext,
@@ -295,6 +297,7 @@ function hostReadyResponse(): Response {
 beforeEach(() => {
   bridgeMock.connect.mockReset().mockResolvedValue();
   bridgeMock.initialized.mockReset().mockResolvedValue();
+  bridgeMock.close.mockReset().mockResolvedValue();
   bridgeMock.sendToolInput.mockReset().mockResolvedValue();
   bridgeMock.sendToolResult.mockReset().mockResolvedValue();
   bridgeMock.setHostContext.mockReset();
@@ -623,6 +626,13 @@ describe("reference app page", () => {
       .mockResolvedValueOnce(new Response("event stream"))
       .mockResolvedValueOnce(new Response("{"));
     expect(await mountReferenceApp(root, launchHash, malformed)).toBe(false);
+
+    const invalidReadyRoot = createFakeRoot();
+    const invalidReady = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('data: {"appId":"approval"}\n\n'));
+    expect(await mountReferenceApp(invalidReadyRoot.root, launchHash, invalidReady)).toBe(false);
+    expect(invalidReadyRoot.status()).toBe("app_session_invalid");
   });
 
   it("routes calls through the authenticated host channel and handles failures", async () => {
@@ -652,6 +662,10 @@ describe("reference app page", () => {
 
     request.mockResolvedValueOnce(new Response("", { status: 403 }));
     expect(await bridgeMock.toolCall({ name: "approve" })).toEqual({ content: [], isError: true });
+    request.mockResolvedValueOnce(
+      new Response('{"error":"app_tool_not_allowed"}', { status: 403 }),
+    );
+    await expect(bridgeMock.toolCall({ name: "approve" })).rejects.toThrow();
     request.mockResolvedValueOnce(
       new Response('{"error":"rate_limited"}', {
         status: 429,

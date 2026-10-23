@@ -20,6 +20,6 @@ Run `yarn workspace @harness/approval-app build` to produce the view resources. 
 
 ## Runs console
 
-The `ui://harness/runs/v1` view lists run status, age, step counts, and pending approval counts. It refreshes through the app-visible `harness.runs.list` and `harness.runs.get` tools every five seconds, pauses while hidden, backs off after tool errors, and provides cursor-based loading for older runs. The `list_runs` model-facing tool remains available to clients without MCP Apps support and links the resource through `_meta.ui.resourceUri`.
+The `ui://harness/runs/v1` view lists run status, age, step counts, and pending approval counts. It refreshes on run-resource subscription updates when the host bridge supports them, and otherwise polls the app-visible `harness.runs.list` and `harness.runs.get` tools every five seconds. It pauses while hidden, backs off after tool errors, and provides cursor-based loading for older runs. The `list_runs` model-facing tool remains available to clients without MCP Apps support and links the resource through `_meta.ui.resourceUri`.
 
 The console requests and displays metadata only until a person selects an approval. That action loads the validated approval payload through the app-only, approval-authorized `harness.approvals.get` tool and transitions to the approval view within the current iframe. Run details use the metadata projection; event content is never requested by the console.

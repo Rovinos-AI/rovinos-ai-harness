@@ -244,6 +244,7 @@ describe("CLI main", () => {
       "policy",
       "servers",
       "store",
+      "replay",
       "healthcheck",
       "worker",
     ]);

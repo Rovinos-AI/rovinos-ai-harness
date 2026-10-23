@@ -9,6 +9,7 @@ import {
   type Principal,
 } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
+import type { ModelProgress } from "@harness/models";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation, loadContinuationChain } from "./continue.js";
@@ -100,6 +101,7 @@ export interface RuntimeRunOptions {
   readonly role?: Code;
   readonly requestedBy?: Principal;
   readonly onStarted?: () => void;
+  readonly onProgress?: (progress: ModelProgress) => void;
 }
 
 /** Runtime control and optional metadata used to start one run. */
@@ -148,6 +150,7 @@ export function startRun(
       quotaService,
       quotaIdentity,
       ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
+      ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
     });
   });
 }

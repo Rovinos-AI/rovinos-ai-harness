@@ -24,10 +24,17 @@ import {
   type ControlPlaneAudit,
   type ControlPlaneAuditHandler,
   type ControlPlaneClock,
+  type ControlPlanePrincipal,
   type ControlPlaneSecretResolver,
 } from "./auth.js";
 import { controlPlaneHttpPortSchema } from "./schemas.js";
 import type { ControlPlaneServerOptions } from "./server.js";
+import { startRunResourceUpdates } from "./resources/run-updates.js";
+import {
+  isRunSubscriptionAuthorized,
+  MAX_CONTROL_PLANE_REQUEST_BYTES,
+  notifyPrincipalResourceUpdates,
+} from "./resources/run-resource-access.js";
 
 const HTTP_PATH = "/mcp";
 const HTTP_TOOL = Code.parse("http_request");
@@ -59,7 +66,9 @@ interface RequestListenerInput {
   readonly failedAuthLimiter: ControlPlaneRateLimiter;
   readonly clock: ControlPlaneClock | undefined;
   readonly audit: ControlPlaneAuditHandler;
-  readonly requestHandler: ReturnType<typeof toNodeHandler>;
+  readonly requestHandler: (
+    principal: ControlPlanePrincipal,
+  ) => ReturnType<typeof toNodeHandler> | undefined;
 }
 
 class ControlPlaneListenError extends HarnessError {
@@ -87,8 +96,15 @@ export async function startControlPlaneHttpTransport({
     controlPlane,
     onAudit: options.onAudit ?? emitControlPlaneAudit,
   });
-  const handler = createMcpHandler(() => createMcpServer(store, sharedOptions));
-  const requestHandler = toNodeHandler(handler);
+  const { handlers, requestHandlers } = createAuthenticatedMcpHandlers(
+    tokens,
+    store,
+    sharedOptions,
+    createMcpServer,
+  );
+  const requestHandler = (
+    principal: ControlPlanePrincipal,
+  ): ReturnType<typeof toNodeHandler> | undefined => requestHandlers.get(principal.tokenId);
   const limiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
   const failedAuthLimiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
   const handleRequest = createRequestListener({
@@ -106,62 +122,181 @@ export async function startControlPlaneHttpTransport({
   if (address === null || typeof address === "string") {
     throw new ControlPlaneListenError();
   }
+  const resourceUpdates = startRunResourceUpdates(
+    store,
+    (uri) => {
+      notifyPrincipalResourceUpdates(tokens, handlers, uri);
+    },
+    {
+      ...(options.onRunResourceUpdateError === undefined
+        ? {}
+        : { onError: options.onRunResourceUpdateError }),
+    },
+  );
   const endpointHost = controlPlane.listen.host.includes(":")
     ? `[${controlPlane.listen.host.replaceAll(/^\[|\]$/g, "")}]`
     : controlPlane.listen.host;
   const scheme = controlPlane.tls === undefined ? "http" : "https";
   return {
     endpoint: `${scheme}://${endpointHost}:${String(address.port)}${HTTP_PATH}`,
-    close: () => closeServer(server),
+    async close() {
+      await resourceUpdates.close();
+      await Promise.all(Array.from(handlers.values(), (handler) => handler.close()));
+      await closeServer(server);
+    },
   };
+}
+
+function createAuthenticatedMcpHandlers(
+  tokens: Awaited<ReturnType<typeof resolveControlPlaneTokens>>,
+  store: EventStore,
+  options: ControlPlaneServerOptions,
+  createMcpServer: HttpServerDependencies["createMcpServer"],
+): {
+  readonly handlers: Map<Code, ReturnType<typeof createMcpHandler>>;
+  readonly requestHandlers: Map<Code, ReturnType<typeof toNodeHandler>>;
+} {
+  const handlers = new Map<Code, ReturnType<typeof createMcpHandler>>();
+  const requestHandlers = new Map<Code, ReturnType<typeof toNodeHandler>>();
+  for (const { principal } of tokens) {
+    const handler = createMcpHandler(
+      () =>
+        createMcpServer(store, {
+          ...options,
+          subscribeRunUpdates: false,
+        }),
+      { maxSubscriptions: 50 },
+    );
+    handlers.set(principal.tokenId, handler);
+    requestHandlers.set(principal.tokenId, toNodeHandler(handler));
+  }
+  return { handlers, requestHandlers };
 }
 
 function createRequestListener(
   input: RequestListenerInput,
 ): (request: IncomingMessage, response: ServerResponse) => void {
   return (request, response) => {
-    if ((request.url ?? "").split("?", 1)[0] !== HTTP_PATH) {
-      response.writeHead(404).end();
-      return;
+    const authenticated = authenticateHttpRequest(input, request, response);
+    if (authenticated !== undefined) {
+      handleAuthenticatedRequest(input, request, response, authenticated);
     }
-    if (
-      !validControlPlaneHostOrigin({
-        host: request.headers.host,
-        origin: request.headers.origin,
-        allowedHosts: input.controlPlane.allowedHosts,
-        tls: input.controlPlane.tls !== undefined,
-      })
-    ) {
-      rejectHostRequest(input.audit, response);
-      return;
-    }
-    const principal = authenticateBearerToken(request.headers.authorization, input.tokens);
-    if (principal === undefined) {
-      rejectUnauthenticatedRequest(input, request, response);
-      return;
-    }
-    if (!input.limiter.tryAcquire(principal.tokenId, input.clock?.now() ?? Date.now())) {
-      rejectRateLimitedRequest(input.audit, principal.tokenId, response);
-      return;
-    }
+  };
+}
 
-    const authenticatedRequest = {
-      method: request.method ?? "GET",
-      url: request.url ?? "/",
-      headers: request.headers,
-      auth: toMcpAuthInfo(principal),
-      [Symbol.asyncIterator]: () => request[Symbol.asyncIterator](),
-    };
-    void input.requestHandler(authenticatedRequest, response).catch(() => {
+interface AuthenticatedHttpRequest {
+  readonly principal: ControlPlanePrincipal;
+  readonly requestHandler: ReturnType<typeof toNodeHandler>;
+}
+
+function authenticateHttpRequest(
+  input: RequestListenerInput,
+  request: IncomingMessage,
+  response: ServerResponse,
+): AuthenticatedHttpRequest | undefined {
+  if ((request.url ?? "").split("?", 1)[0] !== HTTP_PATH) {
+    response.writeHead(404).end();
+    return undefined;
+  }
+  if (
+    !validControlPlaneHostOrigin({
+      host: request.headers.host,
+      origin: request.headers.origin,
+      allowedHosts: input.controlPlane.allowedHosts,
+      tls: input.controlPlane.tls !== undefined,
+    })
+  ) {
+    rejectHostRequest(input.audit, response);
+    return undefined;
+  }
+  const principal = authenticateBearerToken(request.headers.authorization, input.tokens);
+  if (principal === undefined) {
+    rejectUnauthenticatedRequest(input, request, response);
+    return undefined;
+  }
+  if (!input.limiter.tryAcquire(principal.tokenId, input.clock?.now() ?? Date.now())) {
+    rejectRateLimitedRequest(input.audit, principal.tokenId, response);
+    return undefined;
+  }
+  const requestHandler = input.requestHandler(principal);
+  if (requestHandler === undefined) {
+    rejectUnauthenticatedRequest(input, request, response);
+    return undefined;
+  }
+  return { principal, requestHandler };
+}
+
+function handleAuthenticatedRequest(
+  input: RequestListenerInput,
+  request: IncomingMessage,
+  response: ServerResponse,
+  authenticated: AuthenticatedHttpRequest,
+): void {
+  const bodyPromise =
+    request.method === "POST" ? readMcpRequestBody(request) : Promise.resolve(undefined);
+  void bodyPromise
+    .then((body) => {
+      if (body === null) {
+        response.writeHead(413, { "cache-control": "no-store" }).end();
+        return;
+      }
+      if (body !== undefined && !isRunSubscriptionAuthorized(body, authenticated.principal)) {
+        emitAuditSafely(input.audit, {
+          tokenId: authenticated.principal.tokenId,
+          tool: Code.parse("harness.runs.resource"),
+          outcome: Code.parse("run_not_found"),
+        });
+        response.writeHead(403, { "cache-control": "no-store" }).end();
+        return;
+      }
+      const authenticatedRequest = {
+        method: request.method ?? "GET",
+        url: request.url ?? "/",
+        headers: request.headers,
+        auth: toMcpAuthInfo(authenticated.principal),
+        async *[Symbol.asyncIterator]() {
+          if (body !== undefined) {
+            if (body.length > 0) {
+              yield Buffer.from(body);
+            }
+            return;
+          }
+          for await (const chunk of request) {
+            yield chunk;
+          }
+        },
+      };
+      void authenticated.requestHandler(authenticatedRequest, response).catch(() => {
+        if (!response.headersSent) {
+          response
+            .writeHead(500, { "content-type": "text/plain; charset=utf-8" })
+            .end("control_plane_request_failed");
+        } else if (!response.writableEnded) {
+          response.end();
+        }
+      });
+    })
+    .catch(() => {
       if (!response.headersSent) {
-        response
-          .writeHead(500, { "content-type": "text/plain; charset=utf-8" })
-          .end("control_plane_request_failed");
+        response.writeHead(400, { "cache-control": "no-store" }).end();
       } else if (!response.writableEnded) {
         response.end();
       }
     });
-  };
+}
+
+async function readMcpRequestBody(request: IncomingMessage): Promise<string | null> {
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteLength += buffer.byteLength;
+    if (byteLength > MAX_CONTROL_PLANE_REQUEST_BYTES) {
+      return null;
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function rejectHostRequest(audit: ControlPlaneAuditHandler, response: ServerResponse): void {

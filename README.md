@@ -1,8 +1,33 @@
 # Rovinos AI Harness
 
-An open source, TypeScript, container-native **agent harness**. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary. Telemetry is metadata-only by construction.
+**The agent harness you can run in regulated environments: no PII in telemetry, and every run is replayable from its OTel trace.**
 
-> **Status: specification stage.** This repository holds the complete build specification (25 epics, 223 tasks) and the agent instructions used to implement it. No runtime code exists yet. This README describes the harness the specs define. Implementation starts at task 1.1 in [`docs/engineering/tasks/epic-01-foundation.md`](docs/engineering/tasks/epic-01-foundation.md). License: [Apache-2.0](LICENSE).
+Rovinos AI Harness is an open source, TypeScript, container-native agent harness. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary, and telemetry carries metadata only. License: [Apache-2.0](LICENSE).
+
+> **Status: pre-release, working toward v0.1.0.** The runtime, event log, PII vault, policy and approvals, sandbox, MCP client, MCP Apps host, and metadata-only telemetry run today and are tested in CI. Replay from a trace id is in progress for v0.1.0 ([milestone](https://github.com/Rovinos-AI/rovinos-ai-harness/milestone/1)). Packages are not published to npm yet, and APIs may change before v0.1.0.
+
+## Try it in five minutes
+
+You need Docker with Compose v2 and a POSIX shell. A scripted model stands in for a provider, so no API key is needed, and the sample uses synthetic data only. From the repository root:
+
+```bash
+compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
+harness() { compose run --rm --no-deps harness "$@"; }
+
+cp examples/quickstart/.env.example examples/quickstart/.env
+compose build harness && compose build sandbox-runner
+key="$(harness keys generate | sed -n '1p')"
+sed -i.bak "s|^HARNESS_KEY=.*|HARNESS_KEY=$key|" examples/quickstart/.env && rm examples/quickstart/.env.bak
+compose up -d --wait
+
+# The policy asks for approval before the file write, so the run suspends (exit code 5).
+harness run --input examples/quickstart/task.json --fake-model examples/quickstart/fake-model.script.json
+harness --json approvals list
+harness approvals approve <approvalId> --yes
+harness resume <runId> --fake-model examples/quickstart/resume-model.script.json
+```
+
+The [quickstart guide](docs/quickstart.md) explains each step, how to inspect the run, and how to switch to a real provider. CI runs that guide end to end on every change.
 
 ## Contents
 
@@ -37,18 +62,20 @@ An open source, TypeScript, container-native **agent harness**. It runs LLM agen
 
 ## What makes it different
 
-| Property | How the specs achieve it |
+Parts marked *(in progress)* are specified, with tasks open, but are not on `main` yet.
+
+| Property | How the harness achieves it |
 | --- | --- |
 | **Event-sourced resumability** | Every model call, tool intent, tool result, approval, and checkpoint is an immutable event. State is a pure fold over the log. Any process can resume any run. A crash-injection suite kills the run at every append boundary and proves that non-idempotent tools execute exactly once. |
 | **The model never decides authority** | A deterministic policy engine evaluates every tool call on tokenized arguments: `allow`, `ask`, or `deny`, where the most restrictive decision wins. `ask` suspends the run durably until a human decides. |
 | **PII tokenization at every boundary** | Detected values become run-scoped tokens (`EMAIL_1` style placeholders) before they reach a model, a tool, the store, or a UI. Raw values exist only in an encrypted, separate vault and in memory at allowlisted tool arguments. |
 | **Metadata-only telemetry** | Spans and logs come only from a closed registry of typed attributes (ids, codes, enums, numbers, booleans). Three independent layers enforce it: an in-process allowlist, an exact-match leak sentinel, and an allowlisting OpenTelemetry Collector. |
-| **MCP-native human-in-the-loop** | Built on MCP 2026-07-28 and the TypeScript SDK v2. Every human-facing UI (approvals, inputs, run console, run inspector, reports) is an MCP App that runs in any MCP Apps host. The control plane is itself an MCP server, so any MCP client can act as a console. Elicitation and CLI fallbacks cover clients without UI support. |
+| **MCP-native human-in-the-loop** | Built on MCP 2026-07-28 and the TypeScript SDK v2. Every human-facing UI is an MCP App: approvals and the run console today; inputs, the run inspector, and reports *(in progress)* that runs in any MCP Apps host. The control plane is itself an MCP server, so any MCP client can act as a console. Elicitation and CLI fallbacks cover clients without UI support. |
 | **Default-deny execution** | Agent commands run in a separate, non-root, read-only, capability-dropped sandbox container with no network. Egress goes only through an allowlisting proxy. The harness never touches `docker.sock`. |
-| **Human input through MCP elicitation** | MCP servers ask for input with Multi Round-Trip Requests (form or URL mode), and the agent can ask its own questions. Both suspend the run durably until a human answers, then the call continues. Requests are validated, bounded, and recorded. Only humans answer: no model-visible path exists. |
-| **Runs as a service** | A semver-stable SDK, a durable run queue with interchangeable workers, live content-free run updates, quotas across runs, and a validated multi-replica topology on Postgres. Schema versioning and upcasters keep old logs loadable across upgrades. |
+| **Human input through MCP elicitation** | MCP servers ask for input with Multi Round-Trip Requests (form or URL mode), and the agent can ask its own questions. Both suspend the run durably until a human answers, then the call continues *(in progress)*. Requests are validated, bounded, and recorded. Only humans answer: no model-visible path exists. |
+| **Runs as a service** | A semver-stable SDK, a durable run queue with interchangeable workers, live content-free run updates, quotas across runs, and a validated multi-replica topology on Postgres *(in progress)*. Schema versioning and upcasters keep old logs loadable across upgrades. |
 | **Strict by default** | Every data contract is one Zod schema with inferred types, and untrusted JSON and YAML enter only through typed parsers. Type-aware ESLint, Prettier, and linters for Markdown, YAML, shell, Dockerfiles, and spelling run with zero errors and zero warnings as part of every task's definition of done. |
-| **Reproducible and measurable** | Recorded runs replay offline with content-free behavioral diffs that gate CI. An eval runner provides graders, trajectory and privacy assertions, simulated humans, pass@k, and A/B statistics. |
+| **Reproducible and measurable** | Recorded runs replay offline from their trace id, with content-free behavioral diffs that gate CI *(in progress for v0.1.0)*. An eval runner provides graders, trajectory and privacy assertions, simulated humans, pass@k, and A/B statistics *(in progress)*. |
 
 ---
 
@@ -812,7 +839,7 @@ Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log
 
 ## CI/CD
 
-Azure Pipelines runs the stages below. Results are published as JUnit and coverage as Cobertura. Secrets come only from variable groups or Key Vault.
+GitHub Actions (`.github/workflows/ci.yml`) runs the stages below on GitHub-hosted runners for every pull request that is ready for review. JUnit results and Cobertura coverage are uploaded as run artifacts. The workflow has a read-only token and no secrets. The Azure pipeline (`azure-pipelines.yml`) runs the same stages in parallel until it is retired.
 
 ```mermaid
 flowchart LR
