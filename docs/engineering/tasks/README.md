@@ -30,4 +30,4 @@ Specs live next to the code they describe. Read `../CONVENTIONS.md` first.
 | epic-24-run-service-and-scaling | [packages/sdk/epic-24-run-service-and-scaling.md](../../../packages/sdk/epic-24-run-service-and-scaling.md) |
 | epic-25-elicitation-and-human-input | [packages/mcp/epic-25-elicitation-and-human-input.md](../../../packages/mcp/epic-25-elicitation-and-human-input.md) |
 
-When a PR completes a task, add its id to `docs/progress.json`.
+When a PR completes a task, add an empty marker file at `docs/progress/<task-id>`.

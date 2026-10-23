@@ -6,7 +6,7 @@ Instruction precedence: explicit user instructions, then the nearest `AGENTS.md`
 
 ## Current state
 
-The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks add the remaining packages and tooling. `docs/progress.json` tracks completed tasks.
+The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks add the remaining packages and tooling. `docs/progress/` tracks completed tasks with one marker file per task id.
 
 ## How to work here
 
@@ -15,7 +15,7 @@ The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks ad
 3. One task per PR. Title: `[7.3] <task name>`. Commits signed off (`git commit -s`).
 4. Write the tests the task lists, in the CI job it names: `static`, `unit`, `integration`, `gates`.
 5. In the PR description list: task id, what changed, how it was tested, any "(verify)" decisions, follow-ups.
-6. Add the task id to `docs/progress.json` (the threat-case checker reads it).
+6. Add an empty marker file at `docs/progress/<task-id>` (the threat-case checker reads it).
 
 ## Repo map
 
@@ -47,7 +47,7 @@ The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks ad
 
 ## Done means
 
-CONVENTIONS section 8: one task per PR, signed-off commits, `yarn lint` and `yarn typecheck` clean (zero errors and zero warnings), the tests the spec lists in the stage it names, SPDX headers, docs updated, task id in `docs/progress.json`, and `yarn check:agents` passing.
+CONVENTIONS section 8: one task per PR, signed-off commits, `yarn lint` and `yarn typecheck` clean (zero errors and zero warnings), the tests the spec lists in the stage it names, SPDX headers, docs updated, a marker at `docs/progress/<task-id>`, and `yarn check:agents` passing.
 
 ## Stop and ask when
 

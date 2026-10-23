@@ -147,6 +147,7 @@ Rules: unit tests do no network or disk outside a temp dir and use fake clock/id
 - [ ] Acceptance criteria all met; tests listed in the task exist and pass in CI.
 - [ ] `yarn lint` passes with **zero errors and zero warnings**; no lint rule relaxed; any new suppression uses the `-- <reason>` format and is listed in the PR description.
 - [ ] `yarn typecheck` passes; SPDX headers present; commits signed off.
+- [ ] Record the completed task with an empty marker file at `docs/progress/<task-id>`; separate files keep parallel task PRs conflict-free.
 - [ ] New data contracts follow §3.10 (one Zod schema, inferred types, typed parsing).
 - [ ] Public API documented (TSDoc); `docs/` updated if user-visible.
 - [ ] No `console.*`, no `any`, no new dependency without a license from the allowlist (task 1.7).

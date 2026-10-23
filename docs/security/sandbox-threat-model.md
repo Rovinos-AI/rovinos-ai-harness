@@ -56,9 +56,9 @@ access controls.
 
 `activeFromTask` in [`/test/sandbox/cases.json`](../../test/sandbox/cases.json)
 controls when the coverage gate begins enforcing each case. It is set to the
-task that owns the mitigation and test; the checker skips that case until the
-task appears in `docs/progress.json`. A task must add `// threat: T-xx` to its
-test source before marking that task complete.
+task that owns the mitigation and test; the checker skips that case until a
+marker for the task exists in `docs/progress/`. A task must add `// threat: T-xx`
+to its test source before marking that task complete.
 
 | ID | Threat | Mitigation task | Required test |
 | --- | --- | --- | --- |

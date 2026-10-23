@@ -22,7 +22,7 @@
 5. Root scripts: `build`, `lint` (placeholder echoing nothing until 1.2), `typecheck` (`tsc -b --noEmit`), `test:unit`, `test:integration`, `test:canary`, `test:replay` (each `vitest run --project <name> --passWithNoTests` except unit).
 6. Create `packages/schemas/src/testing.ts` exporting `FakeClock` (`now()`, `advance(ms)`) and `SequentialIdGenerator` (deterministic fake ULID-shaped ids) with tests; later tasks extend it.
 7. Root scripts for the agent index: `gen:agents` (`node scripts/gen-agents-index.mjs`) and `check:agents` (`node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs`). Keep the generator as dependency-free `.mjs`; porting it to TypeScript is out of scope. The Vitest `unit` project includes `*.test.ts` only (CONVENTIONS §6), so it must not collect `*.test.mjs`. CI wiring happens in 1.4.
-8. Update root `AGENTS.md`: replace the "Current state" paragraph's no-workspace note (keep the `docs/progress.json` sentence), and switch the agent-index commands under Commands and "Done means" to `yarn gen:agents` / `yarn check:agents`. Then run `yarn gen:agents` and commit any regenerated output.
+8. Update root `AGENTS.md`: replace the "Current state" paragraph's no-workspace note (keep the `docs/progress/` sentence), and switch the agent-index commands under Commands and "Done means" to `yarn gen:agents` / `yarn check:agents`. Then run `yarn gen:agents` and commit any regenerated output.
 **Tests to write:** `packages/schemas/src/index.test.ts` (constant exported); `packages/schemas/src/testing.test.ts` (fake clock advances; ids unique and 26 chars).
 **Acceptance Criteria:**
 
