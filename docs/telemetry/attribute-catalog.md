@@ -52,6 +52,21 @@ Owner task: `4.1`.
 
 Owner task: `4.1`.
 
+### `harness.input_wait`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Optional | `@harness/core` |
+| `harness.event.seq` | integer | Optional | `@harness/core` |
+| `harness.input.action` | enum: `accept`, `decline`, `cancel` | Required | `@harness/core` |
+| `harness.input.mode` | enum: `form`, `url` | Required | `@harness/core` |
+| `harness.input.round` | integer | Required | `@harness/core` |
+| `harness.input.source` | enum: `mcp_mrtr`, `mcp_legacy`, `agent` | Required | `@harness/core` |
+| `harness.run.id` | Id | Required | `@harness/core` |
+| `harness.wait_ms` | integer | Required | `@harness/core` |
+
+Owner task: `25.3`.
+
 ### `harness.model_call`
 
 | Attribute | Type | Presence | Owning package |
