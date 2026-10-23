@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJson } from "@harness/schemas";
@@ -67,12 +67,8 @@ export const ThreatCasesSchema = z.array(ThreatCaseSchema).superRefine((cases, c
   }
 });
 
-/** The completed task ids used to activate threat coverage checks. */
-export const ProgressSchema = z
-  .object({
-    completed: z.array(taskIdSchema),
-  })
-  .strict();
+/** Task ids recorded as complete by marker filenames in docs/progress/. */
+export const ProgressSchema = z.array(taskIdSchema);
 
 /** Validated sandbox threat case. */
 export type ThreatCase = z.infer<typeof ThreatCaseSchema>;
@@ -138,13 +134,15 @@ async function readTestFile(root: string, path: string): Promise<string | undefi
 
 /** Runs the threat coverage check against a repository root. */
 export async function checkThreatCases(root: string): Promise<string[]> {
-  const [catalogText, progressText] = await Promise.all([
+  const [catalogText, progressEntries] = await Promise.all([
     readFile(join(root, "test/sandbox/cases.json"), "utf8"),
-    readFile(join(root, "docs/progress.json"), "utf8"),
+    readdir(join(root, "docs/progress"), { withFileTypes: true }),
   ]);
   const cases = parseJson(ThreatCasesSchema, catalogText);
-  const progress = parseJson(ProgressSchema, progressText);
-  const completedTasks = new Set(progress.completed);
+  if (progressEntries.some((entry) => !entry.isFile())) {
+    throw new Error("Task progress entries must be files.");
+  }
+  const completedTasks = new Set(ProgressSchema.parse(progressEntries.map((entry) => entry.name)));
   const activeTestFiles = new Set(
     cases
       .filter((threatCase) => completedTasks.has(threatCase.activeFromTask))

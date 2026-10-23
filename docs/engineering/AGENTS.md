@@ -18,4 +18,4 @@ Engineering planning docs: conventions, task specs, and the task index.
 
 - `CONVENTIONS.md` is the shared reference for every task spec.
 - Task specs live next to the code they describe; `tasks/README.md` is the index. Do not duplicate spec files here.
-- When a PR completes a task, add its id to `docs/progress.json` (the threat-case checker reads it).
+- When a PR completes a task, add an empty marker file at `docs/progress/<task-id>` (the threat-case checker reads it).
