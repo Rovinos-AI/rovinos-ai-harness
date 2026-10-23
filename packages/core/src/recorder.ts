@@ -71,6 +71,17 @@ export class SpanContextMissingError extends HarnessError {
   }
 }
 
+/** Preserves event-store failures across tool boundaries without recording a tool result. */
+export class RunEventRecordingError extends HarnessError {
+  readonly code = "run_event_record_failed";
+
+  /** Creates an error carrying the original recorder failure. */
+  constructor(readonly failure: unknown) {
+    super("Run event recording failed.");
+    this.name = "RunEventRecordingError";
+  }
+}
+
 /** Optional parent context and links for a registered span. */
 export interface StepSpanOptions {
   readonly links?: readonly Link[];

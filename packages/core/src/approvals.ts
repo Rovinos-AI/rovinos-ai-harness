@@ -342,7 +342,7 @@ function pendingApproval(
  * @returns Events appended while applying the decisions.
  */
 export async function applyResolvedApprovals(
-  options: Omit<ResumeToolStepOptions, "ids">,
+  options: Omit<ResumeToolStepOptions, "ids"> & Partial<Pick<ResumeToolStepOptions, "ids">>,
   state: RunState,
 ): Promise<readonly Event[]> {
   const events: Event[] = [];

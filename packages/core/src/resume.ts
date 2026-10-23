@@ -22,6 +22,7 @@ import {
   restoreWorkspaceSnapshot,
 } from "./resume-history.js";
 import { claimResumeLock } from "./resume-lock.js";
+import { RESUME_LEASE_MS, startLeaseRenewal } from "./resume-lease.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */
 export class RunAlreadyTerminalError extends HarnessError {
@@ -67,8 +68,16 @@ export class RunAwaitingApprovalError extends HarnessError {
   }
 }
 
-const RESUME_LEASE_MS = 30_000;
-const RESUME_LEASE_RENEW_MS = 10_000;
+/** Error raised when a suspended run still has unresolved human inputs. */
+export class RunAwaitingInputError extends HarnessError {
+  readonly code = "run_awaiting_input";
+
+  /** Creates the awaiting-input resume error. */
+  constructor() {
+    super("The run cannot progress until its pending input is resolved.");
+    this.name = "RunAwaitingInputError";
+  }
+}
 
 /** Inputs for resuming an existing run. */
 export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorder"> {
@@ -155,6 +164,9 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHisto
     !hasResolvedApprovalToApply(state)
   ) {
     throw new RunAwaitingApprovalError();
+  }
+  if (state.pendingInputs.size > 0) {
+    throw new RunAwaitingInputError();
   }
   return { events, snapshot, state, head };
 }
@@ -262,6 +274,7 @@ async function applyResumeActions(
         ids: options.ids,
         signal: options.signal,
         ...(options.depth === undefined ? {} : { depth: options.depth }),
+        history: events,
         beforeToolExecution,
         onEvents: (recorded) => events.push(...recorded),
       },
@@ -278,8 +291,11 @@ async function applyResumeActions(
         ...(options.policy === undefined ? {} : { policy: options.policy }),
         clock: options.clock,
         runId: options.runId,
+        ids: options.ids,
+        checkpointer,
         signal: options.signal,
         ...(options.depth === undefined ? {} : { depth: options.depth }),
+        history: events,
         beforeToolExecution,
         onEvents: (recorded) => events.push(...recorded),
       },
@@ -361,33 +377,6 @@ async function withResumeLease(
     }
     release();
   }
-}
-
-function startLeaseRenewal(
-  options: ResumeRunOptions,
-  leaseOwner: Id,
-  leaseController: AbortController,
-): ReturnType<typeof setInterval> {
-  let renewalPending = false;
-  return setInterval(() => {
-    if (renewalPending) {
-      return;
-    }
-    renewalPending = true;
-    void options.store
-      .renewRunExecution(options.runId, leaseOwner, options.clock.now(), RESUME_LEASE_MS)
-      .then((renewed) => {
-        if (!renewed) {
-          leaseController.abort("resume_lease_lost");
-        }
-      })
-      .catch(() => {
-        leaseController.abort("resume_lease_lost");
-      })
-      .finally(() => {
-        renewalPending = false;
-      });
-  }, RESUME_LEASE_RENEW_MS);
 }
 
 async function resumeFromHistory(

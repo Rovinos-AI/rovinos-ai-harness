@@ -7,7 +7,9 @@ import { expect, it } from "vitest";
 import { composeIntegrationSuites } from "../../vitest.config.js";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
-const startsCompose = /"compose"|runNetworkIsolationCompose|composeArgs/u;
+// A suite starts Compose stacks directly, or through the documentation runner (the quickstart).
+const startsCompose =
+  /"compose"|runNetworkIsolationCompose|composeArgs|runQuickstartDocTests|run-doc-tests/u;
 
 it("lists every integration suite that starts a Compose stack", () => {
   const suites = execFileSync("git", ["ls-files", "*.int.test.ts"], { cwd: root, encoding: "utf8" })

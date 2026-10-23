@@ -1,0 +1,170 @@
+# SPDX-License-Identifier: Apache-2.0
+services:
+  quickstart-credentials:
+    image: ${HARNESS_IMAGE:-harness:quickstart}
+    entrypoint: ["node"]
+    command:
+      - -e
+      - |
+        const crypto = require("node:crypto");
+        const fs = require("node:fs");
+        const directory = "/run/harness-secrets";
+        fs.mkdirSync(directory, { recursive: true, mode: 0o711 });
+        fs.chmodSync(directory, 0o700);
+        function tokenFor(name) {
+          const path = directory + "/" + name;
+          if (fs.existsSync(path)) {
+            const stats = fs.lstatSync(path);
+            if (!stats.isFile() || stats.uid !== 0 || (stats.mode & 0o777) !== 0o400) {
+              throw new Error("quickstart_credentials_invalid");
+            }
+            return fs.readFileSync(path, "utf8");
+          }
+          const token = crypto.randomBytes(32).toString("hex");
+          fs.writeFileSync(path, token, { mode: 0o600, flag: "wx" });
+          fs.chmodSync(path, 0o400);
+          return token;
+        }
+        function writeCredential(name, uid, token) {
+          const path = directory + "/" + name;
+          if (fs.existsSync(path)) {
+            const stats = fs.lstatSync(path);
+            if (
+              !stats.isFile() ||
+              stats.uid !== uid ||
+              (stats.mode & 0o777) !== 0o400
+            ) {
+              throw new Error("quickstart_credentials_invalid");
+            }
+          } else {
+            fs.writeFileSync(path, token, { mode: 0o600, flag: "wx" });
+            fs.chmodSync(path, 0o400);
+            fs.chownSync(path, uid, uid);
+          }
+        }
+        writeCredential("control-plane-token", 10001, tokenFor("control-plane-source-token"));
+        const sandboxToken = tokenFor("sandbox-runner-source-token");
+        writeCredential("sandbox-runner-client-token", 10001, sandboxToken);
+        writeCredential("sandbox-runner-token", 10002, sandboxToken);
+        fs.chmodSync(directory, 0o711);
+    user: "0:0"
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 16
+    mem_limit: 128m
+    volumes:
+      - quickstart-secrets:/run/harness-secrets
+    networks:
+      - harness-internal
+  harness:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: ${HARNESS_IMAGE:-harness:quickstart}
+    command: ["serve", "--http", "--port", "3000"]
+    environment:
+      HARNESS_CONFIG: /run/harness/harness.config.yaml
+      HARNESS_CONTROL_TOKEN_FILE: /run/harness-secrets/control-plane-token
+      HARNESS_DATA_DIR: /var/lib/harness/event-store
+      HARNESS_KEY: ${HARNESS_KEY:-}
+      HARNESS_VAULT_DATA_DIR: /var/lib/harness/vault
+      NODE_ENV: production
+    volumes:
+      - quickstart-event-store:/var/lib/harness/event-store
+      - quickstart-vault:/var/lib/harness/vault
+      - .:/app/examples/quickstart:ro
+      - ./harness.config.yaml:/run/harness/harness.config.yaml:ro
+      - ./approval-policy.yaml:/run/harness/approval-policy.yaml:ro
+      - quickstart-secrets:/run/harness-secrets:ro
+    depends_on:
+      quickstart-credentials:
+        condition: service_completed_successfully
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    healthcheck:
+      test: ["CMD", "node", "dist/bin.js", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    networks:
+      - harness-internal
+  sandbox-runner:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.sandbox
+    image: ${HARNESS_SANDBOX_IMAGE:-harness-sandbox:quickstart}
+    environment:
+      SANDBOX_ALLOWED_HOSTS: sandbox-runner:8080
+      SANDBOX_RUNNER_TOKEN_FILE: /run/harness-secrets/sandbox-runner-token
+      SANDBOX_WORKSPACE_ROOT: /workspaces
+    init: true
+    user: "0:0"
+    entrypoint:
+      - setpriv
+      - --reuid=10002
+      - --regid=10003
+      - --clear-groups
+      - --inh-caps=+setuid,+setgid,+setpcap
+      - --ambient-caps=+setuid,+setgid,+setpcap
+      - --
+      - node
+      - packages/sandbox/dist/runner/src/server.js
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev,mode=0770,uid=10002,gid=10003
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - SETPCAP
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    volumes:
+      - quickstart-workspaces:/workspaces
+      - quickstart-secrets:/run/harness-secrets:ro
+    depends_on:
+      quickstart-credentials:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get({ host: '127.0.0.1', port: 8080, path: '/healthz', headers: { host: 'sandbox-runner:8080' } }, (response) => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    networks:
+      - harness-internal
+networks:
+  harness-internal:
+    internal: true
+volumes:
+  quickstart-event-store: {}
+  quickstart-vault: {}
+  quickstart-secrets: {}
+  quickstart-workspaces: {}

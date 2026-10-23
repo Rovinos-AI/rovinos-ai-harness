@@ -9,7 +9,7 @@ import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const composeSchema = z.object({ services: z.record(z.string(), z.unknown()) });
-const serviceSchema = z.object({ healthcheck: z.unknown() });
+const serviceSchema = z.object({ healthcheck: z.unknown(), environment: z.unknown() });
 const healthcheckSchema = z.looseObject({ start_period: z.string(), test: z.array(z.string()) });
 const documentedPresidioStartPeriodMs = 300_000;
 
@@ -66,6 +66,7 @@ describe("compose security evaluator", () => {
       documentedPresidioStartPeriodMs,
     );
     expect(healthcheck.test.join(" ")).toContain("http://127.0.0.1:3000/health");
+    expect(presidioService.environment).toMatchObject({ GUNICORN_CMD_ARGS: "--no-control-socket" });
   });
 
   it.each([

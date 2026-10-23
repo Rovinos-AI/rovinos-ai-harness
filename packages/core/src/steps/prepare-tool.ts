@@ -9,7 +9,7 @@ import {
 } from "@harness/schemas";
 import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
 import type { ModelCompletion, ModelToolCall, RunContext, ToolPort } from "../ports.js";
-import type { RunRecorder } from "../recorder.js";
+import { RunEventRecordingError, type RunRecorder } from "../recorder.js";
 import type { VaultAudit } from "@harness/vault";
 
 /** Internal preparation outcome, retained until the tool loop consumes it. */
@@ -87,16 +87,20 @@ export function toolRunContext(
     ...context,
     recordPiiAction: piiActionRunContext(context, recorder, events).recordPiiAction,
     recordVaultAudit: async (audit: VaultAudit) => {
-      events.push(
-        await recorder.record({
-          type: "pii_action",
-          v: 1,
-          boundary: audit.boundary,
-          action: audit.action,
-          ...(audit.toolId === undefined ? {} : { toolId: audit.toolId }),
-          entities: audit.entities,
-        }),
-      );
+      try {
+        events.push(
+          await recorder.record({
+            type: "pii_action",
+            v: 1,
+            boundary: audit.boundary,
+            action: audit.action,
+            ...(audit.toolId === undefined ? {} : { toolId: audit.toolId }),
+            entities: audit.entities,
+          }),
+        );
+      } catch (error) {
+        throw new RunEventRecordingError(error);
+      }
     },
     recordSubagentSpawned: async ({
       childRunId,
