@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: Apache-2.0
+// Structure and security checks for the GitHub Actions CI workflow (task 1.21). The workflow runs
+// untrusted PR code, so its token, triggers, and action pins are guarded here, not by review alone.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { parseYaml } from "@harness/schemas";
+import { z } from "zod";
+
+const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+
+const stepSchema = z.looseObject({
+  name: z.string().optional(),
+  uses: z.string().optional(),
+  run: z.string().optional(),
+  if: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  with: z.record(z.string(), z.unknown()).optional(),
+});
+const jobSchema = z.looseObject({
+  needs: z.string().optional(),
+  if: z.string().optional(),
+  "runs-on": z.string(),
+  "timeout-minutes": z.number().int().positive(),
+  steps: z.array(stepSchema),
+});
+const workflowSchema = z.looseObject({
+  on: z.record(z.string(), z.unknown()),
+  permissions: z.record(z.string(), z.string()),
+  jobs: z.record(z.string(), jobSchema),
+});
+const actionSchema = z.looseObject({
+  runs: z.looseObject({ using: z.literal("composite"), steps: z.array(stepSchema) }),
+});
+
+type Step = z.infer<typeof stepSchema>;
+
+function readWorkflow(): z.infer<typeof workflowSchema> {
+  return parseYaml(workflowSchema, readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8"));
+}
+
+function readSetupAction(): z.infer<typeof actionSchema> {
+  return parseYaml(
+    actionSchema,
+    readFileSync(resolve(root, ".github/actions/node-setup/action.yml"), "utf8"),
+  );
+}
+
+function jobSteps(name: string): Step[] {
+  const job = readWorkflow().jobs[name];
+  if (job === undefined) {
+    throw new TypeError(`Workflow must contain the ${name} job.`);
+  }
+  return job.steps;
+}
+
+function stepRunning(steps: readonly Step[], command: string): Step | undefined {
+  return steps.find((step) => step.run?.includes(command) === true);
+}
+
+const pinnedAction = /^[\w.-]+\/[\w.-]+(?:\/[\w./-]+)?@[0-9a-f]{40}$/u;
+
+describe("CI workflow", () => {
+  it("runs on pull requests to main without privileged triggers", () => {
+    const workflow = readWorkflow();
+
+    expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "workflow_dispatch"]);
+    expect(workflow.on.pull_request).toEqual({
+      branches: ["main"],
+      types: ["opened", "synchronize", "reopened", "ready_for_review"],
+    });
+  });
+
+  it("grants the token read-only repository access", () => {
+    expect(readWorkflow().permissions).toEqual({ contents: "read" });
+  });
+
+  it("runs the stages in order and skips draft pull requests", () => {
+    const { jobs } = readWorkflow();
+
+    expect(Object.keys(jobs)).toEqual(["static", "unit", "integration", "gates"]);
+    expect(jobs.static?.if).toBe(
+      "github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false",
+    );
+    expect(jobs.unit?.needs).toBe("static");
+    expect(jobs.integration?.needs).toBe("unit");
+    expect(jobs.gates?.needs).toBe("integration");
+  });
+
+  it("pins every action to a full commit SHA", () => {
+    const steps = [
+      ...Object.values(readWorkflow().jobs).flatMap((job) => job.steps),
+      ...readSetupAction().runs.steps,
+    ];
+    const remote = steps
+      .map((step) => step.uses)
+      .filter((uses): uses is string => uses !== undefined && !uses.startsWith("./"));
+
+    expect(remote.length).toBeGreaterThan(0);
+    expect(remote.filter((uses) => !pinnedAction.test(uses))).toEqual([]);
+  });
+
+  it("never persists checkout credentials", () => {
+    for (const job of Object.values(readWorkflow().jobs)) {
+      const checkout = job.steps.find(
+        (step) => step.uses?.startsWith("actions/checkout@") === true,
+      );
+      expect(checkout?.with?.["persist-credentials"]).toBe(false);
+    }
+  });
+
+  it("runs the static checks, with DCO against the pull request's base branch", () => {
+    const steps = jobSteps("static");
+
+    const required = [
+      "yarn lint",
+      "yarn typecheck",
+      "yarn check:agents",
+      "yarn check:spdx",
+      "yarn check:licenses",
+      "node packages/cli/dist/bin.js policy test",
+      "node packages/cli/dist/bin.js policy lint",
+    ];
+    expect(required.filter((command) => stepRunning(steps, command) === undefined)).toEqual([]);
+    const dco = stepRunning(steps, "yarn check:dco");
+    expect(dco?.if).toBe("github.event_name == 'pull_request'");
+    expect(dco?.env).toEqual({ TARGET_BRANCH: "${{ github.base_ref }}" });
+    expect(steps[0]?.with?.["fetch-depth"]).toBe(0);
+  });
+
+  it("reports unit results with coverage even when tests fail", () => {
+    const unit = stepRunning(jobSteps("unit"), "yarn test:unit");
+
+    expect(unit?.run).toContain("--reporter=junit");
+    expect(unit?.run).toContain("--coverage.reportOnFailure");
+    expect(unit?.run).toContain("--coverage.reporter=cobertura");
+    const upload = jobSteps("unit").find((step) => step.name === "Upload unit reports");
+    expect(upload?.if).toBe("success() || failure()");
+  });
+
+  it("isolates the integration Compose project and always tears it down", () => {
+    const integration = readWorkflow().jobs.integration;
+    const steps = jobSteps("integration");
+    const teardown = stepRunning(steps, "down -v --remove-orphans");
+
+    expect(integration?.env).toEqual({ COMPOSE_PROJECT_NAME: "harness-ci-${{ github.run_id }}" });
+    expect(stepRunning(steps, "scripts/ci/compose-wait.sh")).toBeDefined();
+    expect(teardown?.if).toBe("always()");
+    expect(steps.at(-1)).toBe(teardown);
+  });
+
+  it("runs the canary release gate last", () => {
+    expect(stepRunning(jobSteps("gates"), "yarn test:canary")).toBeDefined();
+  });
+
+  it("verifies the pinned mise download before installing it", () => {
+    const install = readSetupAction().runs.steps.find((step) => step.name === "Install mise");
+
+    expect(install?.run).toMatch(/MISE_SHA256=[0-9a-f]{64}/u);
+    expect(install?.run).toContain("sha256sum --check --status");
+  });
+});
