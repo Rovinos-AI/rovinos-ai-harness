@@ -27,11 +27,13 @@ export {
   type InputResponse,
 } from "./human-input.js";
 export {
+  ApprovalAppGetRequestSchema,
   ApprovalAppInputSchema,
   ResolveRequest,
   ResolveResponse,
   RevealRequest,
   RevealResponse,
+  type ApprovalAppGetRequest,
   type ApprovalAppInput,
 } from "./approval-tools.js";
 export { ToolBinaryPayloadSchema, type ToolBinaryPayload } from "./tool-binary.js";
@@ -80,6 +82,14 @@ export {
 } from "./primitives.js";
 export { isRegexSafePattern } from "./regex-safety.js";
 export { AppSpanSchema, type AppSpan } from "./app-span.js";
+export {
+  RunConsoleDetailSchema,
+  RunConsoleListSchema,
+  RunConsoleRunSchema,
+  type RunConsoleDetail,
+  type RunConsoleList,
+  type RunConsoleRun,
+} from "./run-console.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./config/keys.js";
 export { isSecretKeyName } from "./secret-key-name.js";
