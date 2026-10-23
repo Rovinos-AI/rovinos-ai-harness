@@ -1,0 +1,17 @@
+[
+  {
+    "content": "I will write the requested synthetic note.",
+    "toolCalls": [
+      {
+        "callId": "01J00000000000000000000000",
+        "toolId": "fs.write",
+        "args": {
+          "path": "quickstart-note.txt",
+          "content": "This is a synthetic quickstart note.",
+          "mode": "create"
+        }
+      }
+    ],
+    "finishReason": "tool_calls"
+  }
+]

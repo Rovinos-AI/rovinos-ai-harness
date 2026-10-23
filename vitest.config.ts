@@ -17,6 +17,7 @@ export const composeIntegrationSuites = [
   "scripts/compose/prod-like.int.test.ts",
   "test/e2e-skeleton.int.test.ts",
   "test/network-isolation.int.test.ts",
+  "test/quickstart.int.test.ts",
 ] as const;
 
 const composeSuiteSet = new Set<string>(composeIntegrationSuites);
@@ -69,6 +70,11 @@ export default defineConfig({
         extends: true,
         test: {
           name: "unit",
+          // The CI agent is a shared Mac: during the unit stage its load reaches ~14 on 10 cores
+          // with the host swapping, and timing-insensitive tests overran Vitest's 5 s default
+          // (2026-10-22). These are budgets for real hangs, not latency assertions.
+          testTimeout: 15_000,
+          hookTimeout: 30_000,
           include: [
             "packages/**/*.test.ts",
             "tools/**/*.test.ts",
