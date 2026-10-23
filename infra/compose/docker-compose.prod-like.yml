@@ -136,7 +136,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
-      - /var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999,mode=3775
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,uid=999,gid=999,mode=3775
     cap_drop:
       - ALL
     security_opt:
