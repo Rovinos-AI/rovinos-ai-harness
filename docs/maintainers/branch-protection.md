@@ -18,15 +18,25 @@ single maintainer can merge an approved Copilot PR with
 approval.
 
 No status checks are required unless one or more `--check <context>` options are
-provided. DCO runs as `yarn check:dco` in the Azure pipeline's `static` stage;
-it is not a separate GitHub status check. Once Azure reports the pipeline check
-to GitHub, require it with:
+provided. CI runs on GitHub Actions (`.github/workflows/ci.yml`), whose jobs report
+the checks `static`, `unit`, `integration`, and `gates`. DCO runs as
+`yarn check:dco` in the `static` job; it is not a separate status check. Require
+the final job, which runs only after the others pass:
 
 ```sh
-scripts/github/apply-branch-protection.sh --apply --check "Azure Pipelines / Rovinos AI Harness CI"
+scripts/github/apply-branch-protection.sh --apply --check "gates"
 ```
 
-Verify the check name on a pull request before requiring it. The name combines
-the Azure Pipelines app with the pipeline name, as described in
-[Azure Pipelines setup](azure-setup.md). Repeat `--check` for each additional
-status check.
+Verify the check names on a pull request before requiring them. Repeat `--check`
+for each additional status check.
+
+## Pull requests from forks
+
+The workflow runs only on `pull_request` with a read-only token and no secrets,
+on GitHub-hosted runners. Fork runs still wait for a maintainer: under
+**Settings > Actions > General > Fork pull request workflows from outside
+collaborators**, select **Require approval for all outside collaborators**.
+Review the diff before approving the run.
+
+The Azure pipeline, while it still runs in parallel, requires a maintainer's
+`/azp run` comment for fork PRs and gives fork builds no secrets (#557).

@@ -343,6 +343,7 @@ describe("control-plane HTTP transport", () => {
         "get_run",
         "list_runs",
         "resume_run",
+        "review_approval",
         "start_run",
       ]);
       await expect(client.callTool({ name: "list_runs", arguments: {} })).resolves.toMatchObject({

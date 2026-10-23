@@ -481,7 +481,8 @@ beforeAll(async () => {
         version: () => Promise.resolve(canaryAvailable ? 1 : 0),
       }),
       undefined,
-      { maxPrepareMs: 1_000 },
+      // Test budgets (see test/canary/telemetry.ts, #555).
+      { maxPrepareMs: 1_000, maxScanMs: 1_000 },
     ),
     telemetry: {
       sentinel: { minValueLength: 6, enabled: true },
@@ -735,6 +736,39 @@ describe("run", () => {
     } finally {
       await store.close();
     }
+  });
+});
+
+describe("replay", () => {
+  it("resolves the recorded run through the CLI without printing event content", async () => {
+    const current = fixture();
+    const runId = current.runId;
+    if (runId === undefined) {
+      throw new Error("The run id is not available.");
+    }
+
+    const result = await invokeCli(["--json", "replay", "--run", runId]);
+
+    expect(result.code).toBe(ExitCode.ok);
+    const resolved = jsonResult(
+      z
+        .object({
+          rootRunId: Id,
+          runs: z
+            .object({
+              runId: Id,
+              role: z.enum(["root", "subagent"]),
+              parentRunId: Id.optional(),
+            })
+            .strict()
+            .array(),
+        })
+        .strict(),
+      result.stdout,
+    );
+    expect(resolved.rootRunId).toBe(runId);
+    expect(resolved.runs).toEqual([{ runId, role: "root" }]);
+    expect(result.stdout.join("")).not.toContain(current.canary);
   });
 });
 
