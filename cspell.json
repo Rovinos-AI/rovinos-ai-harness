@@ -24,6 +24,8 @@
     "labelledby",
     "noopener",
     "noreferrer",
+    "nodev",
+    "nosuid",
     "onhostcontextchanged",
     "onopenlink",
     "onrequestdisplaymode",

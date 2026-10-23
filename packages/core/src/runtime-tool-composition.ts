@@ -33,7 +33,7 @@ export function createRuntimeToolPort(
     ...(options.pii === undefined ? {} : { resolver: options.pii.resolver }),
   });
   const piiPort =
-    options.pii === undefined
+    options.pii === undefined || options.overrides.alreadyTokenized === true
       ? undefined
       : new PiiToolPort(subagentTool, {
           tokenizer: options.pii.tokenizer,

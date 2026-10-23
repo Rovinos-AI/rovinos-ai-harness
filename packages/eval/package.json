@@ -18,7 +18,9 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@harness/core": "workspace:^",
     "@harness/policy": "workspace:^",
+    "@harness/sandbox": "workspace:^",
     "@harness/schemas": "workspace:^",
     "zod": "4.6.7"
   },
