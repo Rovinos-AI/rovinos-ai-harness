@@ -3,6 +3,7 @@ import type { ModelPort } from "@harness/core";
 import { HarnessConfigSchema } from "@harness/config";
 import { InMemoryEventStore } from "@harness/store";
 import { Code, FakeClock, SequentialIdGenerator } from "@harness/schemas";
+import type { SafeEvent } from "@harness/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness } from "./index.js";
 import type { Harness } from "./types.js";
@@ -10,28 +11,25 @@ import type { Harness } from "./types.js";
 const contentCanary = "SDK_WATCH_CONTENT_CANARY_9421";
 const harnesses: Harness[] = [];
 
-async function waitForCompletion(harness: Harness, runId: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      if ((await harness.getRun(runId)).status === "completed") {
-        return;
-      }
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-  }
-  throw new Error("Run did not complete.");
-}
-
 afterEach(async () => {
   await Promise.all(harnesses.splice(0).map((harness) => harness.close()));
 });
 
 describe("SDK safe-event canary", () => {
-  it("never exposes input content through watch", async () => {
+  it("streams ordered, content-free safe events while a run is active", async () => {
+    let notifyModelStarted: (() => void) | undefined;
+    const modelStarted = new Promise<void>((resolve) => {
+      notifyModelStarted = resolve;
+    });
+    let releaseModel: (() => void) | undefined;
+    const modelGate = new Promise<void>((resolve) => {
+      releaseModel = resolve;
+    });
     const model: ModelPort = {
-      complete: () =>
-        Promise.resolve({
+      complete: async () => {
+        notifyModelStarted?.();
+        await modelGate;
+        return {
           parts: [{ type: "text", text: "Synthetic completion" }],
           usage: { inputTokens: 1, outputTokens: 1 },
           finishReason: "stop",
@@ -42,7 +40,8 @@ describe("SDK safe-event canary", () => {
           repairAttempts: 0,
           fallbackDepth: 0,
           providerBlobs: null,
-        }),
+        };
+      },
     };
     const harness = await createHarness({
       config: HarnessConfigSchema.parse({}),
@@ -55,18 +54,41 @@ describe("SDK safe-event canary", () => {
       },
     });
     harnesses.push(harness);
-    const { runId } = await harness.startRun({ goal: contentCanary });
-    await waitForCompletion(harness, runId);
+    try {
+      const { runId } = await harness.startRun({ goal: contentCanary });
+      await modelStarted;
 
-    const watched: unknown[] = [];
-    for await (const event of harness.watch(runId, { fromSeq: 0 })) {
-      watched.push(event);
+      const watched: SafeEvent[] = [];
+      const iterator = harness.watch(runId, { fromSeq: 0 })[Symbol.asyncIterator]();
+      let runningStatusSeen = false;
+      while (!runningStatusSeen) {
+        const next = await iterator.next();
+        if (next.done) {
+          break;
+        }
+        watched.push(next.value);
+        runningStatusSeen = next.value.kind === "run_status" && next.value.to === "running";
+      }
+
+      expect(runningStatusSeen).toBe(true);
+      expect((await harness.getRun(runId)).status).toBe("running");
+      releaseModel?.();
+
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) {
+          break;
+        }
+        watched.push(next.value);
+      }
+
+      expect(watched.length).toBeGreaterThan(0);
+      const sequences = watched.map((event) => event.seq);
+      expect(sequences).toEqual([...sequences].sort((left, right) => left - right));
+      expect(JSON.stringify(watched)).not.toContain(contentCanary);
+      expect(JSON.stringify(watched)).not.toContain("run_input");
+    } finally {
+      releaseModel?.();
     }
-
-    expect(watched.length).toBeGreaterThan(0);
-    const sequences = watched.map((event) => event.seq);
-    expect(sequences).toEqual([...sequences].sort((left, right) => left - right));
-    expect(JSON.stringify(watched)).not.toContain(contentCanary);
-    expect(JSON.stringify(watched)).not.toContain("run_input");
   });
 });

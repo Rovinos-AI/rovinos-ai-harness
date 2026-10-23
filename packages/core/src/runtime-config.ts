@@ -36,7 +36,14 @@ import type {
 } from "@harness/vault";
 import type { PiiMessageSanitizer, Tokenizer } from "@harness/pii";
 import type { WorkspacePort } from "@harness/context";
-import type { ContextPort, IdGenerator, ModelPort, PolicyPort, RunContext, ToolPort } from "./ports.js";
+import type {
+  ContextPort,
+  IdGenerator,
+  ModelPort,
+  PolicyPort,
+  RunContext,
+  ToolPort,
+} from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";

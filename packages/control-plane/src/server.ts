@@ -39,10 +39,7 @@ import {
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
 import { registerRunResources } from "./resources/runs.js";
-import {
-  startRunResourceUpdates,
-  type RunResourceUpdatesError,
-} from "./resources/run-updates.js";
+import { startRunResourceUpdates, type RunResourceUpdatesError } from "./resources/run-updates.js";
 import type { ModelProgress } from "@harness/models";
 import {
   controlPlanePrincipal,

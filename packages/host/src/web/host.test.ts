@@ -20,6 +20,7 @@ import type { AppBridgeHandlers } from "./bridge.js";
 const bridgeMock = vi.hoisted(() => ({
   connect: vi.fn<() => Promise<void>>(),
   initialized: vi.fn<() => Promise<void>>(),
+  close: vi.fn<() => Promise<void>>(),
   sendToolInput: vi.fn<(input: Readonly<Record<string, unknown>>) => Promise<void>>(),
   sendToolResult: vi.fn<(result: z.infer<typeof CallToolResultSchema>) => Promise<void>>(),
   setHostContext: vi.fn<(context: unknown) => void>(),
@@ -41,6 +42,7 @@ vi.mock("./bridge.js", () => ({
       return {
         connect: bridgeMock.connect,
         initialized: bridgeMock.initialized(),
+        close: bridgeMock.close,
         sendToolInput: bridgeMock.sendToolInput,
         sendToolResult: bridgeMock.sendToolResult,
         setHostContext: bridgeMock.setHostContext,
@@ -295,6 +297,7 @@ function hostReadyResponse(): Response {
 beforeEach(() => {
   bridgeMock.connect.mockReset().mockResolvedValue();
   bridgeMock.initialized.mockReset().mockResolvedValue();
+  bridgeMock.close.mockReset().mockResolvedValue();
   bridgeMock.sendToolInput.mockReset().mockResolvedValue();
   bridgeMock.sendToolResult.mockReset().mockResolvedValue();
   bridgeMock.setHostContext.mockReset();

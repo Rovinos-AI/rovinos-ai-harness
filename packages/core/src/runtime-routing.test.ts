@@ -83,9 +83,7 @@ describe("createRuntime model routing", () => {
         .completion;
       expect(result.status).toBe("completed");
       expect(progress).toHaveBeenCalledOnce();
-      expect(progress).toHaveBeenCalledWith(
-        expect.objectContaining({ outputTokens: 4 }),
-      );
+      expect(progress).toHaveBeenCalledWith(expect.objectContaining({ outputTokens: 4 }));
     } finally {
       await runtime.close();
     }

@@ -266,8 +266,10 @@ async function connectAppFrame(options: ConnectAppFrameOptions): Promise<void> {
     frame.setAttribute("allow", app.permissions.join("; "));
   }
   let removeContextListener = (): void => undefined;
+  let closeBridge = (): void => undefined;
   root.onFrameRemoved(() => {
     removeContextListener();
+    closeBridge();
     endSession();
   });
   root.attachFrame();
@@ -286,10 +288,6 @@ async function connectAppFrame(options: ConnectAppFrameOptions): Promise<void> {
     (cursor) => routeToolList(cursor, app.sessionId, launch.token, request),
     handlers,
   );
-  let closeBridge = (): void => undefined;
-  root.onFrameRemoved(() => {
-    closeBridge();
-  });
   closeBridge = () => {
     void bridge.close();
   };

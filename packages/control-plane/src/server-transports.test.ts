@@ -67,7 +67,10 @@ const mocks = vi.hoisted(() => {
       requestListener = listener;
       return server;
     }),
-    createMcpHandler: vi.fn(() => ({ fetch: () => Promise.resolve(new Response()) })),
+    createMcpHandler: vi.fn(() => ({
+      fetch: () => Promise.resolve(new Response()),
+      close: () => Promise.resolve(),
+    })),
     httpRequestHandler,
     loadApprovalHtml,
     serveStdio: vi.fn(() => ({ close: () => Promise.resolve() })),
@@ -254,6 +257,7 @@ describe("control-plane transports", () => {
       request("/mcp?query=ignored", { host: "127.0.0.1", authorization: AUTHORIZATION }),
       response(),
     );
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(mocks.httpRequestHandler).toHaveBeenCalledOnce();
     await handle.close();
     expect(mocks.createMcpHandler).toHaveBeenCalledOnce();
