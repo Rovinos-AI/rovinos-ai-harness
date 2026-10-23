@@ -73,6 +73,20 @@ export type ConfirmationGateResult =
   | { readonly status: "denied"; readonly code: string }
   | { readonly status: "input_required"; readonly result: InputRequiredResult };
 
+/** One validated answer requested from a human through MCP elicitation. */
+export interface HumanInputRequest<S extends z.ZodType> {
+  readonly key: string;
+  readonly answerSchema: S;
+  readonly createRequest: (message: string) => ReturnType<typeof inputRequired.elicit>;
+}
+
+/** Result of a human elicitation that can carry a decision or other validated answer. */
+export type HumanInputResult<T> =
+  | { readonly status: "accepted"; readonly content: T }
+  | { readonly status: "declined" }
+  | { readonly status: "denied"; readonly code: string }
+  | { readonly status: "input_required"; readonly result: InputRequiredResult };
+
 /**
  * Enforces a single-use, argument-bound human confirmation using SDK-sealed MRTR state.
  *
@@ -120,6 +134,51 @@ export class ConfirmationGate {
       return { status: "allowed" };
     }
 
+    const result = await this.requireHumanInput(
+      context,
+      request,
+      {
+        key: "confirm",
+        answerSchema: confirmSchema,
+        createRequest: (message) =>
+          inputRequired.elicit({
+            message,
+            requestedSchema: {
+              type: "object",
+              properties: { confirm: { type: "boolean" } },
+              required: ["confirm"],
+            },
+          }),
+      },
+      requestStateToken,
+    );
+    if (result.status === "accepted") {
+      return result.content.confirm
+        ? { status: "allowed" }
+        : { status: "denied", code: Code.parse("human_confirmation_declined") };
+    }
+    if (result.status === "declined") {
+      return { status: "denied", code: Code.parse("human_confirmation_declined") };
+    }
+    return result;
+  }
+
+  /** Requests a schema-validated human answer using sealed, argument-bound MRTR state. */
+  requireHumanInput<S extends z.ZodType>(
+    context: ServerContext,
+    request: ConfirmationRequest,
+    elicitation: HumanInputRequest<S>,
+    requestStateToken?: string,
+  ): Promise<HumanInputResult<z.output<S>>> {
+    return this.requestInput(context, request, elicitation, requestStateToken);
+  }
+
+  private async requestInput<S extends z.ZodType>(
+    context: ServerContext,
+    request: ConfirmationRequest,
+    elicitation: HumanInputRequest<S>,
+    requestStateToken?: string,
+  ): Promise<HumanInputResult<z.output<S>>> {
     let stateValue: unknown;
     if (requestStateToken === undefined) {
       stateValue = context.mcpReq.requestState();
@@ -134,15 +193,27 @@ export class ConfirmationGate {
       }
     }
     if (stateValue !== undefined) {
-      return this.acceptRetry(context, request, stateValue);
+      return this.acceptRetry(context, request, stateValue, elicitation);
     }
 
     if (!supportsFormElicitation(request.clientCapabilities)) {
       return { status: "denied", code: Code.parse("human_confirmation_unavailable") };
     }
 
+    const state = this.createState(context, request);
+    const requestState = await this.codec.mint(state, context);
+    return {
+      status: "input_required",
+      result: inputRequired({
+        inputRequests: { [elicitation.key]: elicitation.createRequest(request.summary) },
+        requestState,
+      }),
+    };
+  }
+
+  private createState(context: ServerContext, request: ConfirmationRequest): ConfirmationState {
     const now = this.now();
-    const state: ConfirmationState = confirmationStateSchema.parse({
+    return confirmationStateSchema.parse({
       stateId: this.nextStateId(),
       tokenId: this.tokenId(context),
       toolName: request.toolName,
@@ -150,30 +221,14 @@ export class ConfirmationGate {
       targetId: request.targetId,
       expiresAt: now + CONFIRMATION_TTL_SECONDS * 1_000,
     });
-    const requestState = await this.codec.mint(state, context);
-    return {
-      status: "input_required",
-      result: inputRequired({
-        inputRequests: {
-          confirm: inputRequired.elicit({
-            message: request.summary,
-            requestedSchema: {
-              type: "object",
-              properties: { confirm: { type: "boolean" } },
-              required: ["confirm"],
-            },
-          }),
-        },
-        requestState,
-      }),
-    };
   }
 
-  private async acceptRetry(
+  private async acceptRetry<S extends z.ZodType>(
     context: ServerContext,
     request: ConfirmationRequest,
     stateValue: unknown,
-  ): Promise<ConfirmationGateResult> {
+    elicitation: HumanInputRequest<S>,
+  ): Promise<HumanInputResult<z.output<S>>> {
     const parsedState = confirmationStateSchema.safeParse(stateValue);
     if (!parsedState.success) {
       return { status: "denied", code: Code.parse("confirmation_state_invalid") };
@@ -204,12 +259,35 @@ export class ConfirmationGate {
       return { status: "denied", code: Code.parse("confirmation_state_mismatch") };
     }
 
-    const answer = acceptedContent(context.mcpReq.inputResponses, "confirm", confirmSchema);
-    if (answer?.confirm !== true) {
-      return { status: "denied", code: Code.parse("human_confirmation_declined") };
-    }
-    return { status: "allowed" };
+    return parseHumanAnswer(
+      context.mcpReq.inputResponses,
+      elicitation.key,
+      elicitation.answerSchema,
+    );
   }
+}
+
+function parseHumanAnswer<S extends z.ZodType>(
+  inputResponses: ServerContext["mcpReq"]["inputResponses"],
+  key: string,
+  answerSchema: S,
+): HumanInputResult<z.output<S>> {
+  const responses = z.record(z.string(), z.unknown()).safeParse(inputResponses);
+  const response = responses.success ? responses.data[key] : undefined;
+  const action = z
+    .looseObject({ action: z.enum(["accept", "decline", "cancel"]) })
+    .safeParse(response);
+  if (!action.success || action.data.action !== "accept") {
+    return { status: "declined" };
+  }
+  const answer = acceptedContent(inputResponses, key, answerSchema);
+  if (answer === undefined || answer === null) {
+    return { status: "denied", code: Code.parse("human_input_invalid") };
+  }
+  const parsedAnswer = answerSchema.safeParse(answer);
+  return parsedAnswer.success
+    ? { status: "accepted", content: parsedAnswer.data }
+    : { status: "denied", code: Code.parse("human_input_invalid") };
 }
 
 function supportsFormElicitation(
