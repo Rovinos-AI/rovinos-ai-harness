@@ -24,9 +24,11 @@ export {
 } from "./trial.js";
 export {
   TrialConfigSchema,
+  TrialEvalOptionsSchema,
   prepareTrial,
   type PreparedTrial,
   type TrialConfig,
+  type TrialEvalOptions,
   type TrialExecutor,
 } from "./executor.js";
 export { InProcessExecutor, type InProcessExecutorOptions } from "./executors/inprocess.js";

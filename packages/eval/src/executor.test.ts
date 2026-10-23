@@ -6,7 +6,7 @@ import { parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { defineSuite } from "./load.js";
 import { prepareTrial, TrialConfigSchema } from "./executor.js";
-import type { TrialSpec } from "./trial.js";
+import type { EvalVariant, TrialSpec } from "./trial.js";
 
 const directories: string[] = [];
 
@@ -34,7 +34,11 @@ function trial(workDir: string, fixtureDir?: string, policyFile?: string): Trial
   if (task === undefined) {
     throw new Error("synthetic_task_missing");
   }
-  const variant = { id: "baseline", budgets: { maxSteps: 4 } };
+  const variant: EvalVariant = {
+    id: "baseline",
+    budgets: { maxSteps: 4 },
+    cassetteMode: "replay",
+  };
   return {
     suite,
     task,
@@ -63,6 +67,7 @@ describe("prepareTrial", () => {
     const prepared = await prepareTrial(trial(workDir, fixture, policy));
     const content = await readFile(prepared.configPath, "utf8");
     const config = parseJson(TrialConfigSchema, content);
+    const evalOptions = await readFile(prepared.evalOptionsPath, "utf8");
 
     expect(await readFile(join(prepared.workspaceDir, "fixture.txt"), "utf8")).toBe(
       "synthetic fixture",
@@ -74,6 +79,7 @@ describe("prepareTrial", () => {
     expect(config.keys.keys[0]?.secret).toBe("env:HARNESS_EVAL_KEY");
     expect(prepared.runtimeConfig.store).toEqual(config.store);
     expect(content).not.toContain("A synthetic goal.");
+    expect(evalOptions).toContain('"cassetteMode":"replay"');
     expect(prepared.dbPath).not.toBe(join(root, "another", "data", "harness.db"));
   });
 

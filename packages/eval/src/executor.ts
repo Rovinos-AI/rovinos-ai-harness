@@ -1,22 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
 import { cp, mkdir, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
+  Code,
   KeysConfigSchema,
   ModelsConfigSchema,
   PiiConfigSchema,
   PolicyConfigSchema,
   RolesConfigSchema,
   RunConfigSchema,
-  RunBudgetsSchema,
   StoreConfigSchema,
   VaultConfigSchema,
 } from "@harness/schemas";
+import type { RunBudgetsSchema } from "@harness/schemas";
 import { z } from "zod";
 import type { RuntimeConfig } from "@harness/core";
 import type { EvalTask } from "./schema.js";
+import { EvalCassetteModeSchema } from "./trial.js";
 import type { EvalVariant, TrialResult, TrialSpec } from "./trial.js";
+
+/** Variant-specific eval metadata not consumed by the harness runtime config. */
+export const TrialEvalOptionsSchema = z
+  .object({
+    variantId: Code,
+    cassetteMode: EvalCassetteModeSchema.optional(),
+  })
+  .strict();
+
+/** Inferred eval-only options persisted alongside the harness configuration. */
+export type TrialEvalOptions = z.infer<typeof TrialEvalOptionsSchema>;
 
 /** Generated subset of the harness config used by one eval trial. */
 export const TrialConfigSchema = z
@@ -40,6 +53,7 @@ export interface PreparedTrial {
   readonly config: TrialConfig;
   readonly runtimeConfig: RuntimeConfig;
   readonly configPath: string;
+  readonly evalOptionsPath: string;
   readonly dataDir: string;
   readonly dbPath: string;
   readonly workspaceDir: string;
@@ -118,6 +132,7 @@ export async function prepareTrial(trial: TrialSpec): Promise<PreparedTrial> {
   if (basename(workDir) === "" || workDir === resolve(workDir, "..")) {
     throw new Error("trial_workdir_invalid");
   }
+  await mkdir(dirname(workDir), { recursive: true });
   await mkdir(workDir, { recursive: false });
   const dataDir = join(workDir, "data");
   const workspaceDir = join(workDir, "workspace");
@@ -139,11 +154,23 @@ export async function prepareTrial(trial: TrialSpec): Promise<PreparedTrial> {
   const config = configForTrial(trial.task, trial.variant, keyIdFor(trial));
   const configPath = join(workDir, "harness.config.json");
   await writeFile(configPath, `${JSON.stringify(config)}\n`, { encoding: "utf8", flag: "wx" });
+  const evalOptionsPath = join(workDir, "eval.options.json");
+  const evalOptions = TrialEvalOptionsSchema.parse({
+    variantId: trial.variant.id,
+    ...(trial.variant.cassetteMode === undefined
+      ? {}
+      : { cassetteMode: trial.variant.cassetteMode }),
+  });
+  await writeFile(evalOptionsPath, `${JSON.stringify(evalOptions)}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+  });
 
   return {
     config,
     runtimeConfig: runtimeConfig(config),
     configPath,
+    evalOptionsPath,
     dataDir,
     dbPath: join(dataDir, "harness.db"),
     workspaceDir,

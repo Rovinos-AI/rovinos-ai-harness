@@ -30,7 +30,7 @@ function pathComponent(value: string): string {
 
 function trialSeed(seed: number, taskId: string, variantId: string, trialIndex: number): number {
   const digest = createHash("sha256")
-    .update(`${seed}\u0000${taskId}\u0000${variantId}\u0000${trialIndex}`)
+    .update(`${String(seed)}\u0000${taskId}\u0000${variantId}\u0000${String(trialIndex)}`)
     .digest();
   return digest.readUInt32BE(0);
 }
@@ -46,14 +46,14 @@ function errorCodeFrom(error: unknown): string {
 }
 
 function outputPaths(outDir: string, taskId: string, variantId: string, trialIndex: number) {
-  return join(outDir, "trials", pathComponent(taskId), pathComponent(variantId), `${trialIndex}`);
+  return join(outDir, "trials", pathComponent(taskId), pathComponent(variantId), String(trialIndex));
 }
 
-async function makePlan(
+function makePlan(
   suite: ReturnType<typeof EvalSuiteSchema.parse>,
   variants: readonly EvalVariant[],
   options: z.output<typeof RunnerOptionsSchema>,
-): Promise<TrialSpec[]> {
+): TrialSpec[] {
   const outDir = resolve(options.outDir);
   const trials: TrialSpec[] = [];
   for (const task of suite.tasks) {
@@ -102,7 +102,7 @@ export async function runEval(
   }
   const parsedOptions = RunnerOptionsSchema.parse(options);
   const outDir = resolve(parsedOptions.outDir);
-  const trials = await makePlan(parsedSuite, parsedVariants, parsedOptions);
+  const trials = makePlan(parsedSuite, parsedVariants, parsedOptions);
   const trialsRoot = join(outDir, "trials");
   const jsonlPath = join(outDir, "trials.jsonl");
   await mkdir(trialsRoot, { recursive: true });
@@ -118,7 +118,7 @@ export async function runEval(
     }),
   );
 
-  const results: TrialResult[] = new Array(trials.length);
+  const results = new Map<number, TrialResult>();
   const output = await open(jsonlPath, "w");
   let writeChain = Promise.resolve();
   let nextIndex = 0;
@@ -145,7 +145,7 @@ export async function runEval(
           errorCode: errorCodeFrom(error),
         });
       }
-      results[index] = result;
+      results.set(index, result);
       writeChain = writeChain.then(() =>
         output.appendFile(`${JSON.stringify(result)}\n`, "utf8"),
       );
@@ -161,5 +161,11 @@ export async function runEval(
   } finally {
     await output.close();
   }
-  return results;
+  return trials.map((_, index) => {
+    const result = results.get(index);
+    if (result === undefined) {
+      throw new Error("eval_result_missing");
+    }
+    return result;
+  });
 }

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { defineSuite } from "../load.js";
 import { InProcessExecutor } from "./inprocess.js";
 import type { TrialSpec } from "../trial.js";
+import { runEval } from "../runner.js";
 
 const directories: string[] = [];
 
@@ -143,5 +144,32 @@ describe("InProcessExecutor", () => {
     expect(first.dbPath).not.toBe(second.dbPath);
     expect(first.workspaceDir).not.toBe(second.workspaceDir);
     expect(providerCreations).toBe(2);
+  });
+
+  it("runs planned trials beneath the output directory", async () => {
+    const outDir = await createDirectory();
+    const executor = new InProcessExecutor({
+      model: () => ({
+        complete: () =>
+          Promise.resolve({
+            provider: "synthetic",
+            model: "synthetic",
+            parts: [{ type: "text", text: "done" }],
+            providerBlobs: null,
+            usage: { inputTokens: 1, outputTokens: 1 },
+            finishReason: "stop",
+            latencyMs: 0,
+            schemaValid: true,
+            repairAttempts: 0,
+            fallbackDepth: 0,
+          }),
+      }),
+    });
+    const suite = makeTrial(join(outDir, "unused")).suite;
+    const results = await runEval(suite, [{ id: "baseline" }], executor, { outDir });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.dbPath).toContain(join(outDir, "trials"));
+    expect(existsSync(results[0]?.dbPath ?? "")).toBe(true);
   });
 });

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
+import { execa } from "execa";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import { foldRunState } from "@harness/core";
 import { SqliteEventStore } from "@harness/store-sqlite";
-import { RunStatus } from "@harness/schemas";
+import type { RunStatus } from "@harness/schemas";
 import { z } from "zod";
 import { TrialResultSchema } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
@@ -30,9 +29,18 @@ interface ChildOutcome {
   readonly timedOut: boolean;
 }
 
+interface DockerInvocation {
+  readonly dockerPath: string;
+  readonly args: readonly string[];
+  readonly input: string;
+  readonly timeoutMs: number;
+  readonly name: string;
+  readonly key: string;
+}
+
 function codeFromTrial(trial: TrialSpec): string {
   const hash = createHash("sha256")
-    .update(`${trial.task.id}\u0000${trial.variantId}\u0000${trial.trialIndex}`)
+    .update(`${trial.task.id}\u0000${trial.variantId}\u0000${String(trial.trialIndex)}`)
     .digest("hex")
     .slice(0, 20);
   return `harness-eval-${hash}`;
@@ -46,62 +54,72 @@ function inputForTrial(trial: TrialSpec): string {
   );
 }
 
-function stopContainer(dockerPath: string, name: string): void {
-  const killer = spawn(dockerPath, ["kill", name], { stdio: "ignore" });
-  killer.once("error", () => undefined);
+async function stopContainer(dockerPath: string, name: string): Promise<void> {
+  try {
+    await execa(dockerPath, ["kill", name], {
+      reject: false,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+  } catch {
+    return;
+  }
 }
 
-function runContainer(
-  dockerPath: string,
-  args: readonly string[],
-  input: string,
-  timeoutMs: number,
-  name: string,
-  key: string,
-): Promise<ChildOutcome> {
-  return new Promise((resolveOutcome, reject) => {
-    let child: ChildProcess;
-    try {
-      child = spawn(dockerPath, [...args], {
-        stdio: ["pipe", "ignore", "ignore"],
-        env: { ...process.env, HARNESS_EVAL_KEY: key },
-      });
-    } catch {
-      reject(Object.assign(new Error("docker_spawn_failed"), { code: "docker_spawn_failed" }));
-      return;
-    }
-    let settled = false;
-    let timedOut = false;
-    let timeoutGrace: ReturnType<typeof setTimeout> | undefined;
-    const finish = (outcome: ChildOutcome): void => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        if (timeoutGrace !== undefined) {
-          clearTimeout(timeoutGrace);
-        }
-        resolveOutcome(outcome);
-      }
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      timeoutGrace = setTimeout(() => finish({ exitCode: null, timedOut: true }), 5_000);
-      stopContainer(dockerPath, name);
-      child.kill("SIGTERM");
-    }, timeoutMs);
-    child.once("error", () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        if (timeoutGrace !== undefined) {
-          clearTimeout(timeoutGrace);
-        }
-        reject(Object.assign(new Error("docker_process_failed"), { code: "docker_process_failed" }));
-      }
-    });
-    child.once("close", (exitCode) => finish({ exitCode, timedOut }));
-    child.stdin?.end(input);
+async function runContainer({
+  dockerPath,
+  args,
+  input,
+  timeoutMs,
+  name,
+  key,
+}: DockerInvocation): Promise<ChildOutcome> {
+  const child = execa(dockerPath, [...args], {
+    input,
+    reject: false,
+    stdout: "ignore",
+    stderr: "ignore",
+    env: { ...process.env, HARNESS_EVAL_KEY: key },
   });
+  const completion = child.then(
+    ({ exitCode }) => ({ exitCode: exitCode ?? null, timedOut: false }),
+    () => Promise.reject(Object.assign(new Error("docker_process_failed"), { code: "docker_process_failed" })),
+  );
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await Promise.race([
+    completion,
+    new Promise<ChildOutcome>((resolve) => {
+      timeout = setTimeout(() => {
+        resolve({ exitCode: null, timedOut: true });
+      }, timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  });
+  if (!outcome.timedOut) {
+    return outcome;
+  }
+  await stopContainer(dockerPath, name);
+  child.kill("SIGTERM");
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    completion.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      grace = setTimeout(() => {
+        resolve();
+      }, 5_000);
+    }),
+  ]).finally(() => {
+    if (grace !== undefined) {
+      clearTimeout(grace);
+    }
+  });
+  return outcome;
 }
 
 function mapStatus(status: z.infer<typeof RunStatus>): TrialResult["status"] | undefined {
@@ -199,7 +217,7 @@ export class DockerExecutor implements TrialExecutor {
       "--network",
       this.options.network,
       "--mount",
-      `type=bind,source=${trial.workDir},target=/harness`,
+      `type=bind,source=${resolvePath(trial.workDir)},target=/harness`,
       "--workdir",
       "/harness",
       "--env",
@@ -215,32 +233,32 @@ export class DockerExecutor implements TrialExecutor {
       "--input",
       "-",
     ];
-    const outcome = await runContainer(
-      this.options.dockerPath,
+    const outcome = await runContainer({
+      dockerPath: this.options.dockerPath,
       args,
-      inputForTrial(trial),
-      this.options.timeoutMs,
+      input: inputForTrial(trial),
+      timeoutMs: this.options.timeoutMs,
       name,
-      prepared.key,
-    );
+      key: prepared.key,
+    });
     const durationMs = Math.max(0, Math.floor(performance.now() - startedAt));
-    const readback = await readRunResult(
+    const storedResult = await readRunResult(
       prepared.dbPath,
       prepared.workspaceDir,
       durationMs,
     );
     if (outcome.timedOut) {
       return TrialResultSchema.parse({
-        ...readback,
+        ...storedResult,
         status: "error",
         exitCode: outcome.exitCode ?? 124,
         errorCode: "trial_timeout",
       });
     }
     return TrialResultSchema.parse({
-      ...readback,
+      ...storedResult,
       exitCode: outcome.exitCode ?? 1,
-      ...(readback.status === "error" ? { errorCode: "docker_exit_nonzero" } : {}),
+      ...(storedResult.status === "error" ? { errorCode: "docker_exit_nonzero" } : {}),
     });
   }
 }

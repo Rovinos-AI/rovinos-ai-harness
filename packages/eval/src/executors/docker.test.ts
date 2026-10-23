@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ChildProcess } from "node:child_process";
-import type * as ChildProcessModule from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeClock, parseJson, SequentialIdGenerator } from "@harness/schemas";
@@ -13,26 +10,34 @@ import { defineSuite } from "../load.js";
 import { TrialConfigSchema } from "../executor.js";
 import type { TrialSpec } from "../trial.js";
 
-const mocks = vi.hoisted(() => ({ spawn: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execa: vi.fn() }));
 
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof ChildProcessModule>();
-  return { ...actual, spawn: mocks.spawn };
-});
+vi.mock("execa", () => ({ execa: mocks.execa }));
 
 import { DockerExecutor } from "./docker.js";
 
 const directories: string[] = [];
 
-function makeChild() {
-  const child = new ChildProcess();
-  const input = new PassThrough();
-  Object.defineProperty(child, "stdin", { configurable: true, value: input });
-  const kill = vi.spyOn(child, "kill").mockImplementation(() => {
-    child.emit("close", null, "SIGTERM");
-    return true;
+function completedProcess(exitCode: number): Promise<{ exitCode: number }> & {
+  kill: ReturnType<typeof vi.fn>;
+} {
+  return Object.assign(Promise.resolve({ exitCode }), { kill: vi.fn(() => true) });
+}
+
+function pendingProcess(): Promise<{ exitCode: number }> & { kill: ReturnType<typeof vi.fn> } {
+  let finish: (result: { exitCode: number }) => void = () => undefined;
+  const promise = new Promise<{ exitCode: number }>((resolve) => {
+    finish = resolve;
   });
-  return { child, input, kill };
+  return Object.assign(
+    promise,
+    {
+      kill: vi.fn(() => {
+        finish({ exitCode: 143 });
+        return true;
+      }),
+    },
+  );
 }
 
 async function createDirectory(): Promise<string> {
@@ -115,7 +120,7 @@ async function createRun(workDir: string, key: string, run: boolean): Promise<vo
 }
 
 afterEach(async () => {
-  mocks.spawn.mockReset();
+  mocks.execa.mockReset();
   vi.useRealTimers();
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -124,22 +129,17 @@ describe("DockerExecutor", () => {
   it("uses the isolated database to collect run status and usage", async () => {
     const root = await createDirectory();
     const workDir = join(root, "trial");
-    const { child } = makeChild();
-    mocks.spawn.mockImplementation((_command: string, args: string[]) => {
-      const key = args.find((arg) => arg.startsWith("HARNESS_EVAL_KEY="))?.slice(
-        "HARNESS_EVAL_KEY=".length,
-      );
+    let invocation: { args: string[]; input: string | undefined } | undefined;
+    mocks.execa.mockImplementation(
+      (_command: string, args: string[], options: { env?: NodeJS.ProcessEnv; input?: string }) => {
+      invocation = { args, input: options.input };
+      const key = options.env?.HARNESS_EVAL_KEY;
       if (key === undefined) {
         throw new Error("synthetic_key_missing");
       }
-      setImmediate(() => {
-        void createRun(workDir, key, true).then(
-          () => child.emit("close", 0, null),
-          () => child.emit("error", new Error("synthetic_container_failure")),
-        );
-      });
-      return child;
-    });
+      return createRun(workDir, key, true).then(() => ({ exitCode: 0 }));
+      },
+    );
 
     const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
       makeTrial(workDir),
@@ -149,24 +149,16 @@ describe("DockerExecutor", () => {
     expect(result.runId).toBeDefined();
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2, costMicros: 0 });
     expect(result.exitCode).toBe(0);
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      "docker",
-      expect.arrayContaining(["--network", "none", "--input", "-", "HARNESS_EVAL_KEY"]),
-      expect.objectContaining({
-        env: expect.objectContaining({ HARNESS_EVAL_KEY: expect.any(String) }),
-        stdio: ["pipe", "ignore", "ignore"],
-      }),
+    expect(invocation?.args).toEqual(
+      expect.arrayContaining(["--network", "none", "--input", "-"]),
     );
-    expect(JSON.stringify(mocks.spawn.mock.calls[0])).not.toContain("A synthetic goal.");
+    expect(invocation?.input).toBe(JSON.stringify({ goal: "A synthetic goal." }));
+    expect(JSON.stringify(invocation?.args)).not.toContain("A synthetic goal.");
   });
 
   it("returns a safe error when Docker exits without creating a run", async () => {
     const workDir = join(await createDirectory(), "trial");
-    const { child } = makeChild();
-    mocks.spawn.mockImplementation(() => {
-      setImmediate(() => child.emit("close", 17, null));
-      return child;
-    });
+    mocks.execa.mockImplementation(() => completedProcess(17));
 
     const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
       makeTrial(workDir),
@@ -182,13 +174,15 @@ describe("DockerExecutor", () => {
 
   it("enforces the wall-clock timeout and kills the named container", async () => {
     const workDir = join(await createDirectory(), "trial");
-    const children = [makeChild(), makeChild()];
-    mocks.spawn.mockImplementation(() => {
-      const next = children.shift();
-      if (next === undefined) {
-        throw new Error("synthetic_spawn_unexpected");
+    let processInvocation = 0;
+    let killArgs: string[] | undefined;
+    mocks.execa.mockImplementation((_command: string, args: string[]) => {
+      if (args[0] === "kill") {
+        killArgs = args;
+        return completedProcess(0);
       }
-      return next.child;
+      processInvocation += 1;
+      return pendingProcess();
     });
 
     const pending = new DockerExecutor({
@@ -198,28 +192,19 @@ describe("DockerExecutor", () => {
     const result = await pending;
 
     expect(result).toMatchObject({ status: "error", errorCode: "trial_timeout" });
-    expect(mocks.spawn).toHaveBeenLastCalledWith(
-      "docker",
-      ["kill", expect.stringMatching(/^harness-eval-/u)],
-      { stdio: "ignore" },
-    );
+    expect(processInvocation).toBe(1);
+    expect(killArgs).toEqual(["kill", expect.stringMatching(/^harness-eval-/u)]);
   });
 
-  it("turns process launch failures into stable errors without leaking details", async () => {
+  it("turns process failures into stable errors without leaking details", async () => {
     const workDir = join(await createDirectory(), "trial");
-    mocks.spawn.mockImplementationOnce(() => {
-      throw new Error("synthetic private path");
-    });
+    mocks.execa.mockImplementationOnce(() => Promise.reject(new Error("synthetic private path")));
     await expect(
       new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(workDir)),
-    ).rejects.toMatchObject({ code: "docker_spawn_failed" });
+    ).rejects.toMatchObject({ code: "docker_process_failed" });
 
     const secondWorkDir = join(await createDirectory(), "trial");
-    const { child } = makeChild();
-    mocks.spawn.mockImplementationOnce(() => {
-      setImmediate(() => child.emit("error", new Error("synthetic private path")));
-      return child;
-    });
+    mocks.execa.mockImplementationOnce(() => Promise.reject(new Error("synthetic private path")));
     await expect(
       new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(secondWorkDir)),
     ).rejects.toMatchObject({ code: "docker_process_failed" });

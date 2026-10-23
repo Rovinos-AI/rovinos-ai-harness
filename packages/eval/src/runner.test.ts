@@ -102,7 +102,7 @@ describe("runEval", () => {
       runEval(
         makeSuite(),
         [{ id: "same" }, { id: "same" }],
-        { run: async (trial) => resultFor(trial) },
+        { run: (trial) => Promise.resolve(resultFor(trial)) },
         { outDir: await createDirectory() },
       ),
     ).rejects.toThrow("eval_variant_id_duplicate");
