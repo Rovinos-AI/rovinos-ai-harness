@@ -4,11 +4,12 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { metrics, type SpanContext } from "@opentelemetry/api";
-import { Id, type VaultValueEntry } from "@harness/schemas";
+import { Id, parseJson, type VaultValueEntry } from "@harness/schemas";
 import { type VaultRunReader } from "@harness/telemetry";
 import { createTestMetricCollector } from "@harness/telemetry/testing";
 import { createReferenceHost, type ReferenceHost } from "@harness/host";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { z } from "zod";
 import { createCanaries, type CanarySet } from "./canary/canaries.js";
 import { createCanaryTelemetry, type CanaryTelemetry } from "./canary/telemetry.js";
 
@@ -379,23 +380,37 @@ async function runFixture(
     for (const canary of canaries.strings) {
       expect(output).not.toContain(canary);
     }
-    await assertion({
-      status,
-      spans,
-      accepted: currentMetrics.accepted - baseline.accepted,
-      rejected: metricDelta(baseline, currentMetrics).rejected,
-      canaries,
-      page,
-      hostOrigin,
-      externalRequests,
-      routedExternalRequests,
-      externalResponses,
-      popups,
-      routedTools,
+    const accepted = currentMetrics.accepted - baseline.accepted;
+    const rejected = metricDelta(baseline, currentMetrics).rejected;
+    // Codes and counts only (never content), so a failure says why a marker span was dropped (#555).
+    const evidence = {
       diagnostics,
-      browserConsole,
-      stdout,
-    });
+      accepted,
+      rejected: Object.fromEntries(rejected),
+      errorCodes: spans
+        .filter((span) => span.name === "harness.ui.error")
+        .map((span) => span.attributes["harness.error.code"]),
+      responses: parseJson(FixtureStatusSchema, status).responses,
+    };
+    await assertionWithEvidence(evidence, () =>
+      assertion({
+        status,
+        spans,
+        accepted,
+        rejected,
+        canaries,
+        page,
+        hostOrigin,
+        externalRequests,
+        routedExternalRequests,
+        externalResponses,
+        popups,
+        routedTools,
+        diagnostics,
+        browserConsole,
+        stdout,
+      }),
+    );
     await context.tracing.stop();
   } catch (error) {
     await context.tracing
@@ -412,6 +427,26 @@ async function runFixture(
     await flushMetrics();
     await context.close();
     stdoutSpy.mockRestore();
+  }
+}
+
+const FixtureStatusSchema = z.object({
+  responses: z.array(
+    z.object({ id: z.number().int(), error: z.boolean(), isError: z.boolean() }).strict(),
+  ),
+});
+
+async function assertionWithEvidence(
+  evidence: Readonly<Record<string, unknown>>,
+  run: () => void | Promise<void>,
+): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    if (error instanceof Error) {
+      error.message = `${error.message}\nhost evidence: ${JSON.stringify(evidence)}`;
+    }
+    throw error;
   }
 }
 
