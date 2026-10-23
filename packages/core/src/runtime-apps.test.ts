@@ -55,6 +55,27 @@ async function withTracing(action: () => Promise<void>): Promise<void> {
 }
 
 describe("runtime reference-host callbacks", () => {
+  it("fails closed when the runtime approval ports are unavailable", async () => {
+    const store = new InMemoryEventStore();
+    const callbacks = createRuntimeAppCallbacks({ store, clock: new FakeClock(10) });
+    await expect(
+      callbacks.onAppCallApproval(
+        { callId: builders.nextRunId(), toolId: Code.parse("synthetic.tool"), args: {} },
+        {
+          decision: "ask",
+          ruleId: Code.parse("review"),
+          reason: Code.parse("review"),
+          editable: [],
+        },
+        {
+          runId: builders.nextRunId(),
+          policyContext: { subagent: false, app: Code.parse("synthetic.app") },
+        },
+      ),
+    ).resolves.toMatchObject({ isError: true, content: [{ text: "app_call_requires_approval" }] });
+    await store.close();
+  });
+
   it("reports pending approval state from the run fold and returns false for missing runs", async () => {
     const store = new InMemoryEventStore();
     const pending = await addRun(store, true);

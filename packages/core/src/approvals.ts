@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
 import { ApprovalEditError } from "@harness/policy";
 import { ApprovalEditPreparationError, prepareApprovalEdits } from "./approval-edits.js";
@@ -18,6 +18,7 @@ import {
   resolveDanglingIntentApproval,
 } from "./steps/resume-tool-step.js";
 import type { ResumeToolStepOptions } from "./steps/tool-step.js";
+import { appApprovalProvenance } from "./app-approval-context.js";
 
 export { ApprovalEditsRequiredError };
 export { ApprovalPrincipalRequiredError, ApproverIsRequesterError } from "./approval-principals.js";
@@ -35,6 +36,8 @@ export interface RequestApprovalOptions {
   readonly state: RunState;
   readonly checkpointer: Checkpointer;
   readonly intent?: Extract<EventPartial, { type: "tool_intent" }>;
+  /** Runtime-owned app provenance, committed atomically with its intent. */
+  readonly app?: Code;
 }
 
 /** Result returned after the approval request and suspension checkpoint are durable. */
@@ -134,6 +137,7 @@ export async function requestApproval(
       ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
     };
     const recorded = await recorder.recordBatch([
+      ...appApprovalProvenance(options.app, options.callId),
       ...(options.intent === undefined ? [] : [options.intent]),
       request,
       {
@@ -144,7 +148,8 @@ export async function requestApproval(
         reason: "awaiting_approval",
       },
     ]);
-    const requestIndex = options.intent === undefined ? 0 : 1;
+    const intentIndex = options.app === undefined ? 0 : 1;
+    const requestIndex = intentIndex + (options.intent === undefined ? 0 : 1);
     const requestEvent = recorded[requestIndex];
     const suspendedEvent = recorded[requestIndex + 1];
     if (
@@ -159,7 +164,7 @@ export async function requestApproval(
     const pendingApprovals = new Map(options.state.pendingApprovals);
     pendingApprovals.set(requestEvent.approvalId, requestEvent);
     const pendingToolCalls = new Map(options.state.pendingToolCalls);
-    const intentEvent = options.intent === undefined ? undefined : recorded[0];
+    const intentEvent = options.intent === undefined ? undefined : recorded[intentIndex];
     if (options.intent !== undefined) {
       if (intentEvent?.type !== "tool_intent") {
         throw new ApprovalRequestStateError();

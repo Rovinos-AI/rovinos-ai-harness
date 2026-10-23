@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id } from "@harness/schemas";
+import { HarnessError, type Id } from "@harness/schemas";
+import type { EventStore } from "@harness/store";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
-import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
+import {
+  closeRuntimeResources,
+  markTerminalBestEffort,
+  readRuntimeControlResult,
+} from "./runtime-lifecycle.js";
 import {
   composeAbortSignals,
   inspectCancellationTail,
   watchCancellation,
 } from "./runtime-cancellation.js";
-import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import { withResumeWakeUp } from "./runtime-approval-wake.js";
@@ -18,7 +22,6 @@ import { inheritedBudgets } from "./continue.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { RoleRegistry } from "./roles.js";
-import { foldRunState } from "./run-state.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createRuntimeToolPort } from "./runtime-tool-composition.js";
 import {
@@ -81,32 +84,6 @@ const defaultProcessLike: ShutdownProcessLike = {
   exit: (code) => process.exit(code),
 };
 
-async function readEvents(store: EventStore, runId: Id, fromSeq = 0): Promise<Event[]> {
-  const events: Event[] = [];
-  for await (const event of store.read(runId, { fromSeq })) {
-    events.push(event);
-  }
-  return events;
-}
-
-async function cancelledResult(
-  store: EventStore,
-  runId: Id,
-  firstNewSeq: number,
-): Promise<RunLoopResult | undefined> {
-  const events = await readEvents(store, runId);
-  const state = foldRunState(events);
-  if (state.status !== "cancelled") {
-    return undefined;
-  }
-  return {
-    status: state.status,
-    approvalIds: Array.from(state.pendingApprovals.keys()),
-    state,
-    events: events.filter((event) => event.seq >= firstNewSeq),
-  };
-}
-
 interface RunControlOptions {
   readonly store: EventStore;
   readonly runId: Id;
@@ -168,19 +145,19 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
           },
         });
       }
+      let recovered: RunLoopResult | undefined;
       if (cancellation.observed) {
-        const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
-        if (cancelled !== undefined) {
-          result = cancelled;
-        } else {
-          throw error;
-        }
-      } else {
+        recovered = await readRuntimeControlResult(options, "cancelled");
+      } else if (error instanceof LeaseLostError) {
+        recovered = await readRuntimeControlResult(options, "app_approval");
+      }
+      if (recovered === undefined) {
         throw error;
       }
+      result = recovered;
     }
     if (cancellation.observed) {
-      result = (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
+      result = (await readRuntimeControlResult(options, "cancelled")) ?? result;
     }
     result = await appendFinalRunTrips(result, options);
     tripsFinalized = true;
@@ -271,6 +248,7 @@ function composeRuntime(
   const appCallbacks = createRuntimeAppCallbacks({
     store,
     clock,
+    approval: { tool, policy: options.policy, context: options.context, ids },
     ...(pii === undefined ? {} : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
   });
   return {

@@ -3,12 +3,38 @@ import { HarnessError, type Event, type Id, type JsonValue } from "@harness/sche
 import {
   ApprovalEditError,
   ApprovalPayloadSchema,
+  approvalEditsAreAllowed,
   diffToEdits,
   validateEdits,
 } from "@harness/policy";
 import type { ToolPort } from "./ports.js";
 import type { RunRecorder } from "./recorder.js";
 import { prepareToolCall, toolRunContext } from "./steps/prepare-tool.js";
+import { ApprovalEditNotAllowedError, ApprovalEditsRequiredError } from "./steps/resume-errors.js";
+import type { ApprovalRequestedEvent, ToolIntentEvent } from "./run-state.js";
+
+/** Restores only replacement arguments authorized by the original approval payload. */
+export function approvedArgs(
+  intent: ToolIntentEvent,
+  approval: ApprovalRequestedEvent,
+  resolution: Extract<Event, { type: "approval_resolved" }>,
+): JsonValue {
+  if (resolution.decision !== "edit") {
+    return intent.args;
+  }
+  if (resolution.edits === undefined) {
+    throw new ApprovalEditsRequiredError();
+  }
+  const payload = ApprovalPayloadSchema.safeParse(approval.payload);
+  if (
+    !payload.success ||
+    payload.data.callId !== intent.callId ||
+    !approvalEditsAreAllowed(payload.data, diffToEdits(intent.args, resolution.edits))
+  ) {
+    throw new ApprovalEditNotAllowedError();
+  }
+  return resolution.edits;
+}
 
 /** Safe failure raised when approval edits cannot pass through the PII-aware tool port. */
 export class ApprovalEditPreparationError extends HarnessError {

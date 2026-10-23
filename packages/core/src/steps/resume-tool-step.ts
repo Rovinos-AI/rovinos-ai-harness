@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
+import {
+  APP_APPROVAL_REASON,
+  AppApprovalPolicyError,
+  approvedAppPolicy,
+} from "../app-approval-context.js";
 import type { Code, Event, JsonValue as JsonValueSchema } from "@harness/schemas";
-import { ApprovalPayloadSchema, approvalEditsAreAllowed, diffToEdits } from "@harness/policy";
+import { approvedArgs } from "../approval-edits.js";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { EventPartial } from "../recorder.js";
@@ -13,17 +18,13 @@ import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-s
 import { inputRetryForCall } from "./input-step.js";
 import { runToolCall, type ResumeToolStepOptions } from "./tool-step.js";
 import { requestResumeApprovals } from "./resume-approval-request.js";
+import { hashArgs } from "./tool-execution.js";
 import {
   callFromIntent,
   policyDecisionFromIntent,
   setPolicySpanAttributes,
 } from "./resume-intent.js";
-import {
-  ApprovalEditNotAllowedError,
-  ApprovalEditsRequiredError,
-  ResumeActionMismatchError,
-  ResumeEventMissingError,
-} from "./resume-errors.js";
+import { ResumeActionMismatchError, ResumeEventMissingError } from "./resume-errors.js";
 
 type ApprovalExecutionOptions = Omit<ResumeToolStepOptions, "ids"> &
   Partial<Pick<ResumeToolStepOptions, "ids">>;
@@ -70,6 +71,7 @@ async function recordPolicyDenied(
   options: Omit<ResumeToolStepOptions, "ids">,
   intent: ToolIntentEvent,
   errorCode: string,
+  argsHash = intent.argsHash,
 ): Promise<readonly Event[]> {
   const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, () => {
     setPolicySpanAttributes(intent);
@@ -81,7 +83,7 @@ async function recordPolicyDenied(
       outcome: "denied",
       errorCode,
       latencyMs: 0,
-      executedArgsHash: intent.argsHash,
+      executedArgsHash: argsHash,
       result: null,
     });
   });
@@ -281,7 +283,10 @@ export async function applyApprovalDecision(
         callId: intent.callId,
         toolId: resultToolId(options, intent),
         outcome: "denied",
-        errorCode: "approval_denied",
+        errorCode:
+          resolution.decidedBy === "expiry" && intent.policyReason === APP_APPROVAL_REASON
+            ? "approval_expired"
+            : "approval_denied",
         latencyMs: 0,
         result: null,
       });
@@ -292,29 +297,19 @@ export async function applyApprovalDecision(
     return recordDanglingFailure(options, intent, "resume_ambiguous");
   }
   const args = approvedArgs(intent, approval, resolution);
-  return applyAuthorizedApproval(options, intent, { resolution, state, args });
-}
-
-function approvedArgs(
-  intent: ToolIntentEvent,
-  approval: ApprovalRequestedEvent,
-  resolution: Extract<Event, { type: "approval_resolved" }>,
-): JsonValueSchema {
-  if (resolution.decision !== "edit") {
-    return intent.args;
+  try {
+    const policy = approvedAppPolicy({ options, intent, approval, resolution, args });
+    return await applyAuthorizedApproval(
+      policy === undefined ? options : { ...options, policy },
+      intent,
+      { resolution, state, args },
+    );
+  } catch (error) {
+    if (!(error instanceof AppApprovalPolicyError)) {
+      throw error;
+    }
+    return recordPolicyDenied(options, intent, error.code, hashArgs(args));
   }
-  if (resolution.edits === undefined) {
-    throw new ApprovalEditsRequiredError();
-  }
-  const payload = ApprovalPayloadSchema.safeParse(approval.payload);
-  if (
-    !payload.success ||
-    payload.data.callId !== intent.callId ||
-    !approvalEditsAreAllowed(payload.data, diffToEdits(intent.args, resolution.edits))
-  ) {
-    throw new ApprovalEditNotAllowedError();
-  }
-  return resolution.edits;
 }
 
 async function applyAuthorizedApproval(
