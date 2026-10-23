@@ -516,7 +516,7 @@ describe("control-plane inspection tools", () => {
     const runUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", runId);
     const runResource = await client.readResource({ uri: runUri });
     await expect(
-      client.readResource({ uri: `${RUNS_RESOURCE_URI}/${"00000000000000000000000099"}` }),
+      client.readResource({ uri: `${RUNS_RESOURCE_URI}/00000000000000000000000099` }),
     ).rejects.toThrow();
     await store.append(runId, [builders.modelRequest(runId, CONTENT_CANARY)], 6);
     await vi.waitFor(() => {

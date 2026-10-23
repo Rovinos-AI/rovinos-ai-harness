@@ -82,8 +82,9 @@ describe("createRuntime model routing", () => {
       const result = await runtime.start("synthetic progress goal", { onProgress: progress })
         .completion;
       expect(result.status).toBe("completed");
-      expect(progress).toHaveBeenCalledOnce();
-      expect(progress).toHaveBeenCalledWith(expect.objectContaining({ outputTokens: 4 }));
+      expect(progress).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ outputTokens: 4 }),
+      );
     } finally {
       await runtime.close();
     }

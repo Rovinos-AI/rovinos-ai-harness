@@ -220,8 +220,7 @@ describe("control-plane transports", () => {
 
     await handle.close();
 
-    expect(mocks.serveStdio).toHaveBeenCalledOnce();
-    expect(mocks.serveStdio).toHaveBeenCalledWith(expect.any(Function), {
+    expect(mocks.serveStdio).toHaveBeenCalledExactlyOnceWith(expect.any(Function), {
       maxSubscriptions: 50,
     });
   });
@@ -260,8 +259,7 @@ describe("control-plane transports", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(mocks.httpRequestHandler).toHaveBeenCalledOnce();
     await handle.close();
-    expect(mocks.createMcpHandler).toHaveBeenCalledOnce();
-    expect(mocks.createMcpHandler).toHaveBeenCalledWith(expect.any(Function), {
+    expect(mocks.createMcpHandler).toHaveBeenCalledExactlyOnceWith(expect.any(Function), {
       maxSubscriptions: 50,
     });
     expect(mocks.createServer).toHaveBeenCalledOnce();

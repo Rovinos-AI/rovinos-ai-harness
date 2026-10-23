@@ -34,13 +34,9 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
       ) => Promise<unknown>,
     ) {
       if (method === "tools/list") {
-        bridgeMocks.handleListTools.mockImplementation(
-          handler as (params: { readonly cursor?: string } | undefined) => Promise<unknown>,
-        );
+        bridgeMocks.handleListTools.mockImplementation(handler);
       } else {
-        bridgeMocks.handleSubscribe.mockImplementation(
-          handler as (params: { readonly resourceUri: string }) => Promise<unknown>,
-        );
+        bridgeMocks.handleSubscribe.mockImplementation(handler);
       }
     }
     connect = bridgeMocks.connect;

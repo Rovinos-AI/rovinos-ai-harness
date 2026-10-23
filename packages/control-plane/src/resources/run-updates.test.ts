@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
+import type { Id } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { describe, expect, it, vi } from "vitest";

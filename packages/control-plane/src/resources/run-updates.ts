@@ -16,6 +16,7 @@ export class RunResourceUpdatesError extends HarnessError {
   }
 }
 
+/** Optional concurrency and error-reporting controls for resource update watchers. */
 export interface RunResourceUpdatesOptions {
   readonly maxWatchers?: number;
   readonly onError?: (error: RunResourceUpdatesError) => void;
