@@ -34,6 +34,8 @@ export interface RunsConsoleBridge {
     readonly isError?: boolean | undefined;
     readonly structuredContent?: unknown;
   }>;
+  /** Registers an optional run-resource update listener and returns its disposer. */
+  subscribeRuns?(onUpdate: () => void): () => void;
   openApproval(approvalId: string): Promise<void>;
 }
 
@@ -67,6 +69,7 @@ class RunsConsoleController implements RunsConsoleView {
   private readonly layout: RunsConsoleLayout;
   private readonly now: () => number;
   private timer: number | undefined;
+  private unsubscribeRuns: (() => void) | undefined;
   private pollDelay = pollIntervalMs;
   private refreshing = false;
   private refreshRequested = false;
@@ -95,6 +98,13 @@ class RunsConsoleController implements RunsConsoleView {
     this.layout.loadMoreButton.addEventListener("click", this.loadMoreClicked);
     this.layout.filter.addEventListener("change", this.filterChanged);
     this.document.addEventListener("visibilitychange", this.visibilityChanged);
+    try {
+      this.unsubscribeRuns = options.bridge.subscribeRuns?.(() => {
+        void this.refresh();
+      });
+    } catch {
+      this.unsubscribeRuns = undefined;
+    }
     void this.refresh();
   }
 
@@ -315,7 +325,9 @@ class RunsConsoleController implements RunsConsoleView {
         this.refreshRequested = false;
         void this.refresh();
       } else {
-        this.schedule(this.pollDelay);
+        if (this.unsubscribeRuns === undefined) {
+          this.schedule(this.pollDelay);
+        }
       }
     }
   }
@@ -381,7 +393,9 @@ class RunsConsoleController implements RunsConsoleView {
       }
     } finally {
       this.refreshing = false;
-      this.schedule(this.pollDelay);
+      if (this.unsubscribeRuns === undefined) {
+        this.schedule(this.pollDelay);
+      }
       if (this.refreshRequested) {
         this.refreshRequested = false;
         void this.refresh();
@@ -395,6 +409,8 @@ class RunsConsoleController implements RunsConsoleView {
     }
     this.disposed = true;
     this.clearTimer();
+    this.unsubscribeRuns?.();
+    this.unsubscribeRuns = undefined;
     this.clearTelemetryActivationTimers();
     this.detailGeneration += 1;
     this.layout.refreshButton.removeEventListener("click", this.refreshClicked);

@@ -34,7 +34,12 @@ export const listRunsOutputSchema = z
   .strict();
 
 /** Validated input for the `get_run` tool. */
-export const getRunInputSchema = z.object({ runId: Id }).strict();
+export const getRunInputSchema = z
+  .object({
+    runId: Id,
+    sinceSeq: z.number().int().nonnegative().optional(),
+  })
+  .strict();
 
 /** Validated input for the `approve` tool. */
 export const approveInputSchema = z
@@ -114,7 +119,10 @@ const pendingApprovalSchema = z
 export const getRunOutputSchema = z
   .object({
     runId: Id,
+    createdAt: z.number().int().nonnegative(),
     status: RunStatus,
+    lastSeq: z.number().int().nonnegative(),
+    lastTs: z.number().int().nonnegative(),
     steps: z.number().int().nonnegative(),
     usage: z
       .object({

@@ -218,6 +218,9 @@ describe("control-plane transports", () => {
     await handle.close();
 
     expect(mocks.serveStdio).toHaveBeenCalledOnce();
+    expect(mocks.serveStdio).toHaveBeenCalledWith(expect.any(Function), {
+      maxSubscriptions: 50,
+    });
   });
 
   it("routes only the MCP endpoint and rejects untrusted Host and Origin values", async () => {
@@ -254,6 +257,9 @@ describe("control-plane transports", () => {
     expect(mocks.httpRequestHandler).toHaveBeenCalledOnce();
     await handle.close();
     expect(mocks.createMcpHandler).toHaveBeenCalledOnce();
+    expect(mocks.createMcpHandler).toHaveBeenCalledWith(expect.any(Function), {
+      maxSubscriptions: 50,
+    });
     expect(mocks.createServer).toHaveBeenCalledOnce();
   });
 

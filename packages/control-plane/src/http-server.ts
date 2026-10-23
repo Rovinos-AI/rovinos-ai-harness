@@ -28,6 +28,7 @@ import {
 } from "./auth.js";
 import { controlPlaneHttpPortSchema } from "./schemas.js";
 import type { ControlPlaneServerOptions } from "./server.js";
+import { startRunResourceUpdates } from "./resources/run-updates.js";
 
 const HTTP_PATH = "/mcp";
 const HTTP_TOOL = Code.parse("http_request");
@@ -87,7 +88,16 @@ export async function startControlPlaneHttpTransport({
     controlPlane,
     onAudit: options.onAudit ?? emitControlPlaneAudit,
   });
-  const handler = createMcpHandler(() => createMcpServer(store, sharedOptions));
+  let notifyResourceUpdated: ((uri: string) => void) | undefined;
+  const handler = createMcpHandler(
+    () =>
+      createMcpServer(store, {
+        ...sharedOptions,
+        subscribeRunUpdates: false,
+      }),
+    { maxSubscriptions: 50 },
+  );
+  notifyResourceUpdated = (uri) => handler.notify.resourceUpdated(uri);
   const requestHandler = toNodeHandler(handler);
   const limiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
   const failedAuthLimiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
@@ -106,13 +116,17 @@ export async function startControlPlaneHttpTransport({
   if (address === null || typeof address === "string") {
     throw new ControlPlaneListenError();
   }
+  const resourceUpdates = startRunResourceUpdates(store, (uri) => notifyResourceUpdated?.(uri));
   const endpointHost = controlPlane.listen.host.includes(":")
     ? `[${controlPlane.listen.host.replaceAll(/^\[|\]$/g, "")}]`
     : controlPlane.listen.host;
   const scheme = controlPlane.tls === undefined ? "http" : "https";
   return {
     endpoint: `${scheme}://${endpointHost}:${String(address.port)}${HTTP_PATH}`,
-    close: () => closeServer(server),
+    async close() {
+      await resourceUpdates.close();
+      await closeServer(server);
+    },
   };
 }
 

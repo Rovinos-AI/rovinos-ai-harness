@@ -6,6 +6,8 @@ import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, Token } from "@harness/vault";
 import { request } from "node:http";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { RUNS_RESOURCE_URI, RUN_RESOURCE_URI_TEMPLATE } from "./resources/runs.js";
 import type { ControlPlaneServerOptions } from "./server.js";
 import { startControlPlaneHttp } from "./server.js";
 
@@ -222,6 +224,56 @@ describe("control-plane HTTP transport", () => {
       expect(startRun).not.toHaveBeenCalled();
       expect(continueRun).not.toHaveBeenCalled();
     } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("delivers ordered, content-free run resource updates over subscriptions/listen", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    await store.append(
+      runId,
+      [builders.runCreated(runId), builders.runStatusChanged(runId, "pending", "running")],
+      0,
+    );
+    const server = await startControlPlaneHttp(store, 0, controlPlaneOptions());
+    const client = new Client(
+      { name: "control-plane-run-updates-test", version: "1.0.0" },
+      { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+    );
+    const updates: string[] = [];
+    client.setNotificationHandler(
+      "notifications/resources/updated",
+      { params: z.object({ uri: z.string() }).passthrough() },
+      ({ uri }) => {
+        updates.push(uri);
+      },
+    );
+    const runUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", runId);
+    let subscription: Awaited<ReturnType<typeof client.listen>> | undefined;
+    try {
+      await client.connect(createHttpTransport(server.endpoint));
+      subscription = await client.listen({
+        resourceSubscriptions: [RUNS_RESOURCE_URI, runUri],
+      });
+
+      const canary = "MCP_RUN_UPDATE_CONTENT_CANARY";
+      await store.append(runId, [builders.modelRequest(runId, canary)], 2);
+      await store.append(
+        runId,
+        [builders.checkpointWritten(runId, builders.nextRunId(), 101)],
+        3,
+      );
+      await vi.waitFor(() => {
+        expect(updates).toEqual([RUNS_RESOURCE_URI, runUri, RUNS_RESOURCE_URI, runUri]);
+      });
+
+      expect(JSON.stringify(updates)).not.toContain(canary);
+    } finally {
+      await subscription?.close();
       await client.close();
       await server.close();
       await store.close();

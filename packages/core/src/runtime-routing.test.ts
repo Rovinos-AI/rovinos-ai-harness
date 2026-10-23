@@ -51,6 +51,46 @@ afterEach(async () => {
 });
 
 describe("createRuntime model routing", () => {
+  it("forwards count-only progress from a started run to its subscriber", async () => {
+    const progress = vi.fn();
+    const runtime = await createRuntime(
+      { run: RunConfigSchema.parse({}) },
+      {
+        store: new InMemoryEventStore(),
+        model: {
+          complete: (request, context) => {
+            context.onProgress?.({ requestId: request.requestId, outputTokens: 4 });
+            return Promise.resolve({
+              parts: [{ type: "text", text: "finished" }],
+              usage: { inputTokens: 1, outputTokens: 4 },
+              finishReason: "stop",
+              provider: "test",
+              model: "test",
+              latencyMs: 0,
+              schemaValid: true,
+              repairAttempts: 0,
+              fallbackDepth: 0,
+              providerBlobs: null,
+            });
+          },
+        },
+        policy: allowAllPolicy,
+        transientVault: true,
+      },
+    );
+    try {
+      const result = await runtime.start("synthetic progress goal", { onProgress: progress })
+        .completion;
+      expect(result.status).toBe("completed");
+      expect(progress).toHaveBeenCalledOnce();
+      expect(progress).toHaveBeenCalledWith(
+        expect.objectContaining({ outputTokens: 4 }),
+      );
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("re-enqueues approval resumption when an already-resolved approval is retried", async () => {
     const enqueued: { readonly kind: string; readonly runId: string }[] = [];
     const queuedJob: RunQueueJob = {
