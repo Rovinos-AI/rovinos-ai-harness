@@ -28,6 +28,10 @@ const jobSchema = z.looseObject({
 const workflowSchema = z.looseObject({
   on: z.record(z.string(), z.unknown()),
   permissions: z.record(z.string(), z.string()),
+  concurrency: z.looseObject({
+    group: z.string(),
+    "cancel-in-progress": z.boolean(),
+  }),
   jobs: z.record(z.string(), jobSchema),
 });
 const actionSchema = z.looseObject({
@@ -74,6 +78,14 @@ describe("CI workflow", () => {
 
   it("grants the token read-only repository access", () => {
     expect(readWorkflow().permissions).toEqual({ contents: "read" });
+  });
+
+  it("isolates draft and ready pull request concurrency groups", () => {
+    expect(readWorkflow().concurrency).toEqual({
+      group:
+        "ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.draft }}",
+      "cancel-in-progress": true,
+    });
   });
 
   it("runs the stages in order and skips draft pull requests", () => {
