@@ -47,6 +47,7 @@ export interface HostRequest extends AsyncIterable<Uint8Array | string> {
 /** Minimal HTTP response contract shared by the server and its tests. */
 export interface HostResponse {
   readonly headersSent: boolean;
+  onClose?(listener: () => void): () => void;
   writeHead(status: number, headers: Record<string, string>): void;
   write(value: string): boolean;
   end(value?: string | Buffer): void;
@@ -130,4 +131,10 @@ export interface ReferenceHostDependencies {
   readonly runId?: Id;
   /** Injectable UI-session expiry timer; returns a function that cancels it. */
   readonly scheduleUiSessionExpiry?: (callback: () => void, delayMs: number) => () => void;
+  /** Subscribes an app session to content-free resource URI updates. */
+  readonly subscribeResourceUpdates?: (
+    resourceUri: string,
+    onUpdate: () => void,
+    onClose: () => void,
+  ) => (() => void) | undefined;
 }

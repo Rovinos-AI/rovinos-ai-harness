@@ -36,7 +36,14 @@ import type {
 } from "@harness/vault";
 import type { PiiMessageSanitizer, Tokenizer } from "@harness/pii";
 import type { WorkspacePort } from "@harness/context";
-import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
+import type {
+  ContextPort,
+  IdGenerator,
+  ModelPort,
+  PolicyPort,
+  RunContext,
+  ToolPort,
+} from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
@@ -139,7 +146,12 @@ export interface Runtime {
   /** Starts a run and exposes when its initial events are durable and when execution settles. */
   start(
     goal: JsonValue,
-    options?: { readonly role?: Code; readonly runId?: Id; readonly requestedBy?: Principal },
+    options?: {
+      readonly role?: Code;
+      readonly runId?: Id;
+      readonly requestedBy?: Principal;
+      readonly onProgress?: NonNullable<RunContext["onProgress"]>;
+    },
   ): RuntimeRunHandle;
   /** Starts a follow-up run and exposes durable startup and eventual completion. */
   continueRun(

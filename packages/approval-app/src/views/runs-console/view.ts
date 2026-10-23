@@ -8,6 +8,7 @@ import {
 } from "@harness/schemas/browser";
 import { createEmptyState } from "../../kit/components.js";
 import { getStrings } from "../../kit/strings.js";
+import { nextVisibleRunPage, runsConsolePageSize, runsConsoleResultValue } from "./list.js";
 import {
   createRunsConsoleLayout,
   renderRunDetail,
@@ -21,7 +22,6 @@ const pollIntervalMs = 5_000;
 const maxPollIntervalMs = 60_000;
 const maxTelemetryActivationWaitMs = 2_500;
 const telemetryActivationPollMs = 25;
-const pageSize = 20;
 
 type RunsTelemetry = AppTelemetry<readonly ["ui.render", "ui.error", "ui.interaction"]>;
 
@@ -34,6 +34,8 @@ export interface RunsConsoleBridge {
     readonly isError?: boolean | undefined;
     readonly structuredContent?: unknown;
   }>;
+  /** Registers an optional run-resource listener and reports when it is lost. */
+  subscribeRuns?(onUpdate: () => void, onError: () => void): () => void;
   openApproval(approvalId: string): Promise<void>;
 }
 
@@ -50,16 +52,6 @@ export interface RunsConsoleView {
   dispose(): void;
 }
 
-function resultValue(result: {
-  readonly isError?: boolean | undefined;
-  readonly structuredContent?: unknown;
-}): unknown {
-  if (result.isError === true || result.structuredContent === undefined) {
-    throw new Error("runs_console_tool_failed");
-  }
-  return result.structuredContent;
-}
-
 class RunsConsoleController implements RunsConsoleView {
   private readonly document: Document;
   private readonly window: Window;
@@ -67,6 +59,7 @@ class RunsConsoleController implements RunsConsoleView {
   private readonly layout: RunsConsoleLayout;
   private readonly now: () => number;
   private timer: number | undefined;
+  private unsubscribeRuns: (() => void) | undefined;
   private pollDelay = pollIntervalMs;
   private refreshing = false;
   private refreshRequested = false;
@@ -95,6 +88,27 @@ class RunsConsoleController implements RunsConsoleView {
     this.layout.loadMoreButton.addEventListener("click", this.loadMoreClicked);
     this.layout.filter.addEventListener("change", this.filterChanged);
     this.document.addEventListener("visibilitychange", this.visibilityChanged);
+    const subscriptionState = { ready: false, failed: false };
+    try {
+      this.unsubscribeRuns = options.bridge.subscribeRuns?.(
+        () => {
+          void this.refresh();
+        },
+        () => {
+          if (subscriptionState.ready) {
+            this.subscriptionFailed();
+          } else {
+            subscriptionState.failed = true;
+          }
+        },
+      );
+      subscriptionState.ready = true;
+      if (subscriptionState.failed) {
+        this.subscriptionFailed();
+      }
+    } catch {
+      this.unsubscribeRuns = undefined;
+    }
     void this.refresh();
   }
 
@@ -147,6 +161,18 @@ class RunsConsoleController implements RunsConsoleView {
       this.window.clearTimeout(this.timer);
       this.timer = undefined;
     }
+  }
+
+  private subscriptionFailed(): void {
+    const unsubscribe = this.unsubscribeRuns;
+    this.unsubscribeRuns = undefined;
+    try {
+      unsubscribe?.();
+    } catch {
+      this.schedule(this.pollDelay);
+      return;
+    }
+    this.schedule(this.pollDelay);
   }
 
   private currentFilter(): string | undefined {
@@ -208,7 +234,7 @@ class RunsConsoleController implements RunsConsoleView {
 
   private async getRunDetail(runId: string): Promise<RunConsoleDetail> {
     const response = await this.options.bridge.callTool(detailTool, { runId });
-    return RunConsoleDetailSchema.parse(resultValue(response));
+    return RunConsoleDetailSchema.parse(runsConsoleResultValue(response));
   }
 
   private async openApproval(run: RunConsoleRun): Promise<void> {
@@ -282,10 +308,10 @@ class RunsConsoleController implements RunsConsoleView {
     const requestedFilter = this.currentFilter();
     try {
       const response = await this.options.bridge.callTool(listTool, {
-        limit: pageSize,
+        limit: runsConsolePageSize,
         ...(requestedFilter === undefined ? {} : { status: requestedFilter }),
       });
-      const parsed = RunConsoleListSchema.parse(resultValue(response));
+      const parsed = RunConsoleListSchema.parse(runsConsoleResultValue(response));
       if (!this.currentFilterMatches(requestedFilter)) {
         this.refreshRequested = true;
         return;
@@ -315,47 +341,15 @@ class RunsConsoleController implements RunsConsoleView {
         this.refreshRequested = false;
         void this.refresh();
       } else {
-        this.schedule(this.pollDelay);
+        if (this.unsubscribeRuns === undefined) {
+          this.schedule(this.pollDelay);
+        }
       }
     }
   }
 
   private updateLoadMoreButton(): void {
     this.layout.loadMoreButton.hidden = this.nextCursor === undefined;
-  }
-
-  private async nextVisiblePage(
-    requestedFilter: string | undefined,
-    firstCursor: string,
-  ): Promise<ReturnType<typeof RunConsoleListSchema.parse> | undefined> {
-    let cursor = firstCursor;
-    const seenCursors = new Set<string>();
-    while (!seenCursors.has(cursor)) {
-      seenCursors.add(cursor);
-      const response = await this.options.bridge.callTool(listTool, {
-        limit: pageSize,
-        cursor,
-        ...(requestedFilter === undefined ? {} : { status: requestedFilter }),
-      });
-      const page = RunConsoleListSchema.parse(resultValue(response));
-      if (!this.currentFilterMatches(requestedFilter)) {
-        this.refreshRequested = true;
-        return undefined;
-      }
-      if (page.runs.length > 0) {
-        return {
-          runs: page.runs,
-          ...(page.nextCursor === undefined || seenCursors.has(page.nextCursor)
-            ? {}
-            : { nextCursor: page.nextCursor }),
-        };
-      }
-      if (page.nextCursor === undefined || seenCursors.has(page.nextCursor)) {
-        return { runs: [] };
-      }
-      cursor = page.nextCursor;
-    }
-    return { runs: [] };
   }
 
   private async loadMore(): Promise<void> {
@@ -367,7 +361,12 @@ class RunsConsoleController implements RunsConsoleView {
     const requestedFilter = this.currentFilter();
     const cursor = this.nextCursor;
     try {
-      const page = await this.nextVisiblePage(requestedFilter, cursor);
+      const page = await nextVisibleRunPage(this.options.bridge, requestedFilter, cursor, () =>
+        this.currentFilterMatches(requestedFilter),
+      );
+      if (page === undefined && !this.currentFilterMatches(requestedFilter)) {
+        this.refreshRequested = true;
+      }
       if (page !== undefined && this.currentFilterMatches(requestedFilter)) {
         this.runs = [...this.runs, ...page.runs];
         this.nextCursor = page.nextCursor;
@@ -381,7 +380,9 @@ class RunsConsoleController implements RunsConsoleView {
       }
     } finally {
       this.refreshing = false;
-      this.schedule(this.pollDelay);
+      if (this.unsubscribeRuns === undefined) {
+        this.schedule(this.pollDelay);
+      }
       if (this.refreshRequested) {
         this.refreshRequested = false;
         void this.refresh();
@@ -395,6 +396,8 @@ class RunsConsoleController implements RunsConsoleView {
     }
     this.disposed = true;
     this.clearTimer();
+    this.unsubscribeRuns?.();
+    this.unsubscribeRuns = undefined;
     this.clearTelemetryActivationTimers();
     this.detailGeneration += 1;
     this.layout.refreshButton.removeEventListener("click", this.refreshClicked);

@@ -39,6 +39,10 @@ import {
 } from "./tools/approvals-app.js";
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
+import { registerRunResources } from "./resources/runs.js";
+import type { RunResourceUpdatesError } from "./resources/run-updates.js";
+import { configureRunResourceUpdates } from "./resources/server-updates.js";
+import type { ModelProgress } from "@harness/models";
 import {
   controlPlanePrincipal,
   hasControlPlaneScope,
@@ -60,6 +64,7 @@ export interface ControlPlaneOperations {
     input: StartRunInput & {
       readonly requestedBy: Principal;
       readonly allowedExistingRunIds?: readonly Id[];
+      readonly onProgress?: (progress: ModelProgress) => void;
     },
   ) => Promise<{ readonly runId: Id; readonly status: RunStatus }>;
   readonly continueRun?: (
@@ -116,6 +121,12 @@ export interface ControlPlaneServerOptions {
   readonly runsConsoleHtml?: string;
   /** Optional URL shown to text-only clients as an approval fallback. */
   readonly consoleUrl?: string;
+  /** Publishes resource changes through the serving entry's subscription bus. */
+  readonly onResourceUpdated?: (uri: string) => void;
+  /** Defaults to true; HTTP transport owns one shared watch instead of one per session. */
+  readonly subscribeRunUpdates?: boolean;
+  /** Receives typed failures when live run watchers exceed their configured bound. */
+  readonly onRunResourceUpdateError?: (error: RunResourceUpdatesError) => void;
 }
 
 /** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
@@ -136,10 +147,12 @@ export function createControlPlaneServer(
     },
     { requestState: { verify: confirmationGate.verifyRequestState } },
   );
-  server.server.registerCapabilities({ tools: {} });
+  server.server.registerCapabilities({ tools: {}, resources: { subscribe: true } });
+  configureRunResourceUpdates(server, store, options);
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);
   registerRunInspection(server, store, options);
+  registerRunResources(server, store, options.onAudit);
   registerConfiguredApprovalTools({
     server,
     store,
@@ -333,7 +346,7 @@ export function startControlPlaneStdio(
   options: ControlPlaneServerOptions = {},
 ): StdioServerHandle {
   const sharedOptions = withSharedControlPlaneState(store, options);
-  return serveStdio(() => createControlPlaneServer(store, sharedOptions));
+  return serveStdio(() => createControlPlaneServer(store, sharedOptions), { maxSubscriptions: 50 });
 }
 
 /** Starts an authenticated HTTP MCP endpoint with TLS, Host, Origin, scope, and rate checks. */

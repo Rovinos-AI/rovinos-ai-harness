@@ -6,6 +6,8 @@ import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, Token } from "@harness/vault";
 import { request } from "node:http";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { RUNS_RESOURCE_URI, RUN_RESOURCE_URI_TEMPLATE } from "./resources/runs.js";
 import type { ControlPlaneServerOptions } from "./server.js";
 import { startControlPlaneHttp } from "./server.js";
 
@@ -222,6 +224,113 @@ describe("control-plane HTTP transport", () => {
       expect(startRun).not.toHaveBeenCalled();
       expect(continueRun).not.toHaveBeenCalled();
     } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("delivers ordered, content-free run resource updates over subscriptions/listen", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    await store.append(
+      runId,
+      [builders.runCreated(runId), builders.runStatusChanged(runId, "pending", "running")],
+      0,
+    );
+    const server = await startControlPlaneHttp(store, 0, controlPlaneOptions());
+    const client = new Client(
+      { name: "control-plane-run-updates-test", version: "1.0.0" },
+      { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+    );
+    const updates: string[] = [];
+    client.setNotificationHandler(
+      "notifications/resources/updated",
+      { params: z.object({ uri: z.string() }).loose() },
+      ({ uri }) => {
+        updates.push(uri);
+      },
+    );
+    const runUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", runId);
+    let subscription: Awaited<ReturnType<typeof client.listen>> | undefined;
+    try {
+      await client.connect(createHttpTransport(server.endpoint));
+      subscription = await client.listen({
+        resourceSubscriptions: [RUNS_RESOURCE_URI, runUri],
+      });
+
+      const canary = "MCP_RUN_UPDATE_CONTENT_CANARY";
+      await store.append(runId, [builders.modelRequest(runId, canary)], 2);
+      await store.append(runId, [builders.checkpointWritten(runId, builders.nextRunId(), 101)], 3);
+      await vi.waitFor(() => {
+        expect(updates).toEqual([RUNS_RESOURCE_URI, runUri, RUNS_RESOURCE_URI, runUri]);
+      });
+
+      expect(JSON.stringify(updates)).not.toContain(canary);
+    } finally {
+      await subscription?.close();
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("authorizes run subscriptions and filters list updates to a token's runIds", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const allowedRunId = builders.nextRunId();
+    const deniedRunId = builders.nextRunId();
+    for (const runId of [allowedRunId, deniedRunId]) {
+      await store.append(
+        runId,
+        [builders.runCreated(runId), builders.runStatusChanged(runId, "pending", "running")],
+        0,
+      );
+    }
+    const server = await startControlPlaneHttp(
+      store,
+      0,
+      controlPlaneOptions({}, ["read"], [allowedRunId]),
+    );
+    const client = new Client(
+      { name: "control-plane-restricted-run-updates-test", version: "1.0.0" },
+      { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+    );
+    const updates: string[] = [];
+    client.setNotificationHandler(
+      "notifications/resources/updated",
+      { params: z.object({ uri: z.string() }).loose() },
+      ({ uri }) => {
+        updates.push(uri);
+      },
+    );
+    const allowedUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", allowedRunId);
+    const deniedUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", deniedRunId);
+    let subscription: Awaited<ReturnType<typeof client.listen>> | undefined;
+    try {
+      await client.connect(createHttpTransport(server.endpoint));
+      await expect(client.listen({ resourceSubscriptions: [deniedUri] })).rejects.toThrow();
+      subscription = await client.listen({
+        resourceSubscriptions: [RUNS_RESOURCE_URI, allowedUri],
+      });
+
+      await store.append(
+        deniedRunId,
+        [builders.checkpointWritten(deniedRunId, builders.nextRunId(), 101)],
+        2,
+      );
+      await store.append(
+        allowedRunId,
+        [builders.checkpointWritten(allowedRunId, builders.nextRunId(), 102)],
+        2,
+      );
+      await vi.waitFor(() => {
+        expect(updates).toEqual([allowedUri, RUNS_RESOURCE_URI]);
+      });
+      expect(updates).not.toContain(deniedUri);
+    } finally {
+      await subscription?.close();
       await client.close();
       await server.close();
       await store.close();

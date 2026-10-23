@@ -1,0 +1,196 @@
+# SPDX-License-Identifier: Apache-2.0
+# CI on GitHub-hosted runners (task 1.21): the same static, unit, integration, and gates stages as
+# azure-pipelines.yml, which keeps running in parallel until this workflow has proven itself.
+#
+# No CI on pushes to main: every change reaches main through a PR whose run already tested the
+# merged result (the pull_request merge ref). Draft PRs skip every job, so Copilot PRs build only
+# once they are marked ready.
+#
+# Security: runs only on `pull_request` (never `pull_request_target`), with a read-only token and no
+# secrets, so fork PRs execute on GitHub's machines without access to anything privileged. The
+# repository setting "Require approval for all outside collaborators" gates fork runs behind a
+# maintainer (docs/maintainers/branch-protection.md). Every action is pinned to a commit SHA.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Check telemetry schemas and random strings
+        run: yarn lint:telemetry
+      - name: Check telemetry attribute catalog
+        run: yarn docs:catalog --check
+      - name: Check Collector allowlist
+        run: yarn gen:collector --check
+      - name: Check synthetic PII corpus determinism
+        run: yarn check:pii-corpus
+      - name: Lint
+        run: yarn lint
+        # Scoped to this step so unit tests never inherit it; they must not depend on the environment.
+        env:
+          LINT_PULL_IMAGES: "1"
+      - name: Typecheck
+        run: yarn typecheck
+      - name: Build packages for policy fixture commands
+        run: yarn build
+      - name: Validate Compose security profiles
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/compose/validate.ts
+      - name: Test policy examples
+        run: >
+          node packages/cli/dist/bin.js policy test
+          --policy examples/policy-tests/policy.yaml
+          --calls examples/policy-tests/calls.jsonl
+          --expect examples/policy-tests/expectations.jsonl
+          --explain
+      - name: Lint policy examples
+        run: node packages/cli/dist/bin.js policy lint --policy examples/policy-tests/policy.yaml
+      - name: Check agent index
+        run: yarn check:agents
+      - name: Check SPDX headers
+        run: yarn check:spdx
+      - name: Check dependency licenses
+        run: yarn check:licenses
+      - name: Check sandbox threat test coverage
+        run: yarn check:threat-cases
+      - name: Check DCO sign-offs
+        if: github.event_name == 'pull_request'
+        run: yarn check:dco
+        env:
+          TARGET_BRANCH: ${{ github.base_ref }}
+
+  unit:
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Build detector packages for the PII report
+        run: yarn build
+      # Two workers on the 4-vCPU hosted runner, keeping the Mac agent's ratio (4 workers on 10
+      # cores). Four workers plus coverage saturate the runner, and CPU-heavy tests (TypeScript
+      # emit, type-aware ESLint) then overran their timeouts (#565, #567).
+      - name: Unit tests
+        run: >
+          yarn test:unit
+          --reporter=default --reporter=junit
+          --outputFile.junit=reports/junit.xml
+          --maxWorkers=2
+          --coverage
+          --coverage.reportOnFailure
+          --coverage.reporter=text-summary --coverage.reporter=cobertura
+      - name: Regex detector precision and recall report
+        run: yarn pii:report --mode regex --out-dir reports/pii-report-regex
+      - name: Upload unit reports
+        if: success() || failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-reports
+          path: |
+            reports/junit.xml
+            reports/pii-report-regex
+            coverage/cobertura-coverage.xml
+          if-no-files-found: ignore
+
+  integration:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      COMPOSE_PROJECT_NAME: harness-ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Build schemas for worker-thread tests
+        run: yarn build:schemas
+      - name: Start Compose services and wait for health
+        run: scripts/ci/compose-wait.sh
+      - name: Build reference host browser bundle
+        run: yarn build:host
+      - name: Build approval app for the control-plane resource
+        run: yarn workspace @harness/approval-app build
+      # Use the root script: a direct `yarn workspaces foreach` step lacks the root node_modules/.bin on
+      # PATH, so workspaces without a local typescript pick up an older global tsc (TS6046).
+      - name: Build packages for Inspector conformance
+        run: yarn build
+      - name: Install Chromium and Linux dependencies
+        run: yarn workspace @harness/host exec playwright install --with-deps chromium
+      - name: Integration tests
+        run: >
+          yarn test:integration
+          --reporter=default --reporter=junit
+          --outputFile.junit=reports/integration-junit.xml
+        # The container linter fixtures run on a fresh runner, so they must pull the pinned images.
+        env:
+          TEST_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness
+          TEST_VAULT_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness_vault
+          LINT_PULL_IMAGES: "1"
+      - name: Presidio detector precision and recall report
+        if: success() || failure()
+        run: yarn pii:report --mode presidio --out-dir reports/pii-report-presidio
+      - name: Collect Compose logs
+        if: failure()
+        run: >
+          docker compose --env-file infra/collector/VERSION
+          -f infra/compose/docker-compose.test.yml logs --no-color
+          > reports/compose.log
+      - name: Upload integration reports
+        if: success() || failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-reports
+          path: |
+            reports/integration-junit.xml
+            reports/pii-report-presidio
+            reports/playwright-traces
+            reports/compose.log
+          if-no-files-found: ignore
+      - name: Stop Compose services
+        if: always()
+        run: docker compose --env-file infra/collector/VERSION -f infra/compose/docker-compose.test.yml down -v --remove-orphans
+
+  gates:
+    needs: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Canary release gate
+        run: >
+          yarn test:canary
+          --reporter=default --reporter=junit
+          --outputFile.junit=reports/canary-junit.xml
+      - name: Upload canary report
+        if: success() || failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canary-reports
+          path: reports/canary-junit.xml
+          if-no-files-found: ignore

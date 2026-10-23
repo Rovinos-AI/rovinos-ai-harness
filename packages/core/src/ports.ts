@@ -19,6 +19,7 @@ import type {
 import type { TranscriptGroup } from "@harness/context";
 import type { VaultAuditHandler } from "@harness/vault";
 import type {
+  ModelProgress,
   ModelGatewayResponse,
   TokenizedModelGatewayResponse,
   ValueTransform,
@@ -34,6 +35,8 @@ export type ModelRequest = SharedModelRequest;
 export interface RunContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** Count-only output progress emitted by the active model request. */
+  readonly onProgress?: (progress: ModelProgress) => void;
   /** Durable MRTR handler installed by the core tool step. */
   readonly elicitation?: ElicitationPort;
   /** Resolved MRTR responses for a retried MCP call. */
