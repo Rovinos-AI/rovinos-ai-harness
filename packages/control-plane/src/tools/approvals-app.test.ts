@@ -8,6 +8,7 @@ import { AuditingVaultResolver, Token } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmationGate } from "../confirmation-gate.js";
 import { ApprovalAppRevealRateLimiter, registerApprovalAppTools } from "./approvals-app.js";
+import { ApprovalAppInputSchema } from "@harness/schemas";
 
 const PRIVATE_CANARY = "private-canary@example.test";
 const PHONE_CANARY = "private-phone-canary@example.test";
@@ -199,6 +200,29 @@ afterEach(async () => {
 });
 
 describe("app-only approval tools", () => {
+  it("returns a validated payload only for an accessible pending approval", async () => {
+    const { store, client } = await connect();
+    const approval = await createApproval(store);
+
+    const result = await client.callTool({
+      name: "harness.approvals.get",
+      arguments: { approvalId: approval.approvalId },
+    });
+
+    expect(result.isError).not.toBe(true);
+    const output = ApprovalAppInputSchema.parse(result.structuredContent);
+    expect(output).toMatchObject({
+      approvalId: approval.approvalId,
+      payload: { summary: "Review this request." },
+    });
+    const denied = await client.callTool({
+      name: "harness.approvals.get",
+      arguments: { approvalId: "00000000000000000000000099" },
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.content).toEqual([{ type: "text", text: "approval_not_found" }]);
+  });
+
   it("resolves an allowed edit through the runtime operation", async () => {
     const resolveApproval = vi.fn(() => Promise.resolve(undefined));
     const audits: unknown[] = [];

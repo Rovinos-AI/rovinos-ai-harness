@@ -77,6 +77,8 @@ import {
   type SandboxBackend,
 } from "@harness/sandbox";
 import { InMemoryEventStore, type EventStore } from "@harness/store";
+import { createEventBuilders } from "@harness/store/testing";
+import { createPolicyCheckedAppCallHandler } from "@harness/host";
 import { SqliteEventStore } from "@harness/store-sqlite";
 import { ProviderError, type ProviderAdapter } from "@harness/models";
 import { FakeProvider } from "@harness/models/testing";
@@ -1299,6 +1301,187 @@ describe("MCP runtime", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+});
+
+async function appApprovalFixture() {
+  const directory = await mkdtemp(".e2e-app-approval-");
+  const ids = new SequentialIdGenerator();
+  const runId = Id.parse(ids.next());
+  const clock = new FakeClock(10);
+  const store = new InMemoryEventStore();
+  const builders = createEventBuilders();
+  const created = builders.runCreated(runId);
+  await store.append(
+    runId,
+    [
+      created,
+      {
+        runId,
+        ts: created.ts,
+        traceId: created.traceId,
+        spanId: created.spanId,
+        segmentId: created.segmentId,
+        v: 1,
+        type: "run_input",
+        inputKind: "initial",
+        input: "Synthetic app tool request",
+      },
+      builders.runStatusChanged(runId, "pending", "running"),
+    ],
+    0,
+  );
+  const execute = vi.fn<ToolPort["execute"]>(() =>
+    Promise.resolve({ outcome: "ok", result: { delivered: true } }),
+  );
+  const tool: ToolPort = {
+    describe: () => ({ idempotent: true, timeoutMs: 1000 }),
+    prepare: (call) => Promise.resolve(call),
+    execute,
+  };
+  let mode: "ask" | "allow" | "deny" = "ask";
+  const policy: PolicyPort = {
+    version: "app_approval_e2e",
+    decide: (_call, context) => ({
+      decision: context.app === "synthetic.app" ? mode : "deny",
+      ruleId: "app_review",
+      reason: "app_policy",
+      editable: ["/value"],
+      approvalTtlMs: 100,
+    }),
+  };
+  const config = { run: RunConfigSchema.parse({}) };
+  const overrides = {
+    store,
+    clock,
+    ids,
+    dataDir: directory,
+    transientVault: true,
+    sandboxBackend: unusedSandboxBackend,
+    tool,
+    policy,
+    model: new FakeModelPort([completion([], "Done")]),
+  };
+  const runtime = await createRuntime(config, overrides);
+  const handler = createPolicyCheckedAppCallHandler({
+    policy,
+    tool,
+    nextCallId: () => Id.parse(ids.next()),
+    onAppCallApproval: runtime.onAppCallApproval,
+  });
+  const call = {
+    type: "app_call" as const,
+    appId: Code.parse("synthetic.app"),
+    sessionId: Id.parse(ids.next()),
+    toolName: "synthetic.write",
+    arguments: { value: "synthetic.app@example.test" },
+  };
+  const response = handler(call, {
+    runId,
+    policyContext: { subagent: false, app: Code.parse("synthetic.app") },
+  });
+  await vi.waitFor(async () => {
+    expect(await runtime.hasPendingApproval(runId)).toBe(true);
+  });
+  const events = await readEvents(store, runId);
+  const approval = events.find((event) => event.type === "approval_requested");
+  if (approval?.type !== "approval_requested") {
+    throw new Error("Missing app approval");
+  }
+  return {
+    directory,
+    runtime,
+    response,
+    approval,
+    events,
+    runId,
+    store,
+    execute,
+    clock,
+    config,
+    overrides,
+    setMode: (value: typeof mode) => {
+      mode = value;
+    },
+  };
+}
+
+describe("app-call runtime approval", () => {
+  it.each(["approve", "deny", "edit", "edited_deny", "expiry", "crash"] as const)(
+    "uses the existing durable approval and resume path for %s",
+    async (decision) => {
+      const current = await appApprovalFixture();
+      let restarted: Awaited<ReturnType<typeof createRuntime>> | undefined;
+      try {
+        expect(current.execute).not.toHaveBeenCalled();
+        expect(foldRunState(current.events).status).toBe("suspended");
+        expect(current.events.filter((event) => event.type === "tool_intent")).toHaveLength(1);
+        expect(current.events.filter((event) => event.type === "approval_requested")).toHaveLength(
+          1,
+        );
+        expect(JSON.stringify(current.events)).not.toContain("synthetic.app@example.test");
+        const human = {
+          metadata: { decidedBy: "human" as const, approverId: Code.parse("cli.app_e2e") },
+        };
+        const edited = decision === "edit" || decision === "edited_deny";
+        if (decision === "expiry") {
+          await current.runtime.resolveApproval(
+            current.runId,
+            current.approval.approvalId,
+            "deny",
+            {
+              metadata: { decidedBy: "expiry", reason: Code.parse("expired") },
+            },
+          );
+        } else {
+          let resolution: "approve" | "deny" | "edit" = "approve";
+          if (edited) {
+            resolution = "edit";
+          }
+          if (decision === "deny") {
+            resolution = "deny";
+          }
+          await current.runtime.resolveApproval(
+            current.runId,
+            current.approval.approvalId,
+            resolution,
+            edited ? { ...human, edits: { value: "synthetic.edited@example.test" } } : human,
+          );
+        }
+        if (decision === "edit") {
+          current.setMode("allow");
+        }
+        if (decision === "edited_deny" || decision === "crash") {
+          current.setMode("deny");
+        }
+        if (decision === "crash") {
+          restarted = await createRuntime(current.config, current.overrides);
+        }
+        await (restarted ?? current.runtime).resume(current.runId);
+        const result = await current.response;
+        const allowed = decision === "approve" || decision === "edit";
+        expect(result.isError).toBe(!allowed);
+        expect(current.execute).toHaveBeenCalledTimes(allowed ? 1 : 0);
+        let expected = "app_policy";
+        if (allowed) {
+          expected = '{"delivered":true}';
+        }
+        if (decision === "deny") {
+          expected = "approval_denied";
+        }
+        if (decision === "expiry") {
+          expected = "approval_expired";
+        }
+        expect(result.content).toEqual([{ type: "text", text: expected }]);
+        const after = await readEvents(current.store, current.runId);
+        expect(after.filter((event) => event.type === "tool_intent")).toHaveLength(1);
+        expect(JSON.stringify(after)).not.toContain("synthetic.edited@example.test");
+      } finally {
+        await restarted?.close();
+        await current.runtime.close();
+        await rm(current.directory, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("approval", () => {

@@ -1,29 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id } from "@harness/schemas";
+import { HarnessError, type Id } from "@harness/schemas";
+import type { EventStore } from "@harness/store";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import {
   assertRuntimeOwnership,
   closeRuntimeResources,
   markTerminalBestEffort,
+  recoverRunControlError,
   withSandboxLease,
+  readRuntimeControlResult,
 } from "./runtime-lifecycle.js";
-import {
-  composeAbortSignals,
-  inspectCancellationTail,
-  watchCancellation,
-} from "./runtime-cancellation.js";
-import { type EventStore } from "@harness/store";
+import { composeAbortSignals, watchCancellation } from "./runtime-cancellation.js";
 import { cancelRun } from "./cancel.js";
 import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import { withResumeWakeUp } from "./runtime-approval-wake.js";
 import type { ToolPort } from "./ports.js";
-import { LeaseLostError, type Clock } from "./recorder.js";
+import type { Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { inheritedBudgets } from "./continue.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { RoleRegistry } from "./roles.js";
-import { foldRunState } from "./run-state.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createRuntimeToolPort } from "./runtime-tool-composition.js";
 import {
@@ -86,32 +83,6 @@ const defaultProcessLike: ShutdownProcessLike = {
   exit: (code) => process.exit(code),
 };
 
-async function readEvents(store: EventStore, runId: Id, fromSeq = 0): Promise<Event[]> {
-  const events: Event[] = [];
-  for await (const event of store.read(runId, { fromSeq })) {
-    events.push(event);
-  }
-  return events;
-}
-
-async function cancelledResult(
-  store: EventStore,
-  runId: Id,
-  firstNewSeq: number,
-): Promise<RunLoopResult | undefined> {
-  const events = await readEvents(store, runId);
-  const state = foldRunState(events);
-  if (state.status !== "cancelled") {
-    return undefined;
-  }
-  return {
-    status: state.status,
-    approvalIds: Array.from(state.pendingApprovals.keys()),
-    state,
-    events: events.filter((event) => event.seq >= firstNewSeq),
-  };
-}
-
 interface RunControlOptions {
   readonly store: EventStore;
   readonly runId: Id;
@@ -166,35 +137,26 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       result = await running;
       assertRuntimeOwnership(options.ownershipSignal);
     } catch (error) {
-      assertRuntimeOwnership(options.ownershipSignal);
-      if (error instanceof LeaseLostError) {
-        await inspectCancellationTail({
-          store: options.store,
-          runId: options.runId,
-          fromSeq: cursor.nextSeq,
-          controller,
-          onCursor: (nextSeq) => {
-            cursor.nextSeq = nextSeq;
-          },
-          onCancellation: () => {
-            cancellation.observed = true;
-          },
-        });
-      }
-      assertRuntimeOwnership(options.ownershipSignal);
-      if (cancellation.observed) {
-        const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
-        if (cancelled !== undefined) {
-          result = cancelled;
-        } else {
-          throw error;
-        }
-      } else {
+      const recovery = await recoverRunControlError({
+        error,
+        store: options.store,
+        runId: options.runId,
+        firstNewSeq: options.firstNewSeq,
+        nextSeq: cursor.nextSeq,
+        cancellationObserved: cancellation.observed,
+        controller,
+        ...(options.ownershipSignal === undefined
+          ? {}
+          : { ownershipSignal: options.ownershipSignal }),
+      });
+      cancellation.observed = recovery.cancellationObserved;
+      if (recovery.result === undefined) {
         throw error;
       }
+      result = recovery.result;
     }
     if (cancellation.observed) {
-      result = (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
+      result = (await readRuntimeControlResult(options, "cancelled")) ?? result;
     }
     result = await appendFinalRunTrips(result, options);
     tripsFinalized = true;
@@ -293,6 +255,7 @@ function composeRuntime(
     ...(options.instanceHeartbeat === undefined
       ? {}
       : { ownershipSignal: options.instanceHeartbeat.signal }),
+    approval: { tool, policy: options.policy, context: options.context, ids },
     ...(pii === undefined ? {} : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
   });
   return {

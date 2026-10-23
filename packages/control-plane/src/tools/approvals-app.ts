@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ApprovalPayloadSchema,
+  ApprovalAppGetRequestSchema,
+  ApprovalAppInputSchema,
   Code,
   ResolveRequest,
   ResolveResponse,
@@ -28,6 +30,7 @@ import { z } from "zod";
 
 const TOOL_RESOLVE = Code.parse("harness.approvals.resolve");
 const TOOL_REVEAL = Code.parse("harness.approvals.reveal");
+const TOOL_GET = Code.parse("harness.approvals.get");
 const unknownTokenId = Code.parse("unknown");
 
 /** Scope required by an app-only approval operation. */
@@ -99,8 +102,19 @@ export class ApprovalAppRevealRateLimiter {
   }
 }
 
-/** Registers strict app-only resolve and reveal tools. */
+/** Registers strict app-only approval payload, resolve, and reveal tools. */
 export function registerApprovalAppTools(server: McpServer, options: ApprovalAppToolOptions): void {
+  server.registerTool(
+    TOOL_GET,
+    {
+      description: "Load one pending approval into its human review view.",
+      inputSchema: ApprovalAppGetRequestSchema,
+      outputSchema: ApprovalAppInputSchema,
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    (input, context) => handleGetApprovalRequest(options, input, context),
+  );
   server.registerTool(
     TOOL_RESOLVE,
     {
@@ -123,6 +137,41 @@ export function registerApprovalAppTools(server: McpServer, options: ApprovalApp
     },
     (input, context) => handleRevealRequest(options, input, context),
   );
+}
+
+async function handleGetApprovalRequest(
+  options: ApprovalAppToolOptions,
+  input: unknown,
+  context: ServerContext,
+) {
+  const request = ApprovalAppGetRequestSchema.parse(input);
+  const pending = await findAccessiblePendingApproval({
+    options,
+    context,
+    approvalId: request.approvalId,
+    scope: "approve",
+  });
+  if (!pending.success) {
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: "approval_not_found" }],
+    };
+  }
+  const payload = ApprovalPayloadSchema.safeParse(pending.found.request.payload);
+  if (!payload.success) {
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: "approval_not_found" }],
+    };
+  }
+  const output = ApprovalAppInputSchema.parse({
+    approvalId: request.approvalId,
+    payload: payload.data,
+  });
+  return {
+    structuredContent: output,
+    content: [{ type: "text" as const, text: "Approval payload ready." }],
+  };
 }
 
 type FoundApproval = NonNullable<Awaited<ReturnType<typeof findApprovalRequest>>>;

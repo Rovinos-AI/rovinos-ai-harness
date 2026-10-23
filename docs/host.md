@@ -9,9 +9,30 @@ const host = await createReferenceHost(hostConfig, {
 });
 ```
 
-The host validates the resource MIME type (`text/html` with the exact `profile=mcp-app` parameter, allowing MIME casing and whitespace) and UTF-8 size (at most 1 MiB). A resource URI not present in `host.apps` returns the code `app_unknown`. Each launch receives a fresh ULID session ID. `host.maxUiSessions` defaults to 32 active sessions per host; further launches receive `app_session_limit` until an active session ends. `host.uiSessionMaxMs` defaults to 3,600,000 ms; expired sessions are ended, removed, and reported as `ui_session_expired`. The SDK `AppBridge` handles MCP Apps initialization, tool-input and tool-result notifications, and app tool calls. Calls are accepted only when their tool name is in that app's `allowedTools`. Supplying both `policy` and `tool` creates the default policy-checked handler: arguments are prepared through the tool port and policy sees `{ subagent: false, app: app.id }`. `deny` returns the rule reason without executing; `ask` returns `app_call_requires_approval` without executing. App-call approval suspension is a follow-up. An explicitly supplied `onAppCall` overrides this default and is responsible for preserving policy enforcement.
+The host validates the resource MIME type (`text/html` with the exact `profile=mcp-app` parameter, allowing MIME casing and whitespace) and UTF-8 size (at most 1 MiB). A resource URI not present in `host.apps` returns the code `app_unknown`. Each launch receives a fresh ULID session ID. `host.maxUiSessions` defaults to 32 active sessions per host; further launches receive `app_session_limit` until an active session ends. `host.uiSessionMaxMs` defaults to 3,600,000 ms; expired sessions are ended, removed, and reported as `ui_session_expired`. The SDK `AppBridge` handles MCP Apps initialization, tool-input and tool-result notifications, and app tool calls. Calls are accepted only when their tool name is in that app's `allowedTools`. Supplying both `policy` and `tool` creates the default policy-checked handler: arguments are prepared through the tool port and policy sees `{ subagent: false, app: app.id }`. `deny` returns the rule reason without executing. For `ask`, supply `onAppCallApproval` to persist a pending core approval, suspend and resume the run, and return the resulting tool result (or a typed denial/expiry error) to the app. The callback receives the already-prepared call and policy decision so its runtime adapter can reuse durable approval, edit re-evaluation, and resume handling. Hosts without that durable approval/resume integration fail closed with `app_call_requires_approval`. An explicitly supplied `onAppCall` overrides this default and is responsible for preserving policy enforcement.
 
 Telemetry calls remain local to the host. The default `harness.telemetry.emit` handler checks the serialized payload limit (16 KiB), the 50-span batch limit, and strict schemas for `ui.render`, `ui.decision`, `ui.error`, and `ui.interaction`. Each app session has a token bucket allowing a burst of 20 batches and a sustained rate of 10 batches per second; a batch over that rate returns `rate_limited`. `host.limits` can override `batchesPerSecond`, `batchBurst`, `spansPerMinute` (default 200), and `spansPerSessionLifetime` (default 2,000). Spans over either span cap are silently dropped and counted as `session_cap`; invalid spans are dropped independently and counted with bounded reasons. The handler returns only `{ accepted, dropped }`, and the metrics do not include app or session IDs. Attributes on accepted spans come from validated fields; the default handler does not include the raw app payload in spans or its acknowledgment. A host-supplied `onTelemetryEmit` callback replaces that default and is responsible for applying the same validation and limits, returning only that acknowledgment, and keeping app payloads local.
+
+## App-call approvals
+
+Runtime-backed hosts supply `runtime.onAppCallApproval`. An app call that matches an `ask` rule records
+the prepared, tokenized call as a tool intent and one pending approval, then
+suspends the run using the same durable approval/checkpoint path as model tool
+calls. The app's call remains pending until the approval is resolved and the
+run resumes.
+
+Approve through the normal approval interface, then resume the run (or enable
+automatic resume). Policy is evaluated again before execution, including when
+the human edits arguments or the process restarts after approval. The app
+receives the recorded tool result. Denial and expiry return typed errors
+instead of executing the tool.
+
+`app_call_requires_approval` is still returned when the host has no durable
+approval callback or its tool port has no sanitizing
+`prepare` step. In particular, the host never delegates raw arguments to a
+durable approval callback when preparation is unavailable.
+The runtime returns `app_run_unavailable` if the bound run is unavailable or
+cannot accept a new approval in its current state.
 
 ## Local channel
 

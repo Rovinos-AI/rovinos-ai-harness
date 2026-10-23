@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tool calls are sequential here; parallel execution can be added independently.
-import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
+import { HarnessError, type Code, type Event } from "@harness/schemas";
 import type { Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
 import { countPolicyDecision } from "@harness/telemetry";
 import type { Checkpointer } from "../checkpoint.js";
-import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
+import type { EventPartial } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
 import { recordDeniedResult } from "./tool-result.js";
 import type { IdGenerator, ModelToolCall, PolicyPort, RunContext, ToolPort } from "../ports.js";
-import { foldRunState, type ToolIntentEvent } from "../run-state.js";
+import { foldRunState } from "../run-state.js";
+import {
+  APP_APPROVAL_REASON,
+  appIntentDecision,
+  approvedAskMatches,
+  decideRecordedPolicy,
+} from "../app-approval-context.js";
 import {
   normalizeUnregisteredToolCall,
   prepareToolCall,
   type PreparedToolCall,
+  type RunToolCallBehavior,
 } from "./prepare-tool.js";
 import {
   decidePolicy,
@@ -23,23 +30,14 @@ import {
   requestPolicyApproval,
   setPolicySpanAttributes,
 } from "./policy-step.js";
-import type { ElicitationRetry } from "@harness/mcp";
 import { createToolExecutionContext } from "./tool-context.js";
 import {
   executePreparedTool,
   executedArgsHashField,
   executedArgsHashFor,
   hashArgs,
+  type ToolStepExecutionOptions,
 } from "./tool-execution.js";
-
-interface ToolStepExecutionOptions {
-  readonly recorder: RunRecorder;
-  readonly tool: ToolPort;
-  readonly clock: Clock;
-  readonly runId: Id;
-  readonly signal: AbortSignal;
-  readonly depth?: number;
-}
 
 /** Inputs needed to execute and record one or more tool calls. */
 export interface ToolStepOptions extends ToolStepExecutionOptions {
@@ -61,20 +59,12 @@ export interface ResumeToolStepOptions extends ToolStepExecutionOptions {
   readonly onEvents?: (events: readonly Event[]) => void;
 }
 
-interface RunToolCallBehavior {
-  readonly executedArgsHash?: string;
-  readonly compareArgsHash?: string;
-  readonly checkEditedPolicy?: boolean;
-  readonly existingIntent?: ToolIntentEvent;
-  readonly prepared?: PreparedToolCall;
-  readonly inputRetry?: ElicitationRetry;
-}
-
 function intentPartial(options: {
   readonly call: ModelToolCall;
   readonly description: ReturnType<ToolPort["describe"]>;
   readonly argsHash: string;
   readonly decision: ReturnType<typeof effectiveDecision>;
+  readonly app?: Code;
 }): Extract<EventPartial, { type: "tool_intent" }> {
   const intent: Extract<EventPartial, { type: "tool_intent" }> = {
     type: "tool_intent",
@@ -83,6 +73,9 @@ function intentPartial(options: {
     toolId: options.call.toolId,
     idempotent: options.description?.idempotent ?? false,
     ...policyIntentFields(options.decision),
+    ...(options.app !== undefined && options.decision.decision === "ask"
+      ? { policyReason: APP_APPROVAL_REASON }
+      : {}),
     argsHash: options.argsHash,
     args: options.call.args,
   };
@@ -161,7 +154,10 @@ async function decideAndRunToolCall(
   preparationError: Code | undefined,
 ): Promise<Event> {
   const decision = effectiveDecision(
-    decidePolicy(input.options.policy, call, input.options.depth ?? 0),
+    appIntentDecision(
+      decidePolicy(input.options.policy, call, input.options.depth ?? 0),
+      input.options.app,
+    ),
     preparationError,
     input.description,
   );
@@ -173,6 +169,7 @@ async function decideAndRunToolCall(
     description: input.description,
     argsHash: executedArgsHash,
     decision,
+    ...(input.options.app === undefined ? {} : { app: input.options.app }),
   });
   if (
     preparationError !== undefined ||
@@ -215,9 +212,10 @@ async function executeRecordedIntent(
       executedArgsHash,
     );
   }
-  if (input.behavior.checkEditedPolicy === true) {
+  const appApproval = input.behavior.existingIntent?.policyReason === APP_APPROVAL_REASON;
+  if (input.behavior.checkEditedPolicy === true || appApproval) {
     const decision = effectiveDecision(
-      decidePolicy(input.options.policy, call, input.options.depth ?? 0),
+      decideRecordedPolicy(input.options, call, input.behavior.existingIntent),
       undefined,
       input.description,
     );
@@ -235,7 +233,13 @@ async function executeRecordedIntent(
           : { policyVersion: input.options.policy.version }),
       });
     }
-    if (decision.decision !== "allow") {
+    const authorizedAsk = approvedAskMatches({
+      intent,
+      decision,
+      argsHash: hashArgs(call.args),
+      edited: input.behavior.checkEditedPolicy === true,
+    });
+    if (decision.decision !== "allow" && !authorizedAsk) {
       return recordDeniedResultAndPush(
         input,
         call,
@@ -276,6 +280,7 @@ async function requestToolApproval(
     call,
     decision,
     intent,
+    ...(input.options.app === undefined ? {} : { app: input.options.app }),
   });
   input.events.push(...approval.events);
   return approval.checkpoint;

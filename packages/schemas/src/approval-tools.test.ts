@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import {
+  ApprovalAppGetRequestSchema,
   ApprovalAppInputSchema,
   ResolveRequest,
   ResolveResponse,
@@ -23,6 +24,13 @@ const payload = {
 };
 
 describe("approval tool contracts", () => {
+  it("validates the pending approval lookup request", () => {
+    expect(ApprovalAppGetRequestSchema.parse({ approvalId })).toEqual({ approvalId });
+    expect(ApprovalAppGetRequestSchema.safeParse({ approvalId, runId: approvalId }).success).toBe(
+      false,
+    );
+  });
+
   it("validates app input with a distinct approval id", () => {
     expect(ApprovalAppInputSchema.parse({ approvalId, payload })).toEqual({ approvalId, payload });
     expect(
