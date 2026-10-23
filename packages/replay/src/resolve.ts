@@ -1,0 +1,305 @@
+// SPDX-License-Identifier: Apache-2.0
+import {
+  Event,
+  HarnessError,
+  Id,
+  TraceId,
+  Traceparent,
+  type Event as EventValue,
+  type Id as RunId,
+  type TraceId as TraceIdValue,
+} from "@harness/schemas";
+import type { EventStore } from "@harness/store";
+import { z } from "zod";
+
+const MAX_EVENTS = 1_000_000;
+const ZERO_TRACE_ID = "0".repeat(32);
+const ZERO_SPAN_ID = "0".repeat(16);
+
+const ResolvedRunEntrySchema = z
+  .object({
+    runId: Id,
+    role: z.enum(["root", "subagent"]),
+    parentRunId: Id.optional(),
+    events: Event.array(),
+  })
+  .strict();
+
+/** Metadata and complete validated event logs for a resolved root and its related runs. */
+export const ResolvedRunSchema = z
+  .object({
+    rootRunId: Id,
+    runs: ResolvedRunEntrySchema.array(),
+  })
+  .strict();
+
+/** Inferred result of resolving a run from a run id or trace id. */
+export type ResolvedRun = z.infer<typeof ResolvedRunSchema>;
+
+/** Inputs for resolving one run or the runs related to a trace. */
+export interface ResolveRunInput {
+  /** Event store to query and read. */
+  readonly store: Pick<EventStore, "findRunsByTrace" | "read">;
+  /** Run identifier to load. */
+  readonly runId?: string;
+  /** Trace identifier or W3C traceparent to resolve. */
+  readonly traceId?: string;
+}
+
+/** Error raised when neither or both supported run selectors are supplied or valid. */
+export class ReplayInputError extends HarnessError {
+  override readonly code = "replay_input_invalid";
+
+  constructor() {
+    super("Provide exactly one valid run id or trace id.");
+  }
+}
+
+/** Error raised when the requested run does not exist. */
+export class RunNotFoundError extends HarnessError {
+  override readonly code = "run_not_found";
+
+  constructor() {
+    super("Run was not found.");
+  }
+}
+
+/** Error raised when one trace resolves to multiple possible roots. */
+export class TraceAmbiguousError extends HarnessError {
+  override readonly code = "trace_ambiguous";
+  readonly runIds: readonly RunId[];
+
+  constructor(runIds: readonly RunId[]) {
+    super("Trace resolves to multiple possible root runs.");
+    this.runIds = [...runIds];
+  }
+}
+
+/** Error raised when the resolved event logs exceed the configured safety limit. */
+export class ReplayTooLargeError extends HarnessError {
+  override readonly code = "replay_too_large";
+
+  constructor() {
+    super("Resolved event logs exceed the replay event limit.");
+  }
+}
+
+/** Error raised when a stored event log is empty, malformed, or out of sequence. */
+export class CorruptLogError extends HarnessError {
+  override readonly code = "corrupt_log";
+
+  constructor() {
+    super("Run event log is corrupt.");
+  }
+}
+
+function parseTraceId(input: string): TraceIdValue {
+  const traceIdResult = TraceId.safeParse(input);
+  if (traceIdResult.success) {
+    if (traceIdResult.data === ZERO_TRACE_ID) {
+      throw new ReplayInputError();
+    }
+    return traceIdResult.data;
+  }
+
+  const traceparentResult = Traceparent.safeParse(input);
+  if (!traceparentResult.success) {
+    throw new ReplayInputError();
+  }
+  const [, traceId, spanId] = traceparentResult.data.split("-");
+  if (traceId === ZERO_TRACE_ID || spanId === ZERO_SPAN_ID) {
+    throw new ReplayInputError();
+  }
+  return TraceId.parse(traceId);
+}
+
+interface LoadedRun {
+  readonly runId: RunId;
+  readonly parentRunId?: RunId;
+  readonly events: EventValue[];
+}
+
+async function readRun(
+  store: ResolveRunInput["store"],
+  runId: RunId,
+  previousEventCount = 0,
+): Promise<LoadedRun> {
+  const events: EventValue[] = [];
+  for await (const event of store.read(runId)) {
+    if (previousEventCount + events.length >= MAX_EVENTS) {
+      throw new ReplayTooLargeError();
+    }
+    const parsedEvent = Event.safeParse(event);
+    if (!parsedEvent.success) {
+      throw new CorruptLogError();
+    }
+    const validEvent = parsedEvent.data;
+    if (validEvent.runId !== runId || validEvent.seq !== events.length) {
+      throw new CorruptLogError();
+    }
+    if (events.length === 0 && validEvent.type !== "run_created") {
+      throw new CorruptLogError();
+    }
+    events.push(validEvent);
+  }
+  if (events.length === 0) {
+    throw new RunNotFoundError();
+  }
+  const firstEvent = events[0];
+  if (firstEvent?.type !== "run_created") {
+    throw new CorruptLogError();
+  }
+  return {
+    runId,
+    ...(firstEvent.parentRunId === undefined ? {} : { parentRunId: firstEvent.parentRunId }),
+    events,
+  };
+}
+
+function referencedChildRunIds(run: LoadedRun): RunId[] {
+  return [
+    ...new Set(
+      run.events.flatMap((event) =>
+        event.type === "subagent_spawned" || event.type === "subagent_completed"
+          ? [event.childRunId]
+          : [],
+      ),
+    ),
+  ];
+}
+
+async function readRunTree(
+  store: ResolveRunInput["store"],
+  rootRunId: RunId,
+): Promise<LoadedRun[]> {
+  const runs: LoadedRun[] = [];
+  const pending: { readonly runId: RunId; readonly parentRunId?: RunId }[] = [{ runId: rootRunId }];
+  const expectedParents = new Map<RunId, RunId | undefined>([[rootRunId, undefined]]);
+  const visited = new Set<RunId>();
+  let totalEvents = 0;
+
+  for (const next of pending) {
+    if (visited.has(next.runId)) {
+      continue;
+    }
+    visited.add(next.runId);
+    const run = await readRun(store, next.runId, totalEvents);
+    if (next.parentRunId !== undefined && run.parentRunId !== next.parentRunId) {
+      throw new CorruptLogError();
+    }
+    runs.push(run);
+    totalEvents += run.events.length;
+
+    for (const childRunId of referencedChildRunIds(run)) {
+      const existingParent = expectedParents.get(childRunId);
+      if (expectedParents.has(childRunId)) {
+        if (existingParent !== run.runId) {
+          throw new CorruptLogError();
+        }
+        continue;
+      }
+      expectedParents.set(childRunId, run.runId);
+      pending.push({ runId: childRunId, parentRunId: run.runId });
+    }
+  }
+  return runs;
+}
+
+function asResolvedEntry(run: LoadedRun, role: "root" | "subagent"): ResolvedRun["runs"][number] {
+  return {
+    runId: run.runId,
+    role,
+    ...(run.parentRunId === undefined ? {} : { parentRunId: run.parentRunId }),
+    events: run.events,
+  };
+}
+
+async function resolveTraceRun(
+  store: ResolveRunInput["store"],
+  traceInput: string,
+): Promise<ResolvedRun> {
+  const traceId = parseTraceId(traceInput);
+  const matchedRunIds = [...new Set(await store.findRunsByTrace(traceId))];
+  if (matchedRunIds.length === 0) {
+    throw new RunNotFoundError();
+  }
+
+  let totalEvents = 0;
+  const runs: LoadedRun[] = [];
+  for (const runId of matchedRunIds) {
+    const run = await readRun(store, runId, totalEvents);
+    runs.push(run);
+    totalEvents += run.events.length;
+  }
+
+  const roots = runs.filter((run) => run.parentRunId === undefined);
+  if (roots.length !== 1) {
+    throw new TraceAmbiguousError(matchedRunIds);
+  }
+  const root = roots[0];
+  if (root === undefined) {
+    throw new TraceAmbiguousError(matchedRunIds);
+  }
+  const runsById = new Map(runs.map((run) => [run.runId, run]));
+  for (const run of runs) {
+    if (run.runId === root.runId) {
+      continue;
+    }
+    let current = run;
+    const ancestors = new Set<RunId>();
+    while (current.runId !== root.runId) {
+      if (ancestors.has(current.runId) || current.parentRunId === undefined) {
+        throw new TraceAmbiguousError(matchedRunIds);
+      }
+      ancestors.add(current.runId);
+      const parent = runsById.get(current.parentRunId);
+      if (parent === undefined) {
+        throw new TraceAmbiguousError(matchedRunIds);
+      }
+      current = parent;
+    }
+  }
+  return {
+    rootRunId: root.runId,
+    runs: [
+      asResolvedEntry(root, "root"),
+      ...runs
+        .filter((run) => run.runId !== root.runId)
+        .map((run) => asResolvedEntry(run, "subagent")),
+    ],
+  } satisfies ResolvedRun;
+}
+
+/**
+ * Resolves a run id or trace id and loads every matching run's validated event log.
+ *
+ * @param input - Store and exactly one run or trace selector.
+ * @returns The root run and, for a trace selector, its matching subagent runs.
+ * @throws {@link ReplayInputError} when the selector is missing, duplicated, or invalid.
+ * @throws {@link RunNotFoundError} when no stored events exist for a requested run.
+ * @throws {@link TraceAmbiguousError} when multiple trace matches have no unique root.
+ * @throws {@link ReplayTooLargeError} when more than one million events are resolved.
+ * @throws {@link CorruptLogError} when any event log is malformed or non-contiguous.
+ */
+export async function resolveRun(input: ResolveRunInput): Promise<ResolvedRun> {
+  const hasRunId = input.runId !== undefined;
+  const hasTraceId = input.traceId !== undefined;
+  if (hasRunId === hasTraceId) {
+    throw new ReplayInputError();
+  }
+
+  if (hasRunId) {
+    const parsedRunId = Id.safeParse(input.runId);
+    if (!parsedRunId.success) {
+      throw new ReplayInputError();
+    }
+    const runs = await readRunTree(input.store, parsedRunId.data);
+    const result = {
+      rootRunId: parsedRunId.data,
+      runs: runs.map((run, index) => asResolvedEntry(run, index === 0 ? "root" : "subagent")),
+    } satisfies ResolvedRun;
+    return result;
+  }
+
+  return resolveTraceRun(input.store, input.traceId ?? "");
+}
