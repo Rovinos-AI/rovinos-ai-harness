@@ -4,11 +4,7 @@
     "composite": false,
     "customConditions": ["source"],
     "types": ["node"],
-    "noEmit": true,
-    "paths": {
-      "eventsource": ["../../node_modules/eventsource/dist/index.d.ts"],
-      "eventsource-parser": ["../../node_modules/eventsource-parser/dist/index.d.ts"]
-    }
+    "noEmit": true
   },
   "include": ["src/**/*.ts"],
   "exclude": []

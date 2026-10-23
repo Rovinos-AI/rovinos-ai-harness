@@ -6,11 +6,7 @@
     "noEmit": true,
     "rootDir": "../..",
     "skipLibCheck": true,
-    "types": ["node", "vitest/globals"],
-    "paths": {
-      "eventsource": ["../../node_modules/eventsource/dist/index.d.ts"],
-      "eventsource-parser": ["../../node_modules/eventsource-parser/dist/index.d.ts"]
-    }
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*.test.ts"],
   "references": [
