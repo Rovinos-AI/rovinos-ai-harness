@@ -54,7 +54,13 @@ export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),
     },
-    gate: new SentinelGate(new VaultRunView(vault), undefined, { maxPrepareMs: 1_000 }),
+    // Test budgets, not the production 5 ms scan limit: on a loaded CI agent a GC pause can push one
+    // scan past 5 ms, and the gate then drops the span (fail closed), so assertions on exported spans
+    // flaked (#555). Fail-closed behaviour itself is covered in the gate's unit tests.
+    gate: new SentinelGate(new VaultRunView(vault), undefined, {
+      maxPrepareMs: 1_000,
+      maxScanMs: 1_000,
+    }),
     telemetry: {
       sentinel: { minValueLength: 6, enabled: true },
       correlation: { enabled: false },
