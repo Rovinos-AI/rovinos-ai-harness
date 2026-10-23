@@ -19,13 +19,16 @@ async function createDirectory(): Promise<string> {
   return path;
 }
 
-function makeTrial(workDir: string): TrialSpec {
+function makeTrial(workDir: string, includeMetadata = false): TrialSpec {
   const suite = defineSuite({
     schemaVersion: 1,
     tasks: [
       {
         id: "synthetic_task",
-        input: { goal: "Complete a synthetic tool task." },
+        input: {
+          goal: "Complete a synthetic tool task.",
+          ...(includeMetadata ? { metadata: { category: "synthetic" } } : {}),
+        },
         graders: [],
         tags: [],
       },
@@ -105,7 +108,7 @@ describe("InProcessExecutor", () => {
       tool: () => tool,
       policy: () => policy,
     });
-    const result = await executor.run(makeTrial(join(await createDirectory(), "trial")));
+    const result = await executor.run(makeTrial(join(await createDirectory(), "trial"), true));
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeDefined();
