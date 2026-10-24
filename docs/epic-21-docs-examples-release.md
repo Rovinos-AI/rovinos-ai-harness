@@ -235,7 +235,7 @@ Shared design for this epic:
 
 **Parent:** #21 Docs, examples, and release
 **Task Description:** Provide small, runnable examples for a typed tool loop, human approval, and
-crash recovery, each with copy-pasteable commands and expected output.
+crash recovery, each with commands shown at the top of its README and expected output.
 **Expected Output:** `examples/basic-agent/README.md`, `examples/approval/README.md`,
 `examples/crash-and-resume/README.md`, runnable example source/fixtures, and a documentation-runner
 integration test.

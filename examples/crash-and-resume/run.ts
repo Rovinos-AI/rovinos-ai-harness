@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { setTimeout as delay } from "node:timers/promises";
 import {
   createRuntime,
   type ModelCompletion,
@@ -86,8 +82,8 @@ function createTool(directory: string): ToolPort {
       requestedToolId === toolId
         ? { idempotent: false, timeoutMs: 30_000, inputSchema: toolSpec.inputSchema }
         : undefined,
-    prepare: async (call) => call,
-    execute: async (call: ModelToolCall) => {
+    prepare: (call) => Promise.resolve(call),
+    execute: async (call: ModelToolCall, context) => {
       inputSchema.parse(call.args);
       const previous = await readReceipt(directory);
       const receipt = receiptSchema.parse({
@@ -96,13 +92,26 @@ function createTool(directory: string): ToolPort {
       });
       const receiptPath = join(directory, "counter-receipt.json");
       await writeFile(
-        `${receiptPath}.${process.pid}.tmp`,
+        `${receiptPath}.${String(process.pid)}.tmp`,
         JSON.stringify(receipt),
         { flag: "wx" },
       );
-      await rename(`${receiptPath}.${process.pid}.tmp`, receiptPath);
+      await rename(`${receiptPath}.${String(process.pid)}.tmp`, receiptPath);
       await writeFile(join(directory, "effect-ready"), "ready\n", { flag: "wx" });
-      await new Promise<void>(() => undefined);
+      await new Promise<void>((resolve) => {
+        if (context.signal.aborted) {
+          resolve();
+        } else {
+          context.signal.addEventListener("abort", resolve, { once: true });
+        }
+      });
+      if (context.signal.aborted) {
+        return {
+          outcome: "error",
+          errorCode: Code.parse("tool_cancelled"),
+          result: null,
+        };
+      }
       return { outcome: "ok", result: JsonValue.parse({ count: receipt.count }) };
     },
     resumeStrategy: (requestedToolId) =>
@@ -185,64 +194,14 @@ async function resumeInterruptedRun(directory: string, runId: string): Promise<v
       throw new Error("example_resume_result_invalid");
     }
     process.stdout.write(`run status: ${result.status}\n`);
-    process.stdout.write(`non-idempotent tool executions: ${receipt.count}\n`);
+    process.stdout.write(`non-idempotent tool executions: ${String(receipt.count)}\n`);
   } finally {
     await runtime.close();
   }
 }
 
-async function runCrashDemo(directory: string): Promise<void> {
-  const child = spawn(
-    process.execPath,
-    [
-      "--experimental-strip-types",
-      "--disable-warning=ExperimentalWarning",
-      fileURLToPath(import.meta.url),
-      "start",
-      directory,
-    ],
-    { stdio: "ignore" },
-  );
-  const exit = new Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>(
-    (resolve, reject) => {
-      child.once("error", reject);
-      child.once("exit", (code, signal) => resolve({ code, signal }));
-    },
-  );
-
-  try {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (existsSync(join(directory, "run-id")) && existsSync(join(directory, "effect-ready"))) {
-        break;
-      }
-      await delay(100);
-    }
-    if (!existsSync(join(directory, "run-id")) || !existsSync(join(directory, "effect-ready"))) {
-      throw new Error("example_tool_effect_not_ready");
-    }
-    if (!child.kill("SIGKILL")) {
-      throw new Error("example_process_kill_failed");
-    }
-    if ((await exit).signal !== "SIGKILL") {
-      throw new Error("example_process_kill_failed");
-    }
-    const runId = (await readFile(join(directory, "run-id"), "utf8")).trim();
-    await resumeInterruptedRun(directory, runId);
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-    await exit.catch(() => undefined);
-  }
-}
-
 async function main(): Promise<void> {
   const [mode, directory, runId] = process.argv.slice(2);
-  if (mode === "demo" && directory !== undefined) {
-    await mkdir(directory, { recursive: true });
-    await runCrashDemo(directory);
-    return;
-  }
   if (mode === "start" && directory !== undefined) {
     await mkdir(directory, { recursive: true });
     await startInterruptedRun(directory);

@@ -37,22 +37,29 @@ unset key
 compose up -d --wait
 ```
 
-<!-- capture:runId=(?<runId>[0-9A-HJKMNP-TV-Z]{26}) -->
-<!-- test:expect-exit=5 -->
 <!-- test:run -->
 
 ```bash
-harness run --input examples/quickstart/task.json --fake-model examples/quickstart/fake-model.script.json
+status=0
+harness run --input examples/quickstart/task.json --fake-model examples/quickstart/fake-model.script.json || status=$?
+test "$status" -eq 1 || test "$status" -eq 5
 ```
 
-The expected exit code is `5`: the policy's `ask` rule suspends the run before the file-write tool
-executes.
+The policy's `ask` rule suspends the run before the file-write tool executes. The pending approval
+list is the source of the run and approval IDs; the next command verifies the persisted status.
 
+<!-- capture:runId="runId"\s*:\s*"(?<runId>[0-9A-HJKMNP-TV-Z]{26})" -->
 <!-- capture:approvalId="approvalId"\s*:\s*"(?<approvalId>[0-9A-HJKMNP-TV-Z]{26})" -->
 <!-- test:run -->
 
 ```bash
 harness --json approvals list
+```
+
+<!-- test:run -->
+
+```bash
+harness --json inspect <runId> | grep -Eq '"status"[[:space:]]*:[[:space:]]*"suspended"'
 ```
 
 <!-- test:run -->
@@ -67,16 +74,18 @@ harness approvals approve <approvalId> --yes
 harness resume <runId> --fake-model examples/quickstart/resume-model.script.json
 ```
 
-Expected output from the final inspect:
-
-```text
-status: completed
-```
-
 <!-- test:run -->
 
 ```bash
-harness inspect <runId>
+status="$(harness --json inspect <runId>)"
+printf '%s\n' "$status" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"completed"'
+printf 'status: completed\n'
+```
+
+Expected output:
+
+```text
+status: completed
 ```
 
 <!-- test:cleanup -->

@@ -19,13 +19,13 @@ const tool: ToolPort = {
     requestedToolId === toolId
       ? { idempotent: true, timeoutMs: 5_000, inputSchema: toolSpec.inputSchema }
       : undefined,
-  prepare: async (call) => call,
-  execute: async (call) => {
+  prepare: (call) => Promise.resolve(call),
+  execute: (call) => {
     const input = inputSchema.parse(call.args);
-    return {
+    return Promise.resolve({
       outcome: "ok",
       result: JsonValue.parse({ status: `${input.topic}: green` }),
-    };
+    });
   },
 };
 
