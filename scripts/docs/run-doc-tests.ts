@@ -173,27 +173,50 @@ export async function createDocTestTemporaryRoot(parentDirectory: string): Promi
   return mkdtemp(join(parentDirectory, "quickstart-doc-tests-"));
 }
 
-/** Runs the documented quickstart blocks from a temporary repository copy. */
-export async function runQuickstartDocTests(): Promise<void> {
-  const markdown = await readFile(join(rootDirectory, "docs/quickstart.md"), "utf8");
+async function runDocTestFiles(
+  markdownPaths: readonly string[],
+  projectName: string,
+): Promise<void> {
+  const markdownFiles = await Promise.all(
+    markdownPaths.map((path) => readFile(join(rootDirectory, path), "utf8")),
+  );
   const temporaryRoot = await createDocTestTemporaryRoot(join(rootDirectory, ".tmp"));
   const workingDirectory = join(temporaryRoot, "checkout");
   await mkdir(workingDirectory, { recursive: true });
 
   try {
     await copyWorktree(workingDirectory);
-    executeDocTestBlocks(markdown, {
-      cwd: workingDirectory,
-      env: {
-        ...process.env,
-        HARNESS_IMAGE: "harness:local",
-        HARNESS_SANDBOX_IMAGE: "harness-sandbox:local",
-        COMPOSE_PROJECT_NAME: `harness-quickstart-${String(process.pid)}-${randomUUID()}`,
-      },
-    });
+    for (const markdown of markdownFiles) {
+      executeDocTestBlocks(markdown, {
+        cwd: workingDirectory,
+        env: {
+          ...process.env,
+          HARNESS_IMAGE: "harness:local",
+          HARNESS_SANDBOX_IMAGE: "harness-sandbox:local",
+          COMPOSE_PROJECT_NAME: `harness-${projectName}-${String(process.pid)}-${randomUUID()}`,
+        },
+      });
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
+}
+
+/** Runs the documented quickstart blocks from a temporary repository copy. */
+export async function runQuickstartDocTests(): Promise<void> {
+  await runDocTestFiles(["docs/quickstart.md"], "quickstart");
+}
+
+/** Runs every copy-paste example README from one temporary repository copy. */
+export async function runExampleDocTests(): Promise<void> {
+  await runDocTestFiles(
+    [
+      "examples/basic-agent/README.md",
+      "examples/approval/README.md",
+      "examples/crash-and-resume/README.md",
+    ],
+    "examples",
+  );
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
