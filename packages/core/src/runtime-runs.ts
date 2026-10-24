@@ -10,6 +10,7 @@ import {
 } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { ModelProgress } from "@harness/models";
+import type { Context } from "@opentelemetry/api";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation, loadContinuationChain } from "./continue.js";
@@ -98,6 +99,8 @@ export type RunControl = (
 /** Optional id and role assigned to a new root run. */
 export interface RuntimeRunOptions {
   readonly runId?: Id;
+  readonly replayOf?: Id;
+  readonly rootSpanParent?: Context;
   readonly role?: Code;
   readonly requestedBy?: Principal;
   readonly onStarted?: () => void;
@@ -135,6 +138,8 @@ export function startRun(
       context,
       ids,
       goal,
+      ...(options.replayOf === undefined ? {} : { replayOf: options.replayOf }),
+      ...(options.rootSpanParent === undefined ? {} : { rootSpanParent: options.rootSpanParent }),
       signal,
       ...(options.role === undefined ? {} : { role: options.role }),
       ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),

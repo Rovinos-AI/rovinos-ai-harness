@@ -26,3 +26,9 @@ export {
   type ReplayRuntime,
   type ReplayRuntimeReport,
 } from "./replay-runtime.js";
+export {
+  replayRun,
+  ReplayOutcomeSchema,
+  type ReplayOutcome,
+  type ReplayRunOptions,
+} from "./replay.js";

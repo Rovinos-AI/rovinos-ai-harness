@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createRuntime } from "@harness/core";
-import type { Runtime, RuntimeConfig, ToolPort } from "@harness/core";
+import type { PolicyPort, Runtime, RuntimeConfig, ToolPort } from "@harness/core";
 import { PiiConfigSchema, VaultConfigSchema } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import type { SandboxBackend } from "@harness/sandbox";
 import { z } from "zod";
+import type { Id } from "@harness/schemas";
 import { ResolvedRunSchema } from "./resolve.js";
 import type { ResolvedRun } from "./resolve.js";
 import { ReplayClock } from "./ports/replay-clock.js";
@@ -30,9 +31,11 @@ export interface ReplayRuntime {
   readonly report: ReplayRuntimeReport;
 }
 
-/** Optional read-only registry data used to preserve the recorded model tool definitions. */
+/** Optional current policy and read-only registry data used by the replay runtime. */
 export interface BuildReplayRuntimeOptions {
   readonly toolRegistry?: Pick<ToolPort, "describe" | "getToolSpecs" | "validateInputSchema">;
+  readonly policy?: PolicyPort;
+  readonly replayRunId?: Id;
 }
 
 function rootEvents(resolved: ResolvedRun) {
@@ -55,12 +58,24 @@ export async function buildReplayRuntime(
   const events = rootEvents(resolved);
   const clock = new ReplayClock(events);
   const diagnostics: "replay_ids_exhausted"[] = [];
-  const ids = new ReplayIdGenerator(events, resolved.rootRunId, () => {
+  const chronologicalEvents = resolved.runs
+    .flatMap(({ events: runEvents }) => runEvents)
+    .map((event, index) => ({ event, index }))
+    .sort((left, right) => {
+      const timestampOrder = left.event.ts - right.event.ts;
+      return timestampOrder === 0 ? left.index - right.index : timestampOrder;
+    })
+    .map(({ event }) => event);
+  const idEvents =
+    options.replayRunId === undefined
+      ? chronologicalEvents
+      : chronologicalEvents.filter((event) => event.type !== "run_created");
+  const ids = new ReplayIdGenerator(idEvents, resolved.rootRunId, () => {
     if (!diagnostics.includes("replay_ids_exhausted")) {
       diagnostics.push("replay_ids_exhausted");
     }
   });
-  const tool = new ReplayToolPort(resolved, options.toolRegistry);
+  const tool = new ReplayToolPort(resolved, options.toolRegistry, options.replayRunId);
   const sandbox: SandboxBackend = {
     exec: () => Promise.reject(new ReplayExternalAccessError()),
   };
@@ -76,11 +91,16 @@ export async function buildReplayRuntime(
     alreadyTokenized: true,
     clock,
     ids,
-    model: new ReplayModelPort(resolved, { ids, clock }),
+    model: new ReplayModelPort(resolved, {
+      ids,
+      clock,
+      ...(options.replayRunId === undefined ? {} : { replayRunId: options.replayRunId }),
+    }),
     sandboxBackend: sandbox,
     store: new InMemoryEventStore(),
     tool,
     transientVault: true,
+    ...(options.policy === undefined ? {} : { policy: options.policy }),
   });
   const report = {
     get diagnostics() {

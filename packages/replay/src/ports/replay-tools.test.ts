@@ -16,6 +16,8 @@ import type { ReplayMissingResultError } from "./replay-model.js";
 import { ReplayToolPort } from "./replay-tools.js";
 
 const runId = Id.parse("00000000000000000000000001");
+const childRunId = Id.parse("00000000000000000000000007");
+const replayRunId = Id.parse("00000000000000000000000008");
 const segmentId = Id.parse("00000000000000000000000002");
 const callId = Id.parse("00000000000000000000000003");
 const args: JsonValue = { query: "synthetic" };
@@ -108,6 +110,7 @@ describe("ReplayToolPort", () => {
       validateInputSchema: vi.fn(() => Promise.resolve(true)),
     };
     const port = new ReplayToolPort(resolved, registry);
+    const withoutRegistry = new ReplayToolPort(resolved);
     const context = { runId, signal: new AbortController().signal };
 
     expect(port.describe(Code.parse("test.lookup"), args)).toEqual({
@@ -118,7 +121,8 @@ describe("ReplayToolPort", () => {
     await expect(
       port.execute({ callId, toolId: Code.parse("test.lookup"), args }, context),
     ).resolves.toEqual({ outcome: "ok", result: { found: true } });
-    expect(port.getToolSpecs()).toEqual([]);
+    expect(port.getToolSpecs?.()).toEqual([]);
+    expect(withoutRegistry.getToolSpecs).toBeUndefined();
     await expect(
       port.validateInputSchema(Code.parse("test.lookup"), args, {}, context),
     ).resolves.toBe(true);
@@ -161,5 +165,83 @@ describe("ReplayToolPort", () => {
       code: "replay_missing_result",
       seq: 1,
     } satisfies Partial<ReplayMissingResultError>);
+  });
+
+  it("routes root and subagent tool calls to their own recorded logs", async () => {
+    const { resolved } = fixture();
+    const childCallId = Id.parse("00000000000000000000000009");
+    const childEvents = [
+      EventSchema.parse({
+        runId: childRunId,
+        seq: 0,
+        ts: 1,
+        v: 1,
+        traceId,
+        spanId,
+        segmentId,
+        type: "run_created",
+        configHash: "c".repeat(64),
+        policyVersion: "test",
+        parentRunId: runId,
+      }),
+      EventSchema.parse({
+        runId: childRunId,
+        seq: 1,
+        ts: 2,
+        v: 1,
+        traceId,
+        spanId,
+        segmentId,
+        type: "tool_intent",
+        callId: childCallId,
+        toolId: "test.lookup",
+        idempotent: true,
+        policyDecision: "allow",
+        argsHash: argsHash(args),
+        args,
+      }),
+      EventSchema.parse({
+        runId: childRunId,
+        seq: 2,
+        ts: 3,
+        v: 1,
+        traceId,
+        spanId,
+        segmentId,
+        type: "tool_result",
+        callId: childCallId,
+        toolId: "test.lookup",
+        outcome: "ok",
+        latencyMs: 1,
+        executedArgsHash: argsHash(args),
+        result: { child: true },
+      }),
+    ];
+    const root = resolved.runs.find(({ runId: candidate }) => candidate === runId);
+    if (root === undefined) {
+      throw new Error("Expected the synthetic root log.");
+    }
+    const resolvedWithChild = ResolvedRunSchema.parse({
+      rootRunId: runId,
+      runs: [
+        root,
+        { runId: childRunId, role: "subagent", parentRunId: runId, events: childEvents },
+      ],
+    });
+    const port = new ReplayToolPort(resolvedWithChild, undefined, replayRunId);
+    const contextFor = (contextRunId: Id) => ({
+      runId: contextRunId,
+      signal: new AbortController().signal,
+    });
+
+    await expect(
+      port.execute({ callId, toolId: Code.parse("test.lookup"), args }, contextFor(replayRunId)),
+    ).resolves.toEqual({ outcome: "ok", result: { found: true } });
+    await expect(
+      port.execute(
+        { callId: childCallId, toolId: Code.parse("test.lookup"), args },
+        contextFor(childRunId),
+      ),
+    ).resolves.toEqual({ outcome: "ok", result: { child: true } });
   });
 });

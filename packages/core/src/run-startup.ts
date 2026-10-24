@@ -14,6 +14,7 @@ function makeStartEvents(options: RunLoopOptions): EventPartial[] {
       v: 1,
       configHash: options.configHash,
       policyVersion: options.policyVersion,
+      ...(options.replayOf === undefined ? {} : { replayOf: options.replayOf }),
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.parentCallId === undefined ? {} : { parentCallId: options.parentCallId }),
       ...(options.continuationOf === undefined ? {} : { continuationOf: options.continuationOf }),
