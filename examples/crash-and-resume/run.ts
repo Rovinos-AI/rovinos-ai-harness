@@ -98,7 +98,13 @@ function createTool(directory: string): ToolPort {
         if (context.signal.aborted) {
           resolve();
         } else {
-          context.signal.addEventListener("abort", resolve, { once: true });
+          context.signal.addEventListener(
+            "abort",
+            (_event: Event): void => {
+              resolve();
+            },
+            { once: true },
+          );
         }
       });
       if (context.signal.aborted) {
