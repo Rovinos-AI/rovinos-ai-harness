@@ -57,9 +57,7 @@ describe("harness doctor", () => {
     vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.test:4318/v1/traces");
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
-    const { context, stdout } = createContext(() =>
-      Promise.resolve(HarnessConfigSchema.parse({})),
-    );
+    const { context, stdout } = createContext(() => Promise.resolve(HarnessConfigSchema.parse({})));
 
     const exitCode = await main(["--json", "doctor"], context);
     const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
@@ -68,7 +66,7 @@ describe("harness doctor", () => {
     expect(exitCode).toBe(ExitCode.ok);
     expect(requestedInput).toBeInstanceOf(URL);
     if (!(requestedInput instanceof URL)) {
-      throw new Error("Expected the collector health request to use a URL.");
+      throw new TypeError("Expected the collector health request to use a URL.");
     }
     expect(requestedInput.href).toBe("http://collector.test:13133/");
     expect(results).toContainEqual({
@@ -85,9 +83,7 @@ describe("harness doctor", () => {
       "fetch",
       vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 503 })),
     );
-    const { context, stdout } = createContext(() =>
-      Promise.resolve(HarnessConfigSchema.parse({})),
-    );
+    const { context, stdout } = createContext(() => Promise.resolve(HarnessConfigSchema.parse({})));
 
     const exitCode = await main(["--json", "doctor"], context);
     const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");

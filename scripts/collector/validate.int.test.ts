@@ -99,14 +99,7 @@ it("serves the health endpoint on a loopback-only published port", async () => {
     }
     expect(healthy).toBe(true);
 
-    await compose([
-      "up",
-      "--wait",
-      "--wait-timeout",
-      "75",
-      "--pull=never",
-      "otel-health-wait",
-    ]);
+    await compose(["up", "--wait", "--wait-timeout", "75", "--pull=never", "otel-health-wait"]);
     const helperId = (await compose(["ps", "--quiet", "otel-health-wait"])).trim();
     expect(helperId).not.toBe("");
     const helperHealth = await execFileAsync(
