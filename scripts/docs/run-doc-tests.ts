@@ -196,6 +196,12 @@ export async function runQuickstartDocTests(): Promise<void> {
   }
 }
 
+/** Runs the documented replay example command from the current worktree. */
+export async function runReplayExampleDocTests(): Promise<void> {
+  const markdown = await readFile(join(rootDirectory, "examples/replay/README.md"), "utf8");
+  executeDocTestBlocks(markdown, { cwd: rootDirectory, env: process.env });
+}
+
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runQuickstartDocTests().then(
     () => process.stdout.write("quickstart documentation passed\n"),
