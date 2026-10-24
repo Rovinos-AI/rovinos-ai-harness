@@ -5,11 +5,11 @@ import { ChangeEmitter, watchEvents, watchRunSummaries } from "./subscriptions.j
 import { createEventBuilders } from "./testing/testing.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve: () => void = () => undefined;
-  const promise = new Promise<void>((resolvePromise) => {
-    resolve = resolvePromise;
+  let resolveReady: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    resolveReady = resolve;
   });
-  return { promise, resolve };
+  return { promise, resolve: resolveReady };
 }
 
 it("catches every matching transition committed before the listener is ready", async () => {

@@ -159,7 +159,9 @@ runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 it.each(Array.from({ length: 200 }, (_, index) => index))(
   "catches immediate subscription writes with a cold Postgres listener (%i)",
   async () => {
-    await assertWatchSubscriptionConformance(encryptedPostgresFactory, createEventBuilders());
+    await expect(
+      assertWatchSubscriptionConformance(encryptedPostgresFactory, createEventBuilders()),
+    ).resolves.toBeUndefined();
   },
 );
 
