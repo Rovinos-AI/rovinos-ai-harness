@@ -70,4 +70,17 @@ describe("composeToolPorts", () => {
     expect(additional.prepare).toHaveBeenCalledOnce();
     expect(additional.validateInputSchema).toHaveBeenCalledOnce();
   });
+
+  it("forwards resume strategies to the port owning each tool", () => {
+    const strategy = { onDanglingIntent: vi.fn() };
+    const additional = {
+      ...toolPort(webFetchId),
+      resumeStrategy: vi.fn(() => strategy),
+    };
+    const composed = composeToolPorts(additional, toolPort(existingId));
+
+    expect(composed.resumeStrategy?.(webFetchId)).toBe(strategy);
+    expect(composed.resumeStrategy?.(existingId)).toBeUndefined();
+    expect(additional.resumeStrategy).toHaveBeenCalledWith(webFetchId);
+  });
 });

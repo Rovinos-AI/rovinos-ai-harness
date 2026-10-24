@@ -68,6 +68,7 @@ export function composeToolPorts(additional: ToolPort, existing: ToolPort): Tool
   return {
     ...(prepare === undefined ? {} : { prepare }),
     ...(validateInputSchema === undefined ? {} : { validateInputSchema }),
+    resumeStrategy: (toolId) => portFor(toolId).resumeStrategy?.(toolId),
     describe: (toolId, args) => portFor(toolId).describe(toolId, args),
     getToolSpecs,
     execute: (call, context) => portFor(call.toolId).execute(call, context),

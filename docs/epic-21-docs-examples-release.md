@@ -1,7 +1,7 @@
 # Epic #21: Docs, examples, and release
 
 **Goal:** make the project understandable, runnable, contributable, releasable, and honest about its guarantees. Documentation is tested like code wherever possible. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 21.1 to 21.8, all size S.
+**Tasks:** 21.1 to 21.10, all size S.
 
 Shared design for this epic:
 
@@ -228,3 +228,31 @@ Shared design for this epic:
 - [ ] The npm scope is confirmed and every package uses it.
 - [ ] The packed SDK and CLI install and run outside the workspace with no internal-package dependencies.
 - [ ] Only the SDK, CLI, and two store adapter packages are publishable; the ADR records the decision.
+
+---
+
+## 21.10 Copy-paste examples: basic agent, approval, crash and resume
+
+**Parent:** #21 Docs, examples, and release
+**Task Description:** Provide small, runnable examples for a typed tool loop, human approval, and
+crash recovery, each with commands shown at the top of its README and expected output.
+**Expected Output:** `examples/basic-agent/README.md`, `examples/approval/README.md`,
+`examples/crash-and-resume/README.md`, runnable example source/fixtures, and a documentation-runner
+integration test.
+**Dependencies:** none.
+**Items it depends on:** 21.2.
+
+**Implementation guidance:**
+
+1. The basic-agent example runs one fake-model loop with a Zod-typed tool and inspects the run.
+2. The approval example uses an `ask` policy rule, resolves the pending approval from the CLI, and
+   resumes the run to completion.
+3. The crash-and-resume example kills the process after a non-idempotent tool's side effect is
+   durable, resumes from the event log, and verifies the effect occurred exactly once.
+4. Keep all examples synthetic and offline. Run every README command through `run-doc-tests` in CI;
+   list the integration suite in `composeIntegrationSuites` if it starts a Compose stack.
+
+**Acceptance Criteria:**
+
+- [ ] Each example works from a clean checkout by copying its README commands.
+- [ ] CI runs every example and fails if one breaks.
