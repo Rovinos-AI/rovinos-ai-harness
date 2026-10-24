@@ -136,6 +136,9 @@ describe("published package smoke test", () => {
           ...process.env,
           // This temporary project has a different dependency graph from the copied lockfile.
           YARN_ENABLE_IMMUTABLE_INSTALLS: "false",
+          // The repository install already ran in hardened mode; this install uses its validated lockfile
+          // and local tarballs offline.
+          YARN_ENABLE_HARDENED_MODE: "0",
           YARN_ENABLE_NETWORK: "0",
         },
         maxBuffer: 10_000_000,

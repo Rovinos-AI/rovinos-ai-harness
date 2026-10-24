@@ -184,29 +184,35 @@ function createScriptContainerArgs(
 
 function runHarnessScript(
   context: ComposeContext,
-  containerName: string,
   script: string,
-  detach: boolean,
-  envFile?: string,
+  options: RunHarnessScriptOptions & { readonly containerName: string; readonly detach: boolean },
 ): string {
-  execFileSync("docker", createScriptContainerArgs(context, containerName, script, envFile), {
-    encoding: "utf8",
-  });
-  execFileSync("docker", ["network", "connect", `${context.projectName}_sandbox`, containerName], {
-    encoding: "utf8",
-  });
-  if (detach) {
-    execFileSync("docker", ["start", containerName], { encoding: "utf8" });
-    return containerName;
+  execFileSync(
+    "docker",
+    createScriptContainerArgs(context, options.containerName, script, options.envFile),
+    {
+      encoding: "utf8",
+    },
+  );
+  execFileSync(
+    "docker",
+    ["network", "connect", `${context.projectName}_sandbox`, options.containerName],
+    {
+      encoding: "utf8",
+    },
+  );
+  if (options.detach) {
+    execFileSync("docker", ["start", options.containerName], { encoding: "utf8" });
+    return options.containerName;
   }
   try {
-    return execFileSync("docker", ["start", "--attach", containerName], {
+    return execFileSync("docker", ["start", "--attach", options.containerName], {
       encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
       timeout: 120_000,
     });
   } finally {
-    execFileSync("docker", ["rm", "-f", containerName], { encoding: "utf8" });
+    execFileSync("docker", ["rm", "-f", options.containerName], { encoding: "utf8" });
   }
 }
 
@@ -249,13 +255,11 @@ export function createMultiWorkerCompose(options: MultiWorkerComposeOptions): Mu
       const containerName =
         runOptions.name ??
         `${context.projectName}-script-${String(process.pid)}-${String(++scriptContainerSequence)}`;
-      return runHarnessScript(
-        context,
+      return runHarnessScript(context, script, {
+        ...runOptions,
         containerName,
-        script,
-        runOptions.detach === true,
-        runOptions.envFile,
-      );
+        detach: runOptions.detach === true,
+      });
     },
     waitForLog,
     removeContainer: (container) => {
