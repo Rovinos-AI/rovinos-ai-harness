@@ -15,14 +15,14 @@ telemetry to external services.
 The `datadog` profile requires `DD_API_KEY` and `DD_SITE` in the collector
 environment. Supply the API key through the deployment's secret mechanism; do
 not place it in a config file or commit it. `DD_SITE` is the Datadog site for
-the account, such as `datadoghq.com`.
+the account.
 
 ### Azure Data Explorer
 
 The `adx` profile requires `ADX_CLUSTER_URI`, `ADX_DATABASE`, and
 `ADX_MANAGED_IDENTITY_ID`. Use `system` for a system-assigned managed identity,
 or the client ID for a user-assigned managed identity. Grant that identity the
-Azure Data Explorer **Database Ingestor** role on the target database, and
+Azure Data Explorer **Ingestor** role on the target database, and
 pre-create the `HarnessTraces`, `HarnessLogs`, and `HarnessMetrics` tables.
 The profile uses managed ingestion; enable streaming ingestion for those tables
 on the cluster. The fallback service-principal options are intentionally not
