@@ -34,7 +34,7 @@ unset key
 <!-- test:run -->
 
 ```bash
-compose up -d --wait
+compose up -d --wait sandbox-runner
 ```
 
 <!-- test:run -->
