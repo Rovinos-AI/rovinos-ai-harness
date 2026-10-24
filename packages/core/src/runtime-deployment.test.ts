@@ -99,6 +99,22 @@ describe("validateDeploymentTopology", () => {
       vi.unstubAllEnvs();
     });
 
+    it("does not consume run IDs when opening a heartbeat", async () => {
+      const dataDir = await mkdtemp(join(tmpdir(), "harness-heartbeat-run-ids-"));
+      const ids = new SequentialIdGenerator();
+      const runtime = await createRuntime(
+        { run: RunConfigSchema.parse({}) },
+        { dataDir, clock: new FakeClock(100), ids },
+      );
+
+      try {
+        expect(ids.next()).toBe(Id.parse("00000000000000000000000000"));
+      } finally {
+        await runtime.close();
+        await rm(dataDir, { recursive: true, force: true });
+      }
+    });
+
     it("creates a heartbeat sidecar for a SQLite vault when the event store is Postgres", async () => {
       const dataDir = await mkdtemp(join(tmpdir(), "harness-mixed-store-vault-"));
       const config = {

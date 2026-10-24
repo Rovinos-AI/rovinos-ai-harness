@@ -234,7 +234,6 @@ async function openRuntimeInstanceHeartbeat(options: {
   readonly config: RuntimeConfig;
   readonly overrides: RuntimeOverrides;
   readonly dataDir: string;
-  readonly ids: RuntimeComposition["ids"];
   readonly clock: RuntimeComposition["clock"];
 }): Promise<RuntimeComposition["instanceHeartbeat"]> {
   if (options.config.deployment?.mode === "multi" || options.overrides.readOnlyStore === true) {
@@ -251,11 +250,12 @@ async function openRuntimeInstanceHeartbeat(options: {
     return undefined;
   }
   const heartbeats: SqliteInstanceHeartbeat[] = [];
+  const instanceIds = new SystemIdGenerator(options.clock);
   try {
     for (const databasePath of sqlitePaths) {
       const heartbeat = await openSqliteInstanceHeartbeat({
         databasePath,
-        instanceId: options.ids.next(),
+        instanceId: instanceIds.next(),
         now: () => options.clock.now(),
       });
       if (heartbeat === undefined) {
@@ -372,7 +372,6 @@ export async function setupRuntime(
     instanceHeartbeat = await openRuntimeInstanceHeartbeat({
       config: runtimeConfig,
       overrides,
-      ids,
       clock,
       dataDir,
     });
