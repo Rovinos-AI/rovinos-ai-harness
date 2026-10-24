@@ -100,10 +100,16 @@ describe("Collector allowlist generator", () => {
           transform/metric_attributes:
             error_mode: "ignore"
             metric_statements:
-              - "keep_keys(scope.attributes, [])"
-              - "keep_keys(exemplar.filtered_attributes, [])"
-              - "keep_keys(datapoint.attributes, [\\"harness.collector.a\\", \\"harness.collector.b\\"]) where metric.name == \\"harness.collector.alpha\\""
-              - "keep_keys(datapoint.attributes, [\\"harness.collector.z\\"]) where metric.name == \\"harness.collector.zebra\\""
+              - context: "scope"
+                statements:
+                  - "keep_keys(attributes, [])"
+              - context: "exemplar"
+                statements:
+                  - "keep_keys(filtered_attributes, [])"
+              - context: "datapoint"
+                statements:
+                  - "keep_keys(attributes, [\\"harness.collector.a\\", \\"harness.collector.b\\"]) where metric.name == \\"harness.collector.alpha\\""
+                  - "keep_keys(attributes, [\\"harness.collector.z\\"]) where metric.name == \\"harness.collector.zebra\\""
           transform/resource_attributes:
             error_mode: "ignore"
             trace_statements:

@@ -9,7 +9,7 @@ import { composeIntegrationSuites } from "../../vitest.config.js";
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 // A suite starts a Docker/Compose container, through the documentation runner, or builds images.
 const startsCompose =
-  /"compose"|runNetworkIsolationCompose|composeArgs|runQuickstartDocTests|runExampleDocTests|run-doc-tests|new DockerExecutor|runDocker\(\[\s*"build"/u;
+  /"compose"|runCollectorFixture|runNetworkIsolationCompose|composeArgs|runQuickstartDocTests|runExampleDocTests|run-doc-tests|new DockerExecutor|runDocker\(\[\s*"build"/u;
 
 it("lists every integration suite that starts a container or builds images", () => {
   const suites = execFileSync("git", ["ls-files", "*.int.test.ts"], { cwd: root, encoding: "utf8" })
