@@ -1,6 +1,6 @@
 # Rovinos AI Harness
 
-**An agent harness with metadata-only telemetry and trace-based replay for recorded runs while their event and vault data remain available.**
+**The agent harness you can run in regulated environments: no PII in telemetry, and every recorded run replayable from its OTel trace.** ([Guarantees and limits](docs/guarantees.md))
 
 Rovinos AI Harness is an open source, TypeScript, container-native agent harness. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary, and telemetry carries metadata only. License: [Apache-2.0](LICENSE).
 
