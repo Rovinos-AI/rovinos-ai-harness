@@ -148,9 +148,9 @@ describe("Event", () => {
       throw new Error("Missing run_created sample.");
     }
 
-    expect(
-      Event.parse({ ...created, replayOf: "00000000000000000000000002" }),
-    ).toMatchObject({ replayOf: "00000000000000000000000002" });
+    expect(Event.parse({ ...created, replayOf: "00000000000000000000000002" })).toMatchObject({
+      replayOf: "00000000000000000000000002",
+    });
     expect(Event.safeParse({ ...created, replayOf: "not-an-id" }).success).toBe(false);
   });
 

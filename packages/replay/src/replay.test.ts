@@ -10,13 +10,7 @@ import {
 import { FakeModelPort, FakeToolPort } from "@harness/core/testing";
 import { InMemoryEventStore } from "@harness/store";
 import type { EventStore } from "@harness/store";
-import {
-  Code,
-  Event,
-  Id,
-  RunConfigSchema,
-  type Event as EventValue,
-} from "@harness/schemas";
+import { Code, Event, Id, RunConfigSchema, type Event as EventValue } from "@harness/schemas";
 import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { replayRun } from "./replay.js";
@@ -152,7 +146,9 @@ describe("replayRun", () => {
     const originalCreated = originalEvents[0];
     const outcome = await replayRun(original, { config: runConfig });
     const replayCreated = outcome.events[0];
-    const replaySpan = spanCollector?.getFinishedSpans().find(({ name }) => name === "harness.replay");
+    const replaySpan = spanCollector
+      ?.getFinishedSpans()
+      .find(({ name }) => name === "harness.replay");
     const originalRequest = originalEvents.find((event) => event.type === "model_request");
     const replayRequest = outcome.events.find((event) => event.type === "model_request");
 
@@ -274,8 +270,8 @@ describe("replayRun", () => {
 
     const outcome = await replayRun(resolved, { config: runConfig });
     const created = outcome.events.filter((event) => event.type === "run_created");
-    const replayRoot = created.find((event) => event.type === "run_created" && event.replayOf === original.rootRunId);
-    const replayChild = created.find((event) => event.type === "run_created" && event.replayOf === childRunId);
+    const replayRoot = created.find((event) => event.replayOf === original.rootRunId);
+    const replayChild = created.find((event) => event.replayOf === childRunId);
 
     expect(outcome.status).toBe("error");
     expect(outcome.divergence).toMatchObject({ code: "replay_divergence" });
@@ -300,7 +296,8 @@ describe("replayRun", () => {
 
     expect(outcome.status).toBe("completed");
     expect(outcome.events.some((event) => event.type === "approval_resolved")).toBe(true);
-    expect(outcome.events.every((event) => event.type !== "run_created" || event.replayOf !== undefined))
-      .toBe(true);
+    expect(
+      outcome.events.every((event) => event.type !== "run_created" || event.replayOf !== undefined),
+    ).toBe(true);
   });
 });

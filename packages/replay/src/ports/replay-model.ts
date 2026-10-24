@@ -52,7 +52,10 @@ export class ReplayModelPort implements ModelPort {
       readonly requests: readonly Extract<Event, { type: "model_request" }>[];
     }
   >();
-  private readonly pendingRequests = new Map<Id, { readonly request: ModelRequest; readonly runId: Id }>();
+  private readonly pendingRequests = new Map<
+    Id,
+    { readonly request: ModelRequest; readonly runId: Id }
+  >();
   private readonly requestIndexes = new Map<Id, number>();
 
   /**

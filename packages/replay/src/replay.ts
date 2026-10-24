@@ -53,8 +53,10 @@ export const ReplayOutcomeSchema = z
 export type ReplayOutcome = z.infer<typeof ReplayOutcomeSchema>;
 
 /** Current runtime configuration and optional read-only tool metadata used by the replay ports. */
-export interface ReplayRunOptions
-  extends Pick<BuildReplayRuntimeOptions, "policy" | "toolRegistry"> {
+export interface ReplayRunOptions extends Pick<
+  BuildReplayRuntimeOptions,
+  "policy" | "toolRegistry"
+> {
   readonly config: RuntimeConfig;
 }
 
@@ -91,7 +93,9 @@ function failureFromEvents(
   events: readonly EventValue[],
   originalEvents: readonly EventValue[],
 ): ReplayFailure | undefined {
-  const failed = events.findLast((event) => event.type === "run_status_changed" && event.to === "failed");
+  const failed = events.findLast(
+    (event) => event.type === "run_status_changed" && event.to === "failed",
+  );
   if (
     failed?.type !== "run_status_changed" ||
     (failed.reason !== "replay_divergence" && failed.reason !== "replay_missing_result")
@@ -284,8 +288,9 @@ async function replayRunTree(
       for (const child of childRuns) {
         childOutcomes.push(await replayRunTree(resolved, options, child.runId, replayRunId));
       }
-      const childDivergence = childOutcomes.find((outcome) => outcome.divergence !== undefined)
-        ?.divergence;
+      const childDivergence = childOutcomes.find(
+        (outcome) => outcome.divergence !== undefined,
+      )?.divergence;
       const replayCreated = execution.events.find((event) => event.type === "run_created");
       return ReplayOutcomeSchema.parse({
         replayRunId,

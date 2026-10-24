@@ -83,11 +83,13 @@ export class ReplayToolPort implements ToolPort {
   /** Returns recorded idempotency with timeout and schema metadata from the optional registry. */
   describe(toolId: Code, args?: JsonValue): ToolDescription | undefined {
     const requestedHash = args === undefined ? undefined : hashArgs(args);
-    const intent = [...this.runs.values()].flatMap(({ intents }) => [...intents.values()]).find(
-      (candidate) =>
-        candidate.toolId === toolId &&
-        (requestedHash === undefined || candidate.argsHash === requestedHash),
-    );
+    const intent = [...this.runs.values()]
+      .flatMap(({ intents }) => [...intents.values()])
+      .find(
+        (candidate) =>
+          candidate.toolId === toolId &&
+          (requestedHash === undefined || candidate.argsHash === requestedHash),
+      );
     if (intent === undefined) {
       return undefined;
     }
@@ -119,8 +121,7 @@ export class ReplayToolPort implements ToolPort {
 
   /** Returns the recorded result or fails closed on missing or divergent input. */
   execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult> {
-    const runId =
-      context.runId === this.rootReplayRunId ? this.originalRootRunId : context.runId;
+    const runId = context.runId === this.rootReplayRunId ? this.originalRootRunId : context.runId;
     const run = this.runs.get(runId);
     const intent = run?.intents.get(call.callId);
     const result = run?.results.get(call.callId);
