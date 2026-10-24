@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -43,18 +45,90 @@ function requireStdout(value: unknown): string {
   return value;
 }
 
-it("validates the base configuration and debug profile with the pinned collector", async () => {
-  const validation = await execFileAsync(
+function capturedOutput(error: unknown): string {
+  if (typeof error !== "object" || error === null) {
+    return "";
+  }
+  const stdout = "stdout" in error && typeof error.stdout === "string" ? error.stdout : "";
+  const stderr = "stderr" in error && typeof error.stderr === "string" ? error.stderr : "";
+  return stdout + stderr;
+}
+
+it("validates every profile and verifies the pinned collector components", async () => {
+  const environment = {
+    ...process.env,
+    DD_API_KEY: "test-api-key",
+    DD_SITE: "datadoghq.com",
+    ADX_CLUSTER_URI: "https://example.kusto.windows.net",
+    ADX_DATABASE: "HarnessTests",
+    ADX_MANAGED_IDENTITY_ID: "system",
+  };
+  const validationOptions = {
+    cwd: root,
+    encoding: "utf8" as const,
+    env: environment,
+    maxBuffer: 10 * 1024 * 1024,
+  };
+
+  for (const profile of ["debug", "datadog", "adx", "test"]) {
+    const validation = await execFileAsync(
+      "bash",
+      [resolve(root, "scripts/collector/validate.sh"), profile],
+      validationOptions,
+    );
+    expect(typeof validation.stdout).toBe("string");
+  }
+
+  const verification = await execFileAsync(
     "bash",
-    [resolve(root, "scripts/collector/validate.sh"), "debug"],
-    {
-      cwd: root,
-      encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024,
-    },
+    [resolve(root, "scripts/collector/verify-components.sh")],
+    validationOptions,
   );
-  expect(typeof validation.stdout).toBe("string");
+  expect(typeof verification.stdout).toBe("string");
 }, 120_000);
+
+it("prints the builder fallback when a required component is missing", async () => {
+  const fakeDockerDirectory = mkdtempSync(resolve(tmpdir(), "collector-docker-"));
+  const fakeDocker = resolve(fakeDockerDirectory, "docker");
+  writeFileSync(
+    fakeDocker,
+    `#!/bin/sh
+cat <<'COMPONENTS'
+exporters:
+    - name: azuredataexplorer
+    - name: file
+    - name: debug
+processors:
+    - name: transform
+    - name: filter
+    - name: memory_limiter
+    - name: batch
+COMPONENTS
+`,
+    { mode: 0o755 },
+  );
+
+  try {
+    const result = await execFileAsync(
+      "bash",
+      [resolve(root, "scripts/collector/verify-components.sh")],
+      {
+        ...commandOptions,
+        cwd: root,
+        env: { ...process.env, PATH: `${fakeDockerDirectory}:${process.env.PATH ?? ""}` },
+      },
+    ).then(
+      () => ({ succeeded: true, output: "" }),
+      (error: unknown) => ({ succeeded: false, output: capturedOutput(error) }),
+    );
+
+    expect(result.succeeded).toBe(false);
+    expect(result.output).toContain("missing exporter datadog");
+    expect(result.output).toContain("infra/collector/builder.yaml");
+  } finally {
+    rmSync(fakeDockerDirectory, { recursive: true, force: true });
+  }
+});
 
 it("serves the health endpoint on a loopback-only published port", async () => {
   try {
