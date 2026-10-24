@@ -6,7 +6,6 @@ import { loadConfig, type HarnessConfig } from "@rovinos/config";
 import {
   JsonValue as JsonValueSchema,
   RunInputSchema,
-  type Code,
   type Event,
   type Id,
 } from "@rovinos/schemas";
@@ -142,8 +141,8 @@ class HarnessClient implements Harness {
     return result === undefined ? { runId: candidateRunId } : { result };
   }
 
-  private projectSafeEvents(events: readonly Event[], policyVersion: Code) {
-    return safeEvents(events, policyVersion, this.correlationEnabled, this.runtime.keys);
+  private projectSafeEvents(events: readonly Event[]) {
+    return safeEvents(events, this.correlationEnabled, this.runtime.keys);
   }
 
   private async launchRun(
@@ -218,7 +217,7 @@ class HarnessClient implements Harness {
       steps: state.steps,
       usage: state.usage,
       pendingApprovals: Array.from(state.pendingApprovals.keys()),
-      recentEvents: await this.projectSafeEvents(events.slice(-20), firstEvent.policyVersion),
+      recentEvents: await this.projectSafeEvents(events.slice(-20)),
     });
   }
 
@@ -410,7 +409,7 @@ class HarnessClient implements Harness {
         signal: controller.signal,
         ...(options.maxBuffered === undefined ? {} : { maxBuffered: options.maxBuffered }),
       })) {
-        yield* await this.projectSafeEvents([event], created.policyVersion);
+        yield* await this.projectSafeEvents([event]);
       }
     } finally {
       options.signal?.removeEventListener("abort", onAbort);

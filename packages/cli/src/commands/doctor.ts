@@ -120,6 +120,48 @@ function workerQueueReachableCheck(
   };
 }
 
+function collectorReachableCheck(endpoint: string | undefined): DoctorCheck {
+  return {
+    id: "collector_reachable",
+    title: "Collector health",
+    async run(ctx) {
+      if (endpoint === undefined || endpoint === "") {
+        return { status: "warn", code: "collector_unconfigured" };
+      }
+      let healthUrl: URL;
+      try {
+        const otlpUrl = new URL(endpoint);
+        if (
+          (otlpUrl.protocol !== "http:" && otlpUrl.protocol !== "https:") ||
+          otlpUrl.username !== "" ||
+          otlpUrl.password !== "" ||
+          otlpUrl.search !== "" ||
+          otlpUrl.hash !== ""
+        ) {
+          return { status: "fail", code: "collector_unreachable" };
+        }
+        healthUrl = new URL("http://otel-collector:13133/");
+        healthUrl.hostname = otlpUrl.hostname;
+      } catch {
+        return { status: "fail", code: "collector_unreachable" };
+      }
+      try {
+        const response = await fetch(healthUrl, {
+          method: "GET",
+          redirect: "error",
+          ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
+        });
+        await response.body?.cancel();
+        return response.ok
+          ? { status: "ok", code: "collector_reachable" }
+          : { status: "fail", code: "collector_unreachable" };
+      } catch {
+        return { status: "fail", code: "collector_unreachable" };
+      }
+    },
+  };
+}
+
 /**
  * Creates the `harness doctor` command.
  *
@@ -248,6 +290,9 @@ function defaultDoctorChecks({
   const servers = config?.servers ?? [];
   return [
     ...core.doctorChecks(),
+    collectorReachableCheck(
+      env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ?? env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    ),
     keysConfiguredCheck(config, env, secretResolver),
     workerQueueReachableCheck(core, config, secretResolver),
     ...(config?.pii.presidio === undefined

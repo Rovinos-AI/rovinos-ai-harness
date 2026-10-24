@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { logs } from "@opentelemetry/api-logs";
 import type { TelemetryConfig } from "@rovinos/schemas";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import {
   BatchLogRecordProcessor,
   LoggerProvider,
@@ -16,6 +17,7 @@ import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processo
 import { AllowlistSpanProcessor } from "./processors/allowlist-span-processor.js";
 import { assertSentinelGate, type SentinelGate } from "./sentinel/gate.js";
 import { SEMCONV_STABILITY_OPT_IN } from "./semconv.js";
+import { POLICY_VERSION } from "./generated/policy-version.js";
 import { env } from "node:process";
 
 const sdkFlushersByLoggerProvider = new WeakMap<WeakKey, () => Promise<void>>();
@@ -58,12 +60,15 @@ export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
     ...(options.gate === undefined ? {} : { gate: options.gate }),
     ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
   };
+  const resource = resourceFromAttributes({ "harness.policy.version": POLICY_VERSION });
   const tracerProvider = new BasicTracerProvider({
+    resource,
     spanProcessors: [
       new AllowlistSpanProcessor(new BatchSpanProcessor(options.spanExporter), processorOptions),
     ],
   });
   const loggerProvider = new LoggerProvider({
+    resource,
     processors: [
       new AllowlistLogRecordProcessor(
         new BatchLogRecordProcessor({ exporter: options.logExporter }),

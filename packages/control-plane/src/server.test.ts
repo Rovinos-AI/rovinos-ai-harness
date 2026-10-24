@@ -16,6 +16,7 @@ import {
   type RunStatus,
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
+import { POLICY_VERSION } from "@rovinos/telemetry";
 import { createEventBuilders } from "@rovinos/store/testing";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -470,7 +471,7 @@ describe("control-plane inspection tools", () => {
         ruleId: "approval.rule",
       }),
     );
-    expect(output.recentEvents.every(({ policyVersion }) => policyVersion === "policy.v1")).toBe(
+    expect(output.recentEvents.every(({ policyVersion }) => policyVersion === POLICY_VERSION)).toBe(
       true,
     );
     expect(result.content).toEqual([

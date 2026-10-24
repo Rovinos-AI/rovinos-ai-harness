@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EVENT_FIELD_CLASS, Event, Pseudonym, eventSamples } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
+import { POLICY_VERSION } from "./generated/policy-version.js";
 import { SafeEvent, safeEventSchemas, toSafeEvent } from "./safe-event.js";
 import { z } from "zod";
 
@@ -337,6 +338,15 @@ describe("SafeEvent projection", () => {
       });
     },
   );
+
+  it("defaults to the generated shared policy version", () => {
+    const event = mappedEvents[0]?.event;
+    if (event === undefined) {
+      throw new Error("Expected a mapped event fixture.");
+    }
+
+    expect(toSafeEvent(event)).toMatchObject({ policyVersion: POLICY_VERSION });
+  });
 
   it.each(unexportedEvents)("does not export $type", (event) => {
     expect(toSafeEvent(event, "sanitizer.v1")).toBeNull();
