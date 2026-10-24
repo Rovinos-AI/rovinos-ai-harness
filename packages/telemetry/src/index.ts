@@ -2,6 +2,7 @@
 export { attr, getAttrMeta, isSafeAttr, type AttrMeta } from "./attr.js";
 export { SpanRegistryError, TelemetrySdkError, type SpanRegistryIssue } from "./errors.js";
 export { LogRegistryError } from "./log-registry.js";
+export { POLICY_VERSION } from "./generated/policy-version.js";
 export {
   SafeEvent,
   toSafeEvent,
