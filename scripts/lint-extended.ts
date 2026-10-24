@@ -167,6 +167,13 @@ function lintEditorconfig(
   );
 }
 
+function pullLintImages(runner: typeof run): boolean {
+  return (
+    runner("docker", ["pull", hadolintImage], "Docker for hadolint") &&
+    runner("docker", ["pull", editorconfigImage], "Docker for EditorConfig Checker")
+  );
+}
+
 /** Runs one extended lint mode with an injectable process runner. */
 export function lint(
   mode: string,
@@ -188,7 +195,13 @@ export function lint(
     return lintEditorconfig(requestedFiles, runner, pullImages);
   }
 
-  process.stderr.write("Usage: lint-extended.ts <shell|docker|editorconfig> [Dockerfile ...]\n");
+  if (mode === "pull-images") {
+    return pullLintImages(runner);
+  }
+
+  process.stderr.write(
+    "Usage: lint-extended.ts <shell|docker|editorconfig|pull-images> [Dockerfile ...]\n",
+  );
   return false;
 }
 
