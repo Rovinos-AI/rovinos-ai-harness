@@ -12,6 +12,7 @@ export const EVENT_FIELD_CLASS = {
   run_created: {
     configHash: "meta",
     policyVersion: "meta",
+    replayOf: "meta",
     parentRunId: "meta",
     parentCallId: "meta",
     continuationOf: "meta",

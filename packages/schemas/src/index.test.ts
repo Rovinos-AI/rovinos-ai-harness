@@ -25,11 +25,14 @@ test("exports the event schema, classification, and split/join API", () => {
   const typedNewEvent: NewEvent = newEvent;
 
   expect(EVENT_FIELD_CLASS.run_created.configHash).toBe("meta");
+  expect(EVENT_FIELD_CLASS.run_created.replayOf).toBe("meta");
   expect(EVENT_FIELD_CLASS.run_input).toEqual({ input: "content", inputKind: "meta" });
   expect(RunStatus.parse("running")).toBe("running");
   expect(joinEvent(parts.meta, parts.content)).toEqual(sample);
   expect(seq).toBe(0);
   expect(typedNewEvent).toMatchObject({ type: "run_created" });
+  expect(parts.meta.replayOf).toBe("00000000000000000000000001");
+  expect(parts.content).not.toHaveProperty("replayOf");
 });
 
 test("run_created carries parent metadata and a non-negative depth", () => {

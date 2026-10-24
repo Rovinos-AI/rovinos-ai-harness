@@ -8,26 +8,18 @@ Rovinos AI Harness is an open source, TypeScript, container-native agent harness
 
 ## Try it in five minutes
 
-You need Docker with Compose v2 and a POSIX shell. A scripted model stands in for a provider, so no API key is needed, and the sample uses synthetic data only. From the repository root:
+You need Docker with Compose v2, plus Node 26 with Corepack for Yarn. `mise install` installs the
+pinned Node version. A scripted model stands in for a provider, so no API key is needed, and the
+sample uses synthetic data only. From the repository root:
 
 ```bash
-compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
-
-cp examples/quickstart/.env.example examples/quickstart/.env
-compose build harness && compose build sandbox-runner
-key="$(harness keys generate | sed -n '1p')"
-sed -i.bak "s|^HARNESS_KEY=.*|HARNESS_KEY=$key|" examples/quickstart/.env && rm examples/quickstart/.env.bak
-compose up -d --wait
-
-# The policy asks for approval before the file write, so the run suspends (exit code 5).
-harness run --input examples/quickstart/task.json --fake-model examples/quickstart/fake-model.script.json
-harness --json approvals list
-harness approvals approve <approvalId> --yes
-harness resume <runId> --fake-model examples/quickstart/resume-model.script.json
+yarn quickstart
 ```
 
-The [quickstart guide](docs/quickstart.md) explains each step, how to inspect the run, and how to switch to a real provider. CI runs that guide end to end on every change.
+The sample pauses for human approval and prints the exact commands to approve and resume it. Use
+`yarn quickstart --yes` to complete the sample unattended, or `yarn quickstart:down` to stop the
+stack and remove its volumes and generated `.env`. The
+[quickstart guide](docs/quickstart.md) also keeps the manual steps for users without Node.
 
 ## Contents
 
