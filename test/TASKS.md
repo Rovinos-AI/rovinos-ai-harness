@@ -2,7 +2,7 @@
 
 This folder has no dedicated epic. Tasks that touch it are listed below; the full specs live in the linked files.
 
-Task ids: 2.11, 2.15, 3.7, 5.6, 6.7, 8.5, 9.6, 10.4, 10.6, 18.7, 21.2, 22.5, 7.13, 24.6, 24.8, 25.8
+Task ids: 2.11, 2.15, 3.7, 5.6, 6.7, 8.5, 9.6, 10.4, 10.6, 18.7, 21.2, 21.11, 22.5, 7.13, 24.6, 24.8, 25.8
 
 - [epic-08-leak-sentinel.md](../packages/telemetry/epic-08-leak-sentinel.md)
 - [epic-09-replay.md](../packages/replay/epic-09-replay.md)

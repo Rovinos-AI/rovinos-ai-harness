@@ -8638,6 +8638,7 @@ __metadata:
     "@harness/models": "workspace:^"
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
+    "@harness/replay": "workspace:^"
     "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/sdk": "workspace:^"
