@@ -16,6 +16,7 @@ The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks ad
 4. Write the tests the task lists, in the CI job it names: `static`, `unit`, `integration`, `gates`.
 5. In the PR description list: task id, what changed, how it was tested, any "(verify)" decisions, follow-ups.
 6. Add an empty marker file at `docs/progress/<task-id>` (the threat-case checker reads it).
+7. Before every push, merge current `origin/main`, then run the **full** repo-wide checks, not only the scoped ones: `yarn build`, `yarn lint`, `yarn typecheck`, and `yarn test:unit --coverage`. Push only when all four pass with zero errors and warnings, and report each command's result in the PR description. If your environment cannot run one (for example the Docker integration suites), say so explicitly; never call a failure "unrelated" without checking that `main` passes the same command.
 
 ## Repo map
 
