@@ -43,6 +43,8 @@ jobs:
         run: yarn gen:collector --check
       - name: Check synthetic PII corpus determinism
         run: yarn check:pii-corpus
+      - name: Check documentation claims
+        run: yarn lint:claims
       - name: Lint
         run: yarn lint
         # Scoped to this step so unit tests never inherit it; they must not depend on the environment.

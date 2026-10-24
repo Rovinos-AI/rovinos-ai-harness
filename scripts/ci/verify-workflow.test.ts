@@ -126,6 +126,7 @@ describe("CI workflow", () => {
     const steps = jobSteps("static");
 
     const required = [
+      "yarn lint:claims",
       "yarn lint",
       "yarn typecheck",
       "yarn check:agents",

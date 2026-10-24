@@ -17,7 +17,7 @@ User and contributor documentation.
 ## Rules
 
 - Docs are tested: runnable shell blocks are marked `<!-- test:run -->` and executed in CI; links, anchors, and Mermaid diagrams are validated.
-- No absolute security claims; the claims linter blocks phrases like "cannot leak". State guarantees with evidence and assumptions, and list known gaps.
+- No absolute security claims; the claims linter blocks phrases like "cannot leak". State guarantees with evidence and assumptions, and list known gaps. <!-- claims:allow -->
 - Generated API docs (`docs/api/`) are gitignored and built in CI.
 - ADRs live in `docs/decisions/` and are indexed.
 
