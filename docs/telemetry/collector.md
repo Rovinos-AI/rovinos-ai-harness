@@ -34,3 +34,9 @@ The `test` profile writes newline-delimited JSON to
 `/var/otel-out/{traces,logs,metrics}.jsonl`. The directory must be writable by
 the collector and should be supplied by the test environment; this profile is
 for local and integration testing, not production export.
+
+The pinned contrib image includes every required component. If
+`scripts/collector/verify-components.sh` reports one missing, use
+`infra/collector/builder.yaml` as a manual OpenTelemetry Collector Builder
+fallback; it is not built by default. Pin the resulting custom image in
+`infra/collector/VERSION` before validating or deploying it.
