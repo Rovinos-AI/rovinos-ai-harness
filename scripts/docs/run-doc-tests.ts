@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// Cleanup blocks run even after any failure.
+// Cleanup blocks run even after any failure. Only synthetic test output is printed, never telemetry.
 import { randomUUID } from "node:crypto";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DocTestError, extractDocTestBlocks, substituteCaptures } from "./doc-blocks.js";
-import type { DocTestBlock } from "./doc-blocks.js";
+import type { DocTestBlock, DocTestDocumentPath } from "./doc-blocks.js";
+
+interface IndexedDocTestBlock extends DocTestBlock {
+  readonly blockIndex: number;
+}
 
 interface CommandResult {
   readonly status: number | null;
@@ -28,8 +32,8 @@ function executeShellBlock(code: string, cwd: string, env: NodeJS.ProcessEnv): C
   );
   return {
     status: result.status,
-    stdout: result.stdout,
-    stderr: result.stderr,
+    stdout: result.output[1] ?? "",
+    stderr: result.output[2] ?? "",
     ...(result.error === undefined ? {} : { error: result.error }),
   };
 }
@@ -56,6 +60,7 @@ interface BlockExecutionContext {
   readonly env: NodeJS.ProcessEnv;
   readonly execute: BlockExecutor;
   readonly prelude: string;
+  readonly documentPath: DocTestDocumentPath;
 }
 
 interface BlockExecutionOptions {
@@ -63,26 +68,48 @@ interface BlockExecutionOptions {
   readonly priorFailure?: DocTestError | undefined;
 }
 
+function writeFailureOutput(failure: DocTestError, result: CommandResult): void {
+  for (const [stream, output] of Object.entries({ stdout: result.stdout, stderr: result.stderr })) {
+    if (output.length > 0) {
+      const tail = output
+        .replace(/\r?\n$/u, "")
+        .split(/\r?\n/u)
+        .slice(-200)
+        .join("\n");
+      process.stderr.write(`${failure.message} ${stream} (last 200 lines):\n${tail}\n`);
+    }
+  }
+}
+
 function executeBlock(
-  block: DocTestBlock,
+  block: IndexedDocTestBlock,
   context: BlockExecutionContext,
 ): DocTestError | undefined {
+  let result: CommandResult | undefined;
   try {
     const code = substituteCaptures(block.code, context.captures);
     const executionCode = context.prelude.length === 0 ? code : `${context.prelude}\n${code}`;
-    const result = context.execute(executionCode, context.cwd, context.env);
+    result = context.execute(executionCode, context.cwd, context.env);
     if (result.error !== undefined || result.status !== (block.expectedExitCode ?? 0)) {
-      return new DocTestError(result.status ?? 1);
+      throw new DocTestError(result.status ?? 1);
     }
     captureValues(block, result, context.captures);
     return undefined;
   } catch (error) {
-    return error instanceof DocTestError ? error : new DocTestError();
+    const failure = new DocTestError(
+      error instanceof DocTestError ? error.exitCode : 1,
+      context.documentPath,
+      block.blockIndex,
+    );
+    if (result !== undefined) {
+      writeFailureOutput(failure, result);
+    }
+    return failure;
   }
 }
 
 function executeBlocks(
-  blocks: readonly DocTestBlock[],
+  blocks: readonly IndexedDocTestBlock[],
   context: BlockExecutionContext,
   options: BlockExecutionOptions,
 ): DocTestError | undefined {
@@ -104,16 +131,27 @@ export function executeDocTestBlocks(
   markdown: string,
   options: {
     readonly cwd: string;
+    readonly documentPath?: DocTestDocumentPath;
     readonly env?: NodeJS.ProcessEnv;
     readonly execute?: BlockExecutor;
   },
 ): void {
-  const blocks = extractDocTestBlocks(markdown);
+  const blocks = extractDocTestBlocks(markdown).map((block, index) => ({
+    ...block,
+    blockIndex: index + 1,
+  }));
   const captures = new Map<string, string>();
   const env = options.env ?? process.env;
   const execute = options.execute ?? executeShellBlock;
   const prelude = blocks.find(({ kind }) => kind === "prelude")?.code ?? "";
-  const context = { captures, cwd: options.cwd, env, execute, prelude };
+  const context = {
+    captures,
+    cwd: options.cwd,
+    env,
+    execute,
+    prelude,
+    documentPath: options.documentPath ?? "docs/quickstart.md",
+  };
   const failure = executeBlocks(
     blocks.filter(({ kind }) => kind === "run"),
     context,
@@ -174,11 +212,14 @@ export async function createDocTestTemporaryRoot(parentDirectory: string): Promi
 }
 
 async function runDocTestFiles(
-  markdownPaths: readonly string[],
+  markdownPaths: readonly DocTestDocumentPath[],
   projectName: string,
 ): Promise<void> {
   const markdownFiles = await Promise.all(
-    markdownPaths.map((path) => readFile(join(rootDirectory, path), "utf8")),
+    markdownPaths.map(async (path) => ({
+      path,
+      markdown: await readFile(join(rootDirectory, path), "utf8"),
+    })),
   );
   const temporaryRoot = await createDocTestTemporaryRoot(join(rootDirectory, ".tmp"));
   const workingDirectory = join(temporaryRoot, "checkout");
@@ -186,9 +227,10 @@ async function runDocTestFiles(
 
   try {
     await copyWorktree(workingDirectory);
-    for (const markdown of markdownFiles) {
+    for (const { path, markdown } of markdownFiles) {
       executeDocTestBlocks(markdown, {
         cwd: workingDirectory,
+        documentPath: path,
         env: {
           ...process.env,
           HARNESS_IMAGE: "harness:local",
@@ -222,15 +264,19 @@ export async function runExampleDocTests(): Promise<void> {
 /** Runs the documented replay example command from the current worktree. */
 export async function runReplayExampleDocTests(): Promise<void> {
   const markdown = await readFile(join(rootDirectory, "examples/replay/README.md"), "utf8");
-  executeDocTestBlocks(markdown, { cwd: rootDirectory, env: process.env });
+  executeDocTestBlocks(markdown, {
+    cwd: rootDirectory,
+    documentPath: "examples/replay/README.md",
+    env: process.env,
+  });
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runQuickstartDocTests().then(
     () => process.stdout.write("quickstart documentation passed\n"),
     (error: unknown) => {
-      const code = error instanceof DocTestError ? error.code : "docs_quickstart_test_failed";
-      process.stderr.write(`${code}\n`);
+      const message = error instanceof DocTestError ? error.message : "docs_quickstart_test_failed";
+      process.stderr.write(`${message}\n`);
       process.exitCode = 1;
     },
   );
