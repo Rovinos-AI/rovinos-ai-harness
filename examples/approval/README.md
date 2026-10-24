@@ -1,14 +1,15 @@
 # Approval flow
 
 From the repository root, run the synthetic quickstart scenario. It uses a scripted fake model and
-reuses the secure Compose stack and fixtures from `examples/quickstart`:
+reuses the secure Compose stack and fixtures from `examples/quickstart`. Compose keeps the sandbox
+runner healthy while each harness command runs in a one-shot CLI container:
 
 <!-- test:prelude -->
 
 ```bash
 set -euo pipefail
 compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
+harness() { compose run --rm harness "$@"; }
 ```
 
 <!-- test:run -->
