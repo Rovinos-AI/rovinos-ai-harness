@@ -1,3 +1,3 @@
 {"version":2,"width":100,"height":24,"timestamp":1792828320,"env":{"SHELL":"/bin/bash","TERM":"xterm-256color"}}
 [0.0,"o","$ node examples/replay/run.mjs\r\n"]
-[0.4,"o","Original trace ID: eebc7f15564388941a063b457a8b2c6d\r\nRun status: completed\r\nReplay status: completed\r\nReplay trace ID: bae7546b4710b79d1d67fbc1f486695d\r\nRun events reproduced: yes\r\nReplay trace linked: yes\r\nCanary in exported spans/logs: absent\r\n"]
+[0.4,"o","Original trace ID: 8d707c3f9a26f3e81db62215a7476441\r\nRun status: completed\r\nReplay status: completed\r\nReplay trace ID: b653d8140f7db6f868dd1ba35ca9f076\r\nRun events reproduced: yes\r\nReplay trace linked: yes\r\nCanary in exported spans/logs: absent\r\n"]
