@@ -192,7 +192,7 @@ Shared design for this epic:
 3. **Known gaps:** the list from 8.6 (encryption, compression, steganography, translation, split values), side channels, kernel-level sandbox escapes (19.1 residual risks), provider-side logging by third-party model APIs, user-supplied files in workspaces, human reveal behavior, compromised host.
 4. **Operator responsibilities:** key management and rotation, retention settings, provider trust configuration, network policy, access control to the control plane, backups, monitoring and alerts (links to epic 11 runbooks).
 5. **Non-claims:** the project does not certify compliance with GDPR, HIPAA, or other regimes and is not legal advice.
-6. `lint-claims.ts`: scan `README.md` and `docs/**/*.md` for banned absolute phrases (`completely secure`, `100% safe`, `impossible to leak`, `guaranteed compliant`, `never leaks`, `cannot leak`, case-insensitive) and fail unless the line carries an inline `<!-- claims:allow -->` marker (used when quoting them as examples of what **not** to say). Run in the `static` stage.
+6. `lint-claims.ts`: scan `README.md` and `docs/**/*.md` for banned absolute phrases (`completely secure`, `100% safe`, `impossible to leak`, `guaranteed compliant`, `never leaks`, `cannot leak`, case-insensitive) and fail unless the line carries an inline `<!-- claims:allow -->` marker (used when quoting them as examples of what **not** to say). Run in the `static` stage. <!-- claims:allow -->
 **Tests to write:** claim linter unit tests (banned phrase detected, allow marker honored, code fences ignored optionally by flag); a docs test verifying every evidence link points to an existing test file or CI job name.
 **Acceptance Criteria:**
 
