@@ -17,6 +17,7 @@ services:
       [
         "--config=/etc/otel/base.yaml",
         "--config=/etc/otel/allowlist.generated.yaml",
+        "--config=/etc/otel/policy-version.generated.yaml",
         "--config=/etc/otel/profile-debug.yaml",
       ]
     ports:

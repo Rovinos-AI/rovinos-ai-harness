@@ -12,10 +12,42 @@ services:
       - control_plane_token
     healthcheck:
       test: ["CMD", "node", "dist/bin.js", "healthcheck"]
+    depends_on:
+      otel-health-wait:
+        condition: service_healthy
   otel-collector:
     extends:
       file: docker-compose.yml
       service: otel-collector
+    ports:
+      - "127.0.0.1::13133"
+  otel-health-wait:
+    image: ${HARNESS_IMAGE:-harness:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    entrypoint: ["node"]
+    command: ["/run/harness/otel-health-wait.mjs"]
+    volumes:
+      - ../../scripts/collector/otel-health-wait.mjs:/run/harness/otel-health-wait.mjs:ro
+    depends_on:
+      otel-collector:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "/run/harness/otel-health-wait.mjs", "--check"]
+      interval: 2s
+      timeout: 2s
+      start_period: 70s
+      retries: 30
+    networks:
+      - internal
   presidio-analyzer:
     extends:
       file: docker-compose.yml

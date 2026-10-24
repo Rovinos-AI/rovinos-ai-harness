@@ -3,7 +3,10 @@
 `harness doctor` checks the local Node.js version, loaded configuration, configured secret
 references, data-directory write access, and `worker_queue_reachable`. When `pii.presidio` is
 configured, it also checks the analyzer's `/health` endpoint and reports `presidio_reachable` or
-`presidio_unreachable`. Checks run sequentially with a five-second timeout each. A failed check
+`presidio_unreachable`. When `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or
+`OTEL_EXPORTER_OTLP_ENDPOINT` is configured, it checks the collector health endpoint on that host
+and reports `collector_reachable` or `collector_unreachable`; without an endpoint it warns with
+`collector_unconfigured`. Checks run sequentially with a five-second timeout each. A failed check
 produces exit code `1`; warnings do not change the successful exit code.
 
 Human output is a table containing each check's `id`, `status`, and `code`. With `--json`, the
