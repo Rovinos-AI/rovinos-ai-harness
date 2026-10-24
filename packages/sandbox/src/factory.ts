@@ -4,6 +4,7 @@ import { SandboxConfigSchema, type SecretRef } from "@harness/schemas";
 import type { z } from "zod";
 import { InProcessBackend, type InProcessBackendOptions } from "./inprocess.js";
 import { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
+import { RunnerPool } from "./runner-pool.js";
 import type { SandboxBackend } from "./types.js";
 
 /** Host dependencies shared by configured sandbox backends. */
@@ -32,6 +33,25 @@ export async function createSandboxBackend(
     throw new RemoteSandboxError("sandbox_runner_config_invalid");
   }
   const sandbox = parsed.data;
+  if (sandbox.runners !== undefined) {
+    try {
+      if (deps.secretResolver === undefined) {
+        throw new RemoteSandboxError("sandbox_runner_config_invalid");
+      }
+      const runners = await Promise.all(
+        sandbox.runners.map(async (runner) => {
+          const token = await deps.secretResolver?.resolve(runner.token);
+          if (token === undefined) {
+            throw new RemoteSandboxError("sandbox_runner_config_invalid");
+          }
+          return new RemoteSandboxBackend({ url: runner.url, token: token.reveal() });
+        }),
+      );
+      return new RunnerPool({ runners });
+    } catch {
+      throw new RemoteSandboxError("sandbox_runner_config_invalid");
+    }
+  }
   if (sandbox.runner !== undefined) {
     try {
       if (deps.secretResolver === undefined) {

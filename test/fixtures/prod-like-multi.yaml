@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+deployment:
+  mode: multi
+run:
+  checkpointEveryEvents: 1
+store:
+  dialect: postgres
+  connectionString: file:/run/secrets/store_database_url
+vault:
+  backend: postgres
+  postgres:
+    url: file:/run/secrets/vault_database_url
+keys:
+  currentKeyId: deployment.harness
+  keys:
+    - id: deployment.harness
+      secret: file:/run/secrets/harness_master_key
+sandbox:
+  runners:
+    - url: http://sandbox-runner:8080
+      token: file:/run/secrets/sandbox_runner_token
+    - url: http://sandbox-runner-2:8080
+      token: file:/run/secrets/sandbox_runner_token
+controlPlane:
+  auth:
+    tokens:
+      - id: token.prod-like
+        secret: file:/run/secrets/control_plane_token
+        scopes: [admin]

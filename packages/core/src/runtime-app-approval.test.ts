@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdtemp, rm } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import {
   Code,
@@ -9,6 +10,7 @@ import {
   SequentialIdGenerator,
   type Event,
 } from "@harness/schemas";
+import { RunnerPool, type RunnerPoolRunner, type SandboxBackend } from "@harness/sandbox";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
@@ -48,13 +50,16 @@ async function eventsFor(store: InMemoryEventStore, runId: Id): Promise<Event[]>
   return events;
 }
 
-async function scenario(action: (fixture: Awaited<ReturnType<typeof setup>>) => Promise<void>) {
+async function scenario(
+  action: (fixture: Awaited<ReturnType<typeof setup>>) => Promise<void>,
+  sandboxBackend?: SandboxBackend,
+) {
   trace.disable();
   otelContext.disable();
   const collector = createTestSpanCollector();
   trace.setGlobalTracerProvider(collector.provider);
   otelContext.setGlobalContextManager(createTestContextManager());
-  const fixture = await setup();
+  const fixture = await setup(sandboxBackend);
   try {
     await action(fixture);
   } finally {
@@ -66,7 +71,11 @@ async function scenario(action: (fixture: Awaited<ReturnType<typeof setup>>) => 
   }
 }
 
-async function setup() {
+async function setup(
+  sandboxBackend: SandboxBackend = {
+    exec: () => Promise.reject(new Error("Unused synthetic backend")),
+  },
+) {
   const directory = await mkdtemp(".runtime-app-approval-");
   const clock = new FakeClock(10);
   const ids = new SequentialIdGenerator();
@@ -123,7 +132,7 @@ async function setup() {
     ids: { next: () => Id.parse(ids.next()) },
     dataDir: directory,
     transientVault: true,
-    sandboxBackend: { exec: () => Promise.reject(new Error("Unused synthetic backend")) },
+    sandboxBackend,
     tool,
     policy: { version: Code.parse("app_test"), decide },
     model: new FakeModelPort([
@@ -309,6 +318,68 @@ describe("runtime app approval execution", () => {
         (await eventsFor(f.store, f.runId)).filter((event) => event.type === "tool_intent"),
       ).toHaveLength(1);
     }));
+
+  it("executes an app-call approval resumed on a pooled runtime while holding its runner lease", () => {
+    let leaseHeld = false;
+    let acquired = 0;
+    let released = 0;
+    const runner: RunnerPoolRunner = {
+      healthCheck: () => Promise.resolve(true),
+      acquireLease: () => {
+        acquired += 1;
+        leaseHeld = true;
+        return Promise.resolve();
+      },
+      releaseLease: () => {
+        released += 1;
+        leaseHeld = false;
+        return Promise.resolve();
+      },
+      exec: vi.fn(() =>
+        Promise.resolve({
+          exitCode: 0,
+          stdout: "",
+          stderr: "",
+          stdoutBytes: 0,
+          stderrBytes: 0,
+          truncated: false,
+          timedOut: false,
+          durationMs: 0,
+        }),
+      ),
+      fetch: vi.fn(() =>
+        Promise.resolve({
+          url: "https://example.test/",
+          status: 200,
+          contentType: "text/plain",
+          truncated: false,
+          untrusted: true as const,
+          text: "",
+          hiddenTextDropped: 0,
+        }),
+      ),
+      fileOperation: vi.fn(() => Promise.resolve({ entries: [], truncated: false })),
+      createArchive: vi.fn(() => Promise.resolve(Readable.from([]))),
+      restoreArchive: vi.fn(() => Promise.resolve()),
+      hasWorkspace: vi.fn(() => Promise.resolve(false)),
+    };
+    const pool = new RunnerPool({ runners: [runner] });
+    return scenario(async (f) => {
+      f.execute.mockImplementation(() => {
+        expect(leaseHeld).toBe(true);
+        return Promise.resolve({ outcome: "ok", result: { delivered: true } });
+      });
+      const response = f.request();
+      const approval = await f.pending();
+      await f.runtime.resolveApproval(f.runId, approval.approvalId, "approve", human);
+      await f.runtime.resume(f.runId);
+      await expect(response).resolves.toMatchObject({ isError: false });
+      expect(f.execute).toHaveBeenCalledOnce();
+      expect(acquired).toBe(1);
+      expect(released).toBe(1);
+      expect(leaseHeld).toBe(false);
+    }, pool);
+  });
 
   it.each(["deny", "expiry"] as const)("returns a typed %s error without executing", (kind) =>
     scenario(async (f) => {

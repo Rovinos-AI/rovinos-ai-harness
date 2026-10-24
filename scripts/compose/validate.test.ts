@@ -18,7 +18,7 @@ function service(overrides: Record<string, unknown> = {}): Record<string, unknow
     cap_drop: ["ALL"],
     security_opt: ["no-new-privileges:true"],
     read_only: true,
-    tmpfs: ["/tmp"],
+    tmpfs: ["/tmp:size=64m,noexec,nosuid,nodev"],
     networks: ["internal"],
     healthcheck: { test: ["CMD", "node", "dist/bin.js", "healthcheck"] },
     ...overrides,
@@ -80,6 +80,12 @@ describe("compose security evaluator", () => {
     ["missing no-new-privileges", { security_opt: [] }, "no_new_privileges_missing"],
     ["writable root filesystems", { read_only: false }, "read_only_missing"],
     ["missing writable tmpfs", { tmpfs: [] }, "tmpfs_missing"],
+    ["tmpfs without hardened options", { tmpfs: ["/tmp"] }, "tmpfs_options_missing"],
+    [
+      "tmpfs with executable mounts",
+      { tmpfs: ["/tmp:size=64m,nosuid,nodev"] },
+      "tmpfs_options_missing",
+    ],
     ["missing healthchecks", { healthcheck: undefined }, "healthcheck_missing"],
     ["disabled healthchecks", { healthcheck: { test: ["NONE"] } }, "healthcheck_missing"],
     [
