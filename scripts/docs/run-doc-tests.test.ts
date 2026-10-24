@@ -4,10 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelsConfigSchema, parseYaml } from "@harness/schemas";
 import { z } from "zod";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DocTestError } from "./doc-blocks.js";
 import { createDocTestTemporaryRoot, executeDocTestBlocks } from "./run-doc-tests.js";
 
 describe("quickstart documentation test runner", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("creates the temporary parent when it is missing", async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "quickstart-doc-test-"));
     const missingParent = join(temporaryDirectory, ".tmp");
@@ -157,6 +162,141 @@ describe("quickstart documentation test runner", () => {
 
     expect(failure).toMatchObject({ exitCode: 23 });
     expect(invoked).toEqual(["fail", "cleanup one", "cleanup two"]);
+  });
+
+  it("identifies the second block, prints its output, stops, and attempts every cleanup", () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const invoked: string[] = [];
+    const markdown = [
+      { kind: "run", code: "first" },
+      { kind: "run", code: "fail" },
+      { kind: "run", code: "skipped" },
+      { kind: "cleanup", code: "cleanup one" },
+      { kind: "cleanup", code: "cleanup two" },
+    ]
+      .flatMap(({ kind, code }) => [`<!-- test:${kind} -->`, "```bash", code, "```"])
+      .join("\n");
+    const expectedFailure = new DocTestError(23, "examples/crash-and-resume/README.md", 2);
+    let failure: unknown;
+
+    try {
+      executeDocTestBlocks(markdown, {
+        cwd: ".",
+        documentPath: "examples/crash-and-resume/README.md",
+        execute: (code) => {
+          invoked.push(code);
+          const status = code === "fail" ? 23 : 0;
+          return {
+            status: code === "cleanup one" ? 42 : status,
+            stdout: code === "fail" ? "synthetic stdout\n" : "",
+            stderr: code === "fail" ? "synthetic stderr\n" : "",
+          };
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(DocTestError);
+    expect(failure).toMatchObject({
+      message: expectedFailure.message,
+      documentPath: "examples/crash-and-resume/README.md",
+      blockIndex: 2,
+      exitCode: 23,
+    });
+    expect(stderr.mock.calls).toEqual([
+      [`${expectedFailure.message} stdout (last 200 lines):\nsynthetic stdout\n`],
+      [`${expectedFailure.message} stderr (last 200 lines):\nsynthetic stderr\n`],
+    ]);
+    expect(invoked).toEqual(["first", "fail", "cleanup one", "cleanup two"]);
+  });
+
+  it.each(["", "\n", "\r\n"])(
+    "limits each failed output stream to its last 200 lines (%j)",
+    (ending) => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      const lines = Array.from(
+        { length: 205 },
+        (_, index) => `synthetic line ${String(index + 1)}`,
+      );
+      const output = `${lines.join("\n")}${ending}`;
+
+      expect(() => {
+        executeDocTestBlocks("<!-- test:run -->\n```bash\nfail\n```", {
+          cwd: ".",
+          execute: () => ({ status: 1, stdout: output, stderr: output }),
+        });
+      }).toThrow("docs/quickstart.md block 1");
+
+      const tail = `${lines.slice(5).join("\n")}\n`;
+      expect(stderr.mock.calls).toEqual([
+        [
+          `docs_quickstart_test_failed: docs/quickstart.md block 1 stdout (last 200 lines):\n${tail}`,
+        ],
+        [
+          `docs_quickstart_test_failed: docs/quickstart.md block 1 stderr (last 200 lines):\n${tail}`,
+        ],
+      ]);
+    },
+  );
+
+  it("keeps document-order indexes for cleanup failures after a prelude", () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const markdown = [
+      { kind: "prelude", code: "setup" },
+      { kind: "run", code: "pass" },
+      { kind: "cleanup", code: "fail" },
+    ]
+      .flatMap(({ kind, code }) => [`<!-- test:${kind} -->`, "```bash", code, "```"])
+      .join("\n");
+
+    expect(() => {
+      executeDocTestBlocks(markdown, {
+        cwd: ".",
+        documentPath: "examples/replay/README.md",
+        execute: (code) => ({
+          status: code.endsWith("fail") ? 1 : 0,
+          stdout: "synthetic stdout",
+          stderr: "",
+        }),
+      });
+    }).toThrow("examples/replay/README.md block 3");
+
+    expect(stderr).toHaveBeenCalledExactlyOnceWith(
+      "docs_quickstart_test_failed: examples/replay/README.md block 3 stdout (last 200 lines):\nsynthetic stdout\n",
+    );
+  });
+
+  it("reports captured output and location when a capture fails", () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    expect(() => {
+      executeDocTestBlocks(
+        "<!-- test:run -->\n<!-- capture:runId=(?<runId>[A-Z]+) -->\n```bash\nrun\n```",
+        {
+          cwd: ".",
+          execute: () => ({ status: 0, stdout: "", stderr: "synthetic missing capture" }),
+        },
+      );
+    }).toThrow("docs/quickstart.md block 1");
+
+    expect(stderr).toHaveBeenCalledExactlyOnceWith(
+      "docs_quickstart_test_failed: docs/quickstart.md block 1 stderr (last 200 lines):\nsynthetic missing capture\n",
+    );
+  });
+
+  it("preserves the contextual failure when the shell cannot start", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "quickstart-doc-test-"));
+    await rm(temporaryDirectory, { recursive: true, force: true });
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    expect(() => {
+      executeDocTestBlocks(
+        "<!-- test:run -->\n```bash\nrun\n```\n<!-- test:cleanup -->\n```bash\ncleanup\n```",
+        { cwd: temporaryDirectory },
+      );
+    }).toThrow(new DocTestError(1, "docs/quickstart.md", 1));
+    expect(stderr).not.toHaveBeenCalled();
   });
 
   it("fails when a capture pattern is invalid or does not match", () => {
