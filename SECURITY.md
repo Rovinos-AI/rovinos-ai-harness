@@ -44,5 +44,5 @@ is safe to do so.
 
 The project provides no compliance certification and does not certify that a
 deployment meets any regulatory or legal requirement. See
-[guarantees, best-effort measures, and known gaps](README.md#guarantees-best-effort-measures-and-known-gaps)
-for project assumptions and known gaps.
+[guarantees, best-effort measures, and known gaps](docs/guarantees.md) for
+project assumptions and known gaps.

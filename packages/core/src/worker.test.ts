@@ -14,7 +14,9 @@ import {
 } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "./ports.js";
+import { ResumeConflictError } from "./resume.js";
 import { createRuntime } from "./runtime.js";
+import { RESUME_LEASE_MS } from "./resume-lease.js";
 import { Worker } from "./worker.js";
 
 const RUN_ID = "00000000000000000000000001";
@@ -40,7 +42,11 @@ function job(kind: RunQueueJob["kind"] = "start", runId = RUN_ID, jobId = JOB_ID
 class FakeQueue implements RunQueue {
   readonly pending: RunQueueJob[];
   readonly completed: string[] = [];
-  readonly failed: { readonly jobId: string; readonly errorCode: string }[] = [];
+  readonly failed: {
+    readonly jobId: string;
+    readonly errorCode: string;
+    readonly retryAfterMs: number;
+  }[] = [];
   readonly released: string[] = [];
   readonly enqueued: { readonly kind: string; readonly runId: string }[] = [];
   heartbeatResult = true;
@@ -73,8 +79,8 @@ class FakeQueue implements RunQueue {
     return Promise.resolve(true);
   }
 
-  fail(jobId: string, _workerId: string, errorCode: string) {
-    this.failed.push({ jobId, errorCode });
+  fail(jobId: string, _workerId: string, errorCode: string, retryAfterMs: number) {
+    this.failed.push({ jobId, errorCode, retryAfterMs });
     this.onFail?.();
     return Promise.resolve("retry" as const);
   }
@@ -131,6 +137,26 @@ describe("Worker", () => {
     expect(execute).toHaveBeenCalledOnce();
     expect(queue.completed).toEqual([JOB_ID]);
     expect(queue.failed).toEqual([]);
+  });
+
+  it("backs off resume conflicts until the durable execution lease can expire", async () => {
+    const queue = new FakeQueue();
+    const control: { worker?: Worker } = {};
+    queue.onFail = () => control.worker?.stop();
+    const worker = new Worker({
+      queue,
+      ids: fakeIds(),
+      clock: fakeClock,
+      execute: () => Promise.reject(new ResumeConflictError()),
+    });
+    control.worker = worker;
+
+    await worker.run();
+
+    expect(queue.failed).toEqual([
+      { jobId: JOB_ID, errorCode: "resume_conflict", retryAfterMs: RESUME_LEASE_MS },
+    ]);
+    expect(queue.released).toEqual([]);
   });
 
   it("normalizes uppercase ULID worker identifiers", () => {
@@ -548,7 +574,9 @@ describe("Worker", () => {
 
     await worker.run();
 
-    expect(queue.failed).toEqual([{ jobId: JOB_ID, errorCode: "model.failed" }]);
+    expect(queue.failed).toEqual([
+      { jobId: JOB_ID, errorCode: "model.failed", retryAfterMs: 1_000 },
+    ]);
   });
 
   it("rejects invalid limits and a second run loop", async () => {

@@ -289,7 +289,7 @@ function prepareStack(
   ensureKey(rootDirectory, runCommand);
   writeOutput("Building sandbox-runner image...\n");
   runCompose(rootDirectory, ["build", "sandbox-runner"], [0], runCommand);
-  runCompose(rootDirectory, ["up", "-d", "--wait"], [0], runCommand);
+  runCompose(rootDirectory, ["up", "-d", "--wait", "sandbox-runner"], [0], runCommand);
 }
 
 function startSample(rootDirectory: string, runCommand: QuickstartCommandRunner) {

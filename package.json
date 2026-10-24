@@ -43,6 +43,7 @@
     "lint:fix": "yarn build:schemas && markdownlint-cli2 --fix \"**/*.md\" \".github/**/*.md\" && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/lint-ts.ts --fix && prettier --write .",
     "lint:ts": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/lint-ts.ts",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \".github/**/*.md\"",
+    "lint:claims": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/docs/lint-claims.ts",
     "lint:yaml": "eslint \"**/*.{yaml,yml}\" --max-warnings 0",
     "lint:sh": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/lint-extended.ts shell",
     "lint:docker": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/lint-extended.ts docker",

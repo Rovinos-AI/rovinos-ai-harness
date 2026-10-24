@@ -5,7 +5,7 @@ import { validateWithTokens } from "@rovinos/pii";
 import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { ValueTransform } from "@rovinos/models";
 import type { EventStore } from "@rovinos/store";
-import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
+import type { SandboxBackend, WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import { parseRuntimeModelsConfig, type RuntimeConfig } from "../runtime-config.js";
 import { RunRecorder, type Clock } from "../recorder.js";
 import { configHash } from "../runtime-ids.js";
@@ -22,6 +22,7 @@ import { finalizeChild, type SubagentResult } from "./result.js";
 import { foldRunState, isTerminalRunState } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
 import { QuotaService, type QuotaIdentity } from "../quotas.js";
+import { withSandboxLease } from "../runtime-lifecycle.js";
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
@@ -70,6 +71,7 @@ function childRunOptions(
   readonly configHash: string;
   readonly snapshotKeep?: number;
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
+  readonly sandboxBackend?: SandboxBackend;
 } {
   return {
     configHash: configHash(config),
@@ -171,6 +173,7 @@ interface SubagentRuntimeOptions {
   readonly parentTool: ToolPort;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];
+  readonly sandboxBackend?: SandboxBackend;
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
@@ -392,8 +395,14 @@ export function createSubagentTool(options: SubagentRuntimeInput): ToolPort {
         ...(requestedBy === undefined ? {} : { requestedBy }),
       });
     },
-    resumeChild: (request) => resumeChild(runtimeOptions, request),
-    runChild: (request) => runNewChild(runtimeOptions, request),
+    resumeChild: (request) =>
+      withSandboxLease(runtimeOptions.sandboxBackend, request.runId, () =>
+        resumeChild(runtimeOptions, request),
+      ),
+    runChild: (request) =>
+      withSandboxLease(runtimeOptions.sandboxBackend, request.runId, () =>
+        runNewChild(runtimeOptions, request),
+      ),
   });
   return new AgentSpawnTool(runtimeOptions.parentTool, runtimeOptions.roles, supervisor);
 }

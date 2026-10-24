@@ -3,20 +3,19 @@ import { HarnessError, type Id } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import { forceFlushTelemetry, sentinelTripQueue } from "@rovinos/telemetry";
 import {
+  assertRuntimeOwnership,
   closeRuntimeResources,
   markTerminalBestEffort,
+  recoverRunControlError,
+  withSandboxLease,
   readRuntimeControlResult,
 } from "./runtime-lifecycle.js";
-import {
-  composeAbortSignals,
-  inspectCancellationTail,
-  watchCancellation,
-} from "./runtime-cancellation.js";
+import { composeAbortSignals, watchCancellation } from "./runtime-cancellation.js";
 import { cancelRun } from "./cancel.js";
 import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import { withResumeWakeUp } from "./runtime-approval-wake.js";
 import type { ToolPort } from "./ports.js";
-import { LeaseLostError, type Clock } from "./recorder.js";
+import type { Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { inheritedBudgets } from "./continue.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
@@ -101,6 +100,7 @@ interface RunControlOptions {
   readonly processLike: ShutdownProcessLike;
   readonly graceMs: number;
   readonly operation: (signal: AbortSignal) => Promise<RunLoopResult>;
+  readonly ownershipSignal?: AbortSignal;
 }
 
 async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
@@ -120,6 +120,10 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       await running;
     },
   });
+  const operationSignal =
+    options.ownershipSignal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, options.ownershipSignal]);
   const watcher = watchCancellation({
     store: options.store,
     runId: options.runId,
@@ -135,34 +139,29 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
   });
 
   try {
-    running = options.operation(controller.signal);
+    assertRuntimeOwnership(options.ownershipSignal);
+    running = options.operation(operationSignal);
     try {
       result = await running;
+      assertRuntimeOwnership(options.ownershipSignal);
     } catch (error) {
-      if (error instanceof LeaseLostError) {
-        await inspectCancellationTail({
-          store: options.store,
-          runId: options.runId,
-          fromSeq: cursor.nextSeq,
-          controller,
-          onCursor: (nextSeq) => {
-            cursor.nextSeq = nextSeq;
-          },
-          onCancellation: () => {
-            cancellation.observed = true;
-          },
-        });
-      }
-      let recovered: RunLoopResult | undefined;
-      if (cancellation.observed) {
-        recovered = await readRuntimeControlResult(options, "cancelled");
-      } else if (error instanceof LeaseLostError) {
-        recovered = await readRuntimeControlResult(options, "app_approval");
-      }
-      if (recovered === undefined) {
+      const recovery = await recoverRunControlError({
+        error,
+        store: options.store,
+        runId: options.runId,
+        firstNewSeq: options.firstNewSeq,
+        nextSeq: cursor.nextSeq,
+        cancellationObserved: cancellation.observed,
+        controller,
+        ...(options.ownershipSignal === undefined
+          ? {}
+          : { ownershipSignal: options.ownershipSignal }),
+      });
+      cancellation.observed = recovery.cancellationObserved;
+      if (recovery.result === undefined) {
         throw error;
       }
-      result = recovered;
+      result = recovery.result;
     }
     if (cancellation.observed) {
       result = (await readRuntimeControlResult(options, "cancelled")) ?? result;
@@ -186,19 +185,24 @@ function createTerminalAwareRunControl({
   clock,
   store,
   vault,
+  sandboxBackend,
+  instanceHeartbeat,
 }: RuntimeComposition): RunControl {
   const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   return async (runId, operation, firstNewSeq = 0) => {
-    const result = await withRunControl({
-      store,
-      runId,
-      firstNewSeq,
-      clock,
-      flushTelemetry,
-      processLike: overrides.processLike ?? defaultProcessLike,
-      graceMs: config.run.shutdownGraceMs,
-      operation,
-    });
+    const result = await withSandboxLease(sandboxBackend, runId, () =>
+      withRunControl({
+        store,
+        runId,
+        firstNewSeq,
+        clock,
+        flushTelemetry,
+        processLike: overrides.processLike ?? defaultProcessLike,
+        graceMs: config.run.shutdownGraceMs,
+        ...(instanceHeartbeat === undefined ? {} : { ownershipSignal: instanceHeartbeat.signal }),
+        operation,
+      }),
+    );
     if (
       result.status === "completed" ||
       result.status === "failed" ||
@@ -256,6 +260,9 @@ function composeRuntime(
   const appCallbacks = createRuntimeAppCallbacks({
     store,
     clock,
+    ...(options.instanceHeartbeat === undefined
+      ? {}
+      : { ownershipSignal: options.instanceHeartbeat.signal }),
     approval: { tool, policy: options.policy, context: options.context, ids },
     ...(pii === undefined ? {} : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
   });
@@ -271,6 +278,7 @@ function composeRuntime(
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
     cancel: async (runId) => {
+      assertRuntimeOwnership(options.instanceHeartbeat?.signal);
       const result = await cancelRun(store, runId, clock, ids);
       if (result === "cancelled") {
         await markTerminalBestEffort(vault, runId, clock.now());
@@ -278,7 +286,12 @@ function composeRuntime(
       return result;
     },
     ...appCallbacks,
+    onAppContent: (content) => {
+      assertRuntimeOwnership(options.instanceHeartbeat?.signal);
+      return appCallbacks.onAppContent(content);
+    },
     resolveApproval: async (runId, approvalId, decision, resolveOptions) => {
+      assertRuntimeOwnership(options.instanceHeartbeat?.signal);
       if (
         decision === "edit" &&
         options.overrides.tool === undefined &&
@@ -306,6 +319,7 @@ function composeRuntime(
         vault,
         keys,
         sandboxBackend: options.sandboxBackend,
+        instanceHeartbeat: options.instanceHeartbeat,
         flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
       }),
   };

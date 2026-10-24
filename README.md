@@ -1,6 +1,6 @@
 # Rovinos AI Harness
 
-**The agent harness you can run in regulated environments: no PII in telemetry, and every run is replayable from its OTel trace.**
+**The agent harness you can run in regulated environments: no PII in telemetry, and every recorded run replayable from its OTel trace.** ([Guarantees and limits](docs/guarantees.md))
 
 Rovinos AI Harness is an open source, TypeScript, container-native agent harness. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary, and telemetry carries metadata only. License: [Apache-2.0](LICENSE).
 
@@ -851,29 +851,10 @@ flowchart LR
 
 ## Guarantees, best-effort measures, and known gaps
 
-The project states guarantees with their evidence and assumptions, and does not make absolute claims. Task 21.8 writes the authoritative version at `docs/guarantees.md`.
-
-- **Structural (enforced by construction and tested):**
-  - closed telemetry schemas at three layers
-  - vault separate from the event log
-  - content encrypted at rest
-  - app telemetry validated and host-stamped
-  - default-deny sandbox
-  - policy evaluated in code
-  - approvals recorded in the log
-
-  The evidence comes from the canary suite (8.5), the collector fixture test (10.6), the hostile-app suite (3.7), sandbox hardening (19.7), and crash injection (2.11).
-- **Best effort:** PII detection (with a published precision/recall report), the sentinel's variant matching, and prompt-injection resistance beyond policy enforcement.
-- **Known gaps:**
-  - encrypted, compressed, steganographic, translated, or split values
-  - side channels
-  - kernel-level sandbox escapes
-  - provider-side logging at third-party model APIs
-  - user-supplied workspace files
-  - what a human does after a reveal
-  - a compromised host
-- **Operator responsibilities:** key management and rotation, retention, provider trust settings, network policy, control-plane access, backups, and monitoring.
-- **Non-claims:** no certification of GDPR, HIPAA, or other compliance regimes.
+The project distinguishes structural guarantees from best-effort measures and
+known gaps. The [authoritative guarantees and limits](docs/guarantees.md) page
+gives evidence and assumptions for each guarantee, plus operator
+responsibilities and non-claims.
 
 ---
 

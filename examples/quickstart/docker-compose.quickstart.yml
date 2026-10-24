@@ -85,6 +85,8 @@ services:
     depends_on:
       quickstart-credentials:
         condition: service_completed_successfully
+      sandbox-runner:
+        condition: service_healthy
     init: true
     read_only: true
     tmpfs:

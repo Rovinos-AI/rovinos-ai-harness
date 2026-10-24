@@ -17,7 +17,7 @@ services:
       retries: 10
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:
@@ -29,7 +29,7 @@ services:
     command: ["node", "-e", "setInterval(() => {}, 2 ** 30)"]
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:
@@ -41,7 +41,7 @@ services:
     command: ["node", "-e", "setInterval(() => {}, 2 ** 30)"]
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:

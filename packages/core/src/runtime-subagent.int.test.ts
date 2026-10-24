@@ -278,30 +278,22 @@ function piiTool(
 }
 
 function leaseAwareSandbox(runIds: IdValue[]): SandboxBackend {
-  let owner: IdValue | undefined;
+  const owners = new Set<IdValue>();
   return {
     acquireLease: (runId) => {
-      if (owner !== undefined && owner !== runId) {
-        return Promise.reject(new Error("synthetic lease conflict"));
-      }
-      owner = runId;
+      owners.add(runId);
       return Promise.resolve();
     },
     releaseLease: (runId) => {
-      if (owner === runId) {
-        owner = undefined;
-      }
+      owners.delete(runId);
       return Promise.resolve();
     },
     exec: (runId) => {
-      if (owner !== undefined && owner !== runId) {
-        return Promise.reject(new Error("synthetic lease conflict"));
-      }
-      const temporary = owner === undefined;
-      owner = runId;
+      const temporary = !owners.has(runId);
+      owners.add(runId);
       runIds.push(runId);
       if (temporary) {
-        owner = undefined;
+        owners.delete(runId);
       }
       return Promise.resolve({
         exitCode: 0,

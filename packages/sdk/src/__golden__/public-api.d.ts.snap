@@ -449,6 +449,10 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 url: z.ZodURL;
                 token: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
             }, z.core.$strict>>;
+            runners: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                url: z.ZodURL;
+                token: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+            }, z.core.$strict>>>;
             restoreOnResume: z.ZodOptional<z.ZodBoolean>;
             snapshotEncryption: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>>;
@@ -491,6 +495,12 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             allowedHosts: z.ZodDefault<z.ZodArray<z.ZodString>>;
             rateLimitPerMinute: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>>;
+        deployment: z.ZodPrefault<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                multi: "multi";
+                single: "single";
+            }>>;
+        }, z.core.$strict>>;
         cli: z.ZodOptional<z.ZodObject<{
             principal: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>>;

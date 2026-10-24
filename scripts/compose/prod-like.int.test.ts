@@ -4,12 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, resolve as resolvePath } from "node:path";
-import {
-  ControlPlaneConfigSchema,
-  InspectResultSchema,
-  RunResultSchema,
-  parseJson,
-} from "@rovinos/schemas";
+import { InspectResultSchema, RunResultSchema, parseJson } from "@rovinos/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const projectName = `harness-prod-like-${String(process.pid)}`;
@@ -18,7 +13,11 @@ const controlPlaneToken = randomBytes(32).toString("base64url");
 let secretDirectory = "";
 let runnerTokenFile = "";
 let controlPlaneTokenFile = "";
-let controlPlaneConfigFile = "";
+let masterKeyFile = "";
+let storeUrlFile = "";
+let vaultUrlFile = "";
+let postgresPasswordFile = "";
+let prodLikeConfigFile = "";
 const composeArgs = [
   "compose",
   "--env-file",
@@ -46,8 +45,12 @@ function compose(args: readonly string[], timeout = 300_000): string {
   const environment = { ...composeEnvironment };
   delete environment.SANDBOX_RUNNER_TOKEN;
   environment.SANDBOX_RUNNER_TOKEN_SECRET_FILE = runnerTokenFile;
-  environment.CONTROL_PLANE_CONFIG_FILE = controlPlaneConfigFile;
   environment.CONTROL_PLANE_TOKEN_SECRET_FILE = controlPlaneTokenFile;
+  environment.HARNESS_MASTER_KEY_SECRET_FILE = masterKeyFile;
+  environment.HARNESS_STORE_DATABASE_URL_SECRET_FILE = storeUrlFile;
+  environment.HARNESS_VAULT_DATABASE_URL_SECRET_FILE = vaultUrlFile;
+  environment.POSTGRES_PASSWORD_SECRET_FILE = postgresPasswordFile;
+  environment.PROD_LIKE_CONFIG_FILE = prodLikeConfigFile;
   return execFileSync("docker", [...composeArgs, ...args], {
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
@@ -92,22 +95,25 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
     await writeFile(runnerTokenFile, runnerToken, { encoding: "utf8", mode: 0o444 });
     controlPlaneTokenFile = resolvePath(secretDirectory, "control-plane-token");
     await writeFile(controlPlaneTokenFile, controlPlaneToken, { encoding: "utf8", mode: 0o444 });
-    controlPlaneConfigFile = resolvePath(secretDirectory, "control-plane.json");
-    const controlPlane = ControlPlaneConfigSchema.parse({
-      auth: {
-        tokens: [
-          {
-            id: "token.prod-like-test",
-            secret: "file:/run/secrets/control_plane_token",
-            scopes: ["admin"],
-          },
-        ],
-      },
-    });
-    await writeFile(controlPlaneConfigFile, `${JSON.stringify({ controlPlane })}\n`, {
-      encoding: "utf8",
-      mode: 0o444,
-    });
+    masterKeyFile = resolvePath(secretDirectory, "harness-master-key");
+    const masterKey = randomBytes(32).toString("base64");
+    storeUrlFile = resolvePath(secretDirectory, "store-database-url");
+    vaultUrlFile = resolvePath(secretDirectory, "vault-database-url");
+    postgresPasswordFile = resolvePath(secretDirectory, "postgres-password");
+    const postgresPassword = randomBytes(32).toString("base64url");
+    prodLikeConfigFile = resolvePath(process.cwd(), "test/fixtures/prod-like-multi.yaml");
+    await Promise.all([
+      writeFile(masterKeyFile, masterKey, { encoding: "utf8", mode: 0o444 }),
+      writeFile(storeUrlFile, `postgresql://harness:${postgresPassword}@postgres/harness`, {
+        encoding: "utf8",
+        mode: 0o444,
+      }),
+      writeFile(vaultUrlFile, `postgresql://harness:${postgresPassword}@postgres/harness_vault`, {
+        encoding: "utf8",
+        mode: 0o444,
+      }),
+      writeFile(postgresPasswordFile, postgresPassword, { encoding: "utf8", mode: 0o444 }),
+    ]);
     compose(["up", "--detach", "--wait", "--wait-timeout", "450"], 460_000);
   }, 480_000);
 
@@ -149,13 +155,17 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
       'import { writeFileSync } from "node:fs";',
       'import { createDefaultContext, createOutput, main } from "@rovinos/cli/programmatic";',
       'import { FakeModelPort } from "@rovinos/core/testing";',
+      'import { openConfiguredRunQueue } from "@rovinos/core";',
       "const action = process.env.HARNESS_E2E_ACTION;",
-      'const scriptedModel = new FakeModelPort([{ parts: [{ type: "text", text: "resumed" }], usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "stop", provider: "scripted", model: "shutdown-test", latencyMs: 1, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }]);',
       "const context = createDefaultContext(new Command(), createOutput());",
+      "const config = await context.loadConfig();",
+      "const queue = await openConfiguredRunQueue(config, { clock: context.clock, secretResolver: context.secretResolver });",
+      'const scriptedModel = new FakeModelPort([{ parts: [{ type: "text", text: "resumed" }], usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "stop", provider: "scripted", model: "shutdown-test", latencyMs: 1, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }]);',
       "const createRuntime = context.createRuntime;",
-      'context.createRuntime = async (config, overrides) => createRuntime(config, { ...overrides, model: { complete: async (request, runContext) => { if (action === "run") { process.stdout.write(`RUN_STARTED ${runContext.runId}\\n`); await new Promise((resolve, reject) => { const timer = setTimeout(resolve, 60000); runContext.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("synthetic slow model interrupted")); }, { once: true }); }); } return scriptedModel.complete(request, runContext); } } });',
+      'context.createRuntime = async (config, overrides) => createRuntime(config, { ...overrides, queue, model: { complete: async (request, runContext) => { if (action === "run") { process.stdout.write(`RUN_STARTED ${runContext.runId}\\n`); await new Promise((resolve, reject) => { const timer = setTimeout(resolve, 60000); runContext.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("synthetic slow model interrupted")); }, { once: true }); }); } return scriptedModel.complete(request, runContext); } } });',
       'const args = action === "run" ? (writeFileSync("/tmp/harness-shutdown-input.json", JSON.stringify({ goal: "resume after container stop" })), ["run", "--input", "/tmp/harness-shutdown-input.json"]) : ["--json", "resume", process.env.HARNESS_E2E_RUN_ID];',
       "process.exitCode = await main(args, context);",
+      "await queue.close();",
     ].join("\n");
     compose([
       "run",

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   ModelsConfigSchema,
   ControlPlaneConfigSchema,
+  DeploymentConfigSchema,
   ElicitationConfigSchema,
   CliConfigSchema,
   KeysConfigSchema,
@@ -35,6 +36,7 @@ export const HarnessConfigSchema = z
     sandbox: SandboxConfigSchema,
     elicitation: ElicitationConfigSchema,
     controlPlane: ControlPlaneConfigSchema.optional(),
+    deployment: DeploymentConfigSchema,
     cli: CliConfigSchema.optional(),
   })
   .strict();
