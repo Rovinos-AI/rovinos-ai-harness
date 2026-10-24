@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
-import { HarnessError, type Event, type RunStatus } from "@harness/schemas";
-import type { Plan } from "@harness/context";
+import { HarnessError, type Event, type RunStatus } from "@rovinos/schemas";
+import type { Plan } from "@rovinos/context";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
 import { planLastModelResponseRecovery } from "./run-state.js";
 import { planDanglingIntents } from "./resume-policy.js";

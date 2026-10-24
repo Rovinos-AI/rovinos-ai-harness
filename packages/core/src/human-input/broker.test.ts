@@ -7,10 +7,10 @@ import {
   type Detection,
   type InputRequest,
   type InputResponse,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
-import { Tokenizer } from "@harness/pii";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
+import { Tokenizer } from "@rovinos/pii";
 import { describe, expect, it, vi } from "vitest";
 import { INPUT_WAIT_SPAN } from "../spans.js";
 import {

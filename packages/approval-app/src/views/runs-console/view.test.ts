@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
 import axe from "axe-core";
-import { createAppTelemetry, type AppTelemetry } from "@harness/app-telemetry";
-import { RunStatus, type RunConsoleDetail, type RunConsoleList } from "@harness/schemas/browser";
+import { createAppTelemetry, type AppTelemetry } from "@rovinos/app-telemetry";
+import { RunStatus, type RunConsoleDetail, type RunConsoleList } from "@rovinos/schemas/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRunsConsoleView, type RunsConsoleBridge } from "./view.js";
 

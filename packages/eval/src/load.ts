@@ -2,8 +2,8 @@
 import { createReadStream } from "node:fs";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ContractError, parseJson, parseYaml } from "@harness/schemas";
-import type { ContractIssue } from "@harness/schemas";
+import { ContractError, parseJson, parseYaml } from "@rovinos/schemas";
+import type { ContractIssue } from "@rovinos/schemas";
 import { z } from "zod";
 import { EvalSuiteSchema } from "./schema.js";
 import type { EvalSuite, GraderSpec } from "./schema.js";

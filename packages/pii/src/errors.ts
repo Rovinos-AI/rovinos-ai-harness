@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
-import type { Code } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
+import type { Code } from "@rovinos/schemas";
 
 type PiiTokenizerErrorCode =
   | "pii_depth_exceeded"

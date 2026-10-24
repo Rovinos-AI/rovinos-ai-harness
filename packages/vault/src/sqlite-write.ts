@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import type { Code, Id } from "@harness/schemas";
+import type { Code, Id } from "@rovinos/schemas";
 import { encryptScopeValue } from "./scope-crypto.js";
 import { Token, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";

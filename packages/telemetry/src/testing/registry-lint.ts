@@ -4,7 +4,7 @@ import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
-import type { TelemetryConfig } from "@harness/schemas";
+import type { TelemetryConfig } from "@rovinos/schemas";
 import fc from "fast-check";
 import { z } from "zod";
 import { getAttrMeta, isSafeAttr } from "../attr.js";
@@ -116,7 +116,7 @@ function makeReadableSpan(name: string, attributes: Record<string, string>): Rea
     duration: [1, 0],
     ended: true,
     resource: resourceFromAttributes({}),
-    instrumentationScope: { name: "@harness/telemetry-test" },
+    instrumentationScope: { name: "@rovinos/telemetry-test" },
     droppedAttributesCount: 0,
     droppedEventsCount: 0,
     droppedLinksCount: 0,
@@ -131,7 +131,7 @@ function makeRawLogRecord(
     hrTime: [0, 0],
     hrTimeObserved: [1, 0],
     resource: resourceFromAttributes({}),
-    instrumentationScope: { name: "@harness/telemetry-test" },
+    instrumentationScope: { name: "@rovinos/telemetry-test" },
     attributes,
     body: "untrusted body",
     eventName: definition.name,

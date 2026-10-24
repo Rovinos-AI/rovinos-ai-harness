@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ServerConfigSchema } from "@harness/schemas";
+import { ServerConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import {
   ToolRegistry,

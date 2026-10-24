@@ -1,11 +1,15 @@
 {
-  "name": "@harness/store-postgres",
+  "name": "@rovinos/store-postgres",
   "version": "0.0.0",
-  "private": true,
   "type": "module",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=26"
+  },
   "files": [
-    "dist",
+    "dist/*.js",
+    "dist/*.js.map",
+    "dist/*.d.ts",
     "migrations"
   ],
   "exports": {
@@ -16,16 +20,28 @@
     }
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json"
+    "build": "tsup"
   },
   "dependencies": {
-    "@harness/schemas": "workspace:^",
-    "@harness/store": "workspace:^",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "pg": "8.23.1",
+    "yaml": "2.9.1",
     "zod": "4.6.7"
   },
+  "peerDependencies": {
+    "@rovinos/sdk": "*"
+  },
+  "peerDependenciesMeta": {
+    "@rovinos/sdk": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/store": "workspace:^",
     "@types/pg": "8.23.1",
+    "tsup": "9.0.0",
     "typescript": "5.9.3",
     "vitest": "3.2.6"
   }

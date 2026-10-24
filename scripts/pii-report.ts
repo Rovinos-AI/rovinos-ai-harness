@@ -12,9 +12,9 @@ import {
   phoneDetector,
   secretsDetector,
   urlCredentialsDetector,
-} from "@harness/pii";
-import type { Detection } from "@harness/pii";
-import { DetectionSchema, parseJson } from "@harness/schemas";
+} from "@rovinos/pii";
+import type { Detection } from "@rovinos/pii";
+import { DetectionSchema, parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import { PiiCorpusSampleSchema } from "./gen-pii-corpus.ts";
 
@@ -295,8 +295,8 @@ function regexRegistry(): DetectorRegistry {
 
 function collectPresidioDetections(texts: readonly string[]): Detection[][] {
   const runner = [
-    'import { DetectorRegistry, emailDetector, phoneDetector, creditCardDetector, ibanDetector, ipDetector, secretsDetector, urlCredentialsDetector, PresidioDetector } from "@harness/pii";',
-    'import { PiiPresidioConfigSchema, parseJson } from "@harness/schemas";',
+    'import { DetectorRegistry, emailDetector, phoneDetector, creditCardDetector, ibanDetector, ipDetector, secretsDetector, urlCredentialsDetector, PresidioDetector } from "@rovinos/pii";',
+    'import { PiiPresidioConfigSchema, parseJson } from "@rovinos/schemas";',
     'import { z } from "zod";',
     'const input = await new Promise((resolve, reject) => { let text = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { text += chunk; }); process.stdin.on("end", () => resolve(text)); process.stdin.on("error", reject); });',
     "const texts = parseJson(z.array(z.string()), input);",

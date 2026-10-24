@@ -12,7 +12,7 @@ import {
   type ResourceMetrics,
 } from "@opentelemetry/sdk-metrics";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import type { Id, VaultValueEntry } from "@harness/schemas";
+import type { Id, VaultValueEntry } from "@rovinos/schemas";
 import type { VaultRunReader } from "./sentinel/run-values.js";
 
 /** Creates a no-export tracer provider with deterministic identifiers for tests. */

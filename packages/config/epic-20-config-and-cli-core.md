@@ -5,7 +5,7 @@
 
 Shared design for this epic:
 
-- Config fragments are owned by the package they configure (for example the servers fragment arrives in task 6.1) and exported from `@harness/schemas/src/config/<name>.ts`. `@harness/config` only composes them. This avoids dependency cycles. In this epic every fragment except `run` is a stub `z.object({}).strict()` that owners replace.
+- Config fragments are owned by the package they configure (for example the servers fragment arrives in task 6.1) and exported from `@rovinos/schemas/src/config/<name>.ts`. `@rovinos/config` only composes them. This avoids dependency cycles. In this epic every fragment except `run` is a stub `z.object({}).strict()` that owners replace.
 - Config file format: YAML (`harness.config.yaml`) or JSON, discovered via `--config`, then `HARNESS_CONFIG`, then `./harness.config.yaml`.
 
 ---
@@ -13,8 +13,8 @@ Shared design for this epic:
 ## 20.1 Zod config schema with environment overrides and clear validation errors
 
 **Parent:** #20 Config and CLI core
-**Task Description:** Create `@harness/config`: load a config file, apply environment overrides, validate with Zod, return a deeply frozen typed object, and produce actionable errors.
-**Expected Inputs:** Path to a YAML/JSON file (optional), `process.env`, fragment schemas from `@harness/schemas`.
+**Task Description:** Create `@rovinos/config`: load a config file, apply environment overrides, validate with Zod, return a deeply frozen typed object, and produce actionable errors.
+**Expected Inputs:** Path to a YAML/JSON file (optional), `process.env`, fragment schemas from `@rovinos/schemas`.
 **Expected Output:** `packages/config` exporting `loadConfig(opts): Promise<HarnessConfig>`, `HarnessConfigSchema`, `ConfigError` (code `config_invalid`), `formatConfigIssues(issues): string[]`; `packages/schemas/src/config/{run,store,models,servers,policy,pii,telemetry,sandbox}.ts` (stubs except `run`); `docs/configuration.md` skeleton.
 **Dependencies:** `yaml`, `zod`.
 **Items it depends on:** 1.1, 1.2.

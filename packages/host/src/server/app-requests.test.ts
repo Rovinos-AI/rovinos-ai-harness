@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { Code, HostConfigSchema, Id } from "@harness/schemas";
-import type { HostAppRejectedReason } from "@harness/telemetry";
+import { Code, HostConfigSchema, Id } from "@rovinos/schemas";
+import type { HostAppRejectedReason } from "@rovinos/telemetry";
 import {
   AppRequestRouter,
   AppRequestSchema,

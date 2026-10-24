@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { runTestComposeCommand } from "../scripts/ci/network-isolation.js";

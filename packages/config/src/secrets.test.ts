@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { format, inspect } from "node:util";
 import { describe, expect, it } from "vitest";
-import { SecretRefSchema } from "@harness/schemas";
+import { SecretRefSchema } from "@rovinos/schemas";
 import { ConfigError, loadConfig } from "./index.js";
 import {
   CompositeSecretResolver,

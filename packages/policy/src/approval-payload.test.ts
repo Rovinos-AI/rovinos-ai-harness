@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import type { JsonValue } from "@harness/schemas";
+import type { JsonValue } from "@rovinos/schemas";
 import {
   ApprovalPayloadSchema,
   buildApprovalPayload,

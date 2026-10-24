@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import type { PoolClient, QueryResultRow } from "pg";
 
 /** Delete a terminal run under the same row lock used by append transactions. */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Clock } from "@harness/core";
-import type { Event } from "@harness/schemas";
+import type { Clock } from "@rovinos/core";
+import type { Event } from "@rovinos/schemas";
 
 /** Deterministic clock starting at the first recorded event and advancing by one millisecond. */
 export class ReplayClock implements Clock {

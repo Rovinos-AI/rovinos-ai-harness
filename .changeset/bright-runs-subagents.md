@@ -1,5 +1,5 @@
 ---
-"@harness/sdk": minor
+"@rovinos/sdk": minor
 ---
 
 # Configurable subagent limits

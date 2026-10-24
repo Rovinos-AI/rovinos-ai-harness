@@ -8,7 +8,7 @@ import {
   type Event,
   type Message,
   type ModelRef,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 
 /** Token budget available to a context strategy. */
 export const ContextBudgetSchema = z

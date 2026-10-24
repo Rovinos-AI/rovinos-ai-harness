@@ -4,7 +4,7 @@ import {
   parseJson,
   type ApprovalPayload,
   type JsonValue as Json,
-} from "@harness/schemas/browser";
+} from "@rovinos/schemas/browser";
 import { formatMessage, getStrings } from "./kit/strings.js";
 
 type FormControl =

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ApprovalDecision, ApprovalResolutionMetadata } from "@harness/core";
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import type { ApprovalDecision, ApprovalResolutionMetadata } from "@rovinos/core";
+import { HarnessError, type Event, type Id, type JsonValue } from "@rovinos/schemas";
 import type { ResolvedRun } from "../resolve.js";
 
 type ResolvedApproval = Extract<Event, { type: "approval_resolved" }>;

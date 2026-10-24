@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { HarnessConfigSchema } from "@harness/config";
+import { HarnessConfigSchema } from "@rovinos/config";
 import {
   Checkpointer,
   NaiveContext,
@@ -19,8 +19,8 @@ import {
   type RunLoopResult,
   type ShutdownProcessLike,
   type ToolPort,
-} from "@harness/core";
-import { FakeModelPort, FakeToolPort } from "@harness/core/testing";
+} from "@rovinos/core";
+import { FakeModelPort, FakeToolPort } from "@rovinos/core/testing";
 import {
   FakeClock,
   Event as EventSchema,
@@ -31,8 +31,8 @@ import {
   Sha256Hex,
   parseJson,
   type Event,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCommandRuntime, type CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";

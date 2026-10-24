@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, JsonValue, type ModelRequest, type Part } from "@harness/schemas";
+import { Code, JsonValue, type ModelRequest, type Part } from "@rovinos/schemas";
 import type { z } from "zod";
 import {
   applyValueTransform,

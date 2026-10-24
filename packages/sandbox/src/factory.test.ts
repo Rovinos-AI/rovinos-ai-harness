@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, SandboxConfigSchema, SecretRefSchema } from "@harness/schemas";
+import { Id, SandboxConfigSchema, SecretRefSchema } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSandboxBackend, InProcessBackend, RemoteSandboxBackend } from "./index.js";
 

@@ -5,7 +5,7 @@ import {
   type GenerateContentConfig,
   type Part as VertexPart,
 } from "@google/genai";
-import { Code, JsonValue, type ModelRequest, type Part } from "@harness/schemas";
+import { Code, JsonValue, type ModelRequest, type Part } from "@rovinos/schemas";
 import { z } from "zod";
 import { ProviderError } from "../errors.js";
 import { lowerForProvider } from "../json-schema.js";

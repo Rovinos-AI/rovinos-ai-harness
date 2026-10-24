@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, JsonPointerSchema, JsonValue, isRegexSafePattern } from "@harness/schemas";
-import type { JsonPointer } from "@harness/schemas";
+import { Code, JsonPointerSchema, JsonValue, isRegexSafePattern } from "@rovinos/schemas";
+import type { JsonPointer } from "@rovinos/schemas";
 import { z } from "zod";
 
 const ToolPatternSchema = z

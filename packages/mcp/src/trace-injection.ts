@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag, isSpanContextValid, trace, type SpanContext } from "@opentelemetry/api";
-import type { ServerConfig } from "@harness/schemas";
+import type { ServerConfig } from "@rovinos/schemas";
 
 const MAX_TRACE_STATE_LENGTH = 512;
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, parseJson } from "@harness/schemas";
-import type { Code } from "@harness/schemas";
+import { Id, parseJson } from "@rovinos/schemas";
+import type { Code } from "@rovinos/schemas";
 import type { ControlPlanePrincipal } from "../auth.js";
 import { RUNS_RESOURCE_URI, RUN_RESOURCE_URI_TEMPLATE } from "./runs.js";
 import { z } from "zod";

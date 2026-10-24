@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { createRuntime, foldRunState, type Runtime } from "@harness/core";
-import { loadConfig, type HarnessConfig } from "@harness/config";
+import { createRuntime, foldRunState, type Runtime } from "@rovinos/core";
+import { loadConfig, type HarnessConfig } from "@rovinos/config";
 import {
   JsonValue as JsonValueSchema,
   RunInputSchema,
   type Code,
   type Event,
   type Id,
-} from "@harness/schemas";
-import type { SafeEvent } from "@harness/telemetry";
+} from "@rovinos/schemas";
+import type { SafeEvent } from "@rovinos/telemetry";
 import { SdkError } from "./types.js";
 import { contentEntries, readEvents, safeEvents } from "./event-views.js";
 import { runtimeOverridesFrom } from "./runtime-overrides.js";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, Id, RunResultSchema } from "@harness/schemas";
+import { HarnessError, Id, RunResultSchema } from "@rovinos/schemas";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 import { readFakeModel } from "./run.js";

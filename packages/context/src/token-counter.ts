@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ModelRefSchema, type Message, type ModelRef } from "@harness/schemas";
+import { ModelRefSchema, type Message, type ModelRef } from "@rovinos/schemas";
 import { z } from "zod";
 import type { TokenCounter } from "./types.js";
 

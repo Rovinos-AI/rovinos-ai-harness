@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { JsonValue, parseJson } from "@harness/schemas";
+import { JsonValue, parseJson } from "@rovinos/schemas";
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);

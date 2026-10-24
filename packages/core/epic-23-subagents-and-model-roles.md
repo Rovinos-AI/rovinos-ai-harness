@@ -145,7 +145,7 @@ Shared design for this epic:
 **Items it depends on:** 23.1, 16.5, 14.10.
 **Implementation guidance:**
 
-1. Move the verdict schema from 16.5 to `@harness/schemas` and update 16.5 to import it. Verdict: `{ criteria: { id: Code, met: boolean }[], verdict: "pass" | "fail" }` with no free-text field.
+1. Move the verdict schema from 16.5 to `@rovinos/schemas` and update 16.5 to import it. Verdict: `{ criteria: { id: Code, met: boolean }[], verdict: "pass" | "fail" }` with no free-text field.
 2. `agent.verify { criteria: { id: Code, description: string (max 500) }[] (1..10), subject: JsonValue }` (idempotent, read-only) makes **one** model call with role `judge` through the gateway with `outputSchema` built dynamically so `criteria[*].id` must be one of the supplied ids and every id appears exactly once (use a refinement); temperature 0.
 3. The subject and descriptions pass through the standard PII boundary (they reach a model); the tool result is the validated verdict.
 4. Records are ordinary `model_request`/`model_response` and `tool_result` events in the parent log (no child run). Costs count against the parent's budgets.

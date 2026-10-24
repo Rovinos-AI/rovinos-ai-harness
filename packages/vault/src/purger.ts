@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { VaultConfigSchema } from "@harness/schemas";
+import { VaultConfigSchema } from "@rovinos/schemas";
 import { VaultOperationError } from "./errors.js";
 import { VaultPurgeResultSchema, type VaultAdmin, type VaultPurgeResult } from "./types.js";
 

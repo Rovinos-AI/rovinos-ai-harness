@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id, type VaultValueEntry } from "@harness/schemas";
+import { Code, HarnessError, Id, type VaultValueEntry } from "@rovinos/schemas";
 import type { Token } from "./token.js";
 import { z } from "zod";
 

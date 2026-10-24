@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import { RunStatus, type Event as StoredEvent, type Id } from "@harness/schemas";
+import { RunStatus, type Event as StoredEvent, type Id } from "@rovinos/schemas";
 import {
   InvalidEventError,
   RunExecutionLeaseLostError,
   type RunSummary,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 
 /** Verifies that an append still owns the run's execution lease. */
 export function assertExecutionLease(

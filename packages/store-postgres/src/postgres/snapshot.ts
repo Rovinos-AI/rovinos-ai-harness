@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { PoolClient } from "pg";
-import type { EncodedSnapshot } from "@harness/store/adapter-internal";
-import { InvalidEventError } from "@harness/store/adapter-internal";
+import type { EncodedSnapshot } from "@rovinos/store/adapter-internal";
+import { InvalidEventError } from "@rovinos/store/adapter-internal";
 
 /** Insert a snapshot and normalize primary-key collisions to the store contract. */
 export async function insertSnapshot(client: PoolClient, snapshot: EncodedSnapshot): Promise<void> {

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Synthetic ports keep adversarial boundary inputs deterministic while exercising the real run loop.
-import { AgentSpawnInputSchema, restrictToolPort, type ToolPort } from "@harness/core";
-import { Code, Id, UNREGISTERED_TOOL_ID } from "@harness/schemas";
-import { createTelemetrySdk, type TelemetrySdkOptions } from "@harness/telemetry";
+import { AgentSpawnInputSchema, restrictToolPort, type ToolPort } from "@rovinos/core";
+import { Code, Id, UNREGISTERED_TOOL_ID } from "@rovinos/schemas";
+import { createTelemetrySdk, type TelemetrySdkOptions } from "@rovinos/telemetry";
 import { logs } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
 import { trace } from "@opentelemetry/api";

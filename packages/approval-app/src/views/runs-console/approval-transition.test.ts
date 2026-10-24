@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
-import { createAppTelemetry, type AppTelemetry } from "@harness/app-telemetry";
-import { ApprovalAppInputSchema } from "@harness/schemas/browser";
+import { createAppTelemetry, type AppTelemetry } from "@rovinos/app-telemetry";
+import { ApprovalAppInputSchema } from "@rovinos/schemas/browser";
 import { App } from "@modelcontextprotocol/ext-apps";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { showApprovalTransition } from "./approval-transition.js";

@@ -5,7 +5,7 @@ import {
   ApprovalPayloadSchema,
   type ApprovalPayload,
   type JsonValue,
-} from "@harness/schemas/browser";
+} from "@rovinos/schemas/browser";
 import { appendTokenText } from "./kit/components.js";
 import { formatMessage, getStrings } from "./kit/strings.js";
 

@@ -11,7 +11,7 @@ import {
   type JsonValue as JsonValueType,
   type ToolSpec,
   type PiiActionSummary,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { SystemOffloadIdGenerator } from "./offload-id.js";
 import {
   OffloadedHandleSchema,

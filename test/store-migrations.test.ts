@@ -9,8 +9,8 @@ import {
   migrate,
   type PostgresMigrationClient,
   type PostgresMigrationDriver,
-} from "@harness/store/adapter-internal";
-import { StoreMigrationError } from "@harness/store";
+} from "@rovinos/store/adapter-internal";
+import { StoreMigrationError } from "@rovinos/store";
 
 const sqliteMigrationDirectory = fileURLToPath(
   new URL("../packages/store-sqlite/migrations/sqlite/", import.meta.url),

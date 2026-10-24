@@ -10,7 +10,7 @@ Context strategies (naive, sliding window, summarizing), token counting, offload
 
 ## Allowed internal imports
 
-- `@harness/schemas`, `@harness/telemetry`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`, `@rovinos/telemetry`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

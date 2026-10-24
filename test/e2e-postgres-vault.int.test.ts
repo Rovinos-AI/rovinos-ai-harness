@@ -2,15 +2,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRuntime, type ModelCompletion, type Runtime } from "@harness/core";
-import { allowAllPolicy, FakeModelPort } from "@harness/core/testing";
-import type { SandboxBackend } from "@harness/sandbox";
+import { createRuntime, type ModelCompletion, type Runtime } from "@rovinos/core";
+import { allowAllPolicy, FakeModelPort } from "@rovinos/core/testing";
+import type { SandboxBackend } from "@rovinos/sandbox";
 import {
   KeysConfigSchema,
   RunConfigSchema,
   StoreConfigSchema,
   VaultConfigSchema,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { expect, it } from "vitest";
 
 const storeUrl = process.env.TEST_POSTGRES_URL;

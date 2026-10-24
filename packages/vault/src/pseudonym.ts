@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hkdfSha256, hmacSha256 } from "@harness/crypto";
+import { hkdfSha256, hmacSha256 } from "@rovinos/crypto";
 import {
   Code,
   HarnessError,
@@ -7,7 +7,7 @@ import {
   KEY_PROVIDER_KEY_BYTES,
   Pseudonym,
   type KeyProvider,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import { normalize } from "./normalize.js";
 

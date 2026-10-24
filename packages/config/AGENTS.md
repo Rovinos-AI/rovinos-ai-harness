@@ -10,7 +10,7 @@ Configuration loading, validation, env overrides, secret references. See also `p
 
 ## Allowed internal imports
 
-- `@harness/schemas`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

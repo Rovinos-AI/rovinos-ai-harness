@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { compileJsonSchema, Id } from "@harness/schemas";
+import { compileJsonSchema, Id } from "@rovinos/schemas";
 import { z } from "zod";
 import {
   JsonSchemaError,

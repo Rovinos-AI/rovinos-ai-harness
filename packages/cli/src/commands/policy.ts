@@ -9,10 +9,10 @@ import {
   PolicyTestCallSchema,
   PolicyTestExpectationSchema,
   PolicyTestResultSchema,
-} from "@harness/schemas";
-import type { PolicyTestCall, PolicyTestExpectation, PolicyTestResult } from "@harness/schemas";
-import type { CompiledPolicy } from "@harness/policy";
-import type { Detector } from "@harness/pii";
+} from "@rovinos/schemas";
+import type { PolicyTestCall, PolicyTestExpectation, PolicyTestResult } from "@rovinos/schemas";
+import type { CompiledPolicy } from "@rovinos/policy";
+import type { Detector } from "@rovinos/pii";
 import { z } from "zod";
 import type { CliContext, CommandModule } from "../command.js";
 
@@ -45,7 +45,7 @@ class PolicyCommandError extends HarnessError {
 }
 
 async function readPolicy(path: string) {
-  const { PolicyDocumentSchema } = await import("@harness/policy");
+  const { PolicyDocumentSchema } = await import("@rovinos/policy");
   return parseYaml(PolicyDocumentSchema, await readFile(path, "utf8"));
 }
 
@@ -114,8 +114,8 @@ async function testPolicyResult({
   const results: PolicyTestResult["results"] = [];
   const mismatches: PolicyTestResult["mismatches"] = [];
   const config = await cliContext.loadConfig();
-  const pii = await import("@harness/pii");
-  const { InMemoryVault } = await import("@harness/vault");
+  const pii = await import("@rovinos/pii");
+  const { InMemoryVault } = await import("@rovinos/vault");
   const builtInAndCustomDetectors: readonly Detector[] = [
     pii.creditCardDetector,
     pii.emailDetector,
@@ -215,7 +215,7 @@ async function runTest(rawOptions: unknown, context: CliContext, jsonMode: boole
   ensureUniqueIds(calls, "policy_test_ids_duplicate");
   ensureUniqueIds(expectations, "policy_expectations_ids_duplicate");
 
-  const { compilePolicy } = await import("@harness/policy");
+  const { compilePolicy } = await import("@rovinos/policy");
   const result = await testPolicyResult({
     compiled: compilePolicy(document),
     calls,
@@ -235,7 +235,7 @@ async function runTest(rawOptions: unknown, context: CliContext, jsonMode: boole
 
 async function runLint(rawOptions: unknown, context: CliContext, jsonMode: boolean): Promise<void> {
   const options = LintOptionsSchema.parse(rawOptions);
-  const { lintPolicy } = await import("@harness/policy");
+  const { lintPolicy } = await import("@rovinos/policy");
   const input = parseYaml(z.unknown(), await readFile(options.policy, "utf8"));
   const result = PolicyLintResultSchema.parse(lintPolicy(input));
   context.out.json(PolicyLintResultSchema, result);

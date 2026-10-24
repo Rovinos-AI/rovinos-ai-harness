@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { logs } from "@opentelemetry/api-logs";
-import type { TelemetryConfig } from "@harness/schemas";
+import type { TelemetryConfig } from "@rovinos/schemas";
 import {
   BatchLogRecordProcessor,
   LoggerProvider,

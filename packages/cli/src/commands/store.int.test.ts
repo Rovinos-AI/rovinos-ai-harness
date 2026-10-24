@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema } from "@harness/config";
-import { FakeClock, StoreMigrateResultSchema, parseJson } from "@harness/schemas";
-import { migrate } from "@harness/store/adapter-internal";
-import { PostgresEventStore } from "@harness/store-postgres";
-import { createEventBuilders } from "@harness/store/testing";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { FakeClock, StoreMigrateResultSchema, parseJson } from "@rovinos/schemas";
+import { migrate } from "@rovinos/store/adapter-internal";
+import { PostgresEventStore } from "@rovinos/store-postgres";
+import { createEventBuilders } from "@rovinos/store/testing";
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";

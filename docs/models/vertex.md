@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Vertex AI Gemini adapter
 
-`@harness/models` provides `VertexAdapter` for Gemini models hosted on Google
+`@rovinos/models` provides `VertexAdapter` for Gemini models hosted on Google
 Vertex AI. Configure the Google Cloud project and location in the host and use
 the Vertex model id in each `ModelRequest`. The adapter uses Google Application
 Default Credentials (ADC) by default; configure ADC in the runtime environment
@@ -12,7 +12,7 @@ operator. The adapter rejects non-HTTPS base URLs because requests carry ADC
 credentials; it does not treat arbitrary HTTPS hosts as trusted.
 
 ```ts
-import { VertexAdapter } from "@harness/models";
+import { VertexAdapter } from "@rovinos/models";
 
 const vertex = new VertexAdapter({
   project: "example-project",

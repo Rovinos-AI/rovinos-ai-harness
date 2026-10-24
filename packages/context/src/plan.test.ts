@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { Id, JsonValue, type Event } from "@harness/schemas";
+import { Id, JsonValue, type Event } from "@rovinos/schemas";
 import {
   createPlanReducerState,
   derivePlan,

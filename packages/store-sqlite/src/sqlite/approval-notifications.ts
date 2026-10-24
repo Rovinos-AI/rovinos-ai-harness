@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import { sqliteStoreError } from "./outbox.js";
 
 /** Persists once-only escalation claims for a SQLite event store. */

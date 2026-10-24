@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
-import { HarnessError, ServerConfigSchema, type ServerConfig } from "@harness/schemas";
+import { HarnessError, ServerConfigSchema, type ServerConfig } from "@rovinos/schemas";
 import { ConfigError, formatConfigIssues, loadConfig } from "./index.js";
 
 const validYaml = `run:

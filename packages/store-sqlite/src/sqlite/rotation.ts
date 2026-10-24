@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import {
   ContentDecryptFailedError,
   ContentEncryptFailedError,
   KeyNotFoundError,
   StoreUnavailableError,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import {
   decodeStoreRotationCursor,
   encodeStoreRotationCursor,
@@ -18,7 +18,7 @@ import {
   type StoreKeyRowCount,
   type StoreReencryptBatchResult,
   type StoreRotationCursor,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 
 interface RotationEventRow {
   global_seq: number;

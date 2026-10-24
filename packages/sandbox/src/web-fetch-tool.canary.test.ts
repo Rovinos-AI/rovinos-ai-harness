@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createTelemetrySdk, type TelemetrySdkOptions } from "@harness/telemetry";
-import { Id, JsonValue } from "@harness/schemas";
+import { createTelemetrySdk, type TelemetrySdkOptions } from "@rovinos/telemetry";
+import { Id, JsonValue } from "@rovinos/schemas";
 import { ExportResultCode } from "@opentelemetry/core";
 import { describe, expect, it } from "vitest";
 import { WebFetchTool } from "./web-fetch-tool.js";

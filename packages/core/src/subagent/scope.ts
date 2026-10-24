@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Id } from "@harness/schemas";
+import { HarnessError, type Id } from "@rovinos/schemas";
 
 /** Raised when a run is assigned conflicting vault scopes. */
 export class RunScopeConflictError extends HarnessError {

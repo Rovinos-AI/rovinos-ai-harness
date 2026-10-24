@@ -4,14 +4,14 @@ import {
   ControlPlaneConfigSchema,
   HarnessError,
   type ControlPlaneConfig,
-} from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
-import { emitControlPlaneAudit } from "@harness/telemetry";
+import { emitControlPlaneAudit } from "@rovinos/telemetry";
 import {
   authenticateBearerToken,
   ControlPlaneAuthError,

@@ -15,9 +15,9 @@ import {
   type Id,
   type JsonValue,
   type RunConfig,
-} from "@harness/schemas";
-import type { EventStore } from "@harness/store";
-import { setActiveSpanAttribute } from "@harness/telemetry";
+} from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
+import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import type { IdGenerator, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import type { Clock } from "../recorder.js";
 import { foldRunState } from "../run-state.js";

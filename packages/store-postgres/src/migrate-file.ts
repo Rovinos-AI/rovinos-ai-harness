@@ -6,7 +6,7 @@ import {
   migrate,
   StoreUnavailableError,
   type PostgresMigrationDriver,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 
 const migrationOptionsSchema = z
   .object({

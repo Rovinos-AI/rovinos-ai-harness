@@ -6,14 +6,14 @@ import {
   type JsonValue,
   type Message,
   type ModelRef,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   CalibrationSnapshotSchema,
   ContextSnapshotSchema,
   CalibratingTokenCounter,
   type ContextStrategy,
   type ContextStrategyInput,
-} from "@harness/context";
+} from "@rovinos/context";
 import type { ContextBuildResult, ContextPort } from "../ports.js";
 
 /** Context build dependencies configured for a strategy-backed run-loop port. */

@@ -6,7 +6,7 @@ import {
   parseJson,
   type NewEvent,
   type Snapshot,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import {
   ContentDecryptFailedError,

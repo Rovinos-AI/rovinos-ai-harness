@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 /** Closed error code raised when the Docker CLI cannot be started. */
 export type DockerProcessErrorCode = "docker_process_failed";

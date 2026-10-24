@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Transport } from "@modelcontextprotocol/client";
-import type { SecretRef, ServerConfig } from "@harness/schemas";
+import type { SecretRef, ServerConfig } from "@rovinos/schemas";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
 import type { McpLogger } from "./transports.js";
 

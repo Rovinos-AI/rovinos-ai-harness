@@ -9,8 +9,8 @@ import {
 } from "@modelcontextprotocol/client";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
-import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { ServerConfigSchema, type JsonValue } from "@rovinos/schemas";
+import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError, excludeHeaderDeclaringTools } from "./connection.js";
 import { ClientCredentialsExtensionSupport } from "./connection-helpers.js";

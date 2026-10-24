@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Id } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
-import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
+import { HarnessError, type Id } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
+import { forceFlushTelemetry, sentinelTripQueue } from "@rovinos/telemetry";
 import {
   closeRuntimeResources,
   markTerminalBestEffort,

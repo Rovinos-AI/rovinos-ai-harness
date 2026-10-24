@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError } from "@harness/schemas";
-import { type RunQueue, type RunQueueJob } from "@harness/store";
-import { countWorkerJob, recordWorkerQueueLag } from "@harness/telemetry";
+import { Code, HarnessError } from "@rovinos/schemas";
+import { type RunQueue, type RunQueueJob } from "@rovinos/store";
+import { countWorkerJob, recordWorkerQueueLag } from "@rovinos/telemetry";
 import { z } from "zod";
 import type { IdGenerator } from "./ports.js";
 import type { Clock } from "./recorder.js";

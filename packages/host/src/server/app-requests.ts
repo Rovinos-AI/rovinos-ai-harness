@@ -6,8 +6,8 @@ import {
   JsonValue,
   type AppContentEnvelope,
   type HostConfig,
-} from "@harness/schemas";
-import { countHostAppRejected, type HostAppRejectedReason } from "@harness/telemetry";
+} from "@rovinos/schemas";
+import { countHostAppRejected, type HostAppRejectedReason } from "@rovinos/telemetry";
 import { AppRequestResultSchema } from "../shared/app-request.js";
 import { z } from "zod";
 import type { AppInstance } from "./types.js";

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, type NewEvent } from "@harness/schemas";
-import { FakeClock } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
+import { Code, Id, type NewEvent } from "@rovinos/schemas";
+import { FakeClock } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
 import { context as otelContext, trace } from "@opentelemetry/api";
-import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { describe, expect, it, vi } from "vitest";
 import { foldRunState } from "./run-state.js";
 import { createRuntimeAppCallbacks } from "./runtime-apps.js";

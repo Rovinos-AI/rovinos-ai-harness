@@ -6,7 +6,7 @@ import {
   type Capabilities,
   type JsonValue as JsonValueType,
   type Part,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Structured-output enforcement rung supported by this gateway. */

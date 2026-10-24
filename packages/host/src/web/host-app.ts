@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { INVALID_REQUEST, ProtocolError } from "@modelcontextprotocol/client";
-import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
+import { Code, Id, Traceparent, parseJson } from "@rovinos/schemas";
 import { AppRequestResultSchema } from "../shared/app-request.js";
 import { z } from "zod";
 import { createAppBridge, type AppBridgeHandlers, type AppToolCall } from "./bridge.js";

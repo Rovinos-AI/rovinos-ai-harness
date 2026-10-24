@@ -5,9 +5,9 @@ import {
   type Event as StoredEvent,
   type Id,
   type NewEvent,
-} from "@harness/schemas";
-import type { ContentCodec } from "@harness/store/adapter-internal";
-import { InvalidEventError } from "@harness/store/adapter-internal";
+} from "@rovinos/schemas";
+import type { ContentCodec } from "@rovinos/store/adapter-internal";
+import { InvalidEventError } from "@rovinos/store/adapter-internal";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 

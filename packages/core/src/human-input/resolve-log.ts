@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import type { Event, Id } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import {
   InputAlreadyResolvedError,
   InputNotFoundError,

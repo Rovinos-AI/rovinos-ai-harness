@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 /** Safe protocol failure retaining only the numeric JSON-RPC code. */
 export class McpProtocolError extends HarnessError {

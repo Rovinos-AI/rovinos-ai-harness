@@ -9,15 +9,15 @@ import {
   type Message,
   type ModelRequest,
   type ToolSpec,
-} from "@harness/schemas";
-import { requestHash } from "@harness/models";
+} from "@rovinos/schemas";
+import { requestHash } from "@rovinos/models";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
-import { setActiveSpanAttribute } from "@harness/telemetry";
+import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import type { EventPartial, RunRecorder } from "../recorder.js";
-import type { UsageLedgerDelta } from "@harness/store";
+import type { UsageLedgerDelta } from "@rovinos/store";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
-import type { ValueTransform } from "@harness/models";
+import type { ValueTransform } from "@rovinos/models";
 import { z } from "zod";
 import {
   piiActionRunContext,

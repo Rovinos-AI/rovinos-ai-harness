@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import process from "node:process";
-import { HarnessError, Id, type Code, type Id as IdValue } from "@harness/schemas";
+import { HarnessError, Id, type Code, type Id as IdValue } from "@rovinos/schemas";
 import { ensureRunWorkspace, resolveWorkspacePath } from "./workspace.js";
 import { WorkspaceFileSystem, WorkspaceFileError } from "./workspace-files.js";
 import type { FsOperation, FsToolResult } from "./fs-tools.js";

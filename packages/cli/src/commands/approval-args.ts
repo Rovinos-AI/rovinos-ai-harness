@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { JsonValue } from "@harness/schemas";
-import type { findTokens } from "@harness/vault";
+import type { JsonValue } from "@rovinos/schemas";
+import type { findTokens } from "@rovinos/vault";
 
 type FindTokens = typeof findTokens;
 

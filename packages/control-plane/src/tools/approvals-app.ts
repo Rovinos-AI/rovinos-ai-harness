@@ -10,8 +10,8 @@ import {
   RevealResponse,
   type Id,
   type Principal,
-} from "@harness/schemas";
-import type { AuditingVaultResolver } from "@harness/vault";
+} from "@rovinos/schemas";
+import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
 import {
@@ -24,7 +24,7 @@ import {
   safeErrorCode,
 } from "./approval-app-helpers.js";
 import { findApprovalRequest, readRunState } from "./run-state.js";
-import type { EventStore } from "@harness/store";
+import type { EventStore } from "@rovinos/store";
 import type { ResolveApprovalOperation } from "./approve.js";
 import { z } from "zod";
 

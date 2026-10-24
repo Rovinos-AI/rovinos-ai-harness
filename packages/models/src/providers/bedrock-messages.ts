@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ContentBlock, Message as BedrockMessage } from "@aws-sdk/client-bedrock-runtime";
 import { Buffer } from "node:buffer";
-import { Code, JsonValue, type ModelRequest, type Part } from "@harness/schemas";
+import { Code, JsonValue, type ModelRequest, type Part } from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
 
 const BEDROCK_TOOL_NAME = /^[\w-]{1,64}$/u;

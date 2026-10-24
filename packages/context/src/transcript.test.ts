@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { parseJson, type Event, type Part } from "@harness/schemas";
+import { parseJson, type Event, type Part } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import {
   ContextBudgetSchema,

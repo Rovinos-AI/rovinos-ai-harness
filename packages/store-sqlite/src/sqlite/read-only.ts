@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { StoreUnavailableError } from "@harness/store/adapter-internal";
+import { StoreUnavailableError } from "@rovinos/store/adapter-internal";
 
 function hasJournalSidecar(path: string): boolean {
   return existsSync(`${path}-wal`) || existsSync(`${path}-journal`);

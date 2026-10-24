@@ -207,12 +207,12 @@ Shared design for this epic:
 **Parent:** #21 Docs, examples, and release
 **Task Description:** Decide what is published to npm and under which scope, then make the build produce it: a bundled SDK and a bundled CLI that inline every internal workspace package, plus the separately published store adapters. Must land before 21.6.
 **Expected Inputs:** The workspace packages; 24.1's rule that the SDK is the only stable public API; 7.15's split adapters.
-**Expected Output:** ADR `docs/adr/NNNN-publish-surface.md`; the workspace renamed from `@harness/*` to the chosen scope; a bundler config for `packages/sdk` and `packages/cli`; `scripts/release/check-publish-surface.ts`; `docs/releasing.md` section on the publish surface.
+**Expected Output:** ADR `docs/adr/NNNN-publish-surface.md`; the workspace renamed from `@rovinos/*` to the chosen scope; a bundler config for `packages/sdk` and `packages/cli`; `scripts/release/check-publish-surface.ts`; `docs/releasing.md` section on the publish surface.
 **Dependencies:** a bundler (`tsup` recommended; verify license against 1.7), `@microsoft/api-extractor` or the bundler's declaration bundling for a single `.d.ts`.
 **Items it depends on:** 7.15, 24.1.
 **Implementation guidance:**
 
-1. **Scope.** `@harness` is owned by another organization on npm (checked 2026-10-09), so the packages can't be published under it. The maintainer confirms the replacement scope in the issue before work starts (recommended: `@rovinos`, unclaimed on 2026-10-09) and creates the npm org. Rename every `@harness/*` package name, import, `layers.json` entry, ESLint boundary rule, doc reference, and Dockerfile reference in one mechanical commit; nothing else changes in that commit.
+1. **Scope.** `@harness` is owned by another organization on npm (checked 2026-10-09), so the packages can't be published under it. The maintainer confirms the replacement scope in the issue before work starts (recommended: `@rovinos`, unclaimed on 2026-10-09) and creates the npm org. Rename every `@rovinos/*` package name, import, `layers.json` entry, ESLint boundary rule, doc reference, and Dockerfile reference in one mechanical commit; nothing else changes in that commit.
 2. **Bundling (decision: maintainer, 2026-10-09).** Publish a small surface instead of every internal package:
    - `<scope>/sdk`: bundles `core`, `schemas`, `config`, `telemetry`, `store` (contract, codec, in-memory store) and the other internals it uses into one ESM build with a single bundled `.d.ts`; no `<scope>/*` runtime dependencies remain.
    - `<scope>/cli`: bundles its internals the same way and exposes the `harness` binary.

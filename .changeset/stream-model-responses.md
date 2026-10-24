@@ -1,6 +1,6 @@
 ---
-"@harness/models": minor
-"@harness/sdk": minor
+"@rovinos/models": minor
+"@rovinos/sdk": minor
 ---
 
 # Model streaming configuration

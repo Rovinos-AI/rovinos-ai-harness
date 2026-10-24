@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { inspect } from "node:util";
-import { VaultValueEntrySchema, type Code, type Id, type VaultValueEntry } from "@harness/schemas";
+import { VaultValueEntrySchema, type Code, type Id, type VaultValueEntry } from "@rovinos/schemas";
 import { z } from "zod";
 import { countSkippedShortValues } from "../metrics.js";
 

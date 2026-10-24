@@ -8,7 +8,7 @@ import {
   splitEvent,
   type Event as StoredEvent,
   type NewEvent,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { PoolClient, QueryResultRow } from "pg";
 import { z } from "zod";
 import type {
@@ -16,7 +16,7 @@ import type {
   EncodedSnapshot,
   RunSummary,
   UsageLedgerDelta,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import {
   ContentDecryptFailedError,
   InvalidEventError,
@@ -26,7 +26,7 @@ import {
   StoreUnavailableError,
   UsageLimitExceededError,
   isPreservedStoreError,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { insertPostgresEventBatches } from "./event-insert.js";
 import { insertSnapshot } from "./snapshot.js";
 

@@ -7,7 +7,7 @@ import {
   type LogRecordShape,
   type SpanDefinition,
   type SpanDefinitionShape,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

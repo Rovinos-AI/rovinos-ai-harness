@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id, type Snapshot } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
-import type { WorkspaceSnapshotPort } from "@harness/sandbox";
-import { activeRuns } from "@harness/telemetry";
+import { HarnessError, type Event, type Id, type Snapshot } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
+import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
+import { activeRuns } from "@rovinos/telemetry";
 import { applyResolvedApprovals } from "./approvals.js";
 import { BudgetTracker } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EventSchema } from "@harness/schemas";
+import { EventSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { foldRunState } from "./run-state.js";
 import { planDanglingIntents } from "./resume-policy.js";

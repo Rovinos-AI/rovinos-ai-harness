@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Runtime } from "@harness/core";
+import type { Runtime } from "@rovinos/core";
 import {
   ApprovalPayloadSchema,
   Code,
@@ -12,10 +12,10 @@ import {
   type Id,
   JsonValue,
   type Event,
-} from "@harness/schemas";
-import type { HarnessConfig } from "@harness/config";
-import { applyApprovalEdits, approvalEditsAreAllowed } from "@harness/policy";
-import { findTokens } from "@harness/vault";
+} from "@rovinos/schemas";
+import type { HarnessConfig } from "@rovinos/config";
+import { applyApprovalEdits, approvalEditsAreAllowed } from "@rovinos/policy";
+import { findTokens } from "@rovinos/vault";
 import { ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { z } from "zod";
 import { cliApprovalMetadata, type CliContext } from "../command.js";
@@ -54,9 +54,9 @@ export async function createApprovalViewHost(input: {
   readonly approvalId: Id;
 }): Promise<{ readonly url: string; close(): Promise<void> }> {
   const { runtime, context, config, runId, approvalId } = input;
-  const { createReferenceHost } = await import("@harness/host");
+  const { createReferenceHost } = await import("@rovinos/host");
   const { APPROVAL_RESOURCE_URI, MCP_APP_HTML_MIME_TYPE, loadApprovalHtml } =
-    await import("@harness/control-plane");
+    await import("@rovinos/control-plane");
   const approvalHtml = loadApprovalHtml();
   const pending = await findPendingApproval(runtime, runId, approvalId);
   const payload = ApprovalPayloadSchema.parse(pending.payload);
@@ -152,7 +152,7 @@ async function findPendingApproval(
   if (events.length === 0) {
     throw new ApprovalViewError("approval_not_found");
   }
-  const { foldRunState } = await import("@harness/core");
+  const { foldRunState } = await import("@rovinos/core");
   const state = foldRunState(events);
   const approval = events.find(
     (event): event is Extract<Event, { type: "approval_requested" }> =>

@@ -6,7 +6,7 @@ import {
   type Code as CodeType,
   type JsonValue as JsonValueType,
   type ToolSpec,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type {
   ModelToolCall,
   RunContext,

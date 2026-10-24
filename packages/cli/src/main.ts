@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CompositeSecretResolver, loadConfig, type HarnessConfig } from "@harness/config";
-import { HARNESS_VERSION } from "@harness/schemas";
-import { emitKeysRotated } from "@harness/telemetry";
-import { AkvSecretResolver } from "@harness/vault";
+import { CompositeSecretResolver, loadConfig, type HarnessConfig } from "@rovinos/config";
+import { HARNESS_VERSION } from "@rovinos/schemas";
+import { emitKeysRotated } from "@rovinos/telemetry";
+import { AkvSecretResolver } from "@rovinos/vault";
 import { Command, CommanderError } from "commander";
 import { dirname, resolve } from "node:path";
 import type { CliContext, Clock, CommandModule } from "./command.js";
@@ -61,7 +61,7 @@ export function createDefaultContext(program: Command, out: Output): CliContext 
     secretResolver,
     interactive: createTerminalPrompt(process.stdin, out),
     createRuntime: async (config, overrides) => {
-      const { createRuntime } = await import("@harness/core");
+      const { createRuntime } = await import("@rovinos/core");
       return createRuntime(config, {
         ...overrides,
         onKeysWarning: (code) => {
@@ -81,7 +81,7 @@ export function createDefaultContext(program: Command, out: Output): CliContext 
       });
     },
     openKeyRotation: async (config, selection) => {
-      const { openConfiguredKeyRotation } = await import("@harness/core");
+      const { openConfiguredKeyRotation } = await import("@rovinos/core");
       return openConfiguredKeyRotation(config, {
         ...selection,
         secretResolver,

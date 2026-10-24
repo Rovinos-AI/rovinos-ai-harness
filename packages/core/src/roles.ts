@@ -10,7 +10,7 @@ import {
   type ModelsConfig,
   type RoleConfig,
   type RoleToolPattern,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { z } from "zod";
 
 /** Stable codes emitted for role startup and lookup failures. */

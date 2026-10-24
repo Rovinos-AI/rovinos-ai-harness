@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type JsonValue, type RunStatus } from "@harness/schemas";
-import { createPlanReducerState, planReducer, type PlanReducerState } from "@harness/context";
+import { HarnessError, type Event, type JsonValue, type RunStatus } from "@rovinos/schemas";
+import { createPlanReducerState, planReducer, type PlanReducerState } from "@rovinos/context";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
 import { clearToolExecution, inspectInputRound } from "./run-state-tools.js";
 import type { ModelToolCall } from "./ports.js";

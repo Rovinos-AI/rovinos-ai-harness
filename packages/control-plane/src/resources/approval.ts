@@ -2,7 +2,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 export const APPROVAL_RESOURCE_URI = "ui://harness/approval/v1";
 export const MCP_APP_HTML_MIME_TYPE = "text/html;profile=mcp-app";

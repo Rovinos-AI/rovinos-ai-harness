@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { Code, Id, JsonValue } from "@harness/schemas";
+import { Code, Id, JsonValue } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FsEditInputSchema,

@@ -7,7 +7,7 @@ import {
   type KeyProvider,
   type KeysConfig,
   type SecretRef,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 
 /** Stable errors raised by the local key provider. */
 export type LocalKeyProviderErrorCode =
@@ -37,7 +37,7 @@ export interface ResolvedKeySecret {
   reveal(): string;
 }
 
-/** Resolver compatible with the secret resolver in `@harness/config`. */
+/** Resolver compatible with the secret resolver in `@rovinos/config`. */
 export interface KeySecretResolver {
   /** Resolves an external reference without returning secret values in errors. */
   resolve(ref: SecretRef): Promise<ResolvedKeySecret>;

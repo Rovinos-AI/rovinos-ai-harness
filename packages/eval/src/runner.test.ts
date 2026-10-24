@@ -2,7 +2,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Id, parseJson } from "@harness/schemas";
+import { Id, parseJson } from "@rovinos/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { defineSuite } from "./load.js";
 import { EvalRunnerError, runEval } from "./runner.js";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code } from "@harness/schemas";
+import type { Code } from "@rovinos/schemas";
 import { ProviderNotRegisteredError } from "./errors.js";
 import type { ProviderAdapter } from "./types.js";
 

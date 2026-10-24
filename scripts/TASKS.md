@@ -2,7 +2,7 @@
 
 This folder has no dedicated epic. Tasks that touch it are listed below; the full specs live in the linked files.
 
-Task ids: 1.4-1.9, 4.7, 10.2, 10.4, 13.11, 19.1, 21.1-21.8, 21.13, 22.1-22.4, 7.13, 24.8
+Task ids: 1.4-1.9, 4.7, 10.2, 10.4, 13.11, 19.1, 21.1-21.10, 21.13, 22.1-22.4, 7.13, 24.8
 
 - [epic-01-foundation.md](../docs/engineering/tasks/epic-01-foundation.md)
 - [epic-10-otel-collector.md](../infra/collector/epic-10-otel-collector.md)

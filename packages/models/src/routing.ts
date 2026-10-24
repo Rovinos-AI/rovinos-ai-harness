@@ -6,8 +6,8 @@ import {
   type ModelRequest,
   type ModelUsage,
   type ModelRoutingConfigSchema,
-} from "@harness/schemas";
-import { setActiveSpanAttribute } from "@harness/telemetry";
+} from "@rovinos/schemas";
+import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import type { z } from "zod";
 import {
   attachModelFailureMetadata,

@@ -7,12 +7,12 @@ import {
   type Event,
   type Id,
   type Snapshot,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { Clock, RunRecorder } from "./recorder.js";
 import type { ContextPort, IdGenerator } from "./ports.js";
 import type { RunState } from "./run-state.js";
 import { CHECKPOINT_SPAN } from "./spans.js";
-import type { WorkspaceSnapshotPort } from "@harness/sandbox";
+import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 
 /** Dependencies for writing durable checkpoints. */
 export interface CheckpointerOptions {

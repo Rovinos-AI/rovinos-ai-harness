@@ -6,7 +6,7 @@ import {
   type Code as EntityCode,
   type Id,
   type TelemetryConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import { countSentinelScopeReduced } from "../metrics.js";
 import { activeRuns, type ActiveRuns } from "./active-runs.js";

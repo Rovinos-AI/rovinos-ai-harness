@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelRef } from "@harness/schemas";
+import type { ModelRef } from "@rovinos/schemas";
 import { NaiveStrategy } from "./strategies/naive.js";
 import { SlidingWindowStrategy } from "./strategies/sliding-window.js";
 import { SummarizingStrategy } from "./strategies/summarizing.js";

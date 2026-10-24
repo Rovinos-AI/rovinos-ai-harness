@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ResolveRequest, ResolveResponse, type ApprovalPayload } from "@harness/schemas/browser";
-import type { AppTelemetry } from "@harness/app-telemetry";
+import { ResolveRequest, ResolveResponse, type ApprovalPayload } from "@rovinos/schemas/browser";
+import type { AppTelemetry } from "@rovinos/app-telemetry";
 import { createEditForm } from "./edit-form.js";
 import { getStrings, type UiStrings } from "./kit/strings.js";
 import { mountRevealFlow, type RevealFlow } from "./reveal.js";

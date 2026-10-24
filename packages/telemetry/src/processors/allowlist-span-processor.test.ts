@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { Code, Id, type TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@rovinos/schemas";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -53,7 +53,7 @@ function makeEmptyGate(): SentinelGate {
   );
 }
 
-const testOwnerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
+const testOwnerTask = { taskId: "4.7", packageName: "@rovinos/telemetry" } as const;
 
 function defineTestSpan() {
   return defineSpan(

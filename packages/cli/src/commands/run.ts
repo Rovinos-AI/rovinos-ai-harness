@@ -10,8 +10,8 @@ import {
   type RunInput,
   type RunResult,
   type JsonValue,
-} from "@harness/schemas";
-import type { ModelCompletion, ModelPort, ModelRequest, RunContext } from "@harness/core";
+} from "@rovinos/schemas";
+import type { ModelCompletion, ModelPort, ModelRequest, RunContext } from "@rovinos/core";
 import { cliPrincipal, type CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 

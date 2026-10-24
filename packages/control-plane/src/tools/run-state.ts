@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { foldRunState, type ApprovalRequestedEvent, type RunState } from "@harness/core";
-import type { Event, Id } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { foldRunState, type ApprovalRequestedEvent, type RunState } from "@rovinos/core";
+import type { Event, Id } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 
 /** Reads and folds one run's events, returning undefined when the run is unknown. */
 export async function readRunState(

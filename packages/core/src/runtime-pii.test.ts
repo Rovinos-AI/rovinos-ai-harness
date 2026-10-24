@@ -12,14 +12,14 @@ import {
   RunConfigSchema,
   type ModelRequest,
   type JsonValue,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { ProviderError, type ProviderAdapter } from "@harness/models";
-import { AuditingVaultResolver, InMemoryVault, Token } from "@harness/vault";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { ProviderError, type ProviderAdapter } from "@rovinos/models";
+import { AuditingVaultResolver, InMemoryVault, Token } from "@rovinos/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { emailDetector, PiiMessageSanitizer, PiiToolPort, Tokenizer } from "@harness/pii";
-import * as telemetry from "@harness/telemetry";
-import { AdapterRegistry, ModelGateway } from "@harness/models";
+import { emailDetector, PiiMessageSanitizer, PiiToolPort, Tokenizer } from "@rovinos/pii";
+import * as telemetry from "@rovinos/telemetry";
+import { AdapterRegistry, ModelGateway } from "@rovinos/models";
 import type { ModelCompletion, ModelToolCall, ToolPort } from "./ports.js";
 import { createRuntime } from "./runtime.js";
 import { createRuntimeKeys } from "./runtime-keys.js";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { AnthropicAdapter } from "./anthropic.js";
-import type { ModelRequest } from "@harness/schemas";
+import type { ModelRequest } from "@rovinos/schemas";
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
 const hasApiKey = apiKey !== undefined && apiKey.length > 0;

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import type { Pool, QueryResultRow } from "pg";
 import {
   ContentDecryptFailedError,
   ContentEncryptFailedError,
   KeyNotFoundError,
   StoreUnavailableError,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import {
   decodeStoreRotationCursor,
   encodeStoreRotationCursor,
@@ -18,7 +18,7 @@ import {
   type StoreKeyRowCount,
   type StoreReencryptBatchResult,
   type StoreRotationCursor,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { integer } from "./helpers.js";
 
 interface RotationEventRow extends QueryResultRow {

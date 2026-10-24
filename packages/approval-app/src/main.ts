@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { App } from "@modelcontextprotocol/ext-apps";
-import { createAppTelemetry } from "@harness/app-telemetry";
+import { createAppTelemetry } from "@rovinos/app-telemetry";
 import {
   ApprovalAppInputSchema,
   ApprovalPayloadSchema,
   ResolveResponse,
   RevealResponse,
   parseJson,
-} from "@harness/schemas/browser";
+} from "@rovinos/schemas/browser";
 import { mountApprovalActions, type ApprovalToolCallOutcome } from "./actions.js";
 import { createApprovalFallback } from "./fallback.js";
 import { createApprovalTelemetry } from "./telemetry.js";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { isDockerAvailable } from "@harness/sandbox";
+import { isDockerAvailable } from "@rovinos/sandbox";
 import { afterAll, describe, expect, it } from "vitest";
 import { defineSuite } from "../load.js";
 import { DockerExecutor } from "./docker.js";

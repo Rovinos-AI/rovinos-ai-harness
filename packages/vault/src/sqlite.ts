@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { CryptoError } from "@harness/crypto";
-import { VaultValueEntrySchema } from "@harness/schemas";
-import type { Code, Id, KeyProvider, VaultValueEntry } from "@harness/schemas";
+import { CryptoError } from "@rovinos/crypto";
+import { VaultValueEntrySchema } from "@rovinos/schemas";
+import type { Code, Id, KeyProvider, VaultValueEntry } from "@rovinos/schemas";
 import { normalize } from "./normalize.js";
 import { tokenTypeName, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";

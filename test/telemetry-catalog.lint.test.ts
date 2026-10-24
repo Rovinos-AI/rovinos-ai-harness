@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference types="vite/client" />
-import "@harness/core";
-import { listLogDefinitions, listSpanDefinitions } from "@harness/telemetry";
+import "@rovinos/core";
+import { listLogDefinitions, listSpanDefinitions } from "@rovinos/telemetry";
 import {
   assertRandomStringsDroppedFromLog,
   assertRandomStringsDroppedFromSpan,
   assertRegisteredSchemasSafe,
-} from "@harness/telemetry/testing";
+} from "@rovinos/telemetry/testing";
 import { findTelemetryRegistrationSources } from "../scripts/telemetry-registration-sources.js";
 import { beforeAll, describe, expect, it } from "vitest";
 

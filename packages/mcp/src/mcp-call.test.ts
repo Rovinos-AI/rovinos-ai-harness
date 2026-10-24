@@ -6,7 +6,7 @@ import {
   type CallToolResult,
   type Client,
 } from "@modelcontextprotocol/client";
-import { ServerConfigSchema } from "@harness/schemas";
+import { ServerConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { invokeMcpTool } from "./mcp-call.js";
 

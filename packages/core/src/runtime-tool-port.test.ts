@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue } from "@harness/schemas";
+import { Code, Id, JsonValue } from "@rovinos/schemas";
 import { composeToolPorts } from "./runtime-tool-port.js";
 import { describe, expect, it, vi } from "vitest";
 

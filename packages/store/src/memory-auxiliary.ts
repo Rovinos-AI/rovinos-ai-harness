@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, TraceId, type Event, type Id } from "@harness/schemas";
+import { Code, TraceId, type Event, type Id } from "@rovinos/schemas";
 import type { EventStore, IdempotencyKeyHash } from "./types.js";
 import { InvalidEventError } from "./errors.js";
 import {

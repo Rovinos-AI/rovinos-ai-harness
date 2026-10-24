@@ -2,8 +2,8 @@
 import { lstat, mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { HarnessError } from "@harness/schemas";
-import type { Id } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
+import type { Id } from "@rovinos/schemas";
 import { extractWorkspaceArchive, WorkspaceSnapshotError } from "./snapshot-archive.js";
 
 function codeOf(error: unknown): string | undefined {

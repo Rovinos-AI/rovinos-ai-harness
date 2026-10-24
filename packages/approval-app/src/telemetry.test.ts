@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAppTelemetry, type AppTelemetry, type SpanAttrs } from "@harness/app-telemetry";
-import type { AppSpan } from "@harness/schemas";
+import { createAppTelemetry, type AppTelemetry, type SpanAttrs } from "@rovinos/app-telemetry";
+import type { AppSpan } from "@rovinos/schemas";
 import { createApprovalTelemetry, type ApprovalTelemetryEnvironment } from "./telemetry.js";
 
 type SpanNames = readonly ["ui.render", "ui.decision", "ui.error", "ui.interaction"];

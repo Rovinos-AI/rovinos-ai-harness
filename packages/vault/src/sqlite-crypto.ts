@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hkdfSha256 } from "@harness/crypto";
-import { KEY_PROVIDER_KEY_BYTES, type Code, type Id, type KeyProvider } from "@harness/schemas";
+import { hkdfSha256 } from "@rovinos/crypto";
+import { KEY_PROVIDER_KEY_BYTES, type Code, type Id, type KeyProvider } from "@rovinos/schemas";
 import { VaultOperationError } from "./errors.js";
 import { ENCRYPTION_INFO } from "./sqlite-decrypt.js";
 

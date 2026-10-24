@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { defineSuite } from "./load.js";
 import { EvalVariantSchema, TrialResultSchema, TrialSpecSchema } from "./trial.js";

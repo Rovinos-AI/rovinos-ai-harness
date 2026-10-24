@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, JsonValue, PolicyLintResultSchema, parseTokenType } from "@harness/schemas";
-import type { JsonValue as JsonValueType, PolicyLintResult } from "@harness/schemas";
+import { Code, JsonValue, PolicyLintResultSchema, parseTokenType } from "@rovinos/schemas";
+import type { JsonValue as JsonValueType, PolicyLintResult } from "@rovinos/schemas";
 import { PolicyDocumentSchema } from "./schema.js";
 import type { ArgMatcher, Rule } from "./schema.js";
 import { z } from "zod";

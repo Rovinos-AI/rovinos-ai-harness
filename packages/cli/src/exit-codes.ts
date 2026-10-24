@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 
 /** Stable process exit codes exposed by the harness CLI. */
 export const ExitCode = {

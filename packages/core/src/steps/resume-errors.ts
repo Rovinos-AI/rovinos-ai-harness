@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 /** Error raised when a resume step expected an event that was not recorded. */
 class ResumeEventMissingError extends HarnessError {

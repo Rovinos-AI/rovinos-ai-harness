@@ -1,6 +1,6 @@
 # Harness MCP App UI kit
 
-`@harness/approval-app/src/kit/` is the shared browser-safe component and theme layer for harness MCP Apps. It provides token pills, elicitation forms, tables, timelines, status badges, meters, confirmation dialogs, URL displays, and empty/error states. Add each view under `src/views/<name>/index.ts`; the package build discovers these entries and emits one `dist/<name>.html` resource for each. Build integrations can also pass additional named entrypoints through `buildAllViewHtml({ entries })`.
+`@rovinos/approval-app/src/kit/` is the shared browser-safe component and theme layer for harness MCP Apps. It provides token pills, elicitation forms, tables, timelines, status badges, meters, confirmation dialogs, URL displays, and empty/error states. Add each view under `src/views/<name>/index.ts`; the package build discovers these entries and emits one `dist/<name>.html` resource for each. Build integrations can also pass additional named entrypoints through `buildAllViewHtml({ entries })`.
 
 ## Host context and layout
 
@@ -16,7 +16,7 @@ All harness-authored user-visible copy is in `src/kit/strings.ts`. Use the forma
 
 ## Build and checks
 
-Run `yarn workspace @harness/approval-app build` to produce the view resources. The build embeds script and style, hashes each document, rejects external URLs, and the unit tests enforce a 150 KiB gzip budget per view. Component tests cover hostile text, keyboard-operable controls, and axe checks in both built-in themes.
+Run `yarn workspace @rovinos/approval-app build` to produce the view resources. The build embeds script and style, hashes each document, rejects external URLs, and the unit tests enforce a 150 KiB gzip budget per view. Component tests cover hostile text, keyboard-operable controls, and axe checks in both built-in themes.
 
 ## Runs console
 

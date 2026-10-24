@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import type { Message, ModelRef } from "@harness/schemas";
+import type { Message, ModelRef } from "@rovinos/schemas";
 import { CalibratingTokenCounter, HeuristicTokenCounter } from "./token-counter.js";
 import type { TokenCounter } from "./types.js";
 

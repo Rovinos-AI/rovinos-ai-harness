@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
-import { canonicalJson } from "@harness/models";
+import { Code, Id, JsonValue } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
+import { canonicalJson } from "@rovinos/models";
 import {
   acceptedContent,
   createRequestStateCodec,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { RunStatus, type Event, type Id } from "@harness/schemas";
+import { RunStatus, type Event, type Id } from "@rovinos/schemas";
 import { InvalidEventError } from "./errors.js";
 import type { EventStore, RunSummary, WatchOptions, WatchRunsOptions } from "./types.js";
 

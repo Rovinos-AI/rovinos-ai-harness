@@ -2,7 +2,7 @@
 // cspell:ignore cgremmlbygheaazvmfz foob fooba hlxaaxgj hunjzpwizhbyeotelaisi
 // cspell:ignore mhumxy mzxq mzxw ytboi aiusxzm
 import { describe, expect, it, vi } from "vitest";
-import type * as Crypto from "@harness/crypto";
+import type * as Crypto from "@rovinos/crypto";
 import { encodeBase32, pseudonymize, type PseudonymizeOptions } from "./pseudonym.js";
 
 const cryptoMocks = vi.hoisted(() => {
@@ -24,7 +24,7 @@ const cryptoMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@harness/crypto", async (importOriginal) => {
+vi.mock("@rovinos/crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof Crypto>();
   cryptoMocks.hkdf.mockImplementation((...args) => {
     const derivedKey = actual.hkdfSha256(...args);

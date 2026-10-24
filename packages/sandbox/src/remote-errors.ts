@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 /** Error reported when an authenticated remote runner request fails. */
 export class RemoteSandboxError extends HarnessError {

@@ -6,13 +6,13 @@ import {
   type Span,
   type SpanContext,
 } from "@opentelemetry/api";
-import { Traceparent, type Code, type Id } from "@harness/schemas";
+import { Traceparent, type Code, type Id } from "@rovinos/schemas";
 import {
   attr,
   defineSpan,
   type SpanDefinition,
   type SpanDefinitionShape,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 
 /** Registered host span for one MCP App UI session. */
 export const UI_SESSION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
@@ -22,7 +22,7 @@ export const UI_SESSION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     "harness.app.id": attr.code(),
     "harness.ui.session_id": attr.id(),
   },
-  { taskId: "3.2", packageName: "@harness/host" },
+  { taskId: "3.2", packageName: "@rovinos/host" },
 );
 
 /** Trace context required to create a UI session beneath its originating tool call. */

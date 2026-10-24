@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { EventStore } from "@harness/store";
-import type { Id } from "@harness/schemas";
+import type { EventStore } from "@rovinos/store";
+import type { Id } from "@rovinos/schemas";
 
 const activeResumes = new WeakMap<EventStore, Set<Id>>();
 

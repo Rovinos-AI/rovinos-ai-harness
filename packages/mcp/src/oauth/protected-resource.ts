@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 
 export const OAUTH_CLIENT_CREDENTIALS_EXTENSION =

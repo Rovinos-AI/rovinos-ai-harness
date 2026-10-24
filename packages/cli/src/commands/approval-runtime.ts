@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { HarnessConfig } from "@harness/config";
-import type { Runtime } from "@harness/core";
-import type { RunQueue } from "@harness/store";
+import type { HarnessConfig } from "@rovinos/config";
+import type { Runtime } from "@rovinos/core";
+import type { RunQueue } from "@rovinos/store";
 import type { CliContext } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 
@@ -58,7 +58,7 @@ async function openQueue(context: CliContext, config: HarnessConfig): Promise<Ru
   if (context.openRunQueue !== undefined) {
     return context.openRunQueue(config);
   }
-  const { openConfiguredRunQueue } = await import("@harness/core");
+  const { openConfiguredRunQueue } = await import("@rovinos/core");
   return openConfiguredRunQueue(config, {
     clock: context.clock,
     ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),

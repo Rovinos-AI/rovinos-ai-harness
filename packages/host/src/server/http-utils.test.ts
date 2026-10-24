@@ -47,7 +47,7 @@ describe("writeRequestFailure", () => {
     expect(page.toString("utf8")).toContain('<script src="/host.js"');
 
     // The unbundled source tree has no host.js, so this always takes the dist fallback; that
-    // file exists only after `yarn workspace @harness/host build`.
+    // file exists only after `yarn workspace @rovinos/host build`.
     const bundle = await readStaticAsset("bundle").then(
       (contents) => contents.byteLength > 0,
       (error: unknown) => error instanceof Error,

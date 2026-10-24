@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonValue as JsonValueSchema, type Code, type InputResponse } from "@harness/schemas";
-import { isToken, type AuditingVaultResolver } from "@harness/vault";
+import { JsonValue as JsonValueSchema, type Code, type InputResponse } from "@rovinos/schemas";
+import { isToken, type AuditingVaultResolver } from "@rovinos/vault";
 import { PiiTokenUnresolvableError } from "./detokenize.js";
 import type { PiiToolContext } from "./pii-tool-port.js";
 import { validateWithTokens } from "./validate-with-tokens.js";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, Pseudonym, Sha256Hex, SpanId, TraceId } from "@harness/schemas";
+import { Code, Id, Pseudonym, Sha256Hex, SpanId, TraceId } from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Safe telemetry attribute kinds used by the attribute catalog and processors. */

@@ -6,7 +6,7 @@ import {
   JsonValue,
   type Id,
   type ModelRequest,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import OpenAI, {
   APIConnectionError,
   APIConnectionTimeoutError,

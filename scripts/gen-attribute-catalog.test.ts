@@ -2,7 +2,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { attr, defineLogRecord, defineSpan } from "@harness/telemetry";
+import { attr, defineLogRecord, defineSpan } from "@rovinos/telemetry";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   isAttributeCatalogCurrent,
@@ -10,7 +10,7 @@ import {
   runAttributeCatalogCommand,
 } from "./gen-attribute-catalog.js";
 
-const ownerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
+const ownerTask = { taskId: "4.7", packageName: "@rovinos/telemetry" } as const;
 const fixtureSpan = defineSpan(
   "harness.catalog_fixture",
   {
@@ -57,12 +57,12 @@ describe("attribute catalog generator", () => {
 
       | Attribute | Type | Presence | Owning package |
       | --- | --- | --- | --- |
-      | \`harness.error.code\` | Code | Optional | \`@harness/telemetry\` |
-      | \`harness.fixture.count\` | integer | Optional | \`@harness/telemetry\` |
-      | \`harness.fixture.enabled\` | boolean | Required | \`@harness/telemetry\` |
-      | \`harness.fixture.id\` | Id | Required | \`@harness/telemetry\` |
-      | \`harness.fixture.mode\` | enum: \`safe\`, \`fast\` | Required | \`@harness/telemetry\` |
-      | \`harness.fixture.pseudonym\` | Pseudonym | Optional | \`@harness/telemetry\` |
+      | \`harness.error.code\` | Code | Optional | \`@rovinos/telemetry\` |
+      | \`harness.fixture.count\` | integer | Optional | \`@rovinos/telemetry\` |
+      | \`harness.fixture.enabled\` | boolean | Required | \`@rovinos/telemetry\` |
+      | \`harness.fixture.id\` | Id | Required | \`@rovinos/telemetry\` |
+      | \`harness.fixture.mode\` | enum: \`safe\`, \`fast\` | Required | \`@rovinos/telemetry\` |
+      | \`harness.fixture.pseudonym\` | Pseudonym | Optional | \`@rovinos/telemetry\` |
 
       Owner task: \`4.7\`.
 
@@ -72,9 +72,9 @@ describe("attribute catalog generator", () => {
 
       | Attribute | Type | Presence | Owning package |
       | --- | --- | --- | --- |
-      | \`harness.fixture.code\` | Code | Required | \`@harness/telemetry\` |
-      | \`harness.fixture.hash\` | SHA-256 hash | Required | \`@harness/telemetry\` |
-      | \`harness.fixture.ratio\` | finite number | Required | \`@harness/telemetry\` |
+      | \`harness.fixture.code\` | Code | Required | \`@rovinos/telemetry\` |
+      | \`harness.fixture.hash\` | SHA-256 hash | Required | \`@rovinos/telemetry\` |
+      | \`harness.fixture.ratio\` | finite number | Required | \`@rovinos/telemetry\` |
       "
     `);
   });

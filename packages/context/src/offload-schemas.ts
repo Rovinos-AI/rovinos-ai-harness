@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
-import { JsonValue } from "@harness/schemas";
+import { JsonValue } from "@rovinos/schemas";
 
 /** Validates an offload handle. */
 export const OffloadedHandleSchema = z

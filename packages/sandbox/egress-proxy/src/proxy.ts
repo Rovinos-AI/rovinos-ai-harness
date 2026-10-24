@@ -12,7 +12,7 @@ import { isIP, createConnection, type Socket } from "node:net";
 import process from "node:process";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { ContractError, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import { ContractError, parseJson, SandboxEgressAllowlistSchema } from "@rovinos/schemas";
 import {
   EgressProxyConfigurationError,
   formatEgressProxyConfigurationError,

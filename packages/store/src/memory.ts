@@ -6,7 +6,7 @@ import {
   type Event as StoredEvent,
   type NewEvent,
   type Snapshot,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   JsonContentCodec,
   decodeSnapshot,

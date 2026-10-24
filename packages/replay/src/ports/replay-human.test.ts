@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event as EventSchema, Id, type Event } from "@harness/schemas";
+import { Event as EventSchema, Id, type Event } from "@rovinos/schemas";
 import { ResolvedRunSchema } from "../resolve.js";
 import { describe, expect, it, vi } from "vitest";
 import { ReplayApprovalMissingError, ReplayHuman } from "./replay-human.js";

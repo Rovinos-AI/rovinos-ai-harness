@@ -9,12 +9,12 @@ import {
   ModelGateway,
   OpenAIAdapter,
   prepareMessagesForProvider,
-} from "@harness/models";
-import type { BedrockAdapterOptions } from "@harness/models";
-import { Id, JsonValue, parseJson } from "@harness/schemas";
-import type { KeyProvider, Message, NewEvent, Part } from "@harness/schemas";
-import { AesGcmContentCodec } from "@harness/store";
-import { SqliteEventStore } from "@harness/store-sqlite";
+} from "@rovinos/models";
+import type { BedrockAdapterOptions } from "@rovinos/models";
+import { Id, JsonValue, parseJson } from "@rovinos/schemas";
+import type { KeyProvider, Message, NewEvent, Part } from "@rovinos/schemas";
+import { AesGcmContentCodec } from "@rovinos/store";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 

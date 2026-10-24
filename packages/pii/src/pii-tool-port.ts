@@ -11,8 +11,8 @@ import {
   type PiiActionSummary,
   type PiiConfig,
   type ToolSpec,
-} from "@harness/schemas";
-import { type AuditingVaultResolver, type VaultAuditHandler } from "@harness/vault";
+} from "@rovinos/schemas";
+import { type AuditingVaultResolver, type VaultAuditHandler } from "@rovinos/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import { resolveInputRetry } from "./input-retry.js";

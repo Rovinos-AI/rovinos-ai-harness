@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonValue, type JsonValue as JsonValueType } from "@harness/schemas";
+import { JsonValue, type JsonValue as JsonValueType } from "@rovinos/schemas";
 import type { CallToolResult } from "@modelcontextprotocol/client";
 
 const SMALL_BINARY_BYTES = 8_192;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonValue, ModelRequestSchema, parseJson } from "@harness/schemas";
-import type { ModelRequest, Part } from "@harness/schemas";
+import { JsonValue, ModelRequestSchema, parseJson } from "@rovinos/schemas";
+import type { ModelRequest, Part } from "@rovinos/schemas";
 import { MockAgent, fetch as undiciFetch } from "undici";
 import type { RequestInit as UndiciRequestInit } from "undici";
 import { describe, expect, it } from "vitest";

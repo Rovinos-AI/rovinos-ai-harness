@@ -9,17 +9,17 @@ import {
   type ModelRef,
   type ModelUsage,
   type Part,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   eventsToTranscript,
   type ContextBudget,
   type SummarizingStrategy,
   type TokenCounter,
   type TranscriptGroup,
-} from "@harness/context";
+} from "@rovinos/context";
 import type { IdGenerator, ModelPort, RunContext, Summarizer } from "../ports.js";
 import type { RunRecorder } from "../recorder.js";
-import type { UsageLedgerDelta } from "@harness/store";
+import type { UsageLedgerDelta } from "@rovinos/store";
 import { COMPACTION_SPAN } from "../spans.js";
 
 const DEFAULT_KEEP_RECENT_GROUPS = 6;

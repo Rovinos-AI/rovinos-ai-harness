@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tool calls are sequential here; parallel execution can be added independently.
-import { HarnessError, type Code, type Event } from "@harness/schemas";
+import { HarnessError, type Code, type Event } from "@rovinos/schemas";
 import type { Span } from "@opentelemetry/api";
-import { isSanitizedField, markSanitizedField } from "@harness/pii";
-import { countPolicyDecision } from "@harness/telemetry";
+import { isSanitizedField, markSanitizedField } from "@rovinos/pii";
+import { countPolicyDecision } from "@rovinos/telemetry";
 import type { Checkpointer } from "../checkpoint.js";
 import type { EventPartial } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";

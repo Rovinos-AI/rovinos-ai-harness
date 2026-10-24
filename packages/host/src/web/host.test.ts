@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallToolResultSchema } from "@modelcontextprotocol/core";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import type { z } from "zod";
 import {
   APP_CSP,

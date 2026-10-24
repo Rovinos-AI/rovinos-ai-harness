@@ -5,10 +5,10 @@ import {
   type Code,
   type Id,
   type InputRequest,
-} from "@harness/schemas";
-import { validateWithTokens } from "@harness/pii";
-import type { AuditingVaultResolver } from "@harness/vault";
-import { findTokens } from "@harness/vault";
+} from "@rovinos/schemas";
+import { validateWithTokens } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
+import { findTokens } from "@rovinos/vault";
 import { InputDestinationUnavailableError, InputSchemaUnavailableError } from "./resolve-errors.js";
 import type { InputRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
 

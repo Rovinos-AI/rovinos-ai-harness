@@ -6,11 +6,11 @@ import {
   type Event,
   type Id,
   type KeyProvider,
-} from "@harness/schemas";
-import type { Runtime } from "@harness/core";
-import type { SafeEvent } from "@harness/telemetry";
-import { toSafeEvent } from "@harness/telemetry";
-import { pseudonymize } from "@harness/vault";
+} from "@rovinos/schemas";
+import type { Runtime } from "@rovinos/core";
+import type { SafeEvent } from "@rovinos/telemetry";
+import { toSafeEvent } from "@rovinos/telemetry";
+import { pseudonymize } from "@rovinos/vault";
 
 /** Reads all stored events for one run. */
 export async function readEvents(runtime: Runtime, runId: Id): Promise<Event[]> {

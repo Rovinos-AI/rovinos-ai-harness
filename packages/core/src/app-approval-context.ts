@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Provenance uses existing records, atomically adjacent to a reserved app intent.
 // Arbitrary app messages never confer authority or alter a model tool's policy context.
-import { Code, HarnessError, Id, type Event, type JsonValue } from "@harness/schemas";
+import { Code, HarnessError, Id, type Event, type JsonValue } from "@rovinos/schemas";
 import { z } from "zod";
 import type { ModelToolCall, PolicyContext, PolicyDecision, PolicyPort } from "./ports.js";
 import type { ApprovalRequestedEvent, ToolIntentEvent } from "./run-state.js";

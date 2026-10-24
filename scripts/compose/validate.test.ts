@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseYaml, RunConfigSchema } from "@harness/schemas";
+import { parseYaml, RunConfigSchema } from "@rovinos/schemas";
 import { evaluateComposeSecurity, validateComposeProfiles } from "./validate.js";
 import { z } from "zod";
 

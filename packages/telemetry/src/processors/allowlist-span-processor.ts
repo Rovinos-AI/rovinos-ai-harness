@@ -10,7 +10,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { lookupSpanDefinition } from "../registry.js";
 import { countDroppedTelemetry } from "../metrics.js";
-import { Id, type TelemetryConfig } from "@harness/schemas";
+import { Id, type TelemetryConfig } from "@rovinos/schemas";
 import { assertSentinelGate, type SentinelGate } from "../sentinel/gate.js";
 import { sanitizeAttributes, sanitizeResourceAttributes } from "./sanitize-attributes.js";
 

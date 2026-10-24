@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event, Id, type JsonValue as JsonValueType } from "@harness/schemas";
+import { Event, Id, type JsonValue as JsonValueType } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { finalizeChild } from "./result.js";
 

@@ -2,8 +2,8 @@
 import { readFileSync } from "node:fs";
 import type { GoogleGenAIOptions } from "@google/genai";
 import { JWT } from "google-auth-library";
-import { JsonValue, parseJson } from "@harness/schemas";
-import type { ModelRequest } from "@harness/schemas";
+import { JsonValue, parseJson } from "@rovinos/schemas";
+import type { ModelRequest } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {

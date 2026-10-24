@@ -2,7 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryWorkspace, OffloadedStub } from "@harness/context";
+import { InMemoryWorkspace, OffloadedStub } from "@rovinos/context";
 import {
   Code,
   EventSchema,
@@ -11,8 +11,8 @@ import {
   JsonValue,
   RunConfigSchema,
   SequentialIdGenerator,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelPort, ToolPort } from "./ports.js";
 import type { ToolResumeStrategy } from "./resume-policy.js";

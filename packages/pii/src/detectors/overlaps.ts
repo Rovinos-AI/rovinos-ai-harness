@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Resolve a start-sorted sweep against the last retained range, avoiding quadratic scans.
-import { DetectionSchema } from "@harness/schemas";
+import { DetectionSchema } from "@rovinos/schemas";
 import { PiiDetectorError } from "./types.js";
 import type { Detection } from "./types.js";
 

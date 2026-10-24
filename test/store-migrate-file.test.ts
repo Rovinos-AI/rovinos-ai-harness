@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StoreUnavailableError } from "@harness/store";
+import { StoreUnavailableError } from "@rovinos/store";
 
 const postgresState = vi.hoisted(() => ({
   queries: new Array<string>(),
@@ -33,8 +33,8 @@ vi.mock("pg", () => ({
   },
 }));
 
-import { migratePostgresConnection } from "@harness/store-postgres";
-import { migrateSqliteFile } from "@harness/store-sqlite";
+import { migratePostgresConnection } from "@rovinos/store-postgres";
+import { migrateSqliteFile } from "@rovinos/store-sqlite";
 
 let temporaryDirectory: string | undefined;
 

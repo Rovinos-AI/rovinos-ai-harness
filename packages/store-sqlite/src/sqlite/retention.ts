@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 
 /** Atomically delete the events, snapshots, and row for a terminal run. */
 export function deleteRunTransaction(db: Database.Database, runId: Id): number {

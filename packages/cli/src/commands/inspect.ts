@@ -7,7 +7,7 @@ import {
   type Event,
   type InspectEvent,
   type InspectResult,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 
@@ -49,7 +49,7 @@ export const inspectCommand: CommandModule = {
           if (events.length === 0) {
             throw new RunNotFoundError();
           }
-          const { foldRunState } = await import("@harness/core");
+          const { foldRunState } = await import("@rovinos/core");
           const state = foldRunState(events);
           const continuations: Id[] = [];
           let cursor: string | undefined;

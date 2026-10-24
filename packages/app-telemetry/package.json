@@ -1,5 +1,5 @@
 {
-  "name": "@harness/app-telemetry",
+  "name": "@rovinos/app-telemetry",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,7 @@
     "build": "tsc -b tsconfig.build.json && node build.mjs"
   },
   "dependencies": {
-    "@harness/schemas": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

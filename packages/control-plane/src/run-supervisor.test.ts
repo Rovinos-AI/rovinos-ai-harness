@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
-import type { RunQueue, RunQueueJob } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
+import { Id } from "@rovinos/schemas";
+import type { RunQueue, RunQueueJob } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
 import { describe, expect, it, vi } from "vitest";
 import { RunSupervisor } from "./run-supervisor.js";
 

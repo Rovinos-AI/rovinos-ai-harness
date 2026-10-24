@@ -7,7 +7,7 @@ import {
   type NewEvent,
   type Snapshot,
   type TraceId,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { Pool, type QueryResultRow } from "pg";
 import { z } from "zod";
 import {
@@ -29,7 +29,7 @@ import {
   type RunSummary,
   type SnapshotRow,
   type StoreKeyRotation,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { integer, eventFromRow, storeError, type EventRow } from "./helpers.js";
 import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";

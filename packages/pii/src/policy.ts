@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Destination, PiiAction, PiiBoundary, PiiEntity, PiiPolicy } from "@harness/schemas";
+import type { Destination, PiiAction, PiiBoundary, PiiEntity, PiiPolicy } from "@rovinos/schemas";
 
 /** Entity, boundary, and destination being evaluated. */
 export interface PiiPolicyContext {

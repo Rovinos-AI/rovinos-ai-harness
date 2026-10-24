@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { InMemoryEventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { Code, type Id, type NewEvent } from "@harness/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { Code, type Id, type NewEvent } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createControlPlaneServer } from "../server.js";
 import type { ResolveApprovalOperation } from "./approve.js";

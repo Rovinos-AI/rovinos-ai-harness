@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Pool, PoolClient } from "pg";
-import type { Id, NewEvent } from "@harness/schemas";
+import type { Id, NewEvent } from "@rovinos/schemas";
 import {
   encodeSnapshot,
   validateSnapshotAppend,
@@ -9,7 +9,7 @@ import {
   type EventStore,
   type UsageLedgerDelta,
   parseUsageLedgerDeltas,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { appendTransaction, encodeEvents, storeError, type EncodedEvent } from "./helpers.js";
 
 /** Dependencies used by a Postgres event writer. */

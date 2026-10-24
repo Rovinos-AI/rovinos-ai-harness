@@ -4,8 +4,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ControlPlaneConfigSchema, Id, parseJson, type NewEvent } from "@harness/schemas";
-import { SqliteEventStore } from "@harness/store-sqlite";
+import { ControlPlaneConfigSchema, Id, parseJson, type NewEvent } from "@rovinos/schemas";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { z } from "zod";
 import {
   INSPECTOR_HTTP_TOKEN,

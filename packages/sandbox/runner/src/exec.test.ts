@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeSpec, killProcessGroup, processGroupExists, RunnerExecError } from "./exec.js";
 import type { ExecSpec } from "../../src/types.js";

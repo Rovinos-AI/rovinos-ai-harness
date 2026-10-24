@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, ModelUsageSchema, type JsonValue, type ModelUsage } from "@harness/schemas";
+import { HarnessError, ModelUsageSchema, type JsonValue, type ModelUsage } from "@rovinos/schemas";
 import { z } from "zod";
 import type { EnforcementIssue } from "./enforce/index.js";
 import { redactIssuePath } from "./enforce/repair.js";

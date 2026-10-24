@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { Sha256Hex, type ModelRequest } from "@harness/schemas";
+import { Sha256Hex, type ModelRequest } from "@rovinos/schemas";
 
 /**
  * Serialize JSON-compatible values with object keys in ordinal order.

@@ -2,14 +2,14 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { attr, defineLogRecord, defineSpan } from "@harness/telemetry";
+import { attr, defineLogRecord, defineSpan } from "@rovinos/telemetry";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   renderCollectorAllowlist,
   runCollectorAllowlistCommand,
 } from "./gen-collector-allowlist.js";
 
-const ownerTask = { taskId: "4.6", packageName: "@harness/telemetry" } as const;
+const ownerTask = { taskId: "4.6", packageName: "@rovinos/telemetry" } as const;
 const alphaSpan = defineSpan(
   "harness.collector_alpha",
   {

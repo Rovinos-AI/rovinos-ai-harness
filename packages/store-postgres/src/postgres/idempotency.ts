@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Pool } from "pg";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import {
   InvalidEventError,
   StoreUnavailableError,
   parseIdempotencyKeyTakeover,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import {
   IdempotencyKeyHashSchema,
   type IdempotencyKeyHash,
   type IdempotencyKeyTakeoverOptions,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { storeError } from "./helpers.js";
 
 /** Shared resources and policy checks used by idempotency operations. */

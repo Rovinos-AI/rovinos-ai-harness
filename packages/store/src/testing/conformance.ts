@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { type Event, type NewEvent } from "@harness/schemas";
+import { type Event, type NewEvent } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { SeqConflictError } from "../errors.js";
 import type { EventStore } from "../types.js";

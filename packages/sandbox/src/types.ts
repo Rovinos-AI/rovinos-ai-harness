@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 
 /** Maximum timeout accepted by the execution contract and built-in tool. */
 export const MAX_EXEC_TIMEOUT_MS = 300_000;

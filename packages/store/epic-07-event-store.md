@@ -14,7 +14,7 @@ Shared design for this epic:
 ## 7.1 Zod event schema with meta vs content classification
 
 **Parent:** #7 Event store
-**Task Description:** Define the canonical event envelope and per-type payload schemas in `@harness/schemas`, and the field classification map that marks each field `meta` or `content`, with exhaustiveness enforced by tests.
+**Task Description:** Define the canonical event envelope and per-type payload schemas in `@rovinos/schemas`, and the field classification map that marks each field `meta` or `content`, with exhaustiveness enforced by tests.
 **Expected Inputs:** Event vocabulary in CONVENTIONS §4.
 **Expected Output:** `packages/schemas/src/{json.ts,events.ts,classification.ts}`, exported `Event`, `NewEvent`, `EventType`, `RunStatus`, `EVENT_FIELD_CLASS`, `splitEvent(event)`, `joinEvent(meta, content)`.
 **Dependencies:** `zod`.
@@ -210,7 +210,7 @@ interface EventStore {
 **Parent:** #7 Event store
 **Task Description:** Add snapshot storage written atomically with the `checkpoint_written` event, plus retrieval of the latest snapshot for fast resume.
 **Expected Inputs:** `Snapshot` objects from the run loop.
-**Expected Output:** `Snapshot` schema in `@harness/schemas/src/snapshot.ts`, `SnapshotStore` methods on `EventStore` (`appendWithSnapshot`, `latestSnapshot`), adapter implementations, conformance cases.
+**Expected Output:** `Snapshot` schema in `@rovinos/schemas/src/snapshot.ts`, `SnapshotStore` methods on `EventStore` (`appendWithSnapshot`, `latestSnapshot`), adapter implementations, conformance cases.
 **Dependencies:** none.
 **Items it depends on:** 7.6, 7.7.
 **Implementation guidance:**
@@ -382,14 +382,14 @@ interface EventStore {
 **Items it depends on:** 7.6, 7.8.
 **Implementation guidance:**
 
-1. Move `src/sqlite/**` and its tests to `packages/store-sqlite`, and `src/postgres/**` plus `postgres.int.test.ts` to `packages/store-postgres`. Both depend on `@harness/store` for the contract, errors, codec, and `./testing` suites (dev dependency for the suites).
-2. `@harness/store` drops `better-sqlite3`, `pg`, and their types from `dependencies`; a test asserts its manifest lists neither driver.
-3. Shared helpers used by both adapters (row serialization, snapshot validation, error mapping) stay in `@harness/store` and are exported for adapter packages only (document them as adapter-internal in TSDoc; never part of the public SDK surface).
+1. Move `src/sqlite/**` and its tests to `packages/store-sqlite`, and `src/postgres/**` plus `postgres.int.test.ts` to `packages/store-postgres`. Both depend on `@rovinos/store` for the contract, errors, codec, and `./testing` suites (dev dependency for the suites).
+2. `@rovinos/store` drops `better-sqlite3`, `pg`, and their types from `dependencies`; a test asserts its manifest lists neither driver.
+3. Shared helpers used by both adapters (row serialization, snapshot validation, error mapping) stay in `@rovinos/store` and are exported for adapter packages only (document them as adapter-internal in TSDoc; never part of the public SDK surface).
 4. Move each adapter's conformance invocation with it: `packages/store-sqlite` runs both suites in the unit project; `packages/store-postgres` runs them in the integration project against the Compose Postgres.
 5. Update `layers.json`, the Dockerfile copy step (generic since #273), and any consumer imports; `yarn check:agents` regenerates the index blocks.
-**Tests to write:** existing adapter and conformance tests pass from their new packages; a manifest test that `@harness/store` has no database driver dependency; `yarn workspaces focus @harness/store --production` installs no native addon.
+**Tests to write:** existing adapter and conformance tests pass from their new packages; a manifest test that `@rovinos/store` has no database driver dependency; `yarn workspaces focus @rovinos/store --production` installs no native addon.
 **Acceptance Criteria:**
 
-- [ ] Installing `@harness/store` alone pulls in neither `better-sqlite3` nor `pg`.
+- [ ] Installing `@rovinos/store` alone pulls in neither `better-sqlite3` nor `pg`.
 - [ ] Each adapter package passes both conformance suites (SQLite in unit, Postgres in integration).
 - [ ] No behavior change; all existing tests pass.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { type Code, type JsonValue, type PiiAction, type PiiActionSummary } from "@harness/schemas";
-import { findTokens, type Token } from "@harness/vault";
+import { type Code, type JsonValue, type PiiAction, type PiiActionSummary } from "@rovinos/schemas";
+import { findTokens, type Token } from "@rovinos/vault";
 import { PiiTokenizerError } from "./errors.js";
 
 /** Increments an action/entity count in the mutable summary map. */

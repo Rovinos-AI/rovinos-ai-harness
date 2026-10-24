@@ -1,7 +1,7 @@
 # Event store content encryption
 
-The `@harness/store` package provides the event-store contract and in-memory adapter.
-Install `@harness/store-sqlite` for `SqliteEventStore` or `@harness/store-postgres` for
+The `@rovinos/store` package provides the event-store contract and in-memory adapter.
+Install `@rovinos/store-sqlite` for `SqliteEventStore` or `@rovinos/store-postgres` for
 `PostgresEventStore`; each adapter package supplies only its own database driver.
 
 SQLite and Postgres stores use `JsonContentCodec` by default. To encrypt persisted content, pass an
@@ -11,7 +11,7 @@ SQLite and Postgres stores use `JsonContentCodec` by default. To encrypt persist
 const store = new SqliteEventStore(databasePath, new AesGcmContentCodec(keyProvider));
 ```
 
-`keyProvider` implements the `KeyProvider` interface from `@harness/schemas`. Its
+`keyProvider` implements the `KeyProvider` interface from `@rovinos/schemas`. Its
 `currentKeyId()` returns the identifier for new content, and `getKey(keyId)` resolves the
 corresponding 32-byte AES-256 key. If a key is unavailable, `getKey` must reject with an error
 whose code is `key_not_found`.

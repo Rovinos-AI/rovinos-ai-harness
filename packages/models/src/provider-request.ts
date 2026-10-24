@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, ModelRequest } from "@harness/schemas";
+import type { Code, ModelRequest } from "@rovinos/schemas";
 import { prepareMessagesForProvider } from "./blobs.js";
 import type { ModelGatewayContext, RequestSanitizer } from "./gateway.js";
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Id, PiiConfig } from "@harness/schemas";
-import { PiiEventStore } from "@harness/pii";
-import type { RequestSanitizer } from "@harness/models";
-import type { EventStore } from "@harness/store";
+import type { Code, Id, PiiConfig } from "@rovinos/schemas";
+import { PiiEventStore } from "@rovinos/pii";
+import type { RequestSanitizer } from "@rovinos/models";
+import type { EventStore } from "@rovinos/store";
 import { missingModelPort } from "./runtime-default-ports.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimePii } from "./runtime-pii.js";
