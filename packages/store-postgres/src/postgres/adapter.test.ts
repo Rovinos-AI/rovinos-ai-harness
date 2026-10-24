@@ -1075,7 +1075,7 @@ it("fails a watch when the dedicated listener cannot LISTEN", async () => {
   await store.close();
 });
 
-it("follows run notifications after the initial catch-up without rescanning idle runs", async () => {
+it("follows run notifications after the initial catch-up without scanning idle runs again", async () => {
   const store = new PostgresEventStore("postgresql://harness@localhost/harness");
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
