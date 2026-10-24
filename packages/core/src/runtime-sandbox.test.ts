@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from "node:fs";
 import { mkdtemp, readdir, rm, stat, realpath } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,7 +17,13 @@ import {
   type WorkspaceRef,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { InProcessBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
+import {
+  InProcessBackend,
+  RemoteSandboxBackend,
+  RunnerPool,
+  type RunnerPoolRunner,
+  type SandboxBackend,
+} from "@harness/sandbox";
 import { SqliteVault } from "@harness/vault";
 import { compilePolicy, PolicyDocumentSchema } from "@harness/policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -148,6 +155,93 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
+  it("leases a pooled runner through run, suspension, and failure", async () => {
+    const createPooledRunner = () => {
+      let acquireCount = 0;
+      let releaseCount = 0;
+      let execCount = 0;
+      const runner: RunnerPoolRunner = {
+        healthCheck: vi.fn(() => Promise.resolve(true)),
+        acquireLease: () => {
+          acquireCount += 1;
+          return Promise.resolve();
+        },
+        releaseLease: () => {
+          releaseCount += 1;
+          return Promise.resolve();
+        },
+        exec: () => {
+          execCount += 1;
+          return Promise.resolve(result);
+        },
+        fetch: vi.fn(() =>
+          Promise.resolve({
+            url: "https://example.test/",
+            status: 200,
+            contentType: "text/plain",
+            truncated: false,
+            untrusted: true as const,
+            text: "",
+            hiddenTextDropped: 0,
+          }),
+        ),
+        fileOperation: vi.fn(() => Promise.resolve({ entries: [], truncated: false })),
+        createArchive: vi.fn(() => Promise.resolve(Readable.from([]))),
+        restoreArchive: vi.fn(() => Promise.resolve()),
+        hasWorkspace: vi.fn(() => Promise.resolve(false)),
+      };
+      return {
+        runner,
+        pool: new RunnerPool({ runners: [runner] }),
+        counts: () => ({ acquireCount, releaseCount, execCount }),
+      };
+    };
+    const approvalPolicy = {
+      version: Code.parse("test.approval"),
+      decide: () => ({
+        decision: "ask" as const,
+        ruleId: Code.parse("test.approval_rule"),
+        reason: Code.parse("test.approval_required"),
+        editable: [],
+      }),
+    };
+    const cases = [
+      { expected: "completed", model: model(), policy: allowAllPolicy, executes: true },
+      { expected: "suspended", model: model(), policy: approvalPolicy, executes: false },
+      {
+        expected: "failed",
+        model: { complete: () => Promise.reject(new Error("synthetic model failure")) },
+        policy: allowAllPolicy,
+        executes: false,
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const { pool, counts } = createPooledRunner();
+      const runtime = await createRuntime(
+        { run, pii: PiiConfigSchema.parse({ enabled: false }) },
+        {
+          ...overrides(),
+          sandboxBackend: pool,
+          createTool: (backend) => metadataTool(backend, false),
+          model: testCase.model,
+          policy: testCase.policy,
+        },
+      );
+      try {
+        const runResult = await runtime.run("exercise the pooled sandbox");
+        expect(runResult.status).toBe(testCase.expected);
+        expect(counts()).toEqual({
+          acquireCount: 1,
+          releaseCount: 1,
+          execCount: testCase.executes ? 1 : 0,
+        });
+      } finally {
+        await runtime.close();
+      }
+    }
+  });
+
   it("enforces a sensitive-path ask through the decorated runtime", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-policy-"));
     const modelPort = fileToolModel(
@@ -375,9 +469,9 @@ describe("createRuntime sandbox composition", () => {
     "passes one configured backend to the tool port and records only result metadata (remote=%s)",
     async (remote) => {
       vi.stubEnv("HARNESS_SANDBOX_CANARY", canary);
-      const fetcher = vi.fn((input: RequestInfo | URL) =>
+      const fetcher = vi.fn((_input: RequestInfo | URL) =>
         Promise.resolve(
-          Response.json(requestUrl(input).pathname === "/exec" ? result : { status: "ok" }),
+          Response.json(requestUrl(_input).pathname === "/exec" ? result : { status: "ok" }),
         ),
       );
       vi.stubGlobal("fetch", fetcher);
@@ -421,7 +515,7 @@ describe("createRuntime sandbox composition", () => {
         }
         expect(JSON.stringify(events)).not.toContain(canary);
         expect(JSON.stringify(events)).not.toContain("synthetic-runtime-sandbox-token-0001");
-        expect(fetcher).toHaveBeenCalledTimes(remote ? 1 : 0);
+        expect(fetcher).toHaveBeenCalledTimes(remote ? 3 : 0);
         expect(resolve).toHaveBeenCalledTimes(remote ? 1 : 0);
       } finally {
         await runtime.close();
@@ -430,6 +524,10 @@ describe("createRuntime sandbox composition", () => {
   );
 
   it("does not advertise web.fetch without a configured allowlist or a remote runner", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(Response.json({ status: "ok" }))),
+    );
     const emptyAllowlistModel = textModel();
     const emptyAllowlistRuntime = await createRuntime(
       { run, sandbox: remoteSandbox([]) },
@@ -469,6 +567,10 @@ describe("createRuntime sandbox composition", () => {
   });
 
   it("advertises web.fetch with a remote runner and allowlist alongside createTool tools", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(Response.json({ status: "ok" }))),
+    );
     const modelPort = textModel();
     const customTool = {
       describe: (id: Code) => (id === toolId ? { idempotent: true, timeoutMs: 1_000 } : undefined),
@@ -530,7 +632,10 @@ describe("createRuntime sandbox composition", () => {
   it("applies policy to tokenized web.fetch calls and tokenizes untrusted results", async () => {
     const outputCanary = "fetch.output@example.test";
     const order: string[] = [];
-    const fetcher = vi.fn((_input: URL | RequestInfo): Promise<Response> => {
+    const fetcher = vi.fn((input: URL | RequestInfo): Promise<Response> => {
+      if (requestUrl(input).pathname !== "/fetch") {
+        return Promise.resolve(Response.json({ status: "ok" }));
+      }
       order.push("fetch");
       return Promise.resolve(
         Response.json({
@@ -596,7 +701,9 @@ describe("createRuntime sandbox composition", () => {
 
   // threat: T-05
   it("does not call the runner when policy denies web.fetch", async () => {
-    const fetcher = vi.fn<typeof fetch>();
+    const fetcher = vi.fn((_input: RequestInfo | URL) =>
+      Promise.resolve(Response.json({ status: "ok" })),
+    );
     vi.stubGlobal("fetch", fetcher);
     const modelPort = webFetchModel("https://docs.example.test/page");
     const policy = {
@@ -628,7 +735,9 @@ describe("createRuntime sandbox composition", () => {
         toolId: "web.fetch",
         policyDecision: "deny",
       });
-      expect(fetcher).not.toHaveBeenCalled();
+      expect(fetcher.mock.calls.map(([input]) => requestUrl(input).pathname)).not.toContain(
+        "/fetch",
+      );
       expect(policy.decide).toHaveBeenCalledOnce();
     } finally {
       await runtime.close();
@@ -636,17 +745,21 @@ describe("createRuntime sandbox composition", () => {
   });
 
   it("rejects binary fetch results when no workspace offloader is configured", async () => {
-    const fetcher = vi.fn(() =>
+    const fetcher = vi.fn((input: RequestInfo | URL) =>
       Promise.resolve(
-        Response.json({
-          url: "https://docs.example.test/image",
-          status: 200,
-          contentType: "image/png",
-          binary: true,
-          bytes: [0, 255],
-          truncated: false,
-          untrusted: true,
-        }),
+        Response.json(
+          requestUrl(input).pathname === "/fetch"
+            ? {
+                url: "https://docs.example.test/image",
+                status: 200,
+                contentType: "image/png",
+                binary: true,
+                bytes: [0, 255],
+                truncated: false,
+                untrusted: true,
+              }
+            : { status: "ok" },
+        ),
       ),
     );
     vi.stubGlobal("fetch", fetcher);
@@ -673,7 +786,7 @@ describe("createRuntime sandbox composition", () => {
         result: null,
       });
       expect(JSON.stringify(runResult.events)).not.toContain("[0,255]");
-      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fetcher).toHaveBeenCalledTimes(3);
     } finally {
       await runtime.close();
     }

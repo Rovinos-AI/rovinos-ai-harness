@@ -5,9 +5,23 @@ import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
 import type { SandboxBackend } from "@harness/sandbox";
 import type { EventStore } from "@harness/store";
 import type { RuntimeComposition, RuntimeOverrides } from "./runtime-config.js";
+import { inspectCancellationTail } from "./runtime-cancellation.js";
+import { LeaseLostError } from "./recorder.js";
+import { DeploymentStartupError } from "./runtime-deployment.js";
 import { appApprovalContext } from "./app-approval-context.js";
 import { foldRunState, type RunState } from "./run-state.js";
 import type { RunLoopResult } from "./loop.js";
+
+/** Throws after this process loses ownership of a guarded SQLite runtime. */
+export function assertRuntimeOwnership(signal: AbortSignal | undefined): void {
+  if (
+    signal !== undefined &&
+    signal.aborted &&
+    signal.reason === "deployment_single_instance_violation"
+  ) {
+    throw new DeploymentStartupError("deployment_single_instance_violation");
+  }
+}
 
 function isAppSuspension(state: RunState, events: readonly Event[]): boolean {
   return (
@@ -42,18 +56,65 @@ export async function readRuntimeControlResult(
   };
 }
 
+/** Recovers durable control events after a run loses its event-store lease. */
+export async function recoverRunControlError(options: {
+  readonly error: unknown;
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly firstNewSeq: number;
+  readonly nextSeq: number;
+  readonly cancellationObserved: boolean;
+  readonly controller: AbortController;
+  readonly ownershipSignal?: AbortSignal;
+}): Promise<{
+  readonly result: RunLoopResult | undefined;
+  readonly cancellationObserved: boolean;
+}> {
+  assertRuntimeOwnership(options.ownershipSignal);
+  let nextSeq = options.nextSeq;
+  let cancellationObserved = options.cancellationObserved;
+  if (options.error instanceof LeaseLostError) {
+    await inspectCancellationTail({
+      store: options.store,
+      runId: options.runId,
+      fromSeq: nextSeq,
+      controller: options.controller,
+      onCursor: (value) => {
+        nextSeq = value;
+      },
+      onCancellation: () => {
+        cancellationObserved = true;
+      },
+    });
+  }
+  assertRuntimeOwnership(options.ownershipSignal);
+  let result: RunLoopResult | undefined;
+  if (cancellationObserved) {
+    result = await readRuntimeControlResult(
+      { store: options.store, runId: options.runId, firstNewSeq: options.firstNewSeq },
+      "cancelled",
+    );
+  } else if (options.error instanceof LeaseLostError) {
+    result = await readRuntimeControlResult(
+      { store: options.store, runId: options.runId, firstNewSeq: options.firstNewSeq },
+      "app_approval",
+    );
+  }
+  return { result, cancellationObserved };
+}
+
 /** Runs an operation while holding the backend's optional run-scoped lease. */
 export async function withSandboxLease<T>(
-  backend: SandboxBackend,
+  backend: SandboxBackend | undefined,
   runId: Id,
   operation: () => Promise<T>,
 ): Promise<T> {
-  await backend.acquireLease?.(runId);
+  await backend?.acquireLease?.(runId);
   try {
     return await operation();
   } finally {
     try {
-      await backend.releaseLease?.(runId);
+      await backend?.releaseLease?.(runId);
     } catch {
       // Lease cleanup must not replace a durable run outcome.
     }
@@ -91,6 +152,40 @@ export async function markTerminalBestEffort(
   }
 }
 
+/** Close sandbox resources while guaranteeing backend cleanup is attempted. */
+async function closeSandboxResources(options: {
+  readonly closeToolPort?: () => Promise<void>;
+  readonly sandboxBackend: RuntimeComposition["sandboxBackend"];
+}): Promise<void> {
+  try {
+    await options.closeToolPort?.();
+  } finally {
+    await options.sandboxBackend.close?.();
+  }
+}
+
+/** Close durable runtime resources while guaranteeing remaining cleanup is attempted. */
+async function closeStorageResources(options: {
+  readonly store: EventStore;
+  readonly vault: RuntimeComposition["vault"];
+  readonly keys: RuntimeComposition["keys"];
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+}): Promise<void> {
+  try {
+    await options.store.close();
+  } finally {
+    try {
+      await options.vault.close();
+    } finally {
+      try {
+        await options.instanceHeartbeat?.close();
+      } finally {
+        options.keys.dispose();
+      }
+    }
+  }
+}
+
 /** Flush telemetry and close owned resources, even if an earlier step fails. */
 export async function closeRuntimeResources(options: {
   readonly store: EventStore;
@@ -98,27 +193,16 @@ export async function closeRuntimeResources(options: {
   readonly vault: RuntimeComposition["vault"];
   readonly keys: RuntimeComposition["keys"];
   readonly sandboxBackend: RuntimeComposition["sandboxBackend"];
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
   readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
 }): Promise<void> {
   try {
     await options.flushTelemetry?.();
   } finally {
     try {
-      try {
-        await options.closeToolPort?.();
-      } finally {
-        await options.sandboxBackend.close?.();
-      }
+      await closeSandboxResources(options);
     } finally {
-      try {
-        await options.store.close();
-      } finally {
-        try {
-          await options.vault.close();
-        } finally {
-          options.keys.dispose();
-        }
-      }
+      await closeStorageResources(options);
     }
   }
 }

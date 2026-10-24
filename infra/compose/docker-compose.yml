@@ -11,7 +11,7 @@ services:
     init: true
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:
@@ -160,7 +160,7 @@ services:
       - ../collector/profile-debug.yaml:/etc/otel/profile-debug.yaml:ro
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:

@@ -4,16 +4,72 @@ services:
     profiles: [prod-like]
     environment:
       HARNESS_DATA_DIR: /var/lib/harness/event-store
-      HARNESS_VAULT_DATA_DIR: /var/lib/harness/vault
-      HARNESS_CONFIG: /run/harness/control-plane.yaml
-      SANDBOX_RUNNER_TOKEN: null
-      SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
+      HARNESS_CONFIG: /run/harness/prod-like.yaml
     volumes:
       - harness-event-store:/var/lib/harness/event-store
-      - harness-vault:/var/lib/harness/vault
-      - ${CONTROL_PLANE_CONFIG_FILE:-../../test/fixtures/control-plane-empty.yaml}:/run/harness/control-plane.yaml:ro
+      - ${PROD_LIKE_CONFIG_FILE:-../../test/fixtures/prod-like-multi.yaml}:/run/harness/prod-like.yaml:ro
     secrets:
       - control_plane_token
+      - harness_master_key
+      - sandbox_runner_token
+      - store_database_url
+      - vault_database_url
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sandbox-runner:
+        condition: service_healthy
+      sandbox-runner-2:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    cpus: 2
+    mem_limit: 1g
+  harness-worker:
+    profiles: [prod-like]
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: ${HARNESS_IMAGE:-harness:local}
+    command: ["worker"]
+    environment:
+      HARNESS_DATA_DIR: /var/lib/harness/event-store
+      HARNESS_CONFIG: /run/harness/prod-like.yaml
+    volumes:
+      - harness-event-store:/var/lib/harness/event-store
+      - ${PROD_LIKE_CONFIG_FILE:-../../test/fixtures/prod-like-multi.yaml}:/run/harness/prod-like.yaml:ro
+    secrets:
+      - harness_master_key
+      - sandbox_runner_token
+      - store_database_url
+      - vault_database_url
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sandbox-runner:
+        condition: service_healthy
+      sandbox-runner-2:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "dist/bin.js", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    networks:
+      - internal
+      - sandbox
+    deploy:
+      replicas: 2
     restart: unless-stopped
     stop_grace_period: 30s
     stop_signal: SIGTERM
@@ -24,11 +80,79 @@ services:
     environment:
       SANDBOX_RUNNER_TOKEN: null
       SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
+      SANDBOX_ALLOWED_HOSTS: sandbox-runner:8080
     secrets:
       - sandbox_runner_token
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 30s
     stop_signal: SIGTERM
+  sandbox-runner-2:
+    extends:
+      file: docker-compose.yml
+      service: sandbox-runner
+    profiles: [prod-like]
+    environment:
+      SANDBOX_RUNNER_TOKEN: null
+      SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
+      SANDBOX_ALLOWED_HOSTS: sandbox-runner-2:8080
+    volumes:
+      - harness-workspaces-2:/workspaces
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get({ host: '127.0.0.1', port: 8080, path: '/healthz', headers: { host: 'sandbox-runner-2:8080' } }, (response) => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    secrets:
+      - sandbox_runner_token
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+  postgres:
+    profiles: [prod-like]
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    user: postgres
+    environment:
+      POSTGRES_DB: harness
+      POSTGRES_USER: harness
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - harness-postgres:/var/lib/postgresql/data
+      - ./init-vault.sql:/docker-entrypoint-initdb.d/10-vault.sql:ro
+    secrets:
+      - postgres_password
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,uid=999,gid=999,mode=3775
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "harness", "-d", "harness"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - internal
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    cpus: 2
+    mem_limit: 1g
   otel-collector:
     profiles: [prod-like]
     restart: unless-stopped
@@ -45,9 +169,19 @@ services:
     mem_limit: 2g
 volumes:
   harness-event-store: {}
-  harness-vault: {}
+  harness-workspaces: {}
+  harness-workspaces-2: {}
+  harness-postgres: {}
 secrets:
   control_plane_token:
-    file: ${CONTROL_PLANE_TOKEN_SECRET_FILE:-../../test/fixtures/empty-secret}
+    file: ${CONTROL_PLANE_TOKEN_SECRET_FILE:-/dev/null}
   sandbox_runner_token:
     file: ${SANDBOX_RUNNER_TOKEN_SECRET_FILE:-/dev/null}
+  harness_master_key:
+    file: ${HARNESS_MASTER_KEY_SECRET_FILE:-/dev/null}
+  store_database_url:
+    file: ${HARNESS_STORE_DATABASE_URL_SECRET_FILE:-/dev/null}
+  vault_database_url:
+    file: ${HARNESS_VAULT_DATABASE_URL_SECRET_FILE:-/dev/null}
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_SECRET_FILE:-/dev/null}

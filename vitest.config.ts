@@ -19,6 +19,7 @@ export const composeIntegrationSuites = [
   "scripts/compose/prod-like.int.test.ts",
   "packages/eval/src/executors/docker.int.test.ts",
   "test/e2e-skeleton.int.test.ts",
+  "test/multi-worker.int.test.ts",
   "test/examples.int.test.ts",
   "test/network-isolation.int.test.ts",
   "test/quickstart.int.test.ts",

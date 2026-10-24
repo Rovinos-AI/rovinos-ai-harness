@@ -67,11 +67,12 @@ unset key
 <!-- test:run -->
 
 ```bash
-compose up -d --wait
+compose up -d --wait sandbox-runner
 ```
 
-The quickstart does not expose the HTTP control-plane endpoint; its commands use the CLI through
-Compose. For remote HTTP access, configure TLS as described in
+The quickstart does not expose the HTTP control-plane endpoint; its commands use one-shot CLI
+containers through Compose, so only the sandbox runner stays running. For remote HTTP access,
+configure TLS as described in
 [Control-plane security](control-plane-security.md).
 
 ## Run and inspect the sample

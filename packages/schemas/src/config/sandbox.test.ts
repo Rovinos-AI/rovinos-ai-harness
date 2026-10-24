@@ -30,6 +30,21 @@ describe("SandboxConfigSchema", () => {
     });
   });
 
+  it("accepts a bounded pool of runner references and rejects ambiguous configurations", () => {
+    const runners = [
+      { url: "http://sandbox-runner:8080", token: "env:SANDBOX_RUNNER_TOKEN" },
+      { url: "http://sandbox-runner-2:8080", token: "file:/run/secrets/runner_two" },
+    ];
+    expect(SandboxConfigSchema.parse({ runners })).toEqual({ runners });
+    expect(SandboxConfigSchema.safeParse({ runners: [] }).success).toBe(false);
+    expect(
+      SandboxConfigSchema.safeParse({
+        runner: runners[0],
+        runners,
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts a strict egress allowlist and rejects wildcard hosts or invalid ports", () => {
     expect(
       SandboxConfigSchema.parse({

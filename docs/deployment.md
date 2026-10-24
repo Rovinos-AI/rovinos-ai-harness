@@ -26,14 +26,67 @@ the runtime default shutdown grace is 20 seconds. Allow at least five seconds be
 ## Data and backups
 
 Compose persists the SQLite event store in `harness-event-store`, the vault in `harness-vault`, and
-sandbox workspaces and their snapshots in `harness-workspaces`. Apply separate backup and retention
-policies to those volumes. Use SQLite's online backup mechanism or stop the harness before copying
+each runner's workspace in a separate volume. Workspace snapshots are persisted with runtime state.
+Apply separate backup and retention policies to those volumes. Use SQLite's online backup mechanism or stop the harness before copying
 its database files; do not copy an active SQLite database file directly. Retain encryption keys
 needed to read vault backups separately from the data, and verify restore procedures with a
 non-production copy.
 
 `HARNESS_DATA_DIR` selects the event-store directory; `HARNESS_VAULT_DATA_DIR` optionally selects
 the vault directory and otherwise defaults to `HARNESS_DATA_DIR`.
+
+## Scaling
+
+`deployment.mode` defaults to `single`. In this mode, SQLite remains supported and a per-file
+heartbeat sidecar rejects another live runtime sharing each configured SQLite file. The heartbeat is
+refreshed every 10 seconds; a row older than 30 seconds can be reclaimed after an unclean shutdown.
+
+Set `deployment.mode` to `multi` for a shared deployment. Every runtime must use a Postgres event
+store, a Postgres vault, and a configured run queue; startup fails with
+`deployment_requires_postgres` when any requirement is absent. Do not share SQLite event-store or
+vault files between processes.
+
+Single mode guards every configured SQLite store and vault file, including a vault in a separate
+`HARNESS_VAULT_DATA_DIR`. A lost heartbeat sidecar fences further runtime event writes.
+
+Configure a runner pool with one or more remote sandbox runners. Each runner still grants one run
+lease at a time. The pool tries healthy runners in randomized order, skips a runner with an active
+lease, and temporarily excludes a runner that fails its health check. Keep a runner assignment for
+the duration of a run. On resume a different runner may be selected, in which case the workspace is
+restored from the persisted snapshot.
+
+```yaml
+deployment:
+  mode: multi
+store:
+  dialect: postgres
+  connectionString: file:/run/secrets/store_database_url
+vault:
+  backend: postgres
+  postgres:
+    url: file:/run/secrets/vault_database_url
+sandbox:
+  runners:
+    - url: http://sandbox-runner:8080
+      token: file:/run/secrets/sandbox_runner_token
+    - url: http://sandbox-runner-2:8080
+      token: file:/run/secrets/sandbox_runner_token
+```
+
+The `prod-like` Compose profile defines two `harness-worker` replicas and two separately addressed
+`sandbox-runner` services, each with its own workspace volume. Scale the workers with the deployment controller (or Docker Compose's
+`--scale harness-worker=2`); do not scale a single runner endpoint behind a load balancer because
+lease acquisition and subsequent workspace operations must reach the same runner. The worker and
+runner Kubernetes manifests under `infra/k8s/` are examples, not supported deployment templates.
+Each example runner uses a distinct workspace PVC. Their Deployments use `Recreate` to preserve the
+one-Service/one-lease-manager assumption, so updates briefly interrupt that runner; snapshots let a
+resumed run move to the other runner.
+
+Workers reclaim a queued job after its lease expires if its original worker disappears. Resumption
+uses the event log and snapshot, and non-idempotent tool recovery follows
+`run.resume.onNonIdempotent`. A tool that performs an external side effect must provide an
+idempotency mechanism or a transaction boundary appropriate to that system; a queue lease alone
+cannot make an external side effect exactly once.
 
 ## Postgres vault
 
@@ -66,8 +119,8 @@ lookup HMACs without re-encrypting every value.
 ## Keys and secrets
 
 Do not put tokens, passwords, or encryption keys in Compose YAML or commit them in an env file.
-The `dev` and `prod-like` profiles accept `CONTROL_PLANE_CONFIG_FILE` and
-`CONTROL_PLANE_TOKEN_SECRET_FILE`. The config file must reference the mounted token as
+The `dev` profile accepts `CONTROL_PLANE_CONFIG_FILE`; `prod-like` accepts
+`PROD_LIKE_CONFIG_FILE`. Both profiles accept `CONTROL_PLANE_TOKEN_SECRET_FILE`. The config file must reference the mounted token as
 `file:/run/secrets/control_plane_token` under `controlPlane.auth.tokens`; HTTP starts only after that
 token resolves successfully. Their safe defaults contain no configured tokens, so the harness fails
 closed until both values point to protected host files. Keep those files out of source control.
