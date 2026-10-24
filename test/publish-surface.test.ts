@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-
-const execFileAsync = promisify(execFile);
+import { execFileAsync } from "../scripts/release/check-publish-surface.js";
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const temporaryDirectories: string[] = [];
 
-async function pack(packageName: "sdk" | "cli", outputPath: string): Promise<void> {
+async function pack(
+  packageName: "sdk" | "cli" | "store-sqlite",
+  outputPath: string,
+): Promise<void> {
   await execFileAsync("corepack", ["yarn", "pack", "--out", outputPath], {
     cwd: join(repositoryRoot, "packages", packageName),
     maxBuffer: 10_000_000,
@@ -32,9 +32,11 @@ describe("published package smoke test", () => {
     const projectDirectory = join(temporaryDirectory, "project");
     const sdkArchive = join(temporaryDirectory, "sdk.tgz");
     const cliArchive = join(temporaryDirectory, "cli.tgz");
+    const sqliteArchive = join(temporaryDirectory, "store-sqlite.tgz");
     await mkdir(projectDirectory);
     await pack("sdk", sdkArchive);
     await pack("cli", cliArchive);
+    await pack("store-sqlite", sqliteArchive);
 
     const projectManifest = {
       name: "rovinos-publish-surface-smoke",
@@ -47,6 +49,7 @@ describe("published package smoke test", () => {
       dependencies: {
         "@rovinos/sdk": `file:${relative(projectDirectory, sdkArchive)}`,
         "@rovinos/cli": `file:${relative(projectDirectory, cliArchive)}`,
+        "@rovinos/store-sqlite": `file:${relative(projectDirectory, sqliteArchive)}`,
       },
     };
     await writeFile(join(projectDirectory, "package.json"), JSON.stringify(projectManifest));
@@ -74,11 +77,12 @@ describe("published package smoke test", () => {
     await writeFile(
       smokeFile,
       [
-        'import { createHarness, InMemoryEventStore } from "@rovinos/sdk";',
+        'import { createHarness } from "@rovinos/sdk";',
+        'import { SqliteEventStore } from "@rovinos/store-sqlite";',
         "const harness = await createHarness({",
         "  config: {},",
         "  overrides: {",
-        "    store: new InMemoryEventStore(),",
+        `    store: new SqliteEventStore(${JSON.stringify(join(projectDirectory, "events.sqlite"))}),`,
         '    model: { complete: async () => ({ parts: [{ type: "text", text: "synthetic completion" }], usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop", provider: "test", model: "test-model", latencyMs: 0, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }) },',
         "    transientVault: true,",
         `    dataDir: ${JSON.stringify(join(projectDirectory, "runtime-data"))},`,

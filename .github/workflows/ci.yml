@@ -186,6 +186,20 @@ jobs:
           yarn test:canary
           --reporter=default --reporter=junit
           --outputFile.junit=reports/canary-junit.xml
+      - name: Build packages for replay example
+        run: yarn build
+      - name: Replay regression and documentation example gate
+        run: >
+          yarn test:replay
+          --reporter=default --reporter=junit
+          --outputFile.junit=reports/replay-junit.xml
+      - name: Upload replay report
+        if: success() || failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: replay-reports
+          path: reports/replay-junit.xml
+          if-no-files-found: ignore
       - name: Upload canary report
         if: success() || failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

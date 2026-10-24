@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { z } from "zod";
 import { migrate, StoreUnavailableError } from "@rovinos/store/adapter-internal";
+import { sqliteMigrationDirectory } from "./migration-directory.js";
 import { openReadOnlyDatabase } from "./sqlite/read-only.js";
 
 const migrationOptionsSchema = z
@@ -53,7 +53,7 @@ export function migrateSqliteFile(path: string, options: StoreFileMigrationOptio
   try {
     return migrate(db, "sqlite", {
       ...parsedOptions,
-      migrationDirectory: fileURLToPath(new URL("../migrations/sqlite/", import.meta.url)),
+      migrationDirectory: sqliteMigrationDirectory(),
     });
   } finally {
     db.close();

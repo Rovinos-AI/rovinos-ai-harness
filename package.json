@@ -85,6 +85,7 @@
     "@rovinos/models": "workspace:^",
     "@rovinos/pii": "workspace:^",
     "@rovinos/policy": "workspace:^",
+    "@rovinos/replay": "workspace:^",
     "@rovinos/sandbox": "workspace:^",
     "@rovinos/schemas": "workspace:^",
     "@rovinos/sdk": "workspace:^",

@@ -273,7 +273,7 @@ describe("ESLint configuration", () => {
           : {};
       expect(parserOptions.project).toBeUndefined();
       expect(parserOptions.projectService).toEqual({
-        allowDefaultProject: ["vitest.config.ts"],
+        allowDefaultProject: ["packages/*/tsup.config.ts", "vitest.config.ts"],
         defaultProject: "packages/schemas/tsconfig.test.json",
       });
     }

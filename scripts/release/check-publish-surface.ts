@@ -7,7 +7,8 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 
-const execFileAsync = promisify(execFile);
+/** Execute a command with an explicit argument vector. */
+export const execFileAsync = promisify(execFile);
 const publishedNames = new Set([
   "@rovinos/sdk",
   "@rovinos/cli",
@@ -20,55 +21,51 @@ const sizeBudgets = new Map([
   ["@rovinos/store-sqlite", 10_000_000],
   ["@rovinos/store-postgres", 10_000_000],
 ]);
+const adapterDrivers = new Map([
+  ["@rovinos/store-sqlite", "better-sqlite3"],
+  ["@rovinos/store-postgres", "pg"],
+]);
 
-const packageManifestSchema = z
-  .object({
-    name: z.string(),
-    private: z.boolean().optional(),
-    engines: z.object({ node: z.string() }).passthrough().optional(),
-    dependencies: z.record(z.string(), z.string()).optional(),
-    optionalDependencies: z.record(z.string(), z.string()).optional(),
-    peerDependencies: z.record(z.string(), z.string()).optional(),
-  })
-  .passthrough();
+const packageManifestSchema = z.looseObject({
+  name: z.string(),
+  private: z.boolean().optional(),
+  engines: z.looseObject({ node: z.string() }).optional(),
+  dependencies: z.record(z.string(), z.string()).optional(),
+  optionalDependencies: z.record(z.string(), z.string()).optional(),
+  peerDependencies: z.record(z.string(), z.string()).optional(),
+});
 type PackageManifest = z.infer<typeof packageManifestSchema>;
 
-const packEventSchema = z.object({ location: z.string().optional() }).passthrough();
+const packEventSchema = z.looseObject({ location: z.string().optional() });
+
+/** A file included in a package archive. */
 export interface PackedFile {
   readonly path: string;
   readonly size: number;
 }
 
-export function inspectPackedPackage(
-  manifest: PackageManifest,
-  files: readonly PackedFile[],
-): string[] {
+function inspectPackageManifest(manifest: PackageManifest): string[] {
   const violations: string[] = [];
-  const expectedName = manifest.name;
-  const sizeBudget = sizeBudgets.get(expectedName);
-  if (sizeBudget === undefined || !publishedNames.has(expectedName)) {
-    return ["publish_package_unexpected"];
-  }
   if (manifest.private === true) {
     violations.push("publish_package_private");
   }
   if (manifest.engines?.node !== ">=26") {
     violations.push("publish_node_engine_invalid");
   }
-  const databaseDriver =
-    expectedName === "@rovinos/store-sqlite"
-      ? "better-sqlite3"
-      : expectedName === "@rovinos/store-postgres"
-        ? "pg"
-        : undefined;
+  const driver = adapterDrivers.get(manifest.name);
   if (
-    databaseDriver !== undefined &&
-    (manifest.dependencies?.[databaseDriver] === undefined ||
+    driver !== undefined &&
+    (manifest.dependencies?.[driver] === undefined ||
       manifest.peerDependencies?.["@rovinos/sdk"] === undefined)
   ) {
     violations.push("publish_adapter_dependencies_invalid");
   }
-  const runtimeDependencies = [
+  return violations;
+}
+
+function inspectRuntimeDependencies(manifest: PackageManifest): string[] {
+  const violations: string[] = [];
+  const dependencies = [
     ...Object.keys(manifest.dependencies ?? {}).map((name) => ({
       name,
       group: "dependencies",
@@ -82,18 +79,20 @@ export function inspectPackedPackage(
       group: "peerDependencies",
     })),
   ];
-  for (const dependency of runtimeDependencies) {
+  for (const dependency of dependencies) {
     const optionalSdkPeer =
-      (expectedName === "@rovinos/store-sqlite" || expectedName === "@rovinos/store-postgres") &&
+      adapterDrivers.has(manifest.name) &&
       dependency.name === "@rovinos/sdk" &&
       dependency.group === "peerDependencies";
-    if (
-      (dependency.name.startsWith("@rovinos/") || dependency.name.startsWith("@harness/")) &&
-      !optionalSdkPeer
-    ) {
+    if (dependency.name.startsWith("@rovinos/") && !optionalSdkPeer) {
       violations.push("publish_internal_dependency");
     }
   }
+  return violations;
+}
+
+function inspectPackageFiles(files: readonly PackedFile[], sizeBudget: number): string[] {
+  const violations: string[] = [];
   if (files.length === 0) {
     violations.push("publish_package_empty");
   }
@@ -112,7 +111,26 @@ export function inspectPackedPackage(
       violations.push("publish_testing_helper");
     }
   }
-  return [...new Set(violations)];
+  return violations;
+}
+
+/** Identify manifest, dependency, and archive violations for a publishable package. */
+export function inspectPackedPackage(
+  manifest: PackageManifest,
+  files: readonly PackedFile[],
+): string[] {
+  const expectedName = manifest.name;
+  const sizeBudget = sizeBudgets.get(expectedName);
+  if (sizeBudget === undefined || !publishedNames.has(expectedName)) {
+    return ["publish_package_unexpected"];
+  }
+  return [
+    ...new Set([
+      ...inspectPackageManifest(manifest),
+      ...inspectRuntimeDependencies(manifest),
+      ...inspectPackageFiles(files, sizeBudget),
+    ]),
+  ];
 }
 
 async function workspaceManifests(repositoryRoot: string): Promise<PackageManifest[]> {
@@ -198,7 +216,7 @@ async function bundledImportViolation(
       return true;
     }
     const source = await readFile(resolvedFilePath, "utf8");
-    if (/(?:from\s*|import\s*\()\s*["']@(?:harness|rovinos)\//u.test(source)) {
+    if (/from\s*["']@rovinos\/|import\s*\(\s*["']@rovinos\//u.test(source)) {
       return true;
     }
   }

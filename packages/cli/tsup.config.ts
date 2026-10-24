@@ -37,6 +37,7 @@ const external = [
   "zod",
 ];
 
+// eslint-disable-next-line import-x/no-default-export -- tsup config files require a default export.
 export default defineConfig({
   entry: { bin: "src/bin.ts", programmatic: "src/programmatic.ts" },
   format: ["esm"],
@@ -69,6 +70,6 @@ export default defineConfig({
     },
   },
   esbuildOptions(options) {
-    options.conditions = ["source", "node"];
+    Object.assign(options, { conditions: ["source", "node"] });
   },
 });

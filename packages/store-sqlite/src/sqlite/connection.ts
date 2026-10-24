@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { fileURLToPath } from "node:url";
 import {
   migrate,
   StoreMigrationError,
   type Clock,
   type ContentCodec,
 } from "@rovinos/store/adapter-internal";
+import { sqliteMigrationDirectory } from "../migration-directory.js";
 import { initializeEncryptionMetadata, validateEncryptionMetadata } from "./serialization.js";
 import { openReadOnlyDatabase } from "./read-only.js";
 
@@ -24,13 +24,13 @@ export function openSqliteDatabase(
       db.pragma("synchronous = NORMAL");
       migrate(db, "sqlite", {
         appliedAt: clock.now(),
-        migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
+        migrationDirectory: sqliteMigrationDirectory(),
       });
       initializeEncryptionMetadata(db, codec.encrypted);
     } else {
       const pendingMigrations = migrate(db, "sqlite", {
         dryRun: true,
-        migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
+        migrationDirectory: sqliteMigrationDirectory(),
       });
       if (pendingMigrations.length > 0) {
         throw new StoreMigrationError("schema_migration_pending");

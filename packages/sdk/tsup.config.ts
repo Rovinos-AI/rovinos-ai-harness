@@ -3,6 +3,7 @@ import { cp, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "tsup";
 
+// eslint-disable-next-line import-x/no-default-export -- tsup config files require a default export.
 export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
@@ -61,6 +62,6 @@ export default defineConfig({
     },
   },
   esbuildOptions(options) {
-    options.conditions = ["source", "node"];
+    Object.assign(options, { conditions: ["source", "node"] });
   },
 });

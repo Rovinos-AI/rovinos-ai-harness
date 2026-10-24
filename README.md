@@ -20,6 +20,8 @@ The sample pauses for human approval and prints the exact commands to approve an
 `yarn quickstart --yes` to complete the sample unattended, or `yarn quickstart:down` to stop the
 stack and remove its volumes and generated `.env`. The
 [quickstart guide](docs/quickstart.md) also keeps the manual steps for users without Node.
+See the [replay-from-trace example](examples/replay/README.md) and its
+[terminal recording](examples/replay/demo.cast).
 
 ## Contents
 
