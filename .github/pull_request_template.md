@@ -10,7 +10,7 @@
 
 ## Verification
 
-- [ ] Acceptance criteria are met and the task's tests pass in Azure Pipelines.
+- [ ] Acceptance criteria are met and the task's tests pass in GitHub Actions.
 - [ ] `yarn lint` passes with zero errors and warnings; any new suppression has a written reason.
 - [ ] `yarn typecheck` passes.
 - [ ] Commits are signed off.

@@ -37,6 +37,3 @@ on GitHub-hosted runners. Fork runs still wait for a maintainer: under
 **Settings > Actions > General > Fork pull request workflows from outside
 collaborators**, select **Require approval for all outside collaborators**.
 Review the diff before approving the run.
-
-The Azure pipeline, while it still runs in parallel, requires a maintainer's
-`/azp run` comment for fork PRs and gives fork builds no secrets (#557).

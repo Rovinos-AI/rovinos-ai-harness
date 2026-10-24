@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# CI on GitHub-hosted runners (task 1.21): the same static, unit, integration, and gates stages as
-# azure-pipelines.yml, which keeps running in parallel until this workflow has proven itself.
+# The only pull request CI, on GitHub-hosted runners, with static, unit, integration, and gates jobs.
 #
 # No CI on pushes to main: every change reaches main through a PR whose run already tested the
 # merged result (the pull_request merge ref). Draft PRs skip every job, so Copilot PRs build only

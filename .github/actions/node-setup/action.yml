@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Shared toolchain setup for every CI job (mirrors pipelines/templates/node-setup.yml): pinned mise
-# verified by SHA-256, the mise-pinned Node, Corepack and ShellCheck, the packageManager Yarn, a
-# Yarn cache keyed on the lockfile, and an immutable install.
+# Shared toolchain setup for every GitHub Actions CI job: pinned mise verified by SHA-256, the
+# mise-pinned Node, Corepack and ShellCheck, the packageManager Yarn, a Yarn cache keyed on the
+# lockfile, and an immutable install.
 name: Node setup
 description: Install the pinned toolchain and the workspace dependencies.
 runs:

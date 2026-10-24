@@ -10,6 +10,17 @@ const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const protectionScript = `${repositoryRoot}/scripts/github/apply-branch-protection.sh`;
 
 describe("apply-branch-protection.sh", () => {
+  it("documents the GitHub Actions gates check as required for main", () => {
+    const documentation = readFileSync(
+      `${repositoryRoot}/docs/maintainers/branch-protection.md`,
+      "utf8",
+    );
+
+    expect(documentation).toContain(
+      'scripts/github/apply-branch-protection.sh --apply --check "gates"',
+    );
+  });
+
   it("prints the branch-protection payload with no required checks by default", () => {
     const result = spawnSync("bash", [protectionScript, "--dry-run"], {
       encoding: "utf8",
@@ -34,11 +45,9 @@ describe("apply-branch-protection.sh", () => {
   });
 
   it("prints configured required checks in dry-run mode", () => {
-    const result = spawnSync(
-      "bash",
-      [protectionScript, "--dry-run", "--check", "Azure Pipelines / Rovinos AI Harness CI"],
-      { encoding: "utf8" },
-    );
+    const result = spawnSync("bash", [protectionScript, "--dry-run", "--check", "gates"], {
+      encoding: "utf8",
+    });
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
@@ -46,7 +55,7 @@ describe("apply-branch-protection.sh", () => {
       "{
         "required_status_checks": {
           "strict": true,
-          "contexts": ["Azure Pipelines / Rovinos AI Harness CI"]
+          "contexts": ["gates"]
         },
         "required_pull_request_reviews": {
           "required_approving_review_count": 1

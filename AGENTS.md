@@ -1,6 +1,6 @@
 # AGENTS.md (repository root)
 
-Rovinos AI Harness: an open source, TypeScript, container-native agent harness with an event-sourced run log, metadata-only telemetry, PII tokenization at every boundary, MCP Apps human-in-the-loop approvals, and Azure Pipelines CI. License: Apache-2.0.
+Rovinos AI Harness: an open source, TypeScript, container-native agent harness with an event-sourced run log, metadata-only telemetry, PII tokenization at every boundary, MCP Apps human-in-the-loop approvals, and GitHub Actions CI. License: Apache-2.0.
 
 Instruction precedence: explicit user instructions, then the nearest `AGENTS.md` to the files you edit, then this file. Folder files add rules; they never relax these. This file is always in effect, so folder files do not repeat it.
 
@@ -13,14 +13,14 @@ The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks ad
 1. Pick one task id (for example `7.3`). Index: `docs/engineering/tasks/README.md`. Specs sit next to the code (`packages/<name>/epic-*.md`); `epic-01` lives in `docs/engineering/tasks/`, `epic-21` in `docs/`. Each folder's `AGENTS.md` lists the specs and task ids that touch it.
 2. Read `docs/engineering/CONVENTIONS.md`, the nearest folder `AGENTS.md`, and the task spec. The spec lists inputs, outputs, tests, and acceptance criteria. Meet all of them and do not add scope.
 3. One task per PR. Title: `[7.3] <task name>`. Commits signed off (`git commit -s`).
-4. Write the tests the task lists, in the Azure Pipelines stage it names: `static`, `unit`, `integration`, `gates`.
+4. Write the tests the task lists, in the CI job it names: `static`, `unit`, `integration`, `gates`.
 5. In the PR description list: task id, what changed, how it was tested, any "(verify)" decisions, follow-ups.
 6. Add an empty marker file at `docs/progress/<task-id>` (the threat-case checker reads it).
 
 ## Repo map
 
 - `packages/*`: libraries and apps. Allowed internal imports per package are in `docs/engineering/layers.json` (rendered into CONVENTIONS section 1 and each package's `AGENTS.md`; lint enforces it). No cycles.
-- `infra/*`: compose, collector, dashboards, Kusto, alerts, k8s examples. `security/`: scanner rules and policies. `scripts/`: CI and generator scripts. `test/`: cross-package tests. `docs/`: documentation. `examples/`: runnable examples. `pipelines/`: Azure templates. `tools/eslint-plugin-harness/`: custom lint rules.
+- `infra/*`: compose, collector, dashboards, Kusto, alerts, k8s examples. `security/`: scanner rules and policies. `scripts/`: CI and generator scripts. `test/`: cross-package tests. `docs/`: documentation. `examples/`: runnable examples. `pipelines/`: Azure nightly pipeline configuration. `tools/eslint-plugin-harness/`: custom lint rules.
 
 ## Commands
 
