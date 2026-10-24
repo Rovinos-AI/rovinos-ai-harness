@@ -22,7 +22,55 @@ jobs:
     steps:
       - checkout: self
         fetchDepth: 1
-      - template: pipelines/templates/node-setup.yml
+      - bash: |
+          set -euo pipefail
+          if existing_mise="$(command -v mise)"; then
+            echo "Using preinstalled mise: $("$existing_mise" --version)"
+            echo "##vso[task.prependpath]$(dirname "$existing_mise")"
+            exit 0
+          fi
+          MISE_VERSION=v2026.10.4
+          MISE_SHA256=2fc793020b442d08163603400236b2c693f8cede810c7e432fc77220e6c9e8a1
+          MISE_ARCHIVE="$(Agent.TempDirectory)/mise-${MISE_VERSION}-linux-x64.tar.gz"
+          curl -fsSL \
+            "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mise-${MISE_VERSION}-linux-x64.tar.gz" \
+            -o "$MISE_ARCHIVE"
+          echo "$MISE_SHA256  $MISE_ARCHIVE" | sha256sum --check --status
+          tar -xzf "$MISE_ARCHIVE" -C "$(Agent.TempDirectory)" mise/bin/mise
+          install -D "$(Agent.TempDirectory)/mise/bin/mise" "$HOME/.local/bin/mise"
+          echo "##vso[task.prependpath]$HOME/.local/bin"
+        displayName: Install mise
+      - bash: |
+          set -euo pipefail
+          mise trust
+          mise install
+          mise exec -- corepack enable
+          mkdir -p "$YARN_GLOBAL_FOLDER/cache"
+          echo "##vso[task.prependpath]$(mise where node)/bin"
+          echo "##vso[task.prependpath]$(mise where npm:corepack)/node_modules/.bin"
+          shellcheck_bin="$(mise which shellcheck)"
+          if [ ! -x "$shellcheck_bin" ]; then
+            echo "mise did not install the pinned ShellCheck binary."
+            exit 1
+          fi
+          echo "##vso[task.prependpath]$(dirname "$shellcheck_bin")"
+        displayName: Install pinned toolchain
+      - bash: |
+          set -euo pipefail
+          expected_yarn_version="$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).packageManager.match(/^yarn@([^+]+)/)?.[1] ?? "")')"
+          actual_yarn_version="$(yarn --version)"
+          if [ "$actual_yarn_version" != "$expected_yarn_version" ]; then
+            echo "Yarn version does not match packageManager."
+            exit 1
+          fi
+        displayName: Verify pinned Yarn version
+      - task: Cache@2
+        inputs:
+          key: '"yarn" | "$(Agent.OS)" | yarn.lock | mise.toml'
+          path: $(YARN_GLOBAL_FOLDER)/cache
+        displayName: Cache Yarn packages
+      - script: yarn install --immutable
+        displayName: Install dependencies
       - task: AzureCLI@2
         displayName: Read live Azure Key Vault test secret
         inputs:

@@ -88,7 +88,7 @@ describe("CI workflow", () => {
     });
   });
 
-  it("runs the stages in order and skips draft pull requests", () => {
+  it("runs the CI jobs in order and skips draft pull requests", () => {
     const { jobs } = readWorkflow();
 
     expect(Object.keys(jobs)).toEqual(["static", "unit", "integration", "gates"]);
