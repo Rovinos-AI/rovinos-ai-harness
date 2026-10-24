@@ -18,15 +18,10 @@ const toolSpec = ToolSpecSchema.parse({
   description: "Increment a synthetic counter exactly once.",
   inputSchema: JsonValue.parse(z.toJSONSchema(inputSchema)),
 });
-const receiptSchema = z
-  .object({ callId: Id, count: z.number().int().positive() })
-  .strict();
+const receiptSchema = z.object({ callId: Id, count: z.number().int().positive() }).strict();
 const callId = Id.parse("01J00000000000000000000001");
 
-function completion(
-  parts: ModelCompletion["parts"],
-  finishReason: string,
-): ModelCompletion {
+function completion(parts: ModelCompletion["parts"], finishReason: string): ModelCompletion {
   return {
     parts,
     usage: { inputTokens: 3, outputTokens: 5, costMicros: 0 },
@@ -66,7 +61,10 @@ function modelFor(mode: "start" | "resume"): FakeModelPort {
 
 async function readReceipt(directory: string): Promise<z.infer<typeof receiptSchema> | undefined> {
   try {
-    return parseJson(receiptSchema, await readFile(join(directory, "counter-receipt.json"), "utf8"));
+    return parseJson(
+      receiptSchema,
+      await readFile(join(directory, "counter-receipt.json"), "utf8"),
+    );
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return undefined;
@@ -91,11 +89,9 @@ function createTool(directory: string): ToolPort {
         count: (previous?.count ?? 0) + 1,
       });
       const receiptPath = join(directory, "counter-receipt.json");
-      await writeFile(
-        `${receiptPath}.${String(process.pid)}.tmp`,
-        JSON.stringify(receipt),
-        { flag: "wx" },
-      );
+      await writeFile(`${receiptPath}.${String(process.pid)}.tmp`, JSON.stringify(receipt), {
+        flag: "wx",
+      });
       await rename(`${receiptPath}.${String(process.pid)}.tmp`, receiptPath);
       await writeFile(join(directory, "effect-ready"), "ready\n", { flag: "wx" });
       await new Promise<void>((resolve) => {
