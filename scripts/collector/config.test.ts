@@ -32,17 +32,29 @@ function containsLiteralSecrets(value: unknown): boolean {
 
   return Object.entries(value).some(
     ([key, nested]) =>
-      (/^(?:api_key|password)$/iu.test(key) &&
+      (/^(?:api[_-]?key|key|application_key|client_secret|password)$/iu.test(key) &&
         !(typeof nested === "string" && nested.startsWith("${env:"))) ||
       containsLiteralSecrets(nested),
   );
 }
 
+it("detects literal exporter credentials but permits environment substitutions", () => {
+  expect(containsLiteralSecrets({ api: { key: "synthetic-secret" } })).toBe(true);
+  expect(containsLiteralSecrets({ api: { key: "${env:DD_API_KEY}" } })).toBe(false);
+  expect(
+    containsLiteralSecrets({ azuredataexplorer: { application_key: "synthetic-secret" } }),
+  ).toBe(true);
+});
+
 it("keeps collector and Compose YAML free of literal credentials", () => {
   for (const path of [
     "infra/collector/base.yaml",
     "infra/collector/allowlist.generated.yaml",
+    "infra/collector/builder.yaml",
     "infra/collector/profile-debug.yaml",
+    "infra/collector/profile-datadog.yaml",
+    "infra/collector/profile-adx.yaml",
+    "infra/collector/profile-test.yaml",
     ...composeFiles,
   ]) {
     expect(containsLiteralSecrets(readYaml(path))).toBe(false);
@@ -204,4 +216,98 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
   expect(profile).not.toHaveProperty("service.pipelines.traces.processors");
   expect(profile).not.toHaveProperty("service.pipelines.logs.processors");
   expect(profile).not.toHaveProperty("service.pipelines.metrics.processors");
+});
+
+it("uses the generated allowlist processor order in every collector profile", () => {
+  const allowlist = readYaml("infra/collector/allowlist.generated.yaml");
+  const generatedPipelines = yamlSchema.parse(yamlSchema.parse(allowlist.service).pipelines);
+  const profileExpectations = [
+    {
+      path: "infra/collector/profile-debug.yaml",
+      exporters: { traces: ["debug"], logs: ["debug"], metrics: ["debug"] },
+    },
+    {
+      path: "infra/collector/profile-datadog.yaml",
+      exporters: { traces: ["datadog"], logs: ["datadog"], metrics: ["datadog"] },
+    },
+    {
+      path: "infra/collector/profile-adx.yaml",
+      exporters: {
+        traces: ["azuredataexplorer"],
+        logs: ["azuredataexplorer"],
+        metrics: ["azuredataexplorer"],
+      },
+    },
+    {
+      path: "infra/collector/profile-test.yaml",
+      exporters: {
+        traces: ["file/traces"],
+        logs: ["file/logs"],
+        metrics: ["file/metrics"],
+      },
+    },
+  ] as const;
+  const expectedProcessors = {
+    traces: [
+      "memory_limiter",
+      "filter/drop_unregistered_spans",
+      "filter/drop_span_events",
+      "transform/span_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+    logs: [
+      "memory_limiter",
+      "filter/drop_unregistered_logs",
+      "transform/log_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+    metrics: [
+      "memory_limiter",
+      "filter/drop_unregistered_metrics",
+      "transform/metric_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+  };
+
+  for (const { path, exporters } of profileExpectations) {
+    const profile = readYaml(path);
+    const pipelines = yamlSchema.parse(yamlSchema.parse(profile.service).pipelines);
+
+    for (const signal of ["traces", "logs", "metrics"] as const) {
+      const pipeline = yamlSchema.parse(pipelines[signal]);
+      const generatedPipeline = yamlSchema.parse(generatedPipelines[signal]);
+
+      expect(pipeline.receivers).toEqual(["otlp"]);
+      expect(pipeline.exporters).toEqual(exporters[signal]);
+      expect(pipeline).not.toHaveProperty("processors");
+      expect(generatedPipeline.processors).toEqual(expectedProcessors[signal]);
+    }
+  }
+});
+
+it("writes file exporter output as JSON lines for each signal", () => {
+  const profile = readYaml("infra/collector/profile-test.yaml");
+  expect(profile.exporters).toMatchObject({
+    "file/traces": {
+      path: "/var/otel-out/traces.jsonl",
+      format: "json",
+      append: true,
+      create_directory: true,
+    },
+    "file/logs": {
+      path: "/var/otel-out/logs.jsonl",
+      format: "json",
+      append: true,
+      create_directory: true,
+    },
+    "file/metrics": {
+      path: "/var/otel-out/metrics.jsonl",
+      format: "json",
+      append: true,
+      create_directory: true,
+    },
+  });
 });

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync, watch } from "node:fs";
+import fs from "node:fs";
 import { mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import process from "node:process";
 import { Id } from "@harness/schemas";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ensureRunWorkspace,
   InProcessBackend,
@@ -53,31 +53,157 @@ function makeSpec(
   };
 }
 
-function processHasExited(pid: number): boolean {
+function readProcessStat(pid: number): string[] | undefined {
+  try {
+    const stat = fs.readFileSync(`/proc/${String(pid)}/stat`, "utf8");
+    const commandEnd = stat.lastIndexOf(")");
+    // comm may contain spaces and parentheses; field 3 follows its final closing parenthesis.
+    return commandEnd < 0
+      ? undefined
+      : stat
+          .slice(commandEnd + 2)
+          .trim()
+          .split(/\s+/);
+  } catch {
+    return undefined;
+  }
+}
+
+function readReadyProcess(pidFile: string) {
+  const pid = Number(fs.readFileSync(pidFile, "utf8"));
+  expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
+  return { pid, startTime: readProcessStat(pid)?.[19] };
+}
+
+function processHasExited(pid: number, startTime?: string): boolean {
+  const stat = readProcessStat(pid);
   try {
     process.kill(pid, 0);
   } catch {
     return true;
   }
+  return (
+    stat?.[0] === "Z" ||
+    stat?.[0] === "X" ||
+    (startTime !== undefined && stat?.[19] !== undefined && stat[19] !== startTime)
+  );
+}
+
+function processExitDiagnostic(pid: number): string {
   try {
-    const stat = readFileSync(`/proc/${String(pid)}/stat`, "utf8");
-    const commandEnd = stat.lastIndexOf(")");
-    return commandEnd >= 0 && stat[commandEnd + 2] === "Z";
+    const status = fs.readFileSync(`/proc/${String(pid)}/status`, "utf8");
+    const state = /^State:\s+([A-Z])(?:\s|$)/m.exec(status)?.[1] ?? "unknown";
+    const parentPid = /^PPid:\s+(\d+)\s*$/m.exec(status)?.[1] ?? "unknown";
+    return `pid=${String(pid)} state=${state} ppid=${parentPid}`;
   } catch {
-    return false;
+    return `pid=${String(pid)} state=unknown ppid=unknown`;
   }
 }
 
-async function waitForProcessExit(pid: number): Promise<boolean> {
+async function waitForProcessExit(pid: number, startTime?: string): Promise<boolean> {
   // 15 s: a SIGKILLed child can take seconds to be reaped on a loaded CI agent.
   for (let attempt = 0; attempt < 1500; attempt += 1) {
-    if (processHasExited(pid)) {
+    if (processHasExited(pid, startTime)) {
       return true;
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  return processHasExited(pid);
+  return processHasExited(pid, startTime);
 }
+
+async function expectProcessExit(pid: number, startTime?: string): Promise<void> {
+  const exited = await waitForProcessExit(pid, startTime);
+  assert.isTrue(exited, exited ? undefined : processExitDiagnostic(pid));
+}
+
+describe("process exit observation", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function mockStat(state: string, startTime = "123"): void {
+    vi.spyOn(process, "kill").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      `42 (synthetic (process) name) ${[state, ...Array<string>(18).fill("0"), startTime].join(" ")}`,
+    );
+  }
+
+  it.each(["", "0", "-1", "NaN", "1.5"])("refuses an invalid readiness PID %j", (pid) => {
+    vi.spyOn(fs, "readFileSync").mockReturnValue(pid);
+    expect(() => readReadyProcess("synthetic.ready")).toThrow();
+  });
+
+  it("captures field 22 before a ready process can be killed", () => {
+    mockStat("S");
+    vi.mocked(fs.readFileSync).mockReturnValueOnce("42");
+    expect(readReadyProcess("synthetic.ready")).toEqual({ pid: 42, startTime: "123" });
+  });
+
+  it.each(["Z", "X"])("recognizes state %s as exited", (state) => {
+    mockStat(state);
+    expect(processHasExited(42, "123")).toBe(true);
+  });
+
+  it("recognizes a reused PID even while its replacement is alive", () => {
+    mockStat("S", "124");
+    expect(processHasExited(42, "123")).toBe(true);
+  });
+
+  // threat: T-10
+  it.each(["R", "S", "D", "T"])("does not accept a live original in state %s", (state) => {
+    mockStat(state);
+    expect(processHasExited(42, "123")).toBe(false);
+    expect(processHasExited(42)).toBe(false);
+  });
+
+  it("recognizes a process reaped between reading stat and probing the PID", () => {
+    mockStat("S");
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw new Error("ESRCH");
+    });
+    expect(processHasExited(42, "123")).toBe(true);
+  });
+
+  it("keeps the PID probe fallback when proc is unavailable", () => {
+    mockStat("S");
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    expect(processHasExited(42, "123")).toBe(false);
+    expect(processExitDiagnostic(42)).toBe("pid=42 state=unknown ppid=unknown");
+  });
+
+  it("includes the observed state and parent PID when a wait fails", async () => {
+    vi.useFakeTimers();
+    mockStat("S");
+    vi.mocked(fs.readFileSync).mockReturnValue("State:\tS (sleeping)\nPPid:\t17\n");
+    await expect(
+      Promise.all([expectProcessExit(42, "123"), vi.runAllTimersAsync()]),
+    ).rejects.toThrow("pid=42 state=S ppid=17");
+  });
+
+  it("does not mistake malformed stat for a changed start time", () => {
+    mockStat("S");
+    for (const stat of ["invalid", "42 (synthetic) S"]) {
+      vi.mocked(fs.readFileSync).mockReturnValue(stat);
+      expect(processHasExited(42, "123")).toBe(false);
+    }
+  });
+
+  // threat: T-03
+  it("reports only state codes and numeric PIDs, never raw status contents", () => {
+    mockStat("S");
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      "Name:\tsynthetic-private-canary\nState:\tS (sleeping)\nPPid:\t17\n",
+    );
+    expect(processExitDiagnostic(42)).toBe("pid=42 state=S ppid=17");
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      "State:\tsynthetic-private-canary\nPPid:\tsynthetic-private-canary\n",
+    );
+    expect(processExitDiagnostic(42)).toBe("pid=42 state=unknown ppid=unknown");
+  });
+});
 
 describe("InProcessBackend", () => {
   beforeEach(async () => {
@@ -195,36 +321,28 @@ describe("InProcessBackend", () => {
     ].join("");
     const projectRoot = join(workspaceRoot, runId, "project");
     await ensureRunWorkspace(workspaceRoot, runId);
-    const processesReady = new Promise<void>((resolve) => {
-      const watcher = watch(projectRoot, (_event, filename) => {
-        if (filename?.toString() === "grandchild.ready") {
-          watcher.close();
-          resolve();
-        }
-      });
-    });
-
     const execution = backend.exec(
       runId,
       makeSpec([process.execPath, "-e", parentScript], { timeoutMs: 300_000 }),
       new AbortController().signal,
     );
-    await processesReady;
+    // File creation notifications can precede the PID write; Number("") is the live group PID 0.
+    const { parent, grandchild } = await vi.waitFor(
+      () => ({
+        parent: readReadyProcess(join(projectRoot, "parent.ready")),
+        grandchild: readReadyProcess(join(projectRoot, "grandchild.ready")),
+      }),
+      { timeout: 15_000, interval: 20 },
+    );
     triggerTimeout?.();
     const result = await execution;
-    const parentPidText = await readFile(join(projectRoot, "parent.ready"), "utf8");
-    const grandchildPidText = await readFile(join(projectRoot, "grandchild.ready"), "utf8");
-    const parentPid = Number(parentPidText);
-    const grandchildPid = Number(grandchildPidText);
 
     expect(scheduledDelayMs).toBe(250);
     expect(timeoutCancelled).toBe(true);
     expect(result.timedOut).toBe(true);
     expect(result.signal).toBe("SIGKILL");
-    expect(Number.isSafeInteger(parentPid)).toBe(true);
-    expect(Number.isSafeInteger(grandchildPid)).toBe(true);
-    expect(await waitForProcessExit(parentPid)).toBe(true);
-    expect(await waitForProcessExit(grandchildPid)).toBe(true);
+    await expectProcessExit(parent.pid, parent.startTime);
+    await expectProcessExit(grandchild.pid, grandchild.startTime);
   }, 30_000);
 
   // threat: T-10
@@ -246,7 +364,7 @@ describe("InProcessBackend", () => {
 
     expect(result.exitCode).toBe(0);
     expect(Number.isSafeInteger(grandchildPid)).toBe(true);
-    expect(await waitForProcessExit(grandchildPid)).toBe(true);
+    await expectProcessExit(grandchildPid);
   });
 
   // threat: T-11
@@ -305,12 +423,13 @@ describe("InProcessBackend", () => {
       },
       { timeout: 15_000, interval: 20 },
     );
+    const childStartTime = readProcessStat(childPid)?.[19];
     controller.abort();
     const result = await execution;
 
     expect(result.timedOut).toBe(false);
     expect(result.signal).toBe("SIGKILL");
-    expect(await waitForProcessExit(childPid)).toBe(true);
+    await expectProcessExit(childPid, childStartTime);
   }, 30_000);
 
   it("does not spawn a process when the signal is already aborted", async () => {

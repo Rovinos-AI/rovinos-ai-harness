@@ -8,6 +8,7 @@ export type {
   WorkerOpenDescriptor,
 } from "./conformance-concurrency.js";
 export { createEventBuilders } from "./testing.js";
+export { assertWatchSubscriptionConformance } from "./conformance-watch.js";
 export type { EventStoreTestBuilders } from "./testing.js";
 export { runQueueConformance } from "../queue/conformance.js";
 export type { RunQueueFactory, RunQueueFactoryCreator } from "../queue/conformance.js";
