@@ -16,6 +16,53 @@ async function withStore<T>(
   }
 }
 
+/** Assert that writes committed while subscriptions start are caught up from storage. */
+export async function assertWatchSubscriptionConformance(
+  factory: EventStoreFactory,
+  builders: EventStoreTestBuilders,
+): Promise<void> {
+  await withStore(factory, async (store) => {
+    const runId = builders.nextRunId();
+    const controller = new AbortController();
+    const events = store
+      .watch(runId, { fromSeq: 0, signal: controller.signal })
+      [Symbol.asyncIterator]();
+    const runs = store
+      .watchRuns({ statuses: ["completed"], signal: controller.signal })
+      [Symbol.asyncIterator]();
+    try {
+      const firstEvent = events.next();
+      const firstRun = runs.next();
+      await store.append(
+        runId,
+        [builders.runCreated(runId), builders.runStatusChanged(runId, "pending", "completed")],
+        0,
+      );
+      await expect(firstEvent).resolves.toMatchObject({
+        done: false,
+        value: { runId, seq: 0, type: "run_created" },
+      });
+      await expect(events.next()).resolves.toMatchObject({
+        done: false,
+        value: { runId, seq: 1, to: "completed" },
+      });
+      await expect(events.next()).resolves.toMatchObject({ done: true });
+      let nextRun = await firstRun;
+      while (nextRun.done === false && nextRun.value.runId !== runId) {
+        nextRun = await runs.next();
+      }
+      expect(nextRun).toMatchObject({
+        done: false,
+        value: { runId, status: "completed", lastSeq: 1 },
+      });
+    } finally {
+      controller.abort();
+      await events.return?.();
+      await runs.return?.();
+    }
+  });
+}
+
 function registerCatchupAndTerminal(
   factory: EventStoreFactory,
   builders: EventStoreTestBuilders,
@@ -175,6 +222,9 @@ export function registerWatchConformance(
   factory: EventStoreFactory,
   builders: EventStoreTestBuilders,
 ): void {
+  it("catches writes committed immediately after subscribing", async () => {
+    await assertWatchSubscriptionConformance(factory, builders);
+  });
   registerCatchupAndTerminal(factory, builders);
   registerAbort(factory, builders);
   registerInvalidOptions(factory, builders);
