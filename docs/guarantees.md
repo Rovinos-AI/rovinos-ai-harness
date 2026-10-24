@@ -80,6 +80,67 @@ hardened sandbox.
   restricted configuration, apply host/runtime security updates, and do not
   grant additional capabilities or network routes.
 
+### Policy evaluation
+
+Tool calls are proposals from the model. Harness code evaluates policy against
+prepared, tokenized arguments and controls whether a call is allowed, requires
+approval, or is denied; the model does not make that authorization decision.
+
+- **Evidence:** [policy-checked app call tests](../test/app-call-policy.test.ts)
+  and [tokenized arguments before policy recheck](../packages/core/src/runtime-app-approval.test.ts).
+  CI job: `unit`.
+- **Assumptions:** calls pass through the policy-checked runtime and the
+  configured policy and tool preparation are used.
+
+### Human approvals
+
+An approval-required action suspends until a human decision is recorded as an
+event in the run log. Approval does not itself bypass the runtime's policy
+rechecks.
+
+- **Evidence:** [durable approval and resume test](../packages/core/src/runtime-app-approval.test.ts)
+  and [approval event-state tests](../packages/core/src/run-state.test.ts).
+  CI job: `unit`.
+- **Assumptions:** the approval is completed through the configured host or
+  control-plane flow and its event store remains available.
+
+### Crash recovery
+
+When a run process stops between durable event-log appends, the runtime can
+resume from the recorded state. In particular, a recorded non-idempotent tool
+intent is not blindly executed a second time after recovery; an unresolved
+result may require escalation or human action.
+
+- **Evidence:** [crash-injection recovery matrix](../test/crash-injection.int.test.ts),
+  [non-idempotent recovery test](../test/mcp-servers.int.test.ts), and
+  [crash-and-resume documentation integration test](../test/examples.int.test.ts).
+  CI job: `integration`.
+- **Assumptions:** the event log and any required tool-side idempotency or
+  recovery state remain available; recovery cannot undo external effects that
+  occurred before a crash.
+
+### Replay from a trace
+
+A trace id is a metadata-only locator, not a copy of the run's content.
+Resolution uses the event store to find the recorded run; replay then runs
+against recorded model responses, tool results, and human decisions. It emits a
+new trace linked to the original, reports configuration and policy drift, and
+returns divergence as structured outcome data rather than silently treating a
+divergent run as identical.
+
+- **Evidence:** [trace-id resolution tests](../packages/replay/src/resolve.test.ts),
+  [replay, drift, and divergence tests](../packages/replay/src/replay.test.ts),
+  and the [replay example test](../test/replay-example.replay.test.ts). CI jobs:
+  `unit`, `gates`.
+- **Assumptions:** the original event store and vault remain retained and
+  readable, the original vault keys are available for the retained data, and
+  the recorded run includes its runtime configuration and policy versions.
+
+Replay does not promise identical results from live, non-recorded providers:
+replay serves recorded results rather than calling those providers. A run that
+has been pruned or deleted, or whose event store or required keys are
+unavailable, cannot be replayed from its trace id.
+
 ## Best-effort measures
 
 - **PII detection:** detectors are measured against a synthetic corpus, but

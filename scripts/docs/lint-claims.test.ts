@@ -57,7 +57,7 @@ describe("documentation claims linter", () => {
     const evidenceEntries = [
       ...markdown.matchAll(/- \*\*Evidence:\*\*([\s\S]*?)(?=\n- \*\*Assumptions:\*\*)/gu),
     ];
-    expect(evidenceEntries).toHaveLength(5);
+    expect(evidenceEntries).toHaveLength(9);
 
     for (const [entry] of evidenceEntries) {
       const links = [...entry.matchAll(/\[[^\]]+\]\(([^)]+)\)/gu)];
