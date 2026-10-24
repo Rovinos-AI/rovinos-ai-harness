@@ -60,8 +60,8 @@ export interface ReplayRunOptions
 
 type ReplayFailure = z.infer<typeof ReplayDivergenceSchema>;
 
-function newReplayRunId(resolved: ResolvedRun): IdValue {
-  const generator = new ReplayIdGenerator([], `harness.replay.${resolved.rootRunId}`);
+function newReplayRunId(resolved: ResolvedRun, sourceRunId: IdValue): IdValue {
+  const generator = new ReplayIdGenerator([], `harness.replay.${sourceRunId}`);
   const existingRunIds = new Set(resolved.runs.map(({ runId }) => runId));
   let replayRunId = generator.next();
   while (existingRunIds.has(replayRunId)) {
@@ -128,6 +128,7 @@ interface RunUntilTerminalOptions {
   readonly human: Awaited<ReturnType<typeof buildReplayRuntime>>["human"];
   readonly replayRunId: IdValue;
   readonly originalRunId: IdValue;
+  readonly parentRunId?: IdValue;
   readonly input: EventValue & { type: "run_input" };
 }
 
@@ -136,11 +137,13 @@ async function runUntilTerminal({
   human,
   replayRunId,
   originalRunId,
+  parentRunId,
   input,
 }: RunUntilTerminalOptions): Promise<void> {
   const started = runtime.start(input.input, {
     runId: replayRunId,
     replayOf: originalRunId,
+    ...(parentRunId === undefined ? {} : { parentRunId }),
     rootSpanParent: context.active(),
   });
   let result = await started.completion;
@@ -167,6 +170,7 @@ interface ExecuteReplayOptions {
   readonly replaySpan: ReturnType<typeof REPLAY_SPAN.start>;
   readonly replayRunId: IdValue;
   readonly originalRunId: IdValue;
+  readonly parentRunId?: IdValue;
   readonly originalEvents: readonly EventValue[];
 }
 
@@ -175,6 +179,7 @@ async function executeReplay({
   replaySpan,
   replayRunId,
   originalRunId,
+  parentRunId,
   originalEvents,
 }: ExecuteReplayOptions): Promise<ReplayExecution> {
   let events: EventValue[] = [];
@@ -193,6 +198,7 @@ async function executeReplay({
       human: replay.human,
       replayRunId,
       originalRunId,
+      ...(parentRunId === undefined ? {} : { parentRunId }),
       input,
     });
     events = await readEvents(replay.runtime.store, replayRunId);
@@ -224,28 +230,31 @@ async function executeReplay({
  * @param options - Current runtime configuration and optional read-only tool metadata.
  * @returns The replay run's validated events, terminal status, drift flags, and captured divergence.
  */
-export async function replayRun(
+async function replayRunTree(
   input: ResolvedRun,
   options: ReplayRunOptions,
+  sourceRunId: IdValue,
+  parentRunId?: IdValue,
 ): Promise<ReplayOutcome> {
   const resolved = ResolvedRunSchema.parse(input);
-  const original = resolved.runs.find(({ runId }) => runId === resolved.rootRunId);
+  const original = resolved.runs.find(({ runId }) => runId === sourceRunId);
   const originalCreated = original?.events[0];
   if (original === undefined || originalCreated?.type !== "run_created") {
     throw new ReplayResponseMissingResultError();
   }
 
-  const replayRunId = newReplayRunId(resolved);
+  const replayRunId = newReplayRunId(resolved, sourceRunId);
   const runtimeOptions: BuildReplayRuntimeOptions = {
     ...(options.policy === undefined ? {} : { policy: options.policy }),
     ...(options.toolRegistry === undefined ? {} : { toolRegistry: options.toolRegistry }),
     replayRunId,
+    sourceRunId,
   };
   const replay = await buildReplayRuntime(resolved, options.config, runtimeOptions);
   const replaySpan = REPLAY_SPAN.start(
     { "harness.replay.original_run_id": resolved.rootRunId },
     {
-      parent: ROOT_CONTEXT,
+      parent: parentRunId === undefined ? ROOT_CONTEXT : context.active(),
       links: [
         {
           context: {
@@ -266,26 +275,55 @@ export async function replayRun(
         replay,
         replaySpan,
         replayRunId,
-        originalRunId: resolved.rootRunId,
+        originalRunId: sourceRunId,
+        ...(parentRunId === undefined ? {} : { parentRunId }),
         originalEvents: original.events,
       });
+      const childRuns = resolved.runs.filter((run) => run.parentRunId === sourceRunId);
+      const childOutcomes: ReplayOutcome[] = [];
+      for (const child of childRuns) {
+        childOutcomes.push(await replayRunTree(resolved, options, child.runId, replayRunId));
+      }
+      const childDivergence = childOutcomes.find((outcome) => outcome.divergence !== undefined)
+        ?.divergence;
       const replayCreated = execution.events.find((event) => event.type === "run_created");
       return ReplayOutcomeSchema.parse({
         replayRunId,
         traceId: replaySpan.spanContext().traceId,
-        status: execution.status,
-        events: execution.events,
+        status:
+          execution.divergence !== undefined || childDivergence !== undefined
+            ? "error"
+            : execution.status,
+        events: [...execution.events, ...childOutcomes.flatMap((outcome) => outcome.events)],
         configDrift:
           replayCreated?.type !== "run_created" ||
           replayCreated.configHash !== originalCreated.configHash,
         policyDrift:
           replayCreated?.type !== "run_created" ||
           replayCreated.policyVersion !== originalCreated.policyVersion,
-        ...(execution.divergence === undefined ? {} : { divergence: execution.divergence }),
+        ...((execution.divergence ?? childDivergence) === undefined
+          ? {}
+          : { divergence: execution.divergence ?? childDivergence }),
       });
     });
   } finally {
     await replay.runtime.close();
     replaySpan.end();
   }
+}
+
+/**
+ * Re-executes the resolved runs using isolated replay ports, linking each replay trace to its source
+ * and each subagent replay to its replay parent.
+ *
+ * @param input - Validated original run and related run logs.
+ * @param options - Current runtime configuration and optional read-only tool metadata.
+ * @returns Replay events, terminal status, drift flags, and captured divergence.
+ */
+export async function replayRun(
+  input: ResolvedRun,
+  options: ReplayRunOptions,
+): Promise<ReplayOutcome> {
+  const resolved = ResolvedRunSchema.parse(input);
+  return replayRunTree(resolved, options, resolved.rootRunId);
 }

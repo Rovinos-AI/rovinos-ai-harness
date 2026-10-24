@@ -59,9 +59,10 @@ export class ReplayToolPort implements ToolPort {
     resolved: ResolvedRun,
     private readonly registry?: Pick<ToolPort, "describe" | "getToolSpecs" | "validateInputSchema">,
     replayRunId = resolved.rootRunId,
+    sourceRunId = resolved.rootRunId,
   ) {
     this.rootReplayRunId = replayRunId;
-    this.originalRootRunId = resolved.rootRunId;
+    this.originalRootRunId = sourceRunId;
     if (registry?.getToolSpecs !== undefined) {
       this.getToolSpecs = () => registry.getToolSpecs?.() ?? [];
     }

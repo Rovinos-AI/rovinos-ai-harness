@@ -65,10 +65,11 @@ export class ReplayModelPort implements ModelPort {
       readonly ids: ConstructorParameters<typeof ModelGateway>[1]["ids"];
       readonly clock: ConstructorParameters<typeof ModelGateway>[1]["clock"];
       readonly replayRunId?: Id;
+      readonly sourceRunId?: Id;
     },
   ) {
     this.rootReplayRunId = dependencies.replayRunId ?? resolved.rootRunId;
-    this.originalRootRunId = resolved.rootRunId;
+    this.originalRootRunId = dependencies.sourceRunId ?? resolved.rootRunId;
     for (const run of resolved.runs) {
       this.requestLogs.set(run.runId, {
         events: new EventLogCassetteStore(run.events),

@@ -146,6 +146,7 @@ export interface Runtime {
       readonly role?: Code;
       readonly requestedBy?: Principal;
       readonly replayOf?: Id;
+      readonly parentRunId?: Id;
       readonly rootSpanParent?: Context;
     },
   ): Promise<RunLoopResult>;
@@ -156,6 +157,7 @@ export interface Runtime {
       readonly role?: Code;
       readonly runId?: Id;
       readonly replayOf?: Id;
+      readonly parentRunId?: Id;
       readonly rootSpanParent?: Context;
       readonly requestedBy?: Principal;
       readonly onProgress?: NonNullable<RunContext["onProgress"]>;

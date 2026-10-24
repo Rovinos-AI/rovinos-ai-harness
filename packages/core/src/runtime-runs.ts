@@ -100,6 +100,7 @@ export type RunControl = (
 export interface RuntimeRunOptions {
   readonly runId?: Id;
   readonly replayOf?: Id;
+  readonly parentRunId?: Id;
   readonly rootSpanParent?: Context;
   readonly role?: Code;
   readonly requestedBy?: Principal;
@@ -139,6 +140,7 @@ export function startRun(
       ids,
       goal,
       ...(options.replayOf === undefined ? {} : { replayOf: options.replayOf }),
+      ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.rootSpanParent === undefined ? {} : { rootSpanParent: options.rootSpanParent }),
       signal,
       ...(options.role === undefined ? {} : { role: options.role }),

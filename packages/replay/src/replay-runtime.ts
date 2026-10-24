@@ -36,6 +36,7 @@ export interface BuildReplayRuntimeOptions {
   readonly toolRegistry?: Pick<ToolPort, "describe" | "getToolSpecs" | "validateInputSchema">;
   readonly policy?: PolicyPort;
   readonly replayRunId?: Id;
+  readonly sourceRunId?: Id;
 }
 
 function rootEvents(resolved: ResolvedRun) {
@@ -55,27 +56,21 @@ export async function buildReplayRuntime(
   options: BuildReplayRuntimeOptions = {},
 ): Promise<ReplayRuntime> {
   const resolved = ResolvedRunSchema.parse(input);
-  const events = rootEvents(resolved);
+  const sourceRunId = options.sourceRunId ?? resolved.rootRunId;
+  const source = resolved.runs.find(({ runId }) => runId === sourceRunId);
+  const events = source?.events ?? rootEvents(resolved);
   const clock = new ReplayClock(events);
   const diagnostics: "replay_ids_exhausted"[] = [];
-  const chronologicalEvents = resolved.runs
-    .flatMap(({ events: runEvents }) => runEvents)
-    .map((event, index) => ({ event, index }))
-    .sort((left, right) => {
-      const timestampOrder = left.event.ts - right.event.ts;
-      return timestampOrder === 0 ? left.index - right.index : timestampOrder;
-    })
-    .map(({ event }) => event);
   const idEvents =
     options.replayRunId === undefined
-      ? chronologicalEvents
-      : chronologicalEvents.filter((event) => event.type !== "run_created");
-  const ids = new ReplayIdGenerator(idEvents, resolved.rootRunId, () => {
+      ? events
+      : events.filter((event) => event.type !== "run_created");
+  const ids = new ReplayIdGenerator(idEvents, sourceRunId, () => {
     if (!diagnostics.includes("replay_ids_exhausted")) {
       diagnostics.push("replay_ids_exhausted");
     }
   });
-  const tool = new ReplayToolPort(resolved, options.toolRegistry, options.replayRunId);
+  const tool = new ReplayToolPort(resolved, options.toolRegistry, options.replayRunId, sourceRunId);
   const sandbox: SandboxBackend = {
     exec: () => Promise.reject(new ReplayExternalAccessError()),
   };
@@ -95,6 +90,7 @@ export async function buildReplayRuntime(
       ids,
       clock,
       ...(options.replayRunId === undefined ? {} : { replayRunId: options.replayRunId }),
+      sourceRunId,
     }),
     sandboxBackend: sandbox,
     store: new InMemoryEventStore(),

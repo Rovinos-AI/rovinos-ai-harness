@@ -246,6 +246,48 @@ describe("replayRun", () => {
     });
   });
 
+  it("replays subagent logs and surfaces child divergence in the root outcome", async () => {
+    const original = await recordRun([completion([{ type: "text", text: "root answer" }])]);
+    const child = await recordRun([completion([{ type: "text", text: "child answer" }])]);
+    const childRunId = Id.parse("00000000000000000000000072");
+    const rootEvents = original.runs[0]?.events ?? [];
+    const childEvents = (child.runs[0]?.events ?? []).map((event) =>
+      Event.parse({
+        ...event,
+        runId: childRunId,
+        ...(event.type === "run_created" ? { parentRunId: original.rootRunId } : {}),
+        ...(event.type === "model_request" ? { requestHash: "d".repeat(64) } : {}),
+      }),
+    );
+    const resolved = ResolvedRunSchema.parse({
+      rootRunId: original.rootRunId,
+      runs: [
+        { runId: original.rootRunId, role: "root", events: rootEvents },
+        {
+          runId: childRunId,
+          role: "subagent",
+          parentRunId: original.rootRunId,
+          events: childEvents,
+        },
+      ],
+    });
+
+    const outcome = await replayRun(resolved, { config: runConfig });
+    const created = outcome.events.filter((event) => event.type === "run_created");
+    const replayRoot = created.find((event) => event.type === "run_created" && event.replayOf === original.rootRunId);
+    const replayChild = created.find((event) => event.type === "run_created" && event.replayOf === childRunId);
+
+    expect(outcome.status).toBe("error");
+    expect(outcome.divergence).toMatchObject({ code: "replay_divergence" });
+    expect(replayRoot?.type).toBe("run_created");
+    expect(replayChild).toMatchObject({
+      type: "run_created",
+      replayOf: childRunId,
+      parentRunId: outcome.replayRunId,
+    });
+    expect(replayChild?.traceId).toBe(outcome.traceId);
+  });
+
   it("resolves recorded approvals and completes suspended runs", async () => {
     const original = await recordRun(
       [
