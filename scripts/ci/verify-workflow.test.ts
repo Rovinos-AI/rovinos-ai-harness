@@ -12,6 +12,7 @@ const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 const stepSchema = z.looseObject({
   name: z.string().optional(),
+  id: z.string().optional(),
   uses: z.string().optional(),
   run: z.string().optional(),
   if: z.string().optional(),
@@ -21,6 +22,7 @@ const stepSchema = z.looseObject({
 const jobSchema = z.looseObject({
   needs: z.string().optional(),
   if: z.string().optional(),
+  outputs: z.record(z.string(), z.string()).optional(),
   "runs-on": z.string(),
   "timeout-minutes": z.number().int().positive(),
   steps: z.array(stepSchema),
@@ -33,6 +35,9 @@ const workflowSchema = z.looseObject({
     "cancel-in-progress": z.boolean(),
   }),
   jobs: z.record(z.string(), jobSchema),
+});
+const workflowCallSchema = z.looseObject({
+  outputs: z.record(z.string(), z.looseObject({ value: z.string().optional() })).optional(),
 });
 const actionSchema = z.looseObject({
   runs: z.looseObject({ using: z.literal("composite"), steps: z.array(stepSchema) }),
@@ -97,11 +102,40 @@ describe("CI workflow", () => {
 
     expect(Object.keys(jobs)).toEqual(["static", "unit", "integration", "gates"]);
     expect(jobs.static?.if).toBe(
-      "github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.event.pull_request.draft == false",
+      "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
     );
     expect(jobs.unit?.needs).toBe("static");
     expect(jobs.integration?.needs).toBe("unit");
     expect(jobs.gates?.needs).toBe("integration");
+  });
+
+  it("runs static checks except for draft pull requests", () => {
+    const condition = readWorkflow().jobs.static?.if;
+
+    expect(condition).toBe(
+      "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
+    );
+
+    const shouldRun = (eventName: string, draft: boolean | undefined): boolean =>
+      eventName !== "pull_request" || draft === false;
+
+    expect(shouldRun("push", undefined)).toBe(true);
+    expect(shouldRun("pull_request", true)).toBe(false);
+    expect(shouldRun("pull_request", false)).toBe(true);
+  });
+
+  it("exposes the gates job result to reusable workflow callers", () => {
+    const workflow = readWorkflow();
+    const workflowCall = workflowCallSchema.parse(workflow.on.workflow_call);
+
+    expect(workflowCall.outputs?.gates?.value).toBe("${{ jobs.gates.outputs.result }}");
+    expect(workflow.jobs.gates?.outputs?.result).toBe(
+      "${{ steps.report-gates-result.outputs.result }}",
+    );
+    const reportResult = jobSteps("gates").find((step) => step.id === "report-gates-result");
+    expect(reportResult?.if).toBe("always()");
+    expect(reportResult?.env?.GATES_RESULT).toBe("${{ job.status }}");
+    expect(reportResult?.run).toContain('echo "result=$GATES_RESULT" >> "$GITHUB_OUTPUT"');
   });
 
   it("pins every action to a full commit SHA", () => {

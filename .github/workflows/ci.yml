@@ -16,7 +16,11 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
-  workflow_call: {}
+  workflow_call:
+    outputs:
+      gates:
+        description: Result of the required gates job.
+        value: ${{ jobs.gates.outputs.result }}
 
 permissions:
   contents: read
@@ -28,8 +32,7 @@ concurrency:
 jobs:
   static:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'workflow_call' ||
+      github.event_name != 'pull_request' ||
       github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -198,6 +201,8 @@ jobs:
     needs: integration
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      result: ${{ steps.report-gates-result.outputs.result }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -229,3 +234,9 @@ jobs:
           name: canary-reports
           path: reports/canary-junit.xml
           if-no-files-found: ignore
+      - name: Report gates result
+        if: always()
+        id: report-gates-result
+        env:
+          GATES_RESULT: ${{ job.status }}
+        run: echo "result=$GATES_RESULT" >> "$GITHUB_OUTPUT"

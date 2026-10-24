@@ -14,6 +14,7 @@ const stepSchema = z.looseObject({
 });
 const jobSchema = z.looseObject({
   needs: z.union([z.string(), z.array(z.string())]).optional(),
+  if: z.string().optional(),
   permissions: z.record(z.string(), z.string()).optional(),
   uses: z.string().optional(),
   steps: z.array(stepSchema).optional(),
@@ -48,6 +49,7 @@ describe("release workflow", () => {
       permissions: { contents: "read" },
     });
     expect(workflow.jobs.verify?.needs).toBe("ci");
+    expect(workflow.jobs.verify?.if).toBe("needs.ci.outputs.gates == 'success'");
     expect(workflow.jobs.verify?.permissions).toEqual({ contents: "read" });
     expect(
       workflow.jobs.verify?.steps?.some((step) => step.name === "Verify gates check run"),
