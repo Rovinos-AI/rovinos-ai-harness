@@ -33,4 +33,5 @@ docker run --pull="$pull_policy" --rm \
   "$image" validate \
   --config=/etc/otel/base.yaml \
   --config=/etc/otel/allowlist.generated.yaml \
+  --config=/etc/otel/policy-version.generated.yaml \
   --config="/etc/otel/$profile_file"

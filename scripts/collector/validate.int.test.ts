@@ -24,11 +24,7 @@ async function compose(args: string[]): Promise<string> {
       "--project-name",
       projectName,
       "--file",
-      "infra/compose/docker-compose.yml",
-      "--file",
-      "infra/compose/docker-compose.dev.yml",
-      "--profile",
-      "dev",
+      "infra/compose/docker-compose.test.yml",
       ...args,
     ],
     { ...commandOptions, cwd: root },
@@ -73,6 +69,12 @@ it("serves the health endpoint on a loopback-only published port", async () => {
       commandOptions,
     );
     expect(requireStdout(droppedCapabilities.stdout).trim()).toContain("ALL");
+    const publishedPorts = await execFileAsync(
+      "docker",
+      ["inspect", "--format", "{{json .HostConfig.PortBindings}}", containerId],
+      commandOptions,
+    );
+    expect(requireStdout(publishedPorts.stdout)).not.toContain('"8888/tcp"');
 
     const publishedPort = await compose(["port", "otel-collector", "13133"]);
     const hostPort = publishedPort.trim().split(":").at(-1);
@@ -96,7 +98,24 @@ it("serves the health endpoint on a loopback-only published port", async () => {
       }
     }
     expect(healthy).toBe(true);
+
+    await compose([
+      "up",
+      "--wait",
+      "--wait-timeout",
+      "75",
+      "--pull=never",
+      "otel-health-wait",
+    ]);
+    const helperId = (await compose(["ps", "--quiet", "otel-health-wait"])).trim();
+    expect(helperId).not.toBe("");
+    const helperHealth = await execFileAsync(
+      "docker",
+      ["inspect", "--format", "{{.State.Health.Status}}", helperId],
+      commandOptions,
+    );
+    expect(requireStdout(helperHealth.stdout).trim()).toBe("healthy");
   } finally {
     await compose(["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
   }
-}, 60_000);
+}, 120_000);

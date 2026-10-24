@@ -105,6 +105,7 @@ service:
         - "filter/drop_span_events"
         - "transform/span_attributes"
         - "transform/resource_attributes"
+        - "resource/policy_version"
         - "batch"
     logs:
       processors:
@@ -112,6 +113,7 @@ service:
         - "filter/drop_unregistered_logs"
         - "transform/log_attributes"
         - "transform/resource_attributes"
+        - "resource/policy_version"
         - "batch"
     metrics:
       processors:
@@ -119,4 +121,5 @@ service:
         - "filter/drop_unregistered_metrics"
         - "transform/metric_attributes"
         - "transform/resource_attributes"
+        - "resource/policy_version"
         - "batch"

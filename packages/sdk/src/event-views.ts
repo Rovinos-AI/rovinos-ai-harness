@@ -2,14 +2,13 @@
 import {
   JsonValue as JsonValueSchema,
   splitEvent,
-  type Code,
   type Event,
   type Id,
   type KeyProvider,
 } from "@harness/schemas";
 import type { Runtime } from "@harness/core";
 import type { SafeEvent } from "@harness/telemetry";
-import { toSafeEvent } from "@harness/telemetry";
+import { POLICY_VERSION, toSafeEvent } from "@harness/telemetry";
 import { pseudonymize } from "@harness/vault";
 
 /** Reads all stored events for one run. */
@@ -24,14 +23,13 @@ export async function readEvents(runtime: Runtime, runId: Id): Promise<Event[]> 
 /** Projects events through the safe-event allowlist and optionally adds principal pseudonyms. */
 export async function safeEvents(
   events: readonly Event[],
-  policyVersion: Code,
   correlationEnabled: boolean,
   keyProvider: KeyProvider,
 ): Promise<SafeEvent[]> {
   const projected = await Promise.all(
     events.map(async (event) => {
       if (!correlationEnabled) {
-        return toSafeEvent(event, policyVersion);
+        return toSafeEvent(event, POLICY_VERSION);
       }
       try {
         const pseudonyms = {
@@ -54,9 +52,9 @@ export async function safeEvents(
               }
             : {}),
         };
-        return toSafeEvent(event, policyVersion, pseudonyms);
+        return toSafeEvent(event, POLICY_VERSION, pseudonyms);
       } catch {
-        return toSafeEvent(event, policyVersion);
+        return toSafeEvent(event, POLICY_VERSION);
       }
     }),
   );

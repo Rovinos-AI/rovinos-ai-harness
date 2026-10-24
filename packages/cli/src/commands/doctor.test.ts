@@ -52,6 +52,79 @@ afterEach(async () => {
 });
 
 describe("harness doctor", () => {
+  it("checks the collector health endpoint derived from the configured OTLP host", async () => {
+    await createDataDirectory();
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.test:4318/v1/traces");
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    const { context, stdout } = createContext(() =>
+      Promise.resolve(HarnessConfigSchema.parse({})),
+    );
+
+    const exitCode = await main(["--json", "doctor"], context);
+    const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+    const requestedInput = fetcher.mock.calls[0]?.[0];
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(requestedInput).toBeInstanceOf(URL);
+    if (!(requestedInput instanceof URL)) {
+      throw new Error("Expected the collector health request to use a URL.");
+    }
+    expect(requestedInput.href).toBe("http://collector.test:13133/");
+    expect(results).toContainEqual({
+      id: "collector_reachable",
+      status: "ok",
+      code: "collector_reachable",
+    });
+  });
+
+  it("reports an unsuccessful collector health response", async () => {
+    await createDataDirectory();
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.test:4318");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 503 })),
+    );
+    const { context, stdout } = createContext(() =>
+      Promise.resolve(HarnessConfigSchema.parse({})),
+    );
+
+    const exitCode = await main(["--json", "doctor"], context);
+    const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(results).toContainEqual({
+      id: "collector_reachable",
+      status: "fail",
+      code: "collector_unreachable",
+    });
+  });
+
+  it("fails closed without exposing OTLP endpoint credentials", async () => {
+    await createDataDirectory();
+    const endpoint = "http://collector.test:4318/?token=collector-health-canary";
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint);
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const { context, stdout, stderr } = createContext(() =>
+      Promise.resolve(HarnessConfigSchema.parse({})),
+    );
+
+    const exitCode = await main(["--json", "doctor"], context);
+    const output = stdout.join("") + stderr.join("");
+    const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(results).toContainEqual({
+      id: "collector_reachable",
+      status: "fail",
+      code: "collector_unreachable",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(output).not.toContain(endpoint);
+    expect(output).not.toContain("collector-health-canary");
+  });
+
   it("prints a human-readable table and treats warnings as successful", async () => {
     await createDataDirectory();
     const check: DoctorCheckStatus = { status: "warn", code: "sample_warn" };

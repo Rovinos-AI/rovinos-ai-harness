@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { POLICY_VERSION } from "@harness/telemetry";
 import { expect, it } from "vitest";
 import { parseYaml } from "@harness/schemas";
 import { z } from "zod";
@@ -42,6 +43,7 @@ it("keeps collector and Compose YAML free of literal credentials", () => {
   for (const path of [
     "infra/collector/base.yaml",
     "infra/collector/allowlist.generated.yaml",
+    "infra/collector/policy-version.generated.yaml",
     "infra/collector/profile-debug.yaml",
     ...composeFiles,
   ]) {
@@ -82,6 +84,7 @@ it("binds every published Compose port to loopback", () => {
 it("sets the receiver, processors, health endpoint, and debug pipelines", () => {
   const base = readYaml("infra/collector/base.yaml");
   const allowlist = readYaml("infra/collector/allowlist.generated.yaml");
+  const policyVersion = readYaml("infra/collector/policy-version.generated.yaml");
   const profile = readYaml("infra/collector/profile-debug.yaml");
 
   expect(base.receivers).toMatchObject({
@@ -136,6 +139,17 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     "transform/metric_attributes": { error_mode: "ignore" },
     "transform/resource_attributes": { error_mode: "ignore" },
   });
+  expect(policyVersion.processors).toMatchObject({
+    "resource/policy_version": {
+      attributes: [
+        {
+          key: "harness.policy.version",
+          value: POLICY_VERSION,
+          action: "upsert",
+        },
+      ],
+    },
+  });
   const spanAttributes = yamlSchema.parse(processors["transform/span_attributes"]);
   expect(z.array(z.string()).parse(spanAttributes.trace_statements)).toEqual(
     expect.arrayContaining(["keep_keys(scope.attributes, [])", "set(span.links, nil)"]),
@@ -162,6 +176,7 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
           "filter/drop_span_events",
           "transform/span_attributes",
           "transform/resource_attributes",
+          "resource/policy_version",
           "batch",
         ],
       },
@@ -171,6 +186,7 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
           "filter/drop_unregistered_logs",
           "transform/log_attributes",
           "transform/resource_attributes",
+          "resource/policy_version",
           "batch",
         ],
       },
@@ -180,6 +196,7 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
           "filter/drop_unregistered_metrics",
           "transform/metric_attributes",
           "transform/resource_attributes",
+          "resource/policy_version",
           "batch",
         ],
       },
@@ -204,4 +221,42 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
   expect(profile).not.toHaveProperty("service.pipelines.traces.processors");
   expect(profile).not.toHaveProperty("service.pipelines.logs.processors");
   expect(profile).not.toHaveProperty("service.pipelines.metrics.processors");
+});
+
+it("does not publish collector self-metrics outside the internal network", () => {
+  for (const path of composeFiles) {
+    const services = readYaml(path).services;
+    if (!isRecord(services) || !isRecord(services["otel-collector"])) {
+      continue;
+    }
+    const ports = services["otel-collector"].ports;
+    expect(Array.isArray(ports) ? ports : []).not.toContainEqual(
+      expect.stringMatching(/(?:^|:)8888(?::|$)/u),
+    );
+  }
+});
+
+it("places the policy-version processor last before batch in every profile pipeline", () => {
+  const allowlistPipelines = yamlSchema.parse(
+    yamlSchema.parse(readYaml("infra/collector/allowlist.generated.yaml").service).pipelines,
+  );
+  const profiles = readdirSync(resolve(root, "infra/collector")).filter((filename) =>
+    /^profile-.*\.yaml$/u.test(filename),
+  );
+
+  expect(profiles.length).toBeGreaterThan(0);
+  for (const filename of profiles) {
+    const profilePipelines = yamlSchema.parse(
+      yamlSchema.parse(readYaml(`infra/collector/${filename}`).service).pipelines,
+    );
+    for (const signal of ["traces", "logs", "metrics"] as const) {
+      const profilePipeline = yamlSchema.parse(profilePipelines[signal]);
+      const configuredProcessors = profilePipeline.processors;
+      const processors =
+        configuredProcessors === undefined
+          ? z.array(z.string()).parse(yamlSchema.parse(allowlistPipelines[signal]).processors)
+          : z.array(z.string()).parse(configuredProcessors);
+      expect(processors.slice(-2)).toEqual(["resource/policy_version", "batch"]);
+    }
+  }
 });
