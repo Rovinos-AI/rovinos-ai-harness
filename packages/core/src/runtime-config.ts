@@ -24,6 +24,7 @@ import {
   type VaultConfig,
 } from "@harness/schemas";
 import type { z } from "zod";
+import type { Context } from "@opentelemetry/api";
 import type { SandboxBackend, WorkspaceSnapshotPort } from "@harness/sandbox";
 import type { ProviderAdapter } from "@harness/models";
 import type { McpConnectionDependencies } from "@harness/mcp";
@@ -143,7 +144,13 @@ export interface Runtime {
   readonly ids: IdGenerator;
   run(
     goal: JsonValue,
-    options?: { readonly role?: Code; readonly requestedBy?: Principal },
+    options?: {
+      readonly role?: Code;
+      readonly requestedBy?: Principal;
+      readonly replayOf?: Id;
+      readonly parentRunId?: Id;
+      readonly rootSpanParent?: Context;
+    },
   ): Promise<RunLoopResult>;
   /** Starts a run and exposes when its initial events are durable and when execution settles. */
   start(
@@ -151,6 +158,9 @@ export interface Runtime {
     options?: {
       readonly role?: Code;
       readonly runId?: Id;
+      readonly replayOf?: Id;
+      readonly parentRunId?: Id;
+      readonly rootSpanParent?: Context;
       readonly requestedBy?: Principal;
       readonly onProgress?: NonNullable<RunContext["onProgress"]>;
     },

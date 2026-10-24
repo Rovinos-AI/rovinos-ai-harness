@@ -903,6 +903,7 @@ export declare const RunViewSchema: z.ZodObject<{
             run_created: "run_created";
         }>;
         configHash: z.ZodString;
+        replayOf: z.ZodOptional<z.ZodString>;
         requestedByPseudonym: z.ZodOptional<z.ZodString>;
         runId: z.ZodString;
         seq: z.ZodNumber;

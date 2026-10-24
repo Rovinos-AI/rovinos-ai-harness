@@ -18,6 +18,7 @@ const expectedSpanNames = [
   "harness.compaction",
   "harness.input_wait",
   "harness.model_call",
+  "harness.replay",
   "harness.run",
   "harness.tool_call",
   "harness.ui.decision",

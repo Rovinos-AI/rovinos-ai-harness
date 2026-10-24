@@ -135,10 +135,23 @@ describe("Event", () => {
     expect(Event.parse({ ...created, continuationOf: created.runId })).toMatchObject({
       continuationOf: created.runId,
     });
+
     expect(Event.parse({ ...input, inputKind: "follow_up" })).toMatchObject({
       inputKind: "follow_up",
     });
     expect(Event.safeParse({ ...input, inputKind: "other" }).success).toBe(false);
+  });
+
+  it("accepts replayOf as run metadata", () => {
+    const created = eventSamples.find(({ type }) => type === "run_created");
+    if (created?.type !== "run_created") {
+      throw new Error("Missing run_created sample.");
+    }
+
+    expect(Event.parse({ ...created, replayOf: "00000000000000000000000002" })).toMatchObject({
+      replayOf: "00000000000000000000000002",
+    });
+    expect(Event.safeParse({ ...created, replayOf: "not-an-id" }).success).toBe(false);
   });
 
   it("requires nonnegative token usage on terminal subagent events", () => {

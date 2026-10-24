@@ -6,16 +6,31 @@ uses synthetic input and requests approval before writing a file in the run's is
 ## Prerequisites
 
 - Docker Engine or Docker Desktop with Compose v2.
+- Node 26 with Corepack for Yarn; run `mise install` to install the pinned Node version.
 - A POSIX-compatible shell.
 
-The first setup builds the harness and sandbox-runner images locally. The generated encryption key
-is stored in the ignored `examples/quickstart/.env` file. Control-plane and sandbox-runner tokens
-are generated inside the stack and kept in a named volume with per-service ownership and `0400`
-permissions; you do not need to create or handle token files.
+From the repository root, run:
+
+```bash
+yarn quickstart
+```
+
+The sample pauses for human approval and prints the run id plus the exact approval and resume
+commands. Run `yarn quickstart --yes` to approve and resume automatically. Run `yarn quickstart:down`
+to stop the stack and remove its volumes and generated `.env`.
+
+The command creates `examples/quickstart/.env` with mode `0600` and keeps the generated encryption
+key out of its output. It builds the harness and sandbox-runner images sequentially, then starts the
+stack. Control-plane and sandbox-runner tokens are generated inside the stack and kept in a named
+volume with per-service ownership and `0400` permissions; you do not need to create or handle token
+files.
+
+## Manual setup (without Node)
+
+The following steps are the manual equivalent of `yarn quickstart`. They assume you are running
+from the repository root.
 
 ## Command helpers
-
-The commands below assume you are running them from the repository root.
 
 <!-- test:prelude -->
 
