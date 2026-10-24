@@ -11,6 +11,7 @@ import { PostgresEventStore } from "./postgres/adapter.js";
 import { openPostgresEventStore } from "./postgres/open.js";
 import { encodeEvents } from "./postgres/helpers.js";
 import {
+  assertWatchSubscriptionConformance,
   createEventBuilders,
   runConcurrencyConformance,
   runEventStoreConformance,
@@ -154,6 +155,13 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
   supportsFileReopen: false,
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
+
+it.each(Array.from({ length: 200 }, (_, index) => index))(
+  "catches immediate subscription writes with a cold Postgres listener (%i)",
+  async () => {
+    await assertWatchSubscriptionConformance(encryptedPostgresFactory, createEventBuilders());
+  },
+);
 
 it("serializes concurrent quota ledger updates with event appends", async () => {
   const { admin, schema } = await createSchema();
