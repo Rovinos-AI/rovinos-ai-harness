@@ -8,15 +8,41 @@ import { execFileAsync } from "../scripts/release/check-publish-surface.js";
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const temporaryDirectories: string[] = [];
 
+async function withCommandDiagnostics<T>(command: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    let exitCode = "unknown";
+    let stderr = "";
+    if (typeof error === "object" && error !== null) {
+      if ("code" in error && (typeof error.code === "number" || typeof error.code === "string")) {
+        exitCode = String(error.code);
+      }
+      if ("stderr" in error) {
+        if (typeof error.stderr === "string") {
+          stderr = error.stderr;
+        } else if (Buffer.isBuffer(error.stderr)) {
+          stderr = error.stderr.toString("utf8");
+        }
+      }
+    }
+    const stderrTailLines = stderr.trim().split(/\r?\n/u).slice(-20).join("\n");
+    const stderrTail = stderrTailLines === "" ? "(empty)" : stderrTailLines;
+    expect.fail(`${command} failed with exit code ${exitCode}.\nTail of stderr:\n${stderrTail}`);
+  }
+}
+
 async function pack(
   packageName: "sdk" | "cli" | "store-sqlite",
   outputPath: string,
 ): Promise<void> {
-  await execFileAsync("corepack", ["yarn", "pack", "--out", outputPath], {
-    cwd: join(repositoryRoot, "packages", packageName),
-    maxBuffer: 10_000_000,
-    timeout: 120_000,
-  });
+  await withCommandDiagnostics(`corepack yarn pack (${packageName})`, () =>
+    execFileAsync("corepack", ["yarn", "pack", "--out", outputPath], {
+      cwd: join(repositoryRoot, "packages", packageName),
+      maxBuffer: 10_000_000,
+      timeout: 120_000,
+    }),
+  );
 }
 
 describe("published package smoke test", () => {
@@ -24,6 +50,21 @@ describe("published package smoke test", () => {
     await Promise.all(
       temporaryDirectories.map((directory) => rm(directory, { recursive: true, force: true })),
     );
+  });
+
+  it("reports the exit code and stderr tail when a child command fails", async () => {
+    const stderr = Array.from({ length: 25 }, (_, index) => `line ${String(index + 1)}`).join("\n");
+    const childFailure = Object.assign(new Error("child command failed"), { code: 23, stderr });
+    const failureMessage = await withCommandDiagnostics("example command", () =>
+      Promise.reject(childFailure),
+    ).then(
+      () => "",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    expect(failureMessage).toContain("exit code 23");
+    expect(failureMessage).toContain("line 25");
+    expect(failureMessage).not.toContain("line 1\n");
   });
 
   it("installs the SDK and CLI tarballs outside the workspace", async () => {
@@ -61,17 +102,20 @@ describe("published package smoke test", () => {
       join(projectDirectory, ".yarnrc.yml"),
       "nodeLinker: node-modules\nenableScripts: false\nenableTelemetry: false\n",
     );
-    await execFileAsync("corepack", ["yarn", "install"], {
-      cwd: projectDirectory,
-      env: {
-        ...process.env,
-        YARN_CACHE_FOLDER: join(homedir(), ".yarn", "berry", "cache"),
-        YARN_ENABLE_IMMUTABLE_INSTALLS: "false",
-        YARN_ENABLE_NETWORK: "false",
-      },
-      maxBuffer: 10_000_000,
-      timeout: 120_000,
-    });
+    await withCommandDiagnostics("corepack yarn install", () =>
+      execFileAsync("corepack", ["yarn", "install"], {
+        cwd: projectDirectory,
+        env: {
+          ...process.env,
+          YARN_CACHE_FOLDER: join(homedir(), ".yarn", "berry", "cache"),
+          // This temporary project has a different dependency graph from the copied lockfile.
+          YARN_ENABLE_IMMUTABLE_INSTALLS: "false",
+          YARN_ENABLE_NETWORK: "false",
+        },
+        maxBuffer: 10_000_000,
+        timeout: 120_000,
+      }),
+    );
 
     const smokeFile = join(projectDirectory, "sdk-smoke.mjs");
     await writeFile(
@@ -101,22 +145,28 @@ describe("published package smoke test", () => {
         "}",
       ].join("\n"),
     );
-    await execFileAsync("corepack", ["yarn", "node", smokeFile], {
-      cwd: projectDirectory,
-      maxBuffer: 10_000_000,
-      timeout: 120_000,
-    });
+    await withCommandDiagnostics("corepack yarn node sdk-smoke.mjs", () =>
+      execFileAsync("corepack", ["yarn", "node", smokeFile], {
+        cwd: projectDirectory,
+        maxBuffer: 10_000_000,
+        timeout: 120_000,
+      }),
+    );
 
-    const version = await execFileAsync("corepack", ["yarn", "run", "harness", "--version"], {
-      cwd: projectDirectory,
-      maxBuffer: 1_000_000,
-      timeout: 30_000,
-    });
-    const help = await execFileAsync("corepack", ["yarn", "run", "harness", "--help"], {
-      cwd: projectDirectory,
-      maxBuffer: 1_000_000,
-      timeout: 30_000,
-    });
+    const version = await withCommandDiagnostics("corepack yarn run harness --version", () =>
+      execFileAsync("corepack", ["yarn", "run", "harness", "--version"], {
+        cwd: projectDirectory,
+        maxBuffer: 1_000_000,
+        timeout: 30_000,
+      }),
+    );
+    const help = await withCommandDiagnostics("corepack yarn run harness --help", () =>
+      execFileAsync("corepack", ["yarn", "run", "harness", "--help"], {
+        cwd: projectDirectory,
+        maxBuffer: 1_000_000,
+        timeout: 30_000,
+      }),
+    );
     expect(version.stdout).toContain("0.0.0");
     expect(help.stdout).toContain("Usage");
   }, 240_000);
