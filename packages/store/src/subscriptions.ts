@@ -368,6 +368,10 @@ export async function* watchRunSummaries(
   try {
     const initialSummaries = await initialSummariesPromise;
     yield* initialRunSummaries(initialSummaries, options, seen);
+    if (initialSubscription instanceof Promise) {
+      // LISTEN may become ready after the initial snapshot; replay that gap before waiting.
+      yield* changedRunSummaries(store, await allRunSummaries(store), options, seen);
+    }
     while (!options.signal.aborted) {
       await subscription.changed;
       const previousSubscription = subscription;
