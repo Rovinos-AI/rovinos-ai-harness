@@ -69,7 +69,11 @@ describe("CI workflow", () => {
   it("runs on pull requests to main without privileged triggers", () => {
     const workflow = readWorkflow();
 
-    expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "workflow_dispatch"]);
+    expect(Object.keys(workflow.on).sort()).toEqual([
+      "pull_request",
+      "workflow_call",
+      "workflow_dispatch",
+    ]);
     expect(workflow.on.pull_request).toEqual({
       branches: ["main"],
       types: ["opened", "synchronize", "reopened", "ready_for_review"],
@@ -93,7 +97,7 @@ describe("CI workflow", () => {
 
     expect(Object.keys(jobs)).toEqual(["static", "unit", "integration", "gates"]);
     expect(jobs.static?.if).toBe(
-      "github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false",
+      "github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.event.pull_request.draft == false",
     );
     expect(jobs.unit?.needs).toBe("static");
     expect(jobs.integration?.needs).toBe("unit");
@@ -157,13 +161,7 @@ describe("CI workflow", () => {
 
     expect(step?.run).toContain("scripts/release/verify-release.ts --dry-run");
     expect(step?.run).toContain('cd "packages/$package" && yarn pack --dry-run');
-    expect(step?.run).toContain("docker build --file Dockerfile --tag harness:dry-run .");
-    expect(step?.run).toContain(
-      "docker build --file Dockerfile.sandbox --tag sandbox-runner:dry-run .",
-    );
-    expect(step?.run).toContain(
-      "docker build --file Dockerfile.sandbox --tag sandbox-egress-proxy:dry-run .",
-    );
+    expect(step?.run).not.toContain("docker build");
     expect(step?.run).not.toContain("docker push");
     expect(step?.run).not.toContain("npm publish");
   });

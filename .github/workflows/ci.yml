@@ -16,6 +16,7 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
+  workflow_call: {}
 
 permissions:
   contents: read
@@ -26,7 +27,10 @@ concurrency:
 
 jobs:
   static:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'workflow_call' ||
+      github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -70,9 +74,6 @@ jobs:
           for package in sdk cli store-sqlite store-postgres; do
             (cd "packages/$package" && yarn pack --dry-run)
           done
-          docker build --file Dockerfile --tag harness:dry-run .
-          docker build --file Dockerfile.sandbox --tag sandbox-runner:dry-run .
-          docker build --file Dockerfile.sandbox --tag sandbox-egress-proxy:dry-run .
       - name: Validate Compose security profiles
         run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/compose/validate.ts
       - name: Test policy examples

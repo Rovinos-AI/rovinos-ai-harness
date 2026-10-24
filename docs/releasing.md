@@ -8,16 +8,17 @@ package uses the same version. All other workspace packages remain private and i
 generates package changelogs when maintainers apply a release plan with `yarn changeset version`.
 
 Pull requests that change package files outside Markdown documentation must include a Changeset.
-The CI release dry run checks all four package archives, validates package version consistency, and
-builds the harness, sandbox runner, and egress proxy images without pushing them.
+The CI release dry run checks all four package archives and validates package version consistency.
+The integration job builds the harness and sandbox images without pushing them.
 
-To publish, create and push a `vX.Y.Z` tag for a commit whose GitHub Actions `gates` check run
-succeeded. The tag must match all four package versions, and no unapplied Changesets may remain.
-The tag-triggered workflow builds and tests the source, publishes the four packages with npm
-provenance through trusted publishing, builds and pushes the images to
-`ghcr.io/rovinos-ai/{harness,sandbox-runner,sandbox-egress-proxy}` with version and `latest` tags,
-signs each image with cosign keyless signing, and attaches a BuildKit SBOM attestation. The GitHub
-Release includes the package changelog notes and the Compose deployment files.
+To publish, create and push a `vX.Y.Z` tag for the matching package versions, with no unapplied
+Changesets. The tag-triggered workflow runs the full CI workflow on the tagged tree, then verifies
+release metadata and community files. It publishes the four packages from packed tarballs with npm
+provenance through trusted publishing, builds and pushes
+`ghcr.io/rovinos-ai/harness` and `ghcr.io/rovinos-ai/harness-sandbox` with version tags, signs each
+image with cosign keyless signing, and attaches a BuildKit SBOM attestation. Once package publishing
+succeeds, it moves the image `latest` tags and creates a GitHub Release with package changelog notes
+and the Compose deployment files. Reruns skip npm versions and GitHub Releases that already exist.
 
 Before the first release, configure the GitHub Actions trusted publisher for each npm package (see
 the [npm trusted publishing guide](https://docs.npmjs.com/guides/trusted-publishers)), using
@@ -28,8 +29,8 @@ short-lived npm token, then configure the trusted publisher and remove that toke
 the release workflow never accepts or stores an npm token. Ensure the first release uses a version
 newer than the placeholder.
 
-Releases are blocked if the tagged commit's `gates` check is missing or unsuccessful, release
-metadata is inconsistent, the community-file check with `RELEASE=1` fails, or any build, test,
-publication, image-signing, or SBOM step fails. Node.js 26 or later is required for all published
-packages. The release decisions are recorded in
+Releases are blocked if any CI gate fails, release metadata is inconsistent, a packed package
+contains an unresolved `workspace:` dependency, the community-file check with `RELEASE=1` fails, or
+any build, test, publication, image-signing, or SBOM step fails. Node.js 26 or later is required for
+all published packages. The release decisions are recorded in
 [ADR 0002](decisions/0002-release-pipeline.md).

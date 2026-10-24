@@ -13,38 +13,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   verify:
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      checks: read
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify gates check run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          check_runs="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" | jq -s '[.[] | .check_runs[] | select(.name == "gates")] | sort_by(.started_at)')"
-          if ! printf '%s' "$check_runs" | jq -e 'length > 0 and last.status == "completed" and last.conclusion == "success"' >/dev/null; then
-            echo "The tagged commit does not have a successful gates check run."
-            exit 1
-          fi
       - uses: ./.github/actions/node-setup
       - name: Verify release metadata
         run: |
           yarn build:schemas
           yarn verify:release "$GITHUB_REF_NAME"
-      - name: Build and test tagged source
+      - name: Check release community files
         run: |
-          yarn build
-          yarn test:unit --coverage
-          yarn test:canary
-          yarn test:replay
           RELEASE=1 node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/docs/check-community-files.ts
 
   publish:
@@ -72,7 +63,6 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          version="${tag#v}"
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           docker buildx create --name release-builder --driver docker-container --use
@@ -85,7 +75,6 @@ jobs:
             docker buildx build \
               --file "$dockerfile" \
               --tag "$image:$tag" \
-              --tag "$image:latest" \
               --sbom=true \
               --provenance=true \
               --push \
@@ -100,19 +89,45 @@ jobs:
           }
 
           build_and_sign "ghcr.io/$owner/harness" Dockerfile
-          build_and_sign "ghcr.io/$owner/sandbox-runner" Dockerfile.sandbox
-          build_and_sign "ghcr.io/$owner/sandbox-egress-proxy" Dockerfile.sandbox
-      - name: Publish npm packages with provenance
+          build_and_sign "ghcr.io/$owner/harness-sandbox" Dockerfile.sandbox
+      - name: Pack and publish npm packages with provenance
         run: |
           set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
           for package in sdk cli store-sqlite store-postgres; do
-            (cd "packages/$package" && npm publish --provenance --access public)
+            name="@rovinos/$package"
+            tarball="$RUNNER_TEMP/$package.tgz"
+            (cd "packages/$package" && yarn pack --out "$tarball")
+            if tar -xOf "$tarball" package/package.json | grep -F '"workspace:' >/dev/null; then
+              echo "Packed manifest for $name contains an unresolved workspace dependency."
+              exit 1
+            fi
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published; skipping."
+            else
+              npm publish "$tarball" --provenance --access public
+            fi
+          done
+      - name: Move GHCR latest tags
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          for image in harness harness-sandbox; do
+            docker buildx imagetools create \
+              --tag "ghcr.io/$owner/$image:latest" \
+              "ghcr.io/$owner/$image:$tag"
           done
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "GitHub Release $GITHUB_REF_NAME already exists; skipping."
+            exit 0
+          fi
           notes="$RUNNER_TEMP/release-notes.md"
           : > "$notes"
           for package in sdk cli store-sqlite store-postgres; do
