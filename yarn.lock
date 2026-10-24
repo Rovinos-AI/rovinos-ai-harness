@@ -1913,7 +1913,9 @@ __metadata:
     "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
+    "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
+    "@opentelemetry/api": "npm:1.9.1"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.7"
   languageName: unknown

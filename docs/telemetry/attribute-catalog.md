@@ -88,6 +88,15 @@ Owner task: `25.3`.
 
 Owner task: `4.1`.
 
+### `harness.replay`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Optional | `@harness/replay` |
+| `harness.replay.original_run_id` | Id | Required | `@harness/replay` |
+
+Owner task: `9.3`.
+
 ### `harness.run`
 
 | Attribute | Type | Presence | Owning package |

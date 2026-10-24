@@ -13,14 +13,15 @@ import { ReplayDivergenceError, ReplayModelPort } from "./replay-model.js";
 import type { ReplayMissingResultError } from "./replay-model.js";
 
 const runId = Id.parse("00000000000000000000000001");
+const childRunId = Id.parse("00000000000000000000000007");
 const segmentId = Id.parse("00000000000000000000000002");
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
 const ids = { next: () => Id.parse("00000000000000000000000009") };
 const clock = { now: () => 100 };
 
-function base(seq: number) {
-  return { runId, seq, ts: seq + 1, v: 1, traceId, spanId, segmentId };
+function base(seq: number, eventRunId = runId) {
+  return { runId: eventRunId, seq, ts: seq + 1, v: 1, traceId, spanId, segmentId };
 }
 
 function request(text: string, requestId: string): ModelRequest {
@@ -33,9 +34,9 @@ function request(text: string, requestId: string): ModelRequest {
   });
 }
 
-function requestEvent(seq: number, req: ModelRequest): Event {
+function requestEvent(seq: number, req: ModelRequest, eventRunId = runId): Event {
   return EventSchema.parse({
-    ...base(seq),
+    ...base(seq, eventRunId),
     type: "model_request",
     requestId: req.requestId,
     provider: req.model.provider,
@@ -46,9 +47,9 @@ function requestEvent(seq: number, req: ModelRequest): Event {
   });
 }
 
-function responseEvent(seq: number, req: ModelRequest, text: string): Event {
+function responseEvent(seq: number, req: ModelRequest, text: string, eventRunId = runId): Event {
   return EventSchema.parse({
-    ...base(seq),
+    ...base(seq, eventRunId),
     type: "model_response",
     requestId: req.requestId,
     provider: req.model.provider,
@@ -150,5 +151,40 @@ describe("ReplayModelPort", () => {
       code: "replay_missing_result",
       seq: 1,
     } satisfies Partial<ReplayMissingResultError>);
+  });
+
+  it("serves a subagent response from that run's event log", async () => {
+    const childRequest = request("child prompt", "00000000000000000000000008");
+    const childCreated = EventSchema.parse({
+      ...base(0, childRunId),
+      type: "run_created",
+      configHash: "c".repeat(64),
+      policyVersion: "test",
+      parentRunId: runId,
+    });
+    const resolvedWithChild = ResolvedRunSchema.parse({
+      rootRunId: runId,
+      runs: [
+        { runId, role: "root", events: [runCreated] },
+        {
+          runId: childRunId,
+          role: "subagent",
+          parentRunId: runId,
+          events: [
+            childCreated,
+            requestEvent(1, childRequest, childRunId),
+            responseEvent(2, childRequest, "child response", childRunId),
+          ],
+        },
+      ],
+    });
+    const model = new ReplayModelPort(resolvedWithChild, { ids, clock });
+
+    const result = await model.complete(childRequest, {
+      runId: childRunId,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.parts).toEqual([{ type: "text", text: "child response" }]);
   });
 });

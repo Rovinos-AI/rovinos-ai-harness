@@ -297,6 +297,7 @@ export interface IdGenerator {
 export interface NewRunMetadata {
   readonly configHash: Sha256Hex;
   readonly policyVersion: Code;
+  readonly replayOf?: Id;
   readonly parentRunId?: Id;
   readonly parentCallId?: Id;
   readonly continuationOf?: Id;
