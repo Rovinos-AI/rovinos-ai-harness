@@ -23,7 +23,7 @@ COPY --from=manifests /manifests/ ./
 RUN mise exec -- yarn install --immutable
 COPY . .
 RUN mise exec -- yarn build
-RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/store-sqlite --production \
+RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store-sqlite --production \
     && mkdir -p /out/dist /out/packages \
     && cp -a node_modules /out/node_modules \
     && for package in packages/*/; do \

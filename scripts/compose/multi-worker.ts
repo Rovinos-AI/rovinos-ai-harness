@@ -26,6 +26,7 @@ interface ComposeContext extends MultiWorkerComposeOptions {
 interface RunHarnessScriptOptions {
   readonly name?: string;
   readonly detach?: boolean;
+  readonly envFile?: string;
 }
 
 interface MultiWorkerCompose {
@@ -124,6 +125,7 @@ function createScriptContainerArgs(
   context: ComposeContext,
   containerName: string,
   script: string,
+  envFile?: string,
 ): string[] {
   const secrets: readonly [string, string][] = [
     ["sandbox_runner_token", context.secretFiles.runnerToken],
@@ -164,6 +166,7 @@ function createScriptContainerArgs(
     "HARNESS_CONFIG=/run/prod-like.yaml",
     "--env",
     "HARNESS_DATA_DIR=/var/lib/harness/event-store",
+    ...(envFile === undefined ? [] : ["--env-file", envFile]),
     "--mount",
     `type=bind,source=${join(context.root, "test/fixtures/prod-like-multi.yaml")},target=/run/prod-like.yaml,readonly`,
     ...secrets.flatMap(([name, path]) => [
@@ -184,8 +187,9 @@ function runHarnessScript(
   containerName: string,
   script: string,
   detach: boolean,
+  envFile?: string,
 ): string {
-  execFileSync("docker", createScriptContainerArgs(context, containerName, script), {
+  execFileSync("docker", createScriptContainerArgs(context, containerName, script, envFile), {
     encoding: "utf8",
   });
   execFileSync("docker", ["network", "connect", `${context.projectName}_sandbox`, containerName], {
@@ -245,7 +249,13 @@ export function createMultiWorkerCompose(options: MultiWorkerComposeOptions): Mu
       const containerName =
         runOptions.name ??
         `${context.projectName}-script-${String(process.pid)}-${String(++scriptContainerSequence)}`;
-      return runHarnessScript(context, containerName, script, runOptions.detach === true);
+      return runHarnessScript(
+        context,
+        containerName,
+        script,
+        runOptions.detach === true,
+        runOptions.envFile,
+      );
     },
     waitForLog,
     removeContainer: (container) => {
