@@ -495,6 +495,7 @@ store: {}`,
         allowedHosts: ["127.0.0.1", "localhost", "::1"],
         rateLimitPerMinute: 120,
       },
+      deployment: { mode: "single" },
       run: {
         checkpointEveryEvents: 20,
         shutdownGraceMs: 20_000,

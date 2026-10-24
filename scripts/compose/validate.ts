@@ -55,8 +55,22 @@ function hasNoNewPrivileges(service: Record<string, unknown>): boolean {
   return stringList(service.security_opt).some((option) => option === "no-new-privileges:true");
 }
 
-function hasTmpfs(service: Record<string, unknown>): boolean {
-  return stringList(service.tmpfs).length > 0;
+function hasHardenedTmpfs(service: Record<string, unknown>): boolean {
+  const mounts = stringList(service.tmpfs);
+  return (
+    mounts.length > 0 &&
+    mounts.every((mount) => {
+      const separator = mount.indexOf(":");
+      if (separator < 1) {
+        return false;
+      }
+      const options = mount.slice(separator + 1).split(",");
+      return (
+        options.some((option) => /^size=[1-9]\d*[kmg]?$/iu.test(option)) &&
+        ["noexec", "nosuid", "nodev"].every((required) => options.includes(required))
+      );
+    })
+  );
 }
 
 function hasHealthcheck(service: Record<string, unknown>): boolean {
@@ -182,8 +196,10 @@ function hardeningViolations(name: string, service: Record<string, unknown>): st
   if (service.read_only !== true) {
     violations.push(`${name}: read_only_missing`);
   }
-  if (!hasTmpfs(service)) {
+  if (stringList(service.tmpfs).length === 0) {
     violations.push(`${name}: tmpfs_missing`);
+  } else if (!hasHardenedTmpfs(service)) {
+    violations.push(`${name}: tmpfs_options_missing`);
   }
   return violations;
 }

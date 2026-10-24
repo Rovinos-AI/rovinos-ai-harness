@@ -30,6 +30,7 @@ import {
   type TripQueue,
 } from "@harness/telemetry";
 import { RUN_SPAN } from "./spans.js";
+import { DeploymentStartupError } from "./runtime-deployment.js";
 
 /** Clock used to timestamp recorded events. */
 export interface Clock {
@@ -378,6 +379,12 @@ export class RunRecorder {
   }
 
   private assertWritable(): void {
+    if (
+      this.signal?.aborted === true &&
+      this.signal.reason === "deployment_single_instance_violation"
+    ) {
+      throw new DeploymentStartupError("deployment_single_instance_violation");
+    }
     if (this.signal?.aborted === true && this.signal.reason === "lease_lost") {
       throw new LeaseLostError(this.nextSequence);
     }

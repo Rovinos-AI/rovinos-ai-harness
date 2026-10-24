@@ -23,6 +23,8 @@ const SandboxRunnerConfigSchema = z
   })
   .strict();
 
+const SandboxRunnersConfigSchema = z.array(SandboxRunnerConfigSchema).min(1).max(16);
+
 /** Exact host and port pairs that the sandbox egress proxy may reach. */
 export const SandboxEgressAllowEntrySchema = z
   .object({
@@ -51,8 +53,13 @@ export const SandboxConfigSchema = z
     allowUnsafeInProcess: z.boolean().optional(),
     egress: SandboxEgressConfigSchema.optional(),
     runner: SandboxRunnerConfigSchema.optional(),
+    runners: SandboxRunnersConfigSchema.optional(),
     restoreOnResume: z.boolean().optional(),
     snapshotEncryption: z.boolean().optional(),
   })
   .strict()
+  .refine(({ runner, runners }) => runner === undefined || runners === undefined, {
+    path: ["runners"],
+    message: "Configure either runner or runners, not both",
+  })
   .prefault({});

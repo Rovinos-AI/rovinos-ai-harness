@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Example only: replace the local image and supply operator-managed ConfigMap, Secret, and PVC resources.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harness-worker
+  labels:
+    app.kubernetes.io/name: harness
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: harness
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: harness
+        app.kubernetes.io/component: worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: worker
+          image: harness:local
+          command: ["node", "dist/bin.js", "worker"]
+          env:
+            - name: HARNESS_CONFIG
+              value: /etc/harness/config.yaml
+            - name: HARNESS_DATA_DIR
+              value: /var/lib/harness/state
+          ports: []
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/harness
+              readOnly: true
+            - name: runtime-secrets
+              mountPath: /run/secrets
+              readOnly: true
+            - name: harness-state
+              mountPath: /var/lib/harness/state
+      volumes:
+        - name: config
+          configMap:
+            name: harness-prod-config
+        - name: runtime-secrets
+          secret:
+            secretName: harness-runtime-secrets
+        - name: harness-state
+          persistentVolumeClaim:
+            claimName: harness-state

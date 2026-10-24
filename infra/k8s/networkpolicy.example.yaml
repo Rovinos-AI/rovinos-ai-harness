@@ -17,6 +17,7 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: harness
+      app.kubernetes.io/component: control-plane
   policyTypes:
     - Egress
   egress:
@@ -41,12 +42,87 @@ spec:
           port: 4317
         - protocol: TCP
           port: 4318
-    # No sidecar port is defined by this example. Add an explicit ports list before applying;
-    # omitting ports permits all ports to the selected sidecars.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: harness-sidecar
+    # No sidecar port is defined by this example. Add an explicit ports list before applying;
+    # omitting ports permits all ports to the selected sidecars.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: harness-worker-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: harness
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: sandbox-runner
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-runner-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: sandbox-runner
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: harness
+              app.kubernetes.io/component: worker
+      ports:
+        - protocol: TCP
+          port: 8080
 # The default-deny policy also applies to collector pods. To enable exporter traffic, uncomment
 # this template, replace the CIDR with the operator-approved exporter destination, and adapt labels.
 # ---

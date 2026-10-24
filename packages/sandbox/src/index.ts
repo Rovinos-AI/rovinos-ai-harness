@@ -78,6 +78,8 @@ export type {
 } from "./snapshot.js";
 export { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
 export type { RemoteSandboxBackendOptions } from "./remote.js";
+export { RunnerPool } from "./runner-pool.js";
+export type { RunnerPoolOptions, RunnerPoolRunner } from "./runner-pool.js";
 export { WorkspaceFileError, WorkspaceFileSystem } from "./workspace-files.js";
 export { openUrlInBrowser } from "./open-browser.js";
 export {

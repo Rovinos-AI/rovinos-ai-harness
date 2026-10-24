@@ -170,6 +170,9 @@ it("creates a private environment once, never prints the key, and uses argv arra
       ({ args }) => args.includes("sandbox-runner") && args.includes("build"),
     ),
   );
+  expect(commands.calls.find(({ args }) => args.includes("up"))?.args.slice(-1)).toEqual([
+    "sandbox-runner",
+  ]);
 });
 
 it("approves and resumes the sample with --yes", () => {
