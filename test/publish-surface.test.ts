@@ -45,7 +45,7 @@ async function withCommandDiagnostics<T>(command: string, run: () => Promise<T>)
 }
 
 async function pack(
-  packageName: "sdk" | "cli" | "store-sqlite",
+  packageName: "sdk" | "cli" | "store-sqlite" | "store-postgres",
   outputPath: string,
 ): Promise<void> {
   await withCommandDiagnostics(`corepack yarn pack (${packageName})`, () =>
@@ -101,10 +101,12 @@ describe("published package smoke test", () => {
     const sdkArchive = join(temporaryDirectory, "sdk.tgz");
     const cliArchive = join(temporaryDirectory, "cli.tgz");
     const sqliteArchive = join(temporaryDirectory, "store-sqlite.tgz");
+    const postgresArchive = join(temporaryDirectory, "store-postgres.tgz");
     await mkdir(projectDirectory);
     await pack("sdk", sdkArchive);
     await pack("cli", cliArchive);
     await pack("store-sqlite", sqliteArchive);
+    await pack("store-postgres", postgresArchive);
 
     const projectManifest = {
       name: "rovinos-publish-surface-smoke",
@@ -118,6 +120,7 @@ describe("published package smoke test", () => {
         "@rovinos/sdk": `file:${relative(projectDirectory, sdkArchive)}`,
         "@rovinos/cli": `file:${relative(projectDirectory, cliArchive)}`,
         "@rovinos/store-sqlite": `file:${relative(projectDirectory, sqliteArchive)}`,
+        "@rovinos/store-postgres": `file:${relative(projectDirectory, postgresArchive)}`,
       },
     };
     await writeFile(join(projectDirectory, "package.json"), JSON.stringify(projectManifest));
@@ -152,6 +155,16 @@ describe("published package smoke test", () => {
       [
         'import { createHarness } from "@rovinos/sdk";',
         'import { SqliteEventStore } from "@rovinos/store-sqlite";',
+        'import "@rovinos/cli/programmatic";',
+        'import "@rovinos/store-postgres";',
+        'import { readFile } from "node:fs/promises";',
+        'const cliEntry = import.meta.resolve("@rovinos/cli/programmatic");',
+        'const approvalHtml = await readFile(new URL("./assets/approval.html", cliEntry), "utf8");',
+        'if (!approvalHtml.includes("<!doctype html")) throw new Error("approval_asset_missing");',
+        'const sqliteEntry = import.meta.resolve("@rovinos/store-sqlite");',
+        'await readFile(new URL("./migrations/sqlite/0001_init.sql", sqliteEntry), "utf8");',
+        'const postgresEntry = import.meta.resolve("@rovinos/store-postgres");',
+        'await readFile(new URL("./migrations/postgres/0001_init.sql", postgresEntry), "utf8");',
         "const harness = await createHarness({",
         "  config: {},",
         "  overrides: {",

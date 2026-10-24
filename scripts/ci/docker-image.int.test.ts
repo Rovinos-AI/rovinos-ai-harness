@@ -58,7 +58,7 @@ describe("Docker image", () => {
     expect(version).toBe(HARNESS_VERSION);
   });
 
-  it("includes both dialect migrations and opens a SQLite store", async () => {
+  it("includes package-relative assets and opens a SQLite store", async () => {
     const assets = await runDocker([
       "run",
       "--rm",
@@ -67,7 +67,7 @@ describe("Docker image", () => {
       imageName,
       "--input-type=module",
       "-e",
-      "import { existsSync } from 'node:fs'; const paths = ['/app/migrations/sqlite/0001_init.sql', '/app/migrations/postgres/0001_init.sql', '/app/migrations/vault/sqlite/0001_init.sql', '/app/migrations/vault/postgres/0001_init.sql', '/app/packages/approval-app/dist/approval.html', '/app/packages/approval-app/dist/runs-console.html', '/app/web/index.html', '/app/web/host.js']; if (paths.some((path) => !existsSync(path))) throw new Error('runtime_assets_missing'); process.stdout.write('runtime_assets_ok');",
+      "import { existsSync } from 'node:fs'; const paths = ['/app/dist/migrations/sqlite/0001_init.sql', '/app/dist/migrations/postgres/0001_init.sql', '/app/dist/migrations/vault/sqlite/0001_init.sql', '/app/dist/migrations/vault/postgres/0001_init.sql', '/app/dist/assets/approval.html', '/app/dist/assets/runs-console.html', '/app/dist/assets/web/index.html', '/app/dist/assets/web/host.js']; if (paths.some((path) => !existsSync(path))) throw new Error('runtime_assets_missing'); process.stdout.write('runtime_assets_ok');",
     ]);
     expect(assets.trim()).toBe("runtime_assets_ok");
 

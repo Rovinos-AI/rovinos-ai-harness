@@ -45,24 +45,47 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   async onSuccess() {
-    const migrationsPath = fileURLToPath(new URL("./migrations", import.meta.url));
-    await rm(migrationsPath, { recursive: true, force: true });
+    const migrationsPath = fileURLToPath(new URL("./dist/migrations", import.meta.url));
+    const assetsPath = fileURLToPath(new URL("./dist/assets", import.meta.url));
+    const webAssetsPath = fileURLToPath(new URL("./dist/assets/web", import.meta.url));
+    await Promise.all([
+      rm(migrationsPath, { recursive: true, force: true }),
+      rm(assetsPath, { recursive: true, force: true }),
+    ]);
     await mkdir(migrationsPath, { recursive: true });
+    await mkdir(assetsPath, { recursive: true });
+    await mkdir(webAssetsPath, { recursive: true });
     await Promise.all([
       cp(
         fileURLToPath(new URL("../store-sqlite/migrations/sqlite", import.meta.url)),
-        fileURLToPath(new URL("./migrations/sqlite", import.meta.url)),
+        fileURLToPath(new URL("./dist/migrations/sqlite", import.meta.url)),
         { recursive: true },
       ),
       cp(
         fileURLToPath(new URL("../store-postgres/migrations/postgres", import.meta.url)),
-        fileURLToPath(new URL("./migrations/postgres", import.meta.url)),
+        fileURLToPath(new URL("./dist/migrations/postgres", import.meta.url)),
         { recursive: true },
       ),
       cp(
         fileURLToPath(new URL("../vault/migrations", import.meta.url)),
-        fileURLToPath(new URL("./migrations/vault", import.meta.url)),
+        fileURLToPath(new URL("./dist/migrations/vault", import.meta.url)),
         { recursive: true },
+      ),
+      cp(
+        fileURLToPath(new URL("../approval-app/dist/approval.html", import.meta.url)),
+        fileURLToPath(new URL("./dist/assets/approval.html", import.meta.url)),
+      ),
+      cp(
+        fileURLToPath(new URL("../approval-app/dist/runs-console.html", import.meta.url)),
+        fileURLToPath(new URL("./dist/assets/runs-console.html", import.meta.url)),
+      ),
+      cp(
+        fileURLToPath(new URL("../host/dist/web/index.html", import.meta.url)),
+        fileURLToPath(new URL("./dist/assets/web/index.html", import.meta.url)),
+      ),
+      cp(
+        fileURLToPath(new URL("../host/dist/web/host.js", import.meta.url)),
+        fileURLToPath(new URL("./dist/assets/web/host.js", import.meta.url)),
       ),
     ]);
   },

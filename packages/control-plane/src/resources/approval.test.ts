@@ -24,17 +24,16 @@ afterEach(async () => {
 });
 
 describe("approval app resource", () => {
-  it("resolves both app assets from workspace, bundled image, and CLI package layouts", async () => {
+  it("resolves both app assets beside a bundle and from the workspace source tree", async () => {
     const root = await mkdtemp(join(tmpdir(), "approval-resource-"));
     temporaryDirectories.push(root);
     const layouts = [
+      ["bundle", "cli/dist/chunk.js", "cli/dist/assets"],
       [
         "workspace",
-        "packages/control-plane/dist/resources/approval.js",
+        "packages/control-plane/src/resources/approval.js",
         "packages/approval-app/dist",
       ],
-      ["bundled image", "image/dist/approval.js", "image/packages/approval-app/dist"],
-      ["CLI package", "cli/dist/approval.js", "cli/approval-app/dist"],
     ] as const;
 
     for (const [layout, modulePath, assetDirectory] of layouts) {
@@ -49,12 +48,12 @@ describe("approval app resource", () => {
     }
   });
 
-  it("returns the CLI fallback when no app asset candidate exists", async () => {
+  it("returns the bundle-relative path when the asset is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "approval-resource-missing-"));
     temporaryDirectories.push(root);
     const moduleUrl = pathToFileURL(join(root, "cli/dist/approval.js")).href;
     expect(approvalAppResourcePath("approval.html", moduleUrl)).toBe(
-      fileURLToPath(new URL("../approval-app/dist/approval.html", moduleUrl)),
+      fileURLToPath(new URL("./assets/approval.html", moduleUrl)),
     );
   });
 

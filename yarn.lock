@@ -2603,6 +2603,7 @@ __metadata:
     "@opentelemetry/sdk-metrics": "npm:2.12.0"
     "@opentelemetry/sdk-trace-base": "npm:2.12.0"
     "@opentelemetry/semantic-conventions": "npm:1.43.0"
+    "@rovinos/approval-app": "workspace:^"
     "@rovinos/config": "workspace:^"
     "@rovinos/context": "workspace:^"
     "@rovinos/control-plane": "workspace:^"

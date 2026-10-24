@@ -29,15 +29,9 @@ RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store
     && for package in packages/*/; do \
          if [ -d "${package}dist" ]; then \
            mkdir -p "/out/${package}" && cp -a "${package}package.json" "${package}dist" "/out/${package}"; \
-           if [ -d "${package}migrations" ]; then \
-             cp -a "${package}migrations" "/out/${package}"; \
-           fi; \
          fi; \
        done \
-    && cp -a packages/cli/dist/. /out/dist/ \
-    && mkdir -p /out/migrations /out/web \
-    && cp -a packages/cli/migrations/. /out/migrations/ \
-    && cp -a packages/host/dist/web/. /out/web/
+    && cp -a packages/cli/dist /out/
 
 FROM node:26-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS runtime
 

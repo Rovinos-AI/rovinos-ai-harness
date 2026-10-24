@@ -7,24 +7,19 @@ import { HarnessError } from "@rovinos/schemas";
 export const APPROVAL_RESOURCE_URI = "ui://harness/approval/v1";
 export const MCP_APP_HTML_MIME_TYPE = "text/html;profile=mcp-app";
 
-/** Resolves the approval app asset from workspace, bundled image, or CLI package layouts. */
+/** Resolves an approval app asset beside a bundle, with a source-tree fallback. */
 export function approvalAppResourcePath(
   filename: "approval.html" | "runs-console.html",
   moduleUrl = import.meta.url,
 ): string {
-  const fallback = new URL(`../approval-app/dist/${filename}`, moduleUrl);
-  const candidates = [
-    new URL(`../../../approval-app/dist/${filename}`, moduleUrl),
-    new URL(`../packages/approval-app/dist/${filename}`, moduleUrl),
-    fallback,
-  ];
-  for (const candidate of candidates) {
-    const path = fileURLToPath(candidate);
-    if (existsSync(path)) {
-      return path;
-    }
+  const bundledAsset = new URL(`./assets/${filename}`, moduleUrl);
+  const bundledPath = fileURLToPath(bundledAsset);
+  if (existsSync(bundledPath)) {
+    return bundledPath;
   }
-  return fileURLToPath(fallback);
+  const sourceAsset = new URL(`../../../approval-app/dist/${filename}`, moduleUrl);
+  const sourcePath = fileURLToPath(sourceAsset);
+  return existsSync(sourcePath) ? sourcePath : bundledPath;
 }
 
 class ApprovalResourceError extends HarnessError {

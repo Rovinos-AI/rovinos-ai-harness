@@ -133,17 +133,17 @@ runVaultConformance("SqliteVault conformance", () => {
 });
 
 describe("SqliteVault", () => {
-  it("resolves namespaced bundled vault migrations and workspace migration fallbacks", async () => {
+  it("resolves bundled vault migrations and source migration fallbacks", async () => {
     const root = await mkdtemp(join(tmpdir(), "vault-migration-path-"));
     temporaryDirectories.push(root);
     const moduleUrl = pathToFileURL(join(root, "app/dist/sqlite-migrations.js")).href;
-    const bundledPath = join(root, "app/migrations/vault/sqlite/0001_init.sql");
-    await mkdir(join(root, "app/migrations/vault/sqlite"), { recursive: true });
+    const bundledPath = join(root, "app/dist/migrations/vault/sqlite/0001_init.sql");
+    await mkdir(join(root, "app/dist/migrations/vault/sqlite"), { recursive: true });
     await writeFile(bundledPath, "-- bundled vault migration");
     expect(vaultMigrationPath("sqlite", "0001_init.sql", moduleUrl)).toBe(bundledPath);
 
     const workspaceModuleUrl = pathToFileURL(
-      join(root, "workspace/packages/vault/dist/sqlite-migrations.js"),
+      join(root, "workspace/packages/vault/src/sqlite-migrations.js"),
     ).href;
     const workspacePath = join(root, "workspace/packages/vault/migrations/sqlite/0001_init.sql");
     await mkdir(join(root, "workspace/packages/vault/migrations/sqlite"), { recursive: true });

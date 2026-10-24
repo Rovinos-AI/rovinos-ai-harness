@@ -11,23 +11,23 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   async onSuccess() {
-    const migrationsPath = fileURLToPath(new URL("./migrations", import.meta.url));
+    const migrationsPath = fileURLToPath(new URL("./dist/migrations", import.meta.url));
     await rm(migrationsPath, { recursive: true, force: true });
     await mkdir(migrationsPath, { recursive: true });
     await Promise.all([
       cp(
         fileURLToPath(new URL("../store-sqlite/migrations/sqlite", import.meta.url)),
-        fileURLToPath(new URL("./migrations/sqlite", import.meta.url)),
+        fileURLToPath(new URL("./dist/migrations/sqlite", import.meta.url)),
         { recursive: true },
       ),
       cp(
         fileURLToPath(new URL("../store-postgres/migrations/postgres", import.meta.url)),
-        fileURLToPath(new URL("./migrations/postgres", import.meta.url)),
+        fileURLToPath(new URL("./dist/migrations/postgres", import.meta.url)),
         { recursive: true },
       ),
       cp(
         fileURLToPath(new URL("../vault/migrations", import.meta.url)),
-        fileURLToPath(new URL("./migrations/vault", import.meta.url)),
+        fileURLToPath(new URL("./dist/migrations/vault", import.meta.url)),
         { recursive: true },
       ),
     ]);

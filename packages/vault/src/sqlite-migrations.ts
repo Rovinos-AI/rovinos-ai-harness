@@ -11,7 +11,7 @@ export function vaultMigrationPath(
   filename: string,
   moduleUrl = import.meta.url,
 ): string {
-  const bundledPath = new URL(`../migrations/vault/${dialect}/${filename}`, moduleUrl);
+  const bundledPath = new URL(`./migrations/vault/${dialect}/${filename}`, moduleUrl);
   if (existsSync(fileURLToPath(bundledPath))) {
     return fileURLToPath(bundledPath);
   }

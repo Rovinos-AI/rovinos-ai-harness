@@ -28,8 +28,10 @@ it("pins multi-platform base indexes and installs only build-stage tools", () =>
   expect(dockerfile).not.toMatch(/^RUN mise install\s*&&/mu);
 });
 
-it("copies package migration files into the runtime image", () => {
-  expect(dockerfile).toContain('cp -a "${package}migrations" "/out/${package}"');
+it("copies the packed CLI asset tree into the runtime image", () => {
+  expect(dockerfile).toContain("cp -a packages/cli/dist /out/");
+  expect(dockerfile).not.toContain("/out/migrations");
+  expect(dockerfile).not.toContain("/out/web");
 });
 
 it("removes the image even if Compose teardown fails", async () => {

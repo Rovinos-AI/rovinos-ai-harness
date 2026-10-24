@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool } from "pg";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   migrate,
   StoreUnavailableError,
   type PostgresMigrationDriver,
 } from "@rovinos/store/adapter-internal";
+import { postgresMigrationDirectory } from "./migration-directory.js";
 
 const migrationOptionsSchema = z
   .object({
@@ -50,7 +50,7 @@ export async function migratePostgresConnection(
     const driver: PostgresMigrationDriver = pool;
     return await migrate(driver, "postgres", {
       ...parsedOptions,
-      migrationDirectory: fileURLToPath(new URL("../migrations/postgres/", import.meta.url)),
+      migrationDirectory: postgresMigrationDirectory(),
     });
   } finally {
     await pool.end();
