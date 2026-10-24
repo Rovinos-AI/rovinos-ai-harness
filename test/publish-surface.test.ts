@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -13,10 +13,18 @@ async function withCommandDiagnostics<T>(command: string, run: () => Promise<T>)
     return await run();
   } catch (error) {
     let exitCode = "unknown";
+    let stdout = "";
     let stderr = "";
     if (typeof error === "object" && error !== null) {
       if ("code" in error && (typeof error.code === "number" || typeof error.code === "string")) {
         exitCode = String(error.code);
+      }
+      if ("stdout" in error) {
+        if (typeof error.stdout === "string") {
+          stdout = error.stdout;
+        } else if (Buffer.isBuffer(error.stdout)) {
+          stdout = error.stdout.toString("utf8");
+        }
       }
       if ("stderr" in error) {
         if (typeof error.stderr === "string") {
@@ -26,9 +34,13 @@ async function withCommandDiagnostics<T>(command: string, run: () => Promise<T>)
         }
       }
     }
-    const stderrTailLines = stderr.trim().split(/\r?\n/u).slice(-20).join("\n");
-    const stderrTail = stderrTailLines === "" ? "(empty)" : stderrTailLines;
-    expect.fail(`${command} failed with exit code ${exitCode}.\nTail of stderr:\n${stderrTail}`);
+    const outputTail = (output: string): string => {
+      const lines = output.trim().split(/\r?\n/u).slice(-40).join("\n");
+      return lines === "" ? "(empty)" : lines;
+    };
+    expect.fail(
+      `${command} failed with exit code ${exitCode}.\nTail of stdout:\n${outputTail(stdout)}\nTail of stderr:\n${outputTail(stderr)}`,
+    );
   }
 }
 
@@ -53,8 +65,19 @@ describe("published package smoke test", () => {
   });
 
   it("reports the exit code and stderr tail when a child command fails", async () => {
-    const stderr = Array.from({ length: 25 }, (_, index) => `line ${String(index + 1)}`).join("\n");
-    const childFailure = Object.assign(new Error("child command failed"), { code: 23, stderr });
+    const stdout = Array.from(
+      { length: 45 },
+      (_, index) => `stdout line ${String(index + 1)}`,
+    ).join("\n");
+    const stderr = Array.from(
+      { length: 45 },
+      (_, index) => `stderr line ${String(index + 1)}`,
+    ).join("\n");
+    const childFailure = Object.assign(new Error("child command failed"), {
+      code: 23,
+      stdout,
+      stderr,
+    });
     const failureMessage = await withCommandDiagnostics("example command", () =>
       Promise.reject(childFailure),
     ).then(
@@ -63,8 +86,12 @@ describe("published package smoke test", () => {
     );
 
     expect(failureMessage).toContain("exit code 23");
-    expect(failureMessage).toContain("line 25");
-    expect(failureMessage).not.toContain("line 1\n");
+    expect(failureMessage).toContain("Tail of stdout:\nstdout line 6");
+    expect(failureMessage).toContain("stdout line 45\nTail of stderr:");
+    expect(failureMessage).not.toContain("stdout line 1\n");
+    expect(failureMessage).toContain("Tail of stderr:\nstderr line 6");
+    expect(failureMessage).toContain("stderr line 45");
+    expect(failureMessage).not.toContain("stderr line 1\n");
   });
 
   it("installs the SDK and CLI tarballs outside the workspace", async () => {
@@ -100,17 +127,16 @@ describe("published package smoke test", () => {
     );
     await writeFile(
       join(projectDirectory, ".yarnrc.yml"),
-      "nodeLinker: node-modules\nenableScripts: false\nenableTelemetry: false\n",
+      "nodeLinker: node-modules\nenableScripts: false\nenableTelemetry: false\nenableGlobalCache: true\n",
     );
     await withCommandDiagnostics("corepack yarn install", () =>
       execFileAsync("corepack", ["yarn", "install"], {
         cwd: projectDirectory,
         env: {
           ...process.env,
-          YARN_CACHE_FOLDER: join(homedir(), ".yarn", "berry", "cache"),
           // This temporary project has a different dependency graph from the copied lockfile.
           YARN_ENABLE_IMMUTABLE_INSTALLS: "false",
-          YARN_ENABLE_NETWORK: "false",
+          YARN_ENABLE_NETWORK: "0",
         },
         maxBuffer: 10_000_000,
         timeout: 120_000,
