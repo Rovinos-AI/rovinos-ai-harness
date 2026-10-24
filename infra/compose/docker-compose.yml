@@ -8,6 +8,7 @@ services:
     command: ["serve", "--http"]
     environment:
       HARNESS_DATA_DIR: /tmp/harness
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     init: true
     read_only: true
     tmpfs:
@@ -150,6 +151,7 @@ services:
       [
         "--config=/etc/otel/base.yaml",
         "--config=/etc/otel/allowlist.generated.yaml",
+        "--config=/etc/otel/policy-version.generated.yaml",
         "--config=/etc/otel/profile-debug.yaml",
       ]
     mem_limit: 512m
@@ -157,6 +159,7 @@ services:
     volumes:
       - ../collector/base.yaml:/etc/otel/base.yaml:ro
       - ../collector/allowlist.generated.yaml:/etc/otel/allowlist.generated.yaml:ro
+      - ../collector/policy-version.generated.yaml:/etc/otel/policy-version.generated.yaml:ro
       - ../collector/profile-debug.yaml:/etc/otel/profile-debug.yaml:ro
     read_only: true
     tmpfs:

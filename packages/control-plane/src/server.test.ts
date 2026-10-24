@@ -16,6 +16,7 @@ import {
   type RunStatus,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { POLICY_VERSION } from "@harness/telemetry";
 import { createEventBuilders } from "@harness/store/testing";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -470,7 +471,7 @@ describe("control-plane inspection tools", () => {
         ruleId: "approval.rule",
       }),
     );
-    expect(output.recentEvents.every(({ policyVersion }) => policyVersion === "policy.v1")).toBe(
+    expect(output.recentEvents.every(({ policyVersion }) => policyVersion === POLICY_VERSION)).toBe(
       true,
     );
     expect(result.content).toEqual([

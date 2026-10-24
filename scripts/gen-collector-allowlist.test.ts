@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { attr, defineLogRecord, defineSpan } from "@harness/telemetry";
+import { attr, defineLogRecord, defineSpan, POLICY_VERSION } from "@harness/telemetry";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   renderCollectorAllowlist,
@@ -45,6 +46,16 @@ afterEach(() => {
 });
 
 describe("Collector allowlist generator", () => {
+  it("matches the committed allowlist SHA-256 policy version", () => {
+    const allowlist = readFileSync(
+      new URL("../infra/collector/allowlist.generated.yaml", import.meta.url),
+      "utf8",
+    );
+    const digest = createHash("sha256").update(allowlist, "utf8").digest("hex");
+
+    expect(POLICY_VERSION).toBe(`p-${digest.slice(0, 12)}`);
+  });
+
   it("renders a deterministic snapshot for fixture registries", () => {
     expect(renderCollectorAllowlist([zebraSpan, alphaSpan], [zebraLog, alphaLog], metricAllowlist))
       .toMatchInlineSnapshot(`
@@ -110,6 +121,7 @@ describe("Collector allowlist generator", () => {
                 - "filter/drop_span_events"
                 - "transform/span_attributes"
                 - "transform/resource_attributes"
+                - "resource/policy_version"
                 - "batch"
             logs:
               processors:
@@ -117,6 +129,7 @@ describe("Collector allowlist generator", () => {
                 - "filter/drop_unregistered_logs"
                 - "transform/log_attributes"
                 - "transform/resource_attributes"
+                - "resource/policy_version"
                 - "batch"
             metrics:
               processors:
@@ -124,6 +137,7 @@ describe("Collector allowlist generator", () => {
                 - "filter/drop_unregistered_metrics"
                 - "transform/metric_attributes"
                 - "transform/resource_attributes"
+                - "resource/policy_version"
                 - "batch"
         "
       `);
@@ -133,6 +147,8 @@ describe("Collector allowlist generator", () => {
     const allowlistPath = join(testDirectory, "allowlist.generated.yaml");
     const options = {
       allowlistPath,
+      policyVersionYamlPath: join(testDirectory, "policy-version.generated.yaml"),
+      policyVersionTypescriptPath: join(testDirectory, "policy-version.ts"),
       spans: [alphaSpan],
       logs: [alphaLog],
       metricAllowlist,
@@ -152,9 +168,34 @@ describe("Collector allowlist generator", () => {
     expect(readFileSync(allowlistPath, "utf8")).toBe(`${generated}stale`);
   });
 
+  it("detects drift in both generated policy-version files", () => {
+    const options = {
+      allowlistPath: join(testDirectory, "allowlist.generated.yaml"),
+      policyVersionYamlPath: join(testDirectory, "policy-version.generated.yaml"),
+      policyVersionTypescriptPath: join(testDirectory, "policy-version.ts"),
+      spans: [alphaSpan],
+      logs: [alphaLog],
+      metricAllowlist,
+    };
+    expect(runCollectorAllowlistCommand([], options).exitCode).toBe(0);
+
+    writeFileSync(options.policyVersionYamlPath, "stale");
+    expect(runCollectorAllowlistCommand(["--check"], options).stderr).toContain(
+      "policy-version.generated.yaml is stale",
+    );
+    expect(runCollectorAllowlistCommand([], options).exitCode).toBe(0);
+
+    writeFileSync(options.policyVersionTypescriptPath, "stale");
+    expect(runCollectorAllowlistCommand(["--check"], options).stderr).toContain(
+      "policy-version.ts is stale",
+    );
+  });
+
   it("fails check mode when the generated file is missing", () => {
     const result = runCollectorAllowlistCommand(["--check"], {
       allowlistPath: join(testDirectory, "missing.yaml"),
+      policyVersionYamlPath: join(testDirectory, "missing-policy-version.yaml"),
+      policyVersionTypescriptPath: join(testDirectory, "missing-policy-version.ts"),
       spans: [],
       logs: [],
       metricAllowlist: {},
@@ -168,6 +209,8 @@ describe("Collector allowlist generator", () => {
     expect(
       runCollectorAllowlistCommand(["--unknown"], {
         allowlistPath: join(testDirectory, "unused.yaml"),
+        policyVersionYamlPath: join(testDirectory, "unused-policy-version.yaml"),
+        policyVersionTypescriptPath: join(testDirectory, "unused-policy-version.ts"),
         spans: [],
         logs: [],
         metricAllowlist: {},

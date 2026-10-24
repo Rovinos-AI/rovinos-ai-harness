@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code } from "@harness/schemas";
-import { toSafeEvent } from "@harness/telemetry";
+import { POLICY_VERSION, toSafeEvent } from "@harness/telemetry";
 import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
@@ -43,7 +43,7 @@ export async function getRun(
     if (sinceSeq !== undefined && event.seq <= sinceSeq) {
       return [];
     }
-    const safeEvent = toSafeEvent(event, run.policyVersion);
+    const safeEvent = toSafeEvent(event, POLICY_VERSION);
     return safeEvent === null ? [] : [safeEvent];
   });
   return getRunOutputSchema.parse({
