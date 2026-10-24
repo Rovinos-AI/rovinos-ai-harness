@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+exporters:
+  azuredataexplorer:
+    cluster_uri: ${env:ADX_CLUSTER_URI}
+    db_name: ${env:ADX_DATABASE}
+    managed_identity_id: ${env:ADX_MANAGED_IDENTITY_ID}
+    traces_table_name: HarnessTraces
+    logs_table_name: HarnessLogs
+    metrics_table_name: HarnessMetrics
+    ingestion_type: managed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [azuredataexplorer]
+    logs:
+      receivers: [otlp]
+      exporters: [azuredataexplorer]
+    metrics:
+      receivers: [otlp]
+      exporters: [azuredataexplorer]

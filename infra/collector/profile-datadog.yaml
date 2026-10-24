@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+exporters:
+  datadog:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [datadog]
+    logs:
+      receivers: [otlp]
+      exporters: [datadog]
+    metrics:
+      receivers: [otlp]
+      exporters: [datadog]

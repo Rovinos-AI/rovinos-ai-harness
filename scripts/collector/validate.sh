@@ -28,7 +28,30 @@ if [[ ! -f "$collector_directory/$profile_file" ]]; then
   exit 2
 fi
 
+docker_env_args=()
+case "$1" in
+  datadog)
+    for variable in DD_API_KEY DD_SITE; do
+      if [[ -z "${!variable:-}" ]]; then
+        printf 'Required environment variable %s is not set\n' "$variable" >&2
+        exit 2
+      fi
+      docker_env_args+=(--env "$variable")
+    done
+    ;;
+  adx)
+    for variable in ADX_CLUSTER_URI ADX_DATABASE ADX_MANAGED_IDENTITY_ID; do
+      if [[ -z "${!variable:-}" ]]; then
+        printf 'Required environment variable %s is not set\n' "$variable" >&2
+        exit 2
+      fi
+      docker_env_args+=(--env "$variable")
+    done
+    ;;
+esac
+
 docker run --pull="$pull_policy" --rm \
+  "${docker_env_args[@]}" \
   --volume "$collector_directory:/etc/otel:ro" \
   "$image" validate \
   --config=/etc/otel/base.yaml \
