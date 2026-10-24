@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { cp, rm } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "tsup";
 
@@ -13,9 +13,24 @@ export default defineConfig({
   async onSuccess() {
     const migrationsPath = fileURLToPath(new URL("./migrations", import.meta.url));
     await rm(migrationsPath, { recursive: true, force: true });
-    await cp(fileURLToPath(new URL("../vault/migrations", import.meta.url)), migrationsPath, {
-      recursive: true,
-    });
+    await mkdir(migrationsPath, { recursive: true });
+    await Promise.all([
+      cp(
+        fileURLToPath(new URL("../store-sqlite/migrations/sqlite", import.meta.url)),
+        fileURLToPath(new URL("./migrations/sqlite", import.meta.url)),
+        { recursive: true },
+      ),
+      cp(
+        fileURLToPath(new URL("../store-postgres/migrations/postgres", import.meta.url)),
+        fileURLToPath(new URL("./migrations/postgres", import.meta.url)),
+        { recursive: true },
+      ),
+      cp(
+        fileURLToPath(new URL("../vault/migrations", import.meta.url)),
+        fileURLToPath(new URL("./migrations/vault", import.meta.url)),
+        { recursive: true },
+      ),
+    ]);
   },
   bundle: true,
   skipNodeModulesBundle: true,

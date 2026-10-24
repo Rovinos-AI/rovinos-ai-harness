@@ -1,34 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { VaultOperationError } from "./errors.js";
 
+/** Resolves vault migrations from a bundled layout or the workspace package. */
+export function vaultMigrationPath(dialect: "sqlite" | "postgres", filename: string): string {
+  const bundledPath = new URL(`../migrations/vault/${dialect}/${filename}`, import.meta.url);
+  if (existsSync(fileURLToPath(bundledPath))) {
+    return fileURLToPath(bundledPath);
+  }
+  return fileURLToPath(new URL(`../migrations/${dialect}/${filename}`, import.meta.url));
+}
+
 const MIGRATIONS = [
   {
     version: "0001_init",
-    path: fileURLToPath(new URL("../migrations/sqlite/0001_init.sql", import.meta.url)),
+    path: vaultMigrationPath("sqlite", "0001_init.sql"),
   },
   {
     version: "0002_purge_epochs",
-    path: fileURLToPath(new URL("../migrations/sqlite/0002_purge_epochs.sql", import.meta.url)),
+    path: vaultMigrationPath("sqlite", "0002_purge_epochs.sql"),
   },
   {
     version: "0003_run_meta",
-    path: fileURLToPath(new URL("../migrations/sqlite/0003_run_meta.sql", import.meta.url)),
+    path: vaultMigrationPath("sqlite", "0003_run_meta.sql"),
   },
   {
     version: "0004_lookup_key_id",
-    path: fileURLToPath(new URL("../migrations/sqlite/0004_lookup_key_id.sql", import.meta.url)),
+    path: vaultMigrationPath("sqlite", "0004_lookup_key_id.sql"),
   },
   {
     version: "0005_nullable_lookup",
-    path: fileURLToPath(new URL("../migrations/sqlite/0005_nullable_lookup.sql", import.meta.url)),
+    path: vaultMigrationPath("sqlite", "0005_nullable_lookup.sql"),
   },
   {
     version: "0006_scope_keys",
-    path: fileURLToPath(new URL("../migrations/sqlite/0006_scope_keys.sql", import.meta.url)),
+    path: vaultMigrationPath("sqlite", "0006_scope_keys.sql"),
   },
 ] as const;
 

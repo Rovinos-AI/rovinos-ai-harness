@@ -34,7 +34,10 @@ RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store
            fi; \
          fi; \
        done \
-    && cp -a packages/cli/dist/. /out/dist/
+    && cp -a packages/cli/dist/. /out/dist/ \
+    && mkdir -p /out/migrations /out/web \
+    && cp -a packages/cli/migrations/. /out/migrations/ \
+    && cp -a packages/host/dist/web/. /out/web/
 
 FROM node:26-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS runtime
 

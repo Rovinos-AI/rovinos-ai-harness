@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { McpServer } from "@modelcontextprotocol/server";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { HarnessError } from "@rovinos/schemas";
-import { MCP_APP_HTML_MIME_TYPE } from "./approval.js";
+import { approvalAppResourcePath, MCP_APP_HTML_MIME_TYPE } from "./approval.js";
 
 export const RUNS_CONSOLE_RESOURCE_URI = "ui://harness/runs/v1";
 
@@ -16,9 +15,7 @@ class RunsConsoleResourceError extends HarnessError {
 }
 
 /** Reads the built runs console; the server must not start without this artifact. */
-export function loadRunsConsoleHtml(
-  path = fileURLToPath(new URL("../../../approval-app/dist/runs-console.html", import.meta.url)),
-): string {
+export function loadRunsConsoleHtml(path = approvalAppResourcePath("runs-console.html")): string {
   try {
     return readFileSync(path, "utf8");
   } catch {
