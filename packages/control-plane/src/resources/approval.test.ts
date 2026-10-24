@@ -42,12 +42,9 @@ describe("approval app resource", () => {
         const assetPath = join(root, assetDirectory, filename);
         await mkdir(join(root, assetDirectory), { recursive: true });
         await writeFile(assetPath, `${layout}:${filename}`);
-        expect(
-          approvalAppResourcePath(
-            filename,
-            pathToFileURL(join(root, modulePath)).href,
-          ),
-        ).toBe(assetPath);
+        expect(approvalAppResourcePath(filename, pathToFileURL(join(root, modulePath)).href)).toBe(
+          assetPath,
+        );
       }
     }
   });
