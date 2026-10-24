@@ -6,12 +6,16 @@ import type Database from "better-sqlite3";
 import { VaultOperationError } from "./errors.js";
 
 /** Resolves vault migrations from a bundled layout or the workspace package. */
-export function vaultMigrationPath(dialect: "sqlite" | "postgres", filename: string): string {
-  const bundledPath = new URL(`../migrations/vault/${dialect}/${filename}`, import.meta.url);
+export function vaultMigrationPath(
+  dialect: "sqlite" | "postgres",
+  filename: string,
+  moduleUrl = import.meta.url,
+): string {
+  const bundledPath = new URL(`../migrations/vault/${dialect}/${filename}`, moduleUrl);
   if (existsSync(fileURLToPath(bundledPath))) {
     return fileURLToPath(bundledPath);
   }
-  return fileURLToPath(new URL(`../migrations/${dialect}/${filename}`, import.meta.url));
+  return fileURLToPath(new URL(`../migrations/${dialect}/${filename}`, moduleUrl));
 }
 
 const MIGRATIONS = [

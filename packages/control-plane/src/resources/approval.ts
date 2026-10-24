@@ -8,11 +8,14 @@ export const APPROVAL_RESOURCE_URI = "ui://harness/approval/v1";
 export const MCP_APP_HTML_MIME_TYPE = "text/html;profile=mcp-app";
 
 /** Resolves the approval app asset from workspace, bundled image, or CLI package layouts. */
-export function approvalAppResourcePath(filename: "approval.html" | "runs-console.html"): string {
-  const fallback = new URL(`../approval-app/dist/${filename}`, import.meta.url);
+export function approvalAppResourcePath(
+  filename: "approval.html" | "runs-console.html",
+  moduleUrl = import.meta.url,
+): string {
+  const fallback = new URL(`../approval-app/dist/${filename}`, moduleUrl);
   const candidates = [
-    new URL(`../../../approval-app/dist/${filename}`, import.meta.url),
-    new URL(`../packages/approval-app/dist/${filename}`, import.meta.url),
+    new URL(`../../../approval-app/dist/${filename}`, moduleUrl),
+    new URL(`../packages/approval-app/dist/${filename}`, moduleUrl),
     fallback,
   ];
   for (const candidate of candidates) {

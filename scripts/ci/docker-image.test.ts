@@ -38,6 +38,9 @@ it("removes the image even if Compose teardown fails", async () => {
   const test = vi.fn<(name: string, callback: () => Promise<void>) => void>();
   const composeError = new Error("compose_unavailable");
   const runCommand = vi.fn((_command: string, args: string[]) => {
+    if (args[0] === "logs") {
+      return Promise.resolve({ stdout: "http://127.0.0.1:12345/mcp", stderr: "" });
+    }
     if (args[0] === "compose") {
       return Promise.reject(composeError);
     }
@@ -58,14 +61,62 @@ it("removes the image even if Compose teardown fails", async () => {
 
   await import("./docker-image.int.test.js");
   const build = beforeAll.mock.calls[0]?.[0];
-  const startCompose = test.mock.calls[2]?.[1];
+  const startBundledServer = test.mock.calls[2]?.[1];
+  const startCompose = test.mock.calls[3]?.[1];
   const cleanup = afterAll.mock.calls[0]?.[0];
   expect(build).toBeDefined();
+  expect(startBundledServer).toBeDefined();
   expect(startCompose).toBeDefined();
   expect(cleanup).toBeDefined();
   await build?.();
+  await startBundledServer?.();
   await expect(startCompose?.()).rejects.toBe(composeError);
   await expect(cleanup?.()).rejects.toBe(composeError);
+
+  expect(runCommand.mock.calls.at(-1)?.[1]).toEqual([
+    "image",
+    "rm",
+    "--force",
+    `harness:integration-${String(process.pid)}`,
+  ]);
+});
+
+it("removes the image when the bundled server exits", async () => {
+  const beforeAll = vi.fn<(callback: () => Promise<void>) => void>();
+  const afterAll = vi.fn<(callback: () => Promise<void>) => void>();
+  const test = vi.fn<(name: string, callback: () => Promise<void>) => void>();
+  const runCommand = vi.fn((_command: string, args: string[]) => {
+    if (args[0] === "inspect") {
+      return Promise.resolve({
+        stdout: args[2] === "{{.State.Status}}" ? "exited" : "1",
+        stderr: "",
+      });
+    }
+    return Promise.resolve({ stdout: "", stderr: "" });
+  });
+  const execFile = vi.fn();
+  Object.defineProperty(execFile, promisify.custom, { value: runCommand });
+  vi.doMock("node:child_process", () => ({ execFile }));
+  vi.doMock("vitest", () => ({
+    beforeAll,
+    afterAll,
+    describe: (_name: string, callback: () => void): void => {
+      callback();
+    },
+    expect,
+    it: test,
+  }));
+
+  await import("./docker-image.int.test.js");
+  const build = beforeAll.mock.calls[0]?.[0];
+  const startBundledServer = test.mock.calls[2]?.[1];
+  const cleanup = afterAll.mock.calls[0]?.[0];
+  expect(build).toBeDefined();
+  expect(startBundledServer).toBeDefined();
+  expect(cleanup).toBeDefined();
+  await build?.();
+  await expect(startBundledServer?.()).rejects.toThrow("bundled_server_exited:exited:1:");
+  await cleanup?.();
 
   expect(runCommand.mock.calls.at(-1)?.[1]).toEqual([
     "image",
