@@ -7,8 +7,8 @@ import {
   Sha256Hex,
   type Event,
   type JsonValue,
-} from "@harness/schemas";
-import type { ToolPort } from "@harness/core";
+} from "@rovinos/schemas";
+import type { ToolPort } from "@rovinos/core";
 import { ResolvedRunSchema } from "../resolve.js";
 import { describe, expect, it, vi } from "vitest";
 import { ReplayDivergenceError } from "./replay-model.js";

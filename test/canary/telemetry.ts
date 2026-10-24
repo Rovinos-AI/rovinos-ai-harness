@@ -2,7 +2,7 @@
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { trace } from "@opentelemetry/api";
 import { ExportResultCode } from "@opentelemetry/core";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import {
   attr,
   createTelemetrySdk,
@@ -13,8 +13,8 @@ import {
   type VaultRunReader,
   VaultRunView,
   type TelemetrySdkOptions,
-} from "@harness/telemetry";
-import { __registerUnsafeSpanForTests } from "@harness/telemetry/testing";
+} from "@rovinos/telemetry";
+import { __registerUnsafeSpanForTests } from "@rovinos/telemetry/testing";
 import { z } from "zod";
 
 const UNSAFE_SPAN_NAME = "harness.canary.unsafe";
@@ -91,7 +91,7 @@ export async function emitCanaryBadLog(
   runId: Id,
   canary: string,
 ): Promise<void> {
-  logs.getLogger("@harness/telemetry").emit({
+  logs.getLogger("@rovinos/telemetry").emit({
     eventName: canaryLog.name,
     severityNumber: SeverityNumber.INFO,
     attributes: {
@@ -104,7 +104,7 @@ export async function emitCanaryBadLog(
 
 /** Exercise the registered key-rotation log with counts only. */
 export async function emitCanaryKeysRotated(telemetry: CanaryTelemetry): Promise<void> {
-  emitKeysRotated({ vault: 3, store: 5 }, logs.getLogger("@harness/cli"));
+  emitKeysRotated({ vault: 3, store: 5 }, logs.getLogger("@rovinos/cli"));
   await telemetry.sdk.forceFlush();
 }
 
@@ -115,7 +115,7 @@ export async function emitCanaryUnsafeSpan(
   canary: string,
 ): Promise<void> {
   const span = telemetry.sdk.tracerProvider
-    .getTracer("@harness/canary")
+    .getTracer("@rovinos/canary")
     .startSpan(UNSAFE_SPAN_NAME, {
       attributes: { "harness.run.id": runId, "harness.canary.value": canary },
     });
@@ -149,10 +149,10 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
   const definition = defineSpan(
     "harness.canary.negative_control",
     { "harness.canary.value": attr.enum([canary]) },
-    { taskId: "8.5", packageName: "@harness/telemetry" },
+    { taskId: "8.5", packageName: "@rovinos/telemetry" },
   );
   const span = sdk.tracerProvider
-    .getTracer("@harness/canary-negative-control")
+    .getTracer("@rovinos/canary-negative-control")
     .startSpan(definition.name, { attributes: { "harness.canary.value": canary } });
   span.end();
   await sdk.tracerProvider.forceFlush();

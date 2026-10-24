@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, expect, it, vi } from "vitest";
-import { Id, type KeyProvider } from "@harness/schemas";
+import { Id, type KeyProvider } from "@rovinos/schemas";
 import { runVaultConformance } from "./conformance.test-helpers.js";
 import { PostgresVault } from "./postgres.js";
 

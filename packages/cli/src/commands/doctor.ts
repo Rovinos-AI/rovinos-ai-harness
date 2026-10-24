@@ -6,14 +6,14 @@ import {
   getConfigSecretRefs,
   type HarnessConfig,
   type SecretValueResolver,
-} from "@harness/config";
+} from "@rovinos/config";
 import {
   createServersAuthorizedCheck,
   createServersReachableChecks,
   OAuthTokenStore,
   type McpConnectionDependencies,
-} from "@harness/mcp";
-import { createPresidioReachableCheck } from "@harness/pii";
+} from "@rovinos/mcp";
+import { createPresidioReachableCheck } from "@rovinos/pii";
 import {
   Code,
   DoctorResultsSchema,
@@ -21,10 +21,10 @@ import {
   Id,
   type DoctorCheckResult,
   type SecretRef,
-} from "@harness/schemas";
-import { AkvSecretResolver, LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
-import type { DoctorCheck, DoctorContext, RuntimeConfig } from "@harness/core";
-import type * as Core from "@harness/core";
+} from "@rovinos/schemas";
+import { AkvSecretResolver, LocalKeyProvider, LocalKeyProviderError } from "@rovinos/vault";
+import type { DoctorCheck, DoctorContext, RuntimeConfig } from "@rovinos/core";
+import type * as Core from "@rovinos/core";
 import type { Command } from "commander";
 import { join } from "node:path";
 import type { CliContext, CommandModule } from "../command.js";
@@ -281,7 +281,7 @@ async function runDoctor(
 ): Promise<void> {
   const { config, configErrorCode } = await loadDoctorConfig(context);
   const env = process.env;
-  const core = await import("@harness/core");
+  const core = await import("@rovinos/core");
   const envResolver = new EnvSecretResolver(env);
   const secretResolver =
     context.secretResolver ??

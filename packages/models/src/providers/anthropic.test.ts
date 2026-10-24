@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
 import type { ClientOptions } from "@anthropic-ai/sdk";
-import { JsonValue, ModelRetryConfigSchema, parseJson } from "@harness/schemas";
-import type { ModelRequest } from "@harness/schemas";
+import { JsonValue, ModelRetryConfigSchema, parseJson } from "@rovinos/schemas";
+import type { ModelRequest } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {

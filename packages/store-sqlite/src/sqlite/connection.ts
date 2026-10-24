@@ -6,7 +6,7 @@ import {
   StoreMigrationError,
   type Clock,
   type ContentCodec,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { initializeEncryptionMetadata, validateEncryptionMetadata } from "./serialization.js";
 import { openReadOnlyDatabase } from "./read-only.js";
 

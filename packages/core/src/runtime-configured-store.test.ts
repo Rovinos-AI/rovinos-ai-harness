@@ -2,8 +2,8 @@
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RunConfigSchema, StoreConfigSchema, VaultConfigSchema } from "@harness/schemas";
-import { PiiEventStore } from "@harness/pii";
+import { RunConfigSchema, StoreConfigSchema, VaultConfigSchema } from "@rovinos/schemas";
+import { PiiEventStore } from "@rovinos/pii";
 import { expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import {

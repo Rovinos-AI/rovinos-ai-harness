@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, TraceId } from "@harness/schemas";
-import { InvalidEventError } from "@harness/store/adapter-internal";
-import type { ListRunsOptions, RunSummary } from "@harness/store/adapter-internal";
+import { Id, TraceId } from "@rovinos/schemas";
+import { InvalidEventError } from "@rovinos/store/adapter-internal";
+import type { ListRunsOptions, RunSummary } from "@rovinos/store/adapter-internal";
 import { decodeCursor, runListPage, storeError, type RunSummaryRow } from "./helpers.js";
 import type { Pool } from "pg";
 

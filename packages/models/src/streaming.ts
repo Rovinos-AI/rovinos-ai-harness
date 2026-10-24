@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id, ModelUsage } from "@harness/schemas";
+import type { Id, ModelUsage } from "@rovinos/schemas";
 import { attachModelFailureMetadata, ProviderError } from "./errors.js";
 import { assembleDeltas, ModelProgressSchema, ProviderDeltaSchema } from "./types.js";
 import type { ModelProgress, ProviderDelta } from "./types.js";

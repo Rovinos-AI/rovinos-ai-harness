@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { format, inspect } from "node:util";
-import { KeysConfigSchema, SecretRefSchema } from "@harness/schemas";
+import { KeysConfigSchema, SecretRefSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import {
   AkvKeyProvider,

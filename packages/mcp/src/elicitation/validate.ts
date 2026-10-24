@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FormSchema, HarnessError, type ServerConfig } from "@harness/schemas";
+import { FormSchema, HarnessError, type ServerConfig } from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Raised when an MCP server returns malformed or undeclared input-required data. */

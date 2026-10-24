@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FakeClock, Id, RunConfigSchema, type NewEvent } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
-import { InMemoryEventStore } from "@harness/store";
+import { FakeClock, Id, RunConfigSchema, type NewEvent } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
+import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it } from "vitest";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ContextPort, ModelCompletion, ModelPort, ToolPort } from "./ports.js";

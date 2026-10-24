@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { RunConfigSchema } from "@harness/schemas";
+import { RunConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { BudgetTracker } from "../budgets.js";
 import {

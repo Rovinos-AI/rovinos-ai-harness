@@ -2,7 +2,7 @@
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Clock } from "../../src/types.js";
 import { RunnerLeaseManager } from "./lease.js";

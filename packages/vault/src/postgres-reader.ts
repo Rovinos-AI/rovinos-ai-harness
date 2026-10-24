@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { KeyProvider, VaultValueEntry } from "@harness/schemas";
-import { VaultValueEntrySchema } from "@harness/schemas";
+import type { KeyProvider, VaultValueEntry } from "@rovinos/schemas";
+import { VaultValueEntrySchema } from "@rovinos/schemas";
 import type { Pool, QueryResultRow } from "pg";
 import { VaultOperationError } from "./errors.js";
 import { decryptScopeValue, unwrapScopeKey } from "./scope-crypto.js";

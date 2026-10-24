@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonValue as JsonValueSchema, type Event } from "@harness/schemas";
-import { buildApprovalPayload } from "@harness/policy";
+import { JsonValue as JsonValueSchema, type Event } from "@rovinos/schemas";
+import { buildApprovalPayload } from "@rovinos/policy";
 import type { EventPartial } from "../recorder.js";
 import { APPROVAL_WAIT_SPAN } from "../spans.js";
 import type { ToolIntentEvent } from "../run-state.js";

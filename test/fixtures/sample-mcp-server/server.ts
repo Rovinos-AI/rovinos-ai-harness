@@ -12,7 +12,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/server";
-import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 
 const counterPath = process.env.SAMPLE_COUNTER_FILE ?? "/data/messages.count";
 const spanCollector = createTestSpanCollector();

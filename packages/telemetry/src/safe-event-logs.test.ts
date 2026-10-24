@@ -7,7 +7,7 @@ import {
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { Code, Id, type TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { listLogDefinitions } from "./log-registry.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
@@ -279,7 +279,7 @@ describe("SafeEvent log projection", () => {
       }),
       processors: [processor],
     });
-    const logger = provider.getLogger("@harness/telemetry");
+    const logger = provider.getLogger("@rovinos/telemetry");
 
     try {
       const [modelEvent] = events;

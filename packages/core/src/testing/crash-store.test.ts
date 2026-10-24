@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, SequentialIdGenerator } from "@harness/schemas";
-import { InMemoryEventStore, type EventStore } from "@harness/store";
+import { Code, Id, SequentialIdGenerator } from "@rovinos/schemas";
+import { InMemoryEventStore, type EventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import { CrashingEventStore, SimulatedCrash } from "./crash-store.js";
 

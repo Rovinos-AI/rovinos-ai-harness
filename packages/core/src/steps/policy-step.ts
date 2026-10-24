@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, JsonValue, type Event } from "@harness/schemas";
+import { Code, HarnessError, JsonValue, type Event } from "@rovinos/schemas";
 import type { Span } from "@opentelemetry/api";
-import { buildApprovalPayload } from "@harness/policy";
+import { buildApprovalPayload } from "@rovinos/policy";
 import {
   emitSafeEventToDefaultLogger,
   SafeEvent,
   setActiveSpanAttribute,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 import { requestApproval } from "../approvals.js";
 import type { Checkpointer } from "../checkpoint.js";
 import { PolicyDecisionSchema } from "../ports.js";

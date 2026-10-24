@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event } from "@harness/schemas";
+import type { Event } from "@rovinos/schemas";
 import type { Checkpointer } from "../checkpoint.js";
 import type { RunRecorder } from "../recorder.js";
 import { foldRunState } from "../run-state.js";

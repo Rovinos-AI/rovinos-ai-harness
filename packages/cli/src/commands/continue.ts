@@ -7,7 +7,7 @@ import {
   RunResultSchema,
   parseJson,
   type RunInput,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 

@@ -6,9 +6,9 @@ import {
   type Id,
   type JsonValue,
   type RunConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { Context, Link } from "@opentelemetry/api";
-import { activeRuns } from "@harness/telemetry";
+import { activeRuns } from "@rovinos/telemetry";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
 import { createRunCheckpointer, type Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
@@ -32,10 +32,10 @@ import type {
   RunContext,
   ToolPort,
 } from "./ports.js";
-import type { WorkspaceSnapshotPort } from "@harness/sandbox";
+import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-output.js";
-import type { ValueTransform } from "@harness/models";
+import type { ValueTransform } from "@rovinos/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
 import { modelQuotaHooks } from "./model-quota-hooks.js";

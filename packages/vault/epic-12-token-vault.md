@@ -173,7 +173,7 @@ Shared design for this epic:
 **Parent:** #12 Token vault
 **Task Description:** Record every detokenization as a metadata-only audit event.
 **Expected Inputs:** Resolve calls with context (boundary, tool id).
-**Expected Output:** `packages/vault/src/auditing-resolver.ts` (`AuditingVaultResolver`), `detokenized` added to the `pii_action` action enum in `@harness/schemas` and to the safe-event mapping (7.10), docs section.
+**Expected Output:** `packages/vault/src/auditing-resolver.ts` (`AuditingVaultResolver`), `detokenized` added to the `pii_action` action enum in `@rovinos/schemas` and to the safe-event mapping (7.10), docs section.
 **Dependencies:** none.
 **Items it depends on:** 12.1, 7.10, 2.2.
 **Implementation guidance:**

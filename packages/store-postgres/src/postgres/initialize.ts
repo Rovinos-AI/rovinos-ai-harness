@@ -5,8 +5,8 @@ import {
   StoreEncryptionMismatchError,
   StoreMigrationError,
   migrate,
-} from "@harness/store/adapter-internal";
-import type { ContentCodec, Clock } from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
+import type { ContentCodec, Clock } from "@rovinos/store/adapter-internal";
 import { storeError } from "./helpers.js";
 
 async function migrateSchema(pool: Pool, clock: Clock, skipMigrations: boolean): Promise<void> {

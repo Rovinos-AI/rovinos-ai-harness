@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
+import { aesGcmDecrypt, aesGcmEncrypt } from "@rovinos/crypto";
 import {
   ContractError,
   KEY_PROVIDER_KEY_BYTES,
   parseJson,
   type KeyProvider,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import {
   ContentDecryptFailedError,

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { Id as IdValue } from "@harness/schemas";
+import type { Id as IdValue } from "@rovinos/schemas";
 import {
   activateRunWorkspace,
   clearRunScratch,

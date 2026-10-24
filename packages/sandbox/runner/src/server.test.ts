@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { Duplex, Readable } from "node:stream";
-import { Id, parseJson } from "@harness/schemas";
+import { Id, parseJson } from "@rovinos/schemas";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { WebFetchResultSchema } from "../../src/web-fetch-contracts.js";

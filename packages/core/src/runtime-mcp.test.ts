@@ -2,12 +2,12 @@
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RunConfigSchema, ServerConfigSchema } from "@harness/schemas";
-import { LocalKeyProvider } from "@harness/vault";
+import { RunConfigSchema, ServerConfigSchema } from "@rovinos/schemas";
+import { LocalKeyProvider } from "@rovinos/vault";
 import { afterEach, expect, it, vi } from "vitest";
-import { McpConnectionError, OAuthTokenStore } from "@harness/mcp";
-import type { McpToolPort } from "@harness/mcp";
-import type * as McpModule from "@harness/mcp";
+import { McpConnectionError, OAuthTokenStore } from "@rovinos/mcp";
+import type { McpToolPort } from "@rovinos/mcp";
+import type * as McpModule from "@rovinos/mcp";
 import { createConfiguredMcpToolPort } from "./runtime-mcp.js";
 
 type CreateMcpToolPort = typeof McpToolPort.create;
@@ -16,7 +16,7 @@ const mcpMocks = vi.hoisted(() => ({
   create: vi.fn<CreateMcpToolPort>(),
 }));
 
-vi.mock("@harness/mcp", async (importOriginal) => {
+vi.mock("@rovinos/mcp", async (importOriginal) => {
   const actual = await importOriginal<typeof McpModule>();
   return { ...actual, McpToolPort: { create: mcpMocks.create } };
 });

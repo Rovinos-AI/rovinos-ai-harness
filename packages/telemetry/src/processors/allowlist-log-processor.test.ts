@@ -2,7 +2,7 @@
 import { ROOT_CONTEXT, type Context, type SpanContext } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { Code, Id, type TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@rovinos/schemas";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
@@ -128,7 +128,7 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(sanitized?.severityText).toBeUndefined();
     expect(sanitized?.spanContext).toEqual(spanContext);
     expect(sanitized?.resource.attributes).toEqual({ "service.name": "harness" });
-    expect(sanitized?.instrumentationScope).toEqual({ name: "@harness/telemetry" });
+    expect(sanitized?.instrumentationScope).toEqual({ name: "@rovinos/telemetry" });
     expect(sanitized?.hrTime).not.toBe(input.hrTime);
     expect(input.body).toBe("sensitive free-form body");
     expect(metricMocks.record.mock.calls).toEqual([["invalid_attr"], ["unregistered_attr"]]);

@@ -28,7 +28,7 @@ words deliberately to `docs/engineering/project-words.txt`.
 - Import, Node, Promise, RegExp, and Unicorn rules enforce package hygiene, safe regular expressions,
   current Node APIs, and predictable error handling.
 - `harness/import-direction` reads `docs/engineering/layers.json`; cross-package imports must follow
-  that table and use `@harness/*` package names.
+  that table and use `@rovinos/*` package names.
 - `harness/no-raw-tracer` prevents raw OpenTelemetry SDK imports, `trace.getTracer`, raw span
   creation (`startSpan`/`startActiveSpan`), exception recording (`recordException`), renaming
   (`updateName`), and span attribute mutation (`setAttribute`/`setAttributes`) outside approved
@@ -55,7 +55,7 @@ words deliberately to `docs/engineering/project-words.txt`.
 
 The ESLint config and Vitest workspace config must use default exports for their loaders.
 `scripts/gen-agents-index.mjs` validates `layers.json` through the schema parsing API and is run
-through its Yarn commands, which build `@harness/schemas` first. The root ESLint config also parses
+through its Yarn commands, which build `@rovinos/schemas` first. The root ESLint config also parses
 the canonical layer table through that API and injects it into the plugin; the plugin entry point
 alone opts out of `import-x/no-relative-packages` because it is outside `packages/`.
 

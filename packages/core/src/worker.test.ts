@@ -2,16 +2,16 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunQueue, RunQueueJob } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { SqliteEventStore, SqliteRunQueue } from "@harness/store-sqlite";
+import type { RunQueue, RunQueueJob } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { SqliteEventStore, SqliteRunQueue } from "@rovinos/store-sqlite";
 import {
   FakeClock,
   Id,
   RunConfigSchema,
   SequentialIdGenerator,
   type NewEvent,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import { createRuntime } from "./runtime.js";

@@ -8,11 +8,11 @@ Shared design for this epic:
 - **The event log stays the source of truth.** The queue holds only ids and scheduling state. Run input is recorded as `run_created` and `run_input` events (status `pending`) at enqueue time, so no content lives in queue rows.
 - **Workers are interchangeable.** Any worker can execute or resume any run. Ownership comes from the queue lease plus the store's `seq` conflict (2.2), so a stale worker can never append after losing a run.
 - **Single-instance mode stays supported.** SQLite store and vault with one process remain the default for local use. Multi-instance mode requires Postgres for both and is validated at startup.
-- Package `packages/sdk` is the only stable public API (`@harness/sdk`). `createRuntime` and other internals stay internal. The `harness worker` command lives in `packages/cli`; queue tables live in `packages/store`.
+- Package `packages/sdk` is the only stable public API (`@rovinos/sdk`). `createRuntime` and other internals stay internal. The `harness worker` command lives in `packages/cli`; queue tables live in `packages/store`.
 
 ---
 
-## 24.1 Public SDK: `@harness/sdk`
+## 24.1 Public SDK: `@rovinos/sdk`
 
 **Parent:** #24 Run service, SDK, and horizontal scaling
 **Task Description:** Provide a small, documented, semver-stable programmatic API for embedding the harness in other applications.
@@ -251,7 +251,7 @@ Shared design for this epic:
 1. The token bucket runs as one Lua script (`EVALSHA`, loaded at startup with an `EVAL` fallback) so take-and-refill is atomic on the server, and uses the server's `TIME` so replica clock skew doesn't matter. Keys are `<keyPrefix>:rl:<key>` with a TTL of twice the full-refill time, so idle buckets expire.
 2. Connection: lazy connect, bounded reconnect with backoff, command timeout (default 50 ms). Timeouts and connection errors map to the 24.9 unavailable path (`onUnavailable`), never to an unhandled error.
 3. Secrets: the URL (which may include a password) comes from a `SecretRef` (20.3) and never appears in logs, spans, or errors; TLS is supported for managed Redis/Valkey services.
-4. The package declares the client as a dependency and `@harness/core` (or the SDK, after 21.9) as a peer, matching the adapter packaging rule in 21.9, so users without Redis never install the client.
+4. The package declares the client as a dependency and `@rovinos/core` (or the SDK, after 21.9) as a peer, matching the adapter packaging rule in 21.9, so users without Redis never install the client.
 5. Compose: `valkey` service hardened like Postgres (read-only root, dropped capabilities, loopback-only port, healthcheck `valkey-cli ping`).
 6. Multi-replica example: two `harness serve` replicas sharing Postgres and Valkey, with a short doc showing how to verify the combined provider rate limit holds.
 **Tests to write:** the 24.9 conformance suite against Valkey in the integration stage (including the 200-iteration two-client concurrency case); script-load fallback; timeout and connection-loss paths use `onUnavailable`; a canary test that the connection URL never appears in errors or logs.

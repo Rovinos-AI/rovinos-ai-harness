@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
+import { UNREGISTERED_TOOL_ID } from "@rovinos/schemas";
 import {
   APP_APPROVAL_REASON,
   AppApprovalPolicyError,
   approvedAppPolicy,
 } from "../app-approval-context.js";
-import type { Code, Event, JsonValue as JsonValueSchema } from "@harness/schemas";
+import type { Code, Event, JsonValue as JsonValueSchema } from "@rovinos/schemas";
 import { approvedArgs } from "../approval-edits.js";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { setActiveSpanAttribute } from "@harness/telemetry";
+import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import type { EventPartial } from "../recorder.js";
 import type { ModelToolCall } from "../ports.js";
 import { requestPolicyApproval } from "./policy-step.js";

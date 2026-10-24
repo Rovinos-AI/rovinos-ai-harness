@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { Code, type Event, type ModelRef } from "@harness/schemas";
+import { Code, type Event, type ModelRef } from "@rovinos/schemas";
 import { ContextResultSchema, type ContextStrategy } from "../types.js";
 import { NaiveStrategy } from "./naive.js";
 import { SlidingWindowStrategy } from "./sliding-window.js";

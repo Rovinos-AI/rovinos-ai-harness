@@ -4,7 +4,7 @@ import {
   type Code,
   type Id,
   type StoreRetentionConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { Clock, EventStore, RunSummary } from "./types.js";
 
 const RUN_LIST_BATCH_SIZE = 100;

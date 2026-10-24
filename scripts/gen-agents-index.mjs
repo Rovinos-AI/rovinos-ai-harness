@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, relative, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 
 const BEGIN = "<!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->";
@@ -163,7 +163,7 @@ function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
     lines.push("", "## Allowed internal imports", "");
     lines.push(
       deps.length
-        ? `- ${deps.map((dependency) => `\`@harness/${dependency}\``).join(", ")}. Nothing else from \`@harness/*\`.`
+        ? `- ${deps.map((dependency) => `\`@rovinos/${dependency}\``).join(", ")}. Nothing else from \`@rovinos/*\`.`
         : "- None (leaf package).",
     );
     lines.push(
@@ -200,7 +200,7 @@ export function generate(root) {
   }
 
   const conv = "docs/engineering/CONVENTIONS.md";
-  const table = ["| Package | May import (`@harness/*`) |", "| --- | --- |"];
+  const table = ["| Package | May import (`@rovinos/*`) |", "| --- | --- |"];
   for (const name of packages) {
     table.push(
       `| \`${name}\` | ${layers[name].map((d) => `\`${d}\``).join(", ") || "nothing (leaf)"} |`,

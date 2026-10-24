@@ -9,7 +9,7 @@ import {
   InspectResultSchema,
   RunResultSchema,
   parseJson,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const projectName = `harness-prod-like-${String(process.pid)}`;
@@ -147,8 +147,8 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
     const shutdownRunScript = [
       'import { Command } from "commander";',
       'import { writeFileSync } from "node:fs";',
-      'import { createDefaultContext, createOutput, main } from "@harness/cli/programmatic";',
-      'import { FakeModelPort } from "@harness/core/testing";',
+      'import { createDefaultContext, createOutput, main } from "@rovinos/cli/programmatic";',
+      'import { FakeModelPort } from "@rovinos/core/testing";',
       "const action = process.env.HARNESS_E2E_ACTION;",
       'const scriptedModel = new FakeModelPort([{ parts: [{ type: "text", text: "resumed" }], usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "stop", provider: "scripted", model: "shutdown-test", latencyMs: 1, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }]);',
       "const context = createDefaultContext(new Command(), createOutput());",

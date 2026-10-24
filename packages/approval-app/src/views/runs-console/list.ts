@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { RunConsoleListSchema } from "@harness/schemas/browser";
+import { RunConsoleListSchema } from "@rovinos/schemas/browser";
 
 const listTool = "harness.runs.list";
 export const runsConsolePageSize = 20;

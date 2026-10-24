@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHarnessPlugin } from "@harness/eslint-plugin-harness";
+import { createHarnessPlugin } from "@rovinos/eslint-plugin-harness";
 import { z } from "zod";
 import layersDocument from "./docs/engineering/layers.json" with { type: "json" };
 

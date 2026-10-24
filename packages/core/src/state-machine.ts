@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, RunStatus as RunStatusType } from "@harness/schemas";
+import type { Code, RunStatus as RunStatusType } from "@rovinos/schemas";
 
 /** Triggers accepted by the run lifecycle state machine. */
 export const RUN_TRIGGERS = [

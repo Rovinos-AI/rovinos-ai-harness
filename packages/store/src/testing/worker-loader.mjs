@@ -5,7 +5,7 @@ import ts from "typescript";
 
 /** Resolves source imports that use emitted `.js` extensions to their TypeScript files. */
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier.startsWith("@harness/store/")) {
+  if (specifier.startsWith("@rovinos/store/")) {
     return nextResolve(specifier, {
       ...context,
       conditions: [...context.conditions, "source"],

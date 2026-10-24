@@ -1,13 +1,13 @@
 ---
-"@harness/config": minor
-"@harness/core": minor
-"@harness/pii": minor
-"@harness/schemas": minor
-"@harness/sdk": minor
-"@harness/store": minor
-"@harness/store-postgres": minor
-"@harness/store-sqlite": minor
-"@harness/telemetry": minor
+"@rovinos/config": minor
+"@rovinos/core": minor
+"@rovinos/pii": minor
+"@rovinos/schemas": minor
+"@rovinos/sdk": minor
+"@rovinos/store": minor
+"@rovinos/store-postgres": minor
+"@rovinos/store-sqlite": minor
+"@rovinos/telemetry": minor
 ---
 
 # Cross-run quotas

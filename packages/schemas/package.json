@@ -1,5 +1,5 @@
 {
-  "name": "@harness/schemas",
+  "name": "@rovinos/schemas",
   "version": "0.0.0",
   "private": true,
   "type": "module",

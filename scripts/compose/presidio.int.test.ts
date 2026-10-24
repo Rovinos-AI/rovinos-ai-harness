@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from "node:child_process";
-import { DetectionSchema, parseJson } from "@harness/schemas";
+import { DetectionSchema, parseJson } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 

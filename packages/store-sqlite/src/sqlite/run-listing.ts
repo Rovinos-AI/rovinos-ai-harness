@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import { Id, parseJson, type RunStatus } from "@harness/schemas";
+import { Id, parseJson, type RunStatus } from "@rovinos/schemas";
 import { z } from "zod";
-import { InvalidEventError } from "@harness/store/adapter-internal";
-import type { ListRunsOptions, RunSummary } from "@harness/store/adapter-internal";
+import { InvalidEventError } from "@rovinos/store/adapter-internal";
+import type { ListRunsOptions, RunSummary } from "@rovinos/store/adapter-internal";
 import { sqliteStoreError } from "./outbox.js";
 import { runListPage, type RunSummaryRow } from "./serialization.js";
 

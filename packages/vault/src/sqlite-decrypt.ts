@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { aesGcmDecrypt, hkdfSha256 } from "@harness/crypto";
-import type { Id, KeyProvider } from "@harness/schemas";
+import { aesGcmDecrypt, hkdfSha256 } from "@rovinos/crypto";
+import type { Id, KeyProvider } from "@rovinos/schemas";
 import { VaultOperationError } from "./errors.js";
 
 export const ENCRYPTION_INFO = "harness/vault/enc";

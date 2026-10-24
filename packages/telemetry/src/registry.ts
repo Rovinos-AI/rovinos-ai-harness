@@ -16,7 +16,7 @@ import {
 } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
-import { Code, HarnessError } from "@harness/schemas";
+import { Code, HarnessError } from "@rovinos/schemas";
 import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
 import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
@@ -38,7 +38,7 @@ export type SpanDefinitionShape = SpanShape | ErrorCodeShape;
 /** Task and package responsible for a registered span definition. */
 export interface SpanOwnerTask {
   readonly taskId: string;
-  readonly packageName: `@harness/${string}`;
+  readonly packageName: `@rovinos/${string}`;
 }
 
 /** A registered span definition and its validated attribute contract. */
@@ -93,7 +93,7 @@ function isSpanOwnerTask(value: unknown): value is SpanOwnerTask {
     /^\d+(?:\.\d+)+$/u.test(value.taskId) &&
     "packageName" in value &&
     typeof value.packageName === "string" &&
-    /^@harness\/[a-z0-9-]+$/u.test(value.packageName)
+    /^@rovinos\/[a-z0-9-]+$/u.test(value.packageName)
   );
 }
 
@@ -385,7 +385,7 @@ export function __registerUnsafeSpanForTests(name: string, shape: SpanShape): ()
     name: parsedName,
     shape,
     schema: z.object(shape).strict(),
-    ownerTask: { taskId: "4.6", packageName: "@harness/telemetry" },
+    ownerTask: { taskId: "4.6", packageName: "@rovinos/telemetry" },
     start() {
       throw new SpanRegistryError("span_attr_unconstrained");
     },

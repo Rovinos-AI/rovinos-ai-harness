@@ -5,9 +5,9 @@ import {
   type Id,
   type JsonValue,
   type RunConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { Link } from "@opentelemetry/api";
-import type { EventStore } from "@harness/store";
+import type { EventStore } from "@rovinos/store";
 import type { BudgetViolation } from "./budgets.js";
 import { CorruptLogError, foldRunState } from "./run-state.js";
 import { RunRecorder } from "./recorder.js";

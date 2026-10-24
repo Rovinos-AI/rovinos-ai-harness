@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 import { ModelUsageError } from "./errors.js";
 import { calculateCostMicros, createPricingAccountant, resolveModelPricing } from "./pricing.js";
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CompositeSecretResolver, HarnessConfigSchema } from "@harness/config";
+import { CompositeSecretResolver, HarnessConfigSchema } from "@rovinos/config";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,10 +10,10 @@ import {
   StorePurgeResultSchema,
   parseJson,
   type RunStatus,
-} from "@harness/schemas";
-import { InMemoryEventStore, StoreMigrationError } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { InMemoryVault } from "@harness/vault";
+} from "@rovinos/schemas";
+import { InMemoryEventStore, StoreMigrationError } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { InMemoryVault } from "@rovinos/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";

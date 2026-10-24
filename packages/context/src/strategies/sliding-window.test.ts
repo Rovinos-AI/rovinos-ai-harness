@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { Id, type Event, type Message, type ModelRef, type Part } from "@harness/schemas";
+import { Id, type Event, type Message, type ModelRef, type Part } from "@rovinos/schemas";
 import { SlidingWindowStrategy } from "./sliding-window.js";
 import type { ContextStrategyInput, TokenCounter } from "../types.js";
 import { HeuristicTokenCounter } from "../token-counter.js";

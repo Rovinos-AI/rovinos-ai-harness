@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { z } from "zod";
-import { parseYaml } from "@harness/schemas";
+import { parseYaml } from "@rovinos/schemas";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const updateSchema = z.discriminatedUnion("package-ecosystem", [

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import { StoreUnavailableError } from "./errors.js";
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema } from "@harness/config";
-import { RunAlreadyTerminalError } from "@harness/core";
-import type { RunQueue, RunQueueJob } from "@harness/store";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { RunAlreadyTerminalError } from "@rovinos/core";
+import type { RunQueue, RunQueueJob } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";

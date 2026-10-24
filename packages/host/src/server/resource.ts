@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { HostConfig } from "@harness/schemas";
+import type { HostConfig } from "@rovinos/schemas";
 import { z } from "zod";
 
 const MAX_RESOURCE_BYTES = 1_048_576;

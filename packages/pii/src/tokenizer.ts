@@ -13,8 +13,8 @@ import {
   type PiiActionSummary,
   type PiiBoundary,
   type PiiPolicy,
-} from "@harness/schemas";
-import { isToken, type VaultWriter } from "@harness/vault";
+} from "@rovinos/schemas";
+import { isToken, type VaultWriter } from "@rovinos/vault";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import { assertJsonSize, JsonSizeTracker } from "./json-size.js";
 import { evaluatePiiPolicy } from "./policy.js";

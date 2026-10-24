@@ -2,11 +2,11 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { createRuntime, foldRunState } from "@harness/core";
-import { HarnessError } from "@harness/schemas";
-import type { RunStatus } from "@harness/schemas";
-import { runDockerProcess } from "@harness/sandbox";
-import type { DockerProcessResult } from "@harness/sandbox";
+import { createRuntime, foldRunState } from "@rovinos/core";
+import { HarnessError } from "@rovinos/schemas";
+import type { RunStatus } from "@rovinos/schemas";
+import { runDockerProcess } from "@rovinos/sandbox";
+import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";
 import { TrialResultSchema } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";

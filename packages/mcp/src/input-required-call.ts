@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, JsonValue } from "@harness/schemas";
-import type { InputResponse, JsonValue as JsonValueType } from "@harness/schemas";
-import { countMcpInputRequest } from "@harness/telemetry";
+import { HarnessError, JsonValue } from "@rovinos/schemas";
+import type { InputResponse, JsonValue as JsonValueType } from "@rovinos/schemas";
+import { countMcpInputRequest } from "@rovinos/telemetry";
 import type {
   ElicitationInputOutcome,
   ElicitationPort,

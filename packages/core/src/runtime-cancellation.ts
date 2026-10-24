@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import type { Event, Id } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import type { Event, Id } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 
 const CANCEL_REQUESTED = "cancel_requested";
 const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";

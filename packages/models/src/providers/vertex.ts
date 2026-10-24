@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { GoogleGenAI } from "@google/genai";
 import type { GoogleGenAIOptions } from "@google/genai";
-import type { Capabilities, ModelRequest } from "@harness/schemas";
+import type { Capabilities, ModelRequest } from "@rovinos/schemas";
 import { z } from "zod";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";

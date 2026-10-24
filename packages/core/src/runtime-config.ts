@@ -21,22 +21,22 @@ import {
   type ServersConfig,
   type StoreConfig,
   type VaultConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { z } from "zod";
 import type { Context } from "@opentelemetry/api";
-import type { SandboxBackend, WorkspaceSnapshotPort } from "@harness/sandbox";
-import type { ProviderAdapter } from "@harness/models";
-import type { McpConnectionDependencies } from "@harness/mcp";
-import type { EventStore, RunQueue } from "@harness/store";
+import type { SandboxBackend, WorkspaceSnapshotPort } from "@rovinos/sandbox";
+import type { ProviderAdapter } from "@rovinos/models";
+import type { McpConnectionDependencies } from "@rovinos/mcp";
+import type { EventStore, RunQueue } from "@rovinos/store";
 import type {
   AuditingVaultResolver,
   LocalKeyProvider,
   VaultResolver,
   VaultAdmin,
   VaultWriter,
-} from "@harness/vault";
-import type { PiiMessageSanitizer, Tokenizer } from "@harness/pii";
-import type { WorkspacePort } from "@harness/context";
+} from "@rovinos/vault";
+import type { PiiMessageSanitizer, Tokenizer } from "@rovinos/pii";
+import type { WorkspacePort } from "@rovinos/context";
 import type {
   ContextPort,
   IdGenerator,

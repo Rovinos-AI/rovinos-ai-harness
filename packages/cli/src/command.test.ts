@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema } from "@harness/config";
-import { HarnessError } from "@harness/schemas";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { HarnessError } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { cliPrincipal } from "./command.js";
 

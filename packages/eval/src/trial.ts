@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, ModelRefSchema } from "@harness/schemas";
+import { Code, Id, ModelRefSchema } from "@rovinos/schemas";
 import { z } from "zod";
 import { EvalSuiteSchema, EvalTaskSchema } from "./schema.js";
 

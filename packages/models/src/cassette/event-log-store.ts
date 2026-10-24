@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { type Event, type ModelRequest, type Sha256Hex } from "@harness/schemas";
+import { type Event, type ModelRequest, type Sha256Hex } from "@rovinos/schemas";
 import { ProviderResultSchema } from "../types.js";
 import {
   CassetteDivergenceError,

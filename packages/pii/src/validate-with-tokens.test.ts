@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import type { JsonValue } from "@harness/schemas";
-import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@harness/vault";
+import type { JsonValue } from "@rovinos/schemas";
+import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@rovinos/vault";
 import { z } from "zod";
 import {
   createValidateWithTokensResultSchema,

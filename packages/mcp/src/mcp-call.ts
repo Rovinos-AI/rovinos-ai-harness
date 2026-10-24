@@ -7,7 +7,7 @@ import {
   type CallToolResult,
   type Client,
 } from "@modelcontextprotocol/client";
-import type { ServerConfig } from "@harness/schemas";
+import type { ServerConfig } from "@rovinos/schemas";
 import { McpProtocolError } from "./errors.js";
 import { buildActiveRequestMeta } from "./trace-injection.js";
 import type { McpTool } from "./tool-list.js";

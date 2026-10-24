@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // cspell:ignore linkpath
-import { HarnessError, Id } from "@harness/schemas";
-import type { WorkspaceRef } from "@harness/schemas";
+import { HarnessError, Id } from "@rovinos/schemas";
+import type { WorkspaceRef } from "@rovinos/schemas";
 import { createReadStream, createWriteStream } from "node:fs";
 import { chmod, lstat, readlink, readdir, rm } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";

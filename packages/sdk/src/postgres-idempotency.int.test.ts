@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
-import { HarnessConfigSchema } from "@harness/config";
-import type { ModelPort } from "@harness/core";
+import { HarnessConfigSchema } from "@rovinos/config";
+import type { ModelPort } from "@rovinos/core";
 import { createHarness } from "./index.js";
-import { Code, FakeClock, Id } from "@harness/schemas";
-import { PostgresEventStore } from "@harness/store-postgres";
+import { Code, FakeClock, Id } from "@rovinos/schemas";
+import { PostgresEventStore } from "@rovinos/store-postgres";
 import { Pool } from "pg";
 import { expect, it } from "vitest";
 

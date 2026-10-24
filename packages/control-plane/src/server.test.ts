@@ -14,9 +14,9 @@ import {
   type EventType,
   type NewEvent,
   type RunStatus,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {

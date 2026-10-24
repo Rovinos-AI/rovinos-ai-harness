@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { type Code, HarnessError, type Id, type JsonValue, type PiiConfig } from "@harness/schemas";
-import { findTokens } from "@harness/vault";
-import type { AuditingVaultResolver, VaultAuditHandler } from "@harness/vault";
+import { type Code, HarnessError, type Id, type JsonValue, type PiiConfig } from "@rovinos/schemas";
+import { findTokens } from "@rovinos/vault";
+import type { AuditingVaultResolver, VaultAuditHandler } from "@rovinos/vault";
 
 /** Result of detokenizing an allowlisted tool argument copy. */
 export interface DetokenizeArgsResult {

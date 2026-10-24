@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { BedrockAdapter } from "./bedrock.js";
-import type { ModelRequest } from "@harness/schemas";
+import type { ModelRequest } from "@rovinos/schemas";
 
 const region = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
 const modelId = process.env.BEDROCK_MODEL_ID;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from "node:fs/promises";
-import { parseYaml } from "@harness/schemas";
+import { parseYaml } from "@rovinos/schemas";
 import { PolicyDocumentSchema } from "./schema.js";
 import type { PolicyDocument } from "./schema.js";
 
@@ -57,7 +57,7 @@ export {
   type ApprovalSweepRun,
   type ApprovalSweepStore,
 } from "./sweeper.js";
-export type { ApprovalSweepResult } from "@harness/schemas";
+export type { ApprovalSweepResult } from "@rovinos/schemas";
 
 /**
  * Loads and validates a YAML or JSON policy document from disk.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { SequentialIdGenerator, type JsonValue } from "@harness/schemas";
+import { SequentialIdGenerator, type JsonValue } from "@rovinos/schemas";
 import { InMemoryWorkspace, OffloadedStub, OffloadingToolPort } from "./offload.js";
 
 const runId = "00000000000000000000000001";

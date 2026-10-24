@@ -10,7 +10,7 @@ MCP Apps host: sandboxed iframe reference host, app call routing, telemetry inge
 
 ## Allowed internal imports
 
-- `@harness/schemas`, `@harness/telemetry`, `@harness/core`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/core`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

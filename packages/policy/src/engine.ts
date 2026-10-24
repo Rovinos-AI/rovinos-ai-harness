@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import { compilePolicy, type PolicyCall } from "./evaluate.js";
 import type { PolicyDocument } from "./schema.js";
 import { policyVersion } from "./version.js";

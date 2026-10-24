@@ -5,7 +5,7 @@ import {
   type Capabilities,
   type ModelRequest,
   type ModelResponse,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import { ProviderError } from "../errors.js";
 import { ProviderResultSchema, type ProviderResult } from "../types.js";

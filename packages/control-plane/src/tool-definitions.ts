@@ -8,7 +8,7 @@ import {
   ResolveResponse,
   RevealRequest,
   RevealResponse,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { Tool } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { APPROVAL_RESOURCE_URI } from "./resources/approval.js";

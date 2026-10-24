@@ -4,7 +4,7 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { Writable, Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import {
   assertWorkspaceArchiveLimits,
   createWorkspaceArchive,

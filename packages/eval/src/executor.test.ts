@@ -2,7 +2,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { defineSuite } from "./load.js";
 import { prepareTrial, TrialConfigSchema } from "./executor.js";

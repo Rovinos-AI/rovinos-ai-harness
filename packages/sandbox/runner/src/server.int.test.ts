@@ -3,7 +3,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { Id, parseJson } from "@harness/schemas";
+import { Id, parseJson } from "@rovinos/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ExecResultSchema } from "../../src/types.js";
@@ -418,8 +418,8 @@ describe("sandbox runner Compose service", () => {
     const tryHarnessFirst = [
       "(async () => {",
       'const fs = require("node:fs");',
-      'const { FsWorkspace } = await import("@harness/sandbox");',
-      'const { Id } = await import("@harness/schemas");',
+      'const { FsWorkspace } = await import("@rovinos/sandbox");',
+      'const { Id } = await import("@rovinos/schemas");',
       `const runId = Id.parse("${harnessFirstRun}");`,
       'try { await new FsWorkspace({ workspaceRoot: "/workspaces", runId }).write(".harness/offload/value", new TextEncoder().encode("x")); } catch {}',
       "process.stdout.write(String(fs.existsSync(`/workspaces/${runId}`))); })().catch(() => process.exit(1));",
@@ -435,8 +435,8 @@ describe("sandbox runner Compose service", () => {
     ).toBe(200);
     const writeFromHarness = [
       "(async () => {",
-      'const { FsWorkspace } = await import("@harness/sandbox");',
-      'const { Id } = await import("@harness/schemas");',
+      'const { FsWorkspace } = await import("@rovinos/sandbox");',
+      'const { Id } = await import("@rovinos/schemas");',
       `const runId = Id.parse("${harnessFirstRun}");`,
       'await new FsWorkspace({ workspaceRoot: "/workspaces", runId }).write(".harness/offload/value", new TextEncoder().encode("x"));',
       'process.stdout.write("ok"); })().catch(() => process.exit(1));',
@@ -461,8 +461,8 @@ describe("sandbox runner Compose service", () => {
     ).toBe(200);
     const writeAfterRunner = [
       "(async () => {",
-      'const { FsWorkspace } = await import("@harness/sandbox");',
-      'const { Id } = await import("@harness/schemas");',
+      'const { FsWorkspace } = await import("@rovinos/sandbox");',
+      'const { Id } = await import("@rovinos/schemas");',
       `const runId = Id.parse("${runnerFirstRun}");`,
       'await new FsWorkspace({ workspaceRoot: "/workspaces", runId }).write(".harness/offload/value", new TextEncoder().encode("x"));',
       'process.stdout.write("ok"); })().catch(() => process.exit(1));',

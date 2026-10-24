@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { z } from "zod";
-import { migrate, StoreUnavailableError } from "@harness/store/adapter-internal";
+import { migrate, StoreUnavailableError } from "@rovinos/store/adapter-internal";
 import { openReadOnlyDatabase } from "./sqlite/read-only.js";
 
 const migrationOptionsSchema = z

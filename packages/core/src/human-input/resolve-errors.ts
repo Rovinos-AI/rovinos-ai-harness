@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 /** Error raised when an input request does not exist in the run log. */
 export class InputNotFoundError extends HarnessError {

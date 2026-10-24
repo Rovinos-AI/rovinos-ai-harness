@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, RunStatus, joinEvent, parseJson, type Event as StoredEvent } from "@harness/schemas";
+import { Id, RunStatus, joinEvent, parseJson, type Event as StoredEvent } from "@rovinos/schemas";
 import type Database from "better-sqlite3";
 import { z } from "zod";
-import type { ContentCodec, EncodedSnapshot, RunSummary } from "@harness/store/adapter-internal";
+import type { ContentCodec, EncodedSnapshot, RunSummary } from "@rovinos/store/adapter-internal";
 import {
   ContentDecryptFailedError,
   InvalidEventError,
   KeyNotFoundError,
   StoreEncryptionMismatchError,
   StoreUnavailableError,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 
 /** Initialize or validate the durable content-encryption mode for a SQLite database. */
 export function initializeEncryptionMetadata(db: Database.Database, encrypted: boolean): void {

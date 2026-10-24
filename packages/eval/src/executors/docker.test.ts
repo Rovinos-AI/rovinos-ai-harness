@@ -2,11 +2,11 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeClock, parseJson, SequentialIdGenerator } from "@harness/schemas";
-import type { ModelPort } from "@harness/core";
-import { createRuntime } from "@harness/core";
-import type * as SandboxModule from "@harness/sandbox";
-import type { DockerProcessOptions, DockerProcessResult } from "@harness/sandbox";
+import { FakeClock, parseJson, SequentialIdGenerator } from "@rovinos/schemas";
+import type { ModelPort } from "@rovinos/core";
+import { createRuntime } from "@rovinos/core";
+import type * as SandboxModule from "@rovinos/sandbox";
+import type { DockerProcessOptions, DockerProcessResult } from "@rovinos/sandbox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineSuite } from "../load.js";
 import { TrialConfigSchema } from "../executor.js";
@@ -14,7 +14,7 @@ import type { TrialSpec } from "../trial.js";
 
 const mocks = vi.hoisted(() => ({ runDockerProcess: vi.fn() }));
 
-vi.mock("@harness/sandbox", async (importOriginal) => {
+vi.mock("@rovinos/sandbox", async (importOriginal) => {
   const actual = await importOriginal<typeof SandboxModule>();
   return { ...actual, runDockerProcess: mocks.runDockerProcess };
 });

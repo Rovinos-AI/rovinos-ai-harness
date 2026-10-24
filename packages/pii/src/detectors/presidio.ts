@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, parseJson, type Detection, type PiiPresidioConfig } from "@harness/schemas";
+import { Code, parseJson, type Detection, type PiiPresidioConfig } from "@rovinos/schemas";
 import { fetch as undiciFetch } from "undici";
 import type { Response as UndiciResponse } from "undici";
 import { z } from "zod";

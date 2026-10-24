@@ -1,5 +1,5 @@
 ---
-"@harness/sdk": minor
+"@rovinos/sdk": minor
 ---
 
 # Prompt cache pricing and usage

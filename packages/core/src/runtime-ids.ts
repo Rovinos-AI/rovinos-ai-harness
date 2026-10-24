@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, randomBytes } from "node:crypto";
-import { Id, Sha256Hex } from "@harness/schemas";
+import { Id, Sha256Hex } from "@rovinos/schemas";
 import type { IdGenerator } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { RuntimeConfig } from "./runtime-config.js";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@harness/schemas";
-import { SeqConflictError, type EventStore } from "@harness/store";
-import { ApprovalEditError } from "@harness/policy";
+import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@rovinos/schemas";
+import { SeqConflictError, type EventStore } from "@rovinos/store";
+import { ApprovalEditError } from "@rovinos/policy";
 import { ApprovalEditPreparationError, prepareApprovalEdits } from "./approval-edits.js";
 import {
   assertApproverMayResolve,

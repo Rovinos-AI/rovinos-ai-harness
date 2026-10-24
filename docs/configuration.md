@@ -1,6 +1,6 @@
 # Configuration
 
-`@harness/config` loads YAML or JSON, validates it with the shared Zod fragments, and returns a deeply frozen `HarnessConfig`. Unknown keys are rejected. Validation errors identify paths and expected types without including submitted values.
+`@rovinos/config` loads YAML or JSON, validates it with the shared Zod fragments, and returns a deeply frozen `HarnessConfig`. Unknown keys are rejected. Validation errors identify paths and expected types without including submitted values.
 
 ## File selection and environment overrides
 
@@ -134,7 +134,7 @@ Before each checkpoint, the runtime archives the run workspace under `<dataDir>/
 
 Unencrypted snapshot creation and restore verification stream archive data. Encrypted creation is an exception to the no-full-buffer guarantee: the AES-GCM API accepts a `Buffer`, so the compressed archive must be materialized before encryption.
 
-The runtime exposes `sandboxBackend`. Applications can compose sandbox-backed tool ports with `RuntimeOverrides.createTool(backend)`; an explicit `tool` override takes precedence. This does not automatically register workspace or web tools. Tool adapters must keep the existing policy, approval, PII, and output-offloading boundaries. `RuntimeOverrides.sandboxBackend` replaces the backend for tests or embedding; the runtime owns its optional `close()` hook, including cleanup after setup failure. Closing the runtime also releases storage and keys if backend cleanup fails. The lower-level `createSandboxBackend(sandboxConfig, deps)` factory is exported by `@harness/sandbox`.
+The runtime exposes `sandboxBackend`. Applications can compose sandbox-backed tool ports with `RuntimeOverrides.createTool(backend)`; an explicit `tool` override takes precedence. This does not automatically register workspace or web tools. Tool adapters must keep the existing policy, approval, PII, and output-offloading boundaries. `RuntimeOverrides.sandboxBackend` replaces the backend for tests or embedding; the runtime owns its optional `close()` hook, including cleanup after setup failure. Closing the runtime also releases storage and keys if backend cleanup fails. The lower-level `createSandboxBackend(sandboxConfig, deps)` factory is exported by `@rovinos/sandbox`.
 
 ### Sandbox egress
 
@@ -205,7 +205,7 @@ for routing, tool, prompt, budget, context-strategy, and result-schema behavior.
 
 ## PII detectors and custom identifiers
 
-`@harness/pii` exports synchronous detectors for email, phone, credit cards,
+`@rovinos/pii` exports synchronous detectors for email, phone, credit cards,
 IBANs, IPv4/IPv6, AWS/GitHub keys, JWT-shaped strings, private-key opening
 markers, and URL credentials. Credit cards require Luhn validation; IBANs
 require a known country length and mod-97 validation. Detection is imperfect:

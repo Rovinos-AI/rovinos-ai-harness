@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import { Id } from "@harness/schemas";
-import { InvalidEventError, parseIdempotencyKeyTakeover } from "@harness/store/adapter-internal";
+import { Id } from "@rovinos/schemas";
+import { InvalidEventError, parseIdempotencyKeyTakeover } from "@rovinos/store/adapter-internal";
 import { sqliteStoreError } from "./outbox.js";
 import {
   IdempotencyKeyHashSchema,
   type IdempotencyKeyHash,
   type IdempotencyKeyTakeoverOptions,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 
 /**
  * Persist or retrieve a hashed idempotency claim in SQLite.

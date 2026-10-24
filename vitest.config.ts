@@ -33,17 +33,17 @@ export default defineConfig({
   resolve: {
     conditions: ["source", "module", "browser", "development|production"],
     alias: {
-      "@harness/schemas/browser": fileURLToPath(
+      "@rovinos/schemas/browser": fileURLToPath(
         new URL("./packages/schemas/src/browser.ts", import.meta.url),
       ),
-      "@harness/config": fileURLToPath(new URL("./packages/config/src/index.ts", import.meta.url)),
-      "@harness/schemas": fileURLToPath(
+      "@rovinos/config": fileURLToPath(new URL("./packages/config/src/index.ts", import.meta.url)),
+      "@rovinos/schemas": fileURLToPath(
         new URL("./packages/schemas/src/index.ts", import.meta.url),
       ),
     },
   },
   ssr: {
-    noExternal: [/^@harness\//],
+    noExternal: [/^@rovinos\//],
     resolve: {
       conditions: ["source", "node", "development|production"],
     },

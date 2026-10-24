@@ -5,7 +5,7 @@ import {
   ModelRequestSchema,
   ModelUsageSchema,
   PartSchema,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { MockAgent, fetch as undiciFetch } from "undici";
 import type { Dispatcher } from "undici";
 import { describe, expect, it } from "vitest";

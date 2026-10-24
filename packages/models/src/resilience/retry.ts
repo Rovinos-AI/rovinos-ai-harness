@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, ModelRetryConfigSchema } from "@harness/schemas";
-import type { ModelRetryConfig } from "@harness/schemas";
+import { HarnessError, ModelRetryConfigSchema } from "@rovinos/schemas";
+import type { ModelRetryConfig } from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
 
 /** Normalized random source whose result is in the interval [0, 1). */

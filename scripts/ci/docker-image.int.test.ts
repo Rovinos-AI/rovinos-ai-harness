@@ -4,7 +4,7 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { HARNESS_VERSION } from "@harness/schemas";
+import { HARNESS_VERSION } from "@rovinos/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -65,7 +65,7 @@ describe("Docker image", () => {
       imageName,
       "--input-type=module",
       "-e",
-      "import { existsSync } from 'node:fs'; import { SqliteEventStore } from '@harness/store-sqlite'; const paths = ['/app/packages/store-sqlite/migrations/sqlite/0001_init.sql', '/app/packages/store-postgres/migrations/postgres/0001_init.sql']; if (paths.some((path) => !existsSync(path))) throw new Error('migration_files_missing'); const path = '/tmp/harness-store-image-smoke.sqlite'; const store = new SqliteEventStore(path); await store.close(); if (!existsSync(path)) throw new Error('sqlite_store_not_created'); process.stdout.write('migration_files_and_sqlite_store_ok');",
+      "import { existsSync } from 'node:fs'; import { SqliteEventStore } from '@rovinos/store-sqlite'; const paths = ['/app/packages/store-sqlite/migrations/sqlite/0001_init.sql', '/app/packages/store-postgres/migrations/postgres/0001_init.sql']; if (paths.some((path) => !existsSync(path))) throw new Error('migration_files_missing'); const path = '/tmp/harness-store-image-smoke.sqlite'; const store = new SqliteEventStore(path); await store.close(); if (!existsSync(path)) throw new Error('sqlite_store_not_created'); process.stdout.write('migration_files_and_sqlite_store_ok');",
     ]);
     expect(output.trim()).toBe("migration_files_and_sqlite_store_ok");
   });

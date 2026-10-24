@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id, RunStatus } from "@harness/schemas";
+import type { Id, RunStatus } from "@rovinos/schemas";
 import type { PoolClient } from "pg";
 import type { EncodedEvent } from "./helpers.js";
 

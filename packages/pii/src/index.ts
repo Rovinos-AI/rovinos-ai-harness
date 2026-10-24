@@ -38,5 +38,5 @@ export type {
   PiiToolPortLike,
   PiiToolPortDependencies,
 } from "./pii-tool-port.js";
-export type { PiiActionSummary } from "@harness/schemas";
-export { toPiiActionEventPayload as toPiiActionEvent } from "@harness/schemas";
+export type { PiiActionSummary } from "@rovinos/schemas";
+export { toPiiActionEventPayload as toPiiActionEvent } from "@rovinos/schemas";

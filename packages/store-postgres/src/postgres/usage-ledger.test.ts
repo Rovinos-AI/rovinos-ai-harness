@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import {
   InvalidEventError,
   StoreUnavailableError,
   type UsageLedgerPeriod,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { describe, expect, it, vi } from "vitest";
 import { queryPostgresUsageLedger, readPostgresUsageLedger } from "./usage-ledger.js";
 

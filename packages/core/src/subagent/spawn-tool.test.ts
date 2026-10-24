@@ -7,8 +7,8 @@ import {
   RunConfigSchema,
   type JsonValue,
   type ToolSpec,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import { LeaseLostError } from "../recorder.js";
 import { RoleRegistry } from "../roles.js";

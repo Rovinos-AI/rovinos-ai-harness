@@ -41,7 +41,7 @@ describe("app telemetry browser bundle", () => {
   it("does not bundle the schemas package or Zod runtime", async () => {
     const bundle = await buildIife();
     expect(bundle).not.toBe("");
-    expect(bundle).not.toContain("@harness/schemas");
+    expect(bundle).not.toContain("@rovinos/schemas");
     for (const identifier of ["ZodError", "safeParse"]) {
       expect(bundle).not.toMatch(new RegExp(`\\b${identifier}\\b`, "u"));
     }

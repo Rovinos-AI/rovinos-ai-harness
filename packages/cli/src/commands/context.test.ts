@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema } from "@harness/config";
-import { createRuntime as composeRuntime, type RuntimeOverrides } from "@harness/core";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { createRuntime as composeRuntime, type RuntimeOverrides } from "@rovinos/core";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,11 +11,11 @@ import {
   Id,
   parseJson,
   type JsonValue,
-} from "@harness/schemas";
-import { StrategyComparisonReportSchema } from "@harness/context";
-import { InMemoryEventStore } from "@harness/store";
-import { SqliteEventStore } from "@harness/store-sqlite";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
+} from "@rovinos/schemas";
+import { StrategyComparisonReportSchema } from "@rovinos/context";
+import { InMemoryEventStore } from "@rovinos/store";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { main } from "../main.js";

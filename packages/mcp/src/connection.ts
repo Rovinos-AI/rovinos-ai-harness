@@ -6,7 +6,7 @@ import type {
   CallToolResult,
   Transport,
 } from "@modelcontextprotocol/client";
-import type { ServerConfig } from "@harness/schemas";
+import type { ServerConfig } from "@rovinos/schemas";
 import {
   McpConnectionError,
   McpProtocolError,

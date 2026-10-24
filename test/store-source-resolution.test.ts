@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { Id } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { expect, it } from "vitest";
 
 it("resolves the store source export without a built package", async () => {

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, InMemoryTransport, type Client as McpClient } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { Code, type Id, type NewEvent, type Principal } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { AuditingVaultResolver, Token } from "@harness/vault";
+import { Code, type Id, type NewEvent, type Principal } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { AuditingVaultResolver, Token } from "@rovinos/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmationGate } from "../confirmation-gate.js";
 import { ApprovalAppRevealRateLimiter, registerApprovalAppTools } from "./approvals-app.js";
-import { ApprovalAppInputSchema } from "@harness/schemas";
+import { ApprovalAppInputSchema } from "@rovinos/schemas";
 
 const PRIVATE_CANARY = "private-canary@example.test";
 const PHONE_CANARY = "private-phone-canary@example.test";

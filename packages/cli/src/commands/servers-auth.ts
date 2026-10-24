@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CompositeSecretResolver, type HarnessConfig } from "@harness/config";
+import { CompositeSecretResolver, type HarnessConfig } from "@rovinos/config";
 import {
   McpAuthRequiredError,
   OAuthTokenStore,
   OAuthTokenStoreError,
   startMcpOAuthLogin,
-} from "@harness/mcp";
-import { openUrlInBrowser } from "@harness/sandbox";
-import { Code, HarnessError } from "@harness/schemas";
-import type { KeyProvider } from "@harness/schemas";
-import { AkvSecretResolver, LocalKeyProvider } from "@harness/vault";
+} from "@rovinos/mcp";
+import { openUrlInBrowser } from "@rovinos/sandbox";
+import { Code, HarnessError } from "@rovinos/schemas";
+import type { KeyProvider } from "@rovinos/schemas";
+import { AkvSecretResolver, LocalKeyProvider } from "@rovinos/vault";
 import type { Command } from "commander";
 import { join } from "node:path";
 import { z } from "zod";
@@ -90,7 +90,7 @@ async function runServersLogin(
     throw new McpAuthRequiredError();
   }
 
-  const core = await import("@harness/core");
+  const core = await import("@rovinos/core");
   const keys = createLoginKeys(config, context);
   let store: OAuthTokenStore | undefined;
   let session: Awaited<ReturnType<typeof startMcpOAuthLogin>> | undefined;
@@ -146,7 +146,7 @@ async function runServersLogout(
   if (!parsedId.success) {
     throw new ServersCommandError("mcp_server_not_found");
   }
-  const core = await import("@harness/core");
+  const core = await import("@rovinos/core");
   const keys: KeyProvider = {
     currentKeyId: () => "logout",
     getKey: () => Promise.reject(new OAuthTokenStoreError()),

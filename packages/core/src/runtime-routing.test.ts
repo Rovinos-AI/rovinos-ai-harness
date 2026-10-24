@@ -14,13 +14,13 @@ import {
   RunConfigSchema,
   ServerConfigSchema,
   parseJson,
-} from "@harness/schemas";
-import { InMemoryEventStore, type RunQueue, type RunQueueJob } from "@harness/store";
-import { ProviderError } from "@harness/models";
-import { PolicyDocumentSchema, policyVersion } from "@harness/policy";
-import type { PolicyDocument } from "@harness/policy";
+} from "@rovinos/schemas";
+import { InMemoryEventStore, type RunQueue, type RunQueueJob } from "@rovinos/store";
+import { ProviderError } from "@rovinos/models";
+import { PolicyDocumentSchema, policyVersion } from "@rovinos/policy";
+import type { PolicyDocument } from "@rovinos/policy";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
-import type { ProviderAdapter } from "@harness/models";
+import type { ProviderAdapter } from "@rovinos/models";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import { ApprovalAlreadyResolvedError } from "./approvals.js";
 import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "./ports.js";

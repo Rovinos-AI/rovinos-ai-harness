@@ -1,11 +1,16 @@
 {
-  "name": "@harness/sdk",
+  "name": "@rovinos/sdk",
   "version": "0.0.0",
-  "private": true,
   "type": "module",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=26"
+  },
   "files": [
-    "dist"
+    "dist/*.js",
+    "dist/*.js.map",
+    "dist/*.d.ts",
+    "migrations"
   ],
   "exports": {
     ".": {
@@ -15,23 +20,49 @@
     }
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json"
+    "build": "tsup"
   },
   "dependencies": {
-    "@harness/config": "workspace:^",
-    "@harness/core": "workspace:^",
-    "@harness/models": "workspace:^",
-    "@harness/schemas": "workspace:^",
-    "@harness/store": "workspace:^",
-    "@harness/telemetry": "workspace:^",
-    "@harness/vault": "workspace:^",
+    "@anthropic-ai/sdk": "0.135.0",
+    "@aws-sdk/client-bedrock-runtime": "3.1152.0",
+    "@azure/identity": "4.14.0",
+    "@azure/keyvault-secrets": "4.11.2",
+    "@google/genai": "2.30.0",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api-logs": "0.223.0",
+    "@opentelemetry/context-async-hooks": "2.12.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/sdk-logs": "0.223.0",
+    "@opentelemetry/sdk-metrics": "2.12.0",
+    "@opentelemetry/sdk-trace-base": "2.12.0",
+    "@opentelemetry/semantic-conventions": "1.43.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "openai": "7.34.0",
+    "parse5": "8.0.1",
+    "tar": "7.5.22",
+    "undici": "8.12.2",
+    "yaml": "2.9.1",
     "zod": "4.6.7"
   },
+  "optionalDependencies": {
+    "better-sqlite3": "13.0.3",
+    "pg": "8.23.1"
+  },
   "devDependencies": {
-    "@harness/store-postgres": "workspace:^",
-    "@harness/store-sqlite": "workspace:^",
+    "@rovinos/config": "workspace:^",
+    "@rovinos/core": "workspace:^",
+    "@rovinos/models": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/store": "workspace:^",
+    "@rovinos/store-postgres": "workspace:^",
+    "@rovinos/store-sqlite": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
+    "@rovinos/vault": "workspace:^",
+    "@types/better-sqlite3": "9.6.0",
     "@types/pg": "8.23.1",
-    "pg": "8.23.1",
+    "tsup": "9.0.0",
     "typescript": "5.9.3",
     "vitest": "3.2.6"
   }

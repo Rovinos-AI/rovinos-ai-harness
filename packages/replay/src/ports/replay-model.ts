@@ -7,10 +7,10 @@ import {
   CassetteStoreReadOnlyError,
   EventLogCassetteStore,
   ModelGateway,
-} from "@harness/models";
-import type { CassetteEntry, CassetteStore } from "@harness/models";
-import type { ModelCompletion, ModelPort, RunContext } from "@harness/core";
-import { HarnessError, type Event, type Id, type ModelRequest } from "@harness/schemas";
+} from "@rovinos/models";
+import type { CassetteEntry, CassetteStore } from "@rovinos/models";
+import type { ModelCompletion, ModelPort, RunContext } from "@rovinos/core";
+import { HarnessError, type Event, type Id, type ModelRequest } from "@rovinos/schemas";
 import type { ResolvedRun } from "../resolve.js";
 
 /** A content-free replay failure with only the recorded sequence. */

@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 export { createHarness } from "./harness.js";
+/** In-memory event store for tests and single-process ephemeral runs. */
+export { InMemoryEventStore } from "@rovinos/store";
+/** Persistence contract for custom SDK storage adapters. */
+export type { EventStore } from "@rovinos/store";
 export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, type WatchOptions, } from "./types.js";
-export type { SafeEvent } from "@harness/telemetry";
+export type { SafeEvent } from "@rovinos/telemetry";
 
 import { type Harness, type CreateHarnessOptions } from "./types.js";
 /**
@@ -12,35 +16,35 @@ import { type Harness, type CreateHarnessOptions } from "./types.js";
  */
 export declare function createHarness(options: CreateHarnessOptions): Promise<Harness>;
 
-import { HarnessError, Id } from "@harness/schemas";
-import { SafeEvent } from "@harness/telemetry";
+import { HarnessError, Id } from "@rovinos/schemas";
+import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
 export declare const HarnessOverridesSchema: z.ZodObject<{
-    store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;
+    store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
     dataDir: z.ZodOptional<z.ZodString>;
     roleConfigDirectory: z.ZodOptional<z.ZodString>;
     readOnlyStore: z.ZodOptional<z.ZodBoolean>;
     transientVault: z.ZodOptional<z.ZodBoolean>;
-    clock: z.ZodOptional<z.ZodCustom<import("@harness/core").Clock, import("@harness/core").Clock>>;
-    ids: z.ZodOptional<z.ZodCustom<import("@harness/core").IdGenerator, import("@harness/core").IdGenerator>>;
-    model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
-    providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
+    clock: z.ZodOptional<z.ZodCustom<import("@rovinos/core").Clock, import("@rovinos/core").Clock>>;
+    ids: z.ZodOptional<z.ZodCustom<import("@rovinos/core").IdGenerator, import("@rovinos/core").IdGenerator>>;
+    model: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ModelPort, import("@rovinos/core").ModelPort>>;
+    providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@rovinos/models").ProviderAdapter, import("@rovinos/models").ProviderAdapter>>>;
     secretResolver: z.ZodOptional<z.ZodCustom<{
-        resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
+        resolve(ref: import("@rovinos/schemas").SecretRef, signal?: AbortSignal): Promise<{
             reveal(): string;
         }>;
     }, {
-        resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
+        resolve(ref: import("@rovinos/schemas").SecretRef, signal?: AbortSignal): Promise<{
             reveal(): string;
         }>;
     }>>;
     onKeysWarning: z.ZodOptional<z.ZodCustom<(code: "keys_ephemeral") => void, (code: "keys_ephemeral") => void>>;
-    tool: z.ZodOptional<z.ZodCustom<import("@harness/core").ToolPort, import("@harness/core").ToolPort>>;
-    policy: z.ZodOptional<z.ZodCustom<import("@harness/core").PolicyPort, import("@harness/core").PolicyPort>>;
-    context: z.ZodOptional<z.ZodCustom<import("@harness/core").ContextPort, import("@harness/core").ContextPort>>;
-    scopeRegistry: z.ZodOptional<z.ZodCustom<import("@harness/core").RunScopeRegistry, import("@harness/core").RunScopeRegistry>>;
-    processLike: z.ZodOptional<z.ZodCustom<import("@harness/core").ShutdownProcessLike, import("@harness/core").ShutdownProcessLike>>;
+    tool: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ToolPort, import("@rovinos/core").ToolPort>>;
+    policy: z.ZodOptional<z.ZodCustom<import("@rovinos/core").PolicyPort, import("@rovinos/core").PolicyPort>>;
+    context: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ContextPort, import("@rovinos/core").ContextPort>>;
+    scopeRegistry: z.ZodOptional<z.ZodCustom<import("@rovinos/core").RunScopeRegistry, import("@rovinos/core").RunScopeRegistry>>;
+    processLike: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ShutdownProcessLike, import("@rovinos/core").ShutdownProcessLike>>;
     flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
 }, z.core.$strict>;
 /** Dependencies used when embedding or testing the harness. */
@@ -496,59 +500,59 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }, z.core.$strict>>;
     }, z.core.$strict>;
     overrides: z.ZodOptional<z.ZodObject<{
-        store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;
+        store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
         dataDir: z.ZodOptional<z.ZodString>;
         roleConfigDirectory: z.ZodOptional<z.ZodString>;
         readOnlyStore: z.ZodOptional<z.ZodBoolean>;
         transientVault: z.ZodOptional<z.ZodBoolean>;
-        clock: z.ZodOptional<z.ZodCustom<import("@harness/core").Clock, import("@harness/core").Clock>>;
-        ids: z.ZodOptional<z.ZodCustom<import("@harness/core").IdGenerator, import("@harness/core").IdGenerator>>;
-        model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
-        providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
+        clock: z.ZodOptional<z.ZodCustom<import("@rovinos/core").Clock, import("@rovinos/core").Clock>>;
+        ids: z.ZodOptional<z.ZodCustom<import("@rovinos/core").IdGenerator, import("@rovinos/core").IdGenerator>>;
+        model: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ModelPort, import("@rovinos/core").ModelPort>>;
+        providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@rovinos/models").ProviderAdapter, import("@rovinos/models").ProviderAdapter>>>;
         secretResolver: z.ZodOptional<z.ZodCustom<{
-            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
+            resolve(ref: import("@rovinos/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }, {
-            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
+            resolve(ref: import("@rovinos/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }>>;
         onKeysWarning: z.ZodOptional<z.ZodCustom<(code: "keys_ephemeral") => void, (code: "keys_ephemeral") => void>>;
-        tool: z.ZodOptional<z.ZodCustom<import("@harness/core").ToolPort, import("@harness/core").ToolPort>>;
-        policy: z.ZodOptional<z.ZodCustom<import("@harness/core").PolicyPort, import("@harness/core").PolicyPort>>;
-        context: z.ZodOptional<z.ZodCustom<import("@harness/core").ContextPort, import("@harness/core").ContextPort>>;
-        scopeRegistry: z.ZodOptional<z.ZodCustom<import("@harness/core").RunScopeRegistry, import("@harness/core").RunScopeRegistry>>;
-        processLike: z.ZodOptional<z.ZodCustom<import("@harness/core").ShutdownProcessLike, import("@harness/core").ShutdownProcessLike>>;
+        tool: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ToolPort, import("@rovinos/core").ToolPort>>;
+        policy: z.ZodOptional<z.ZodCustom<import("@rovinos/core").PolicyPort, import("@rovinos/core").PolicyPort>>;
+        context: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ContextPort, import("@rovinos/core").ContextPort>>;
+        scopeRegistry: z.ZodOptional<z.ZodCustom<import("@rovinos/core").RunScopeRegistry, import("@rovinos/core").RunScopeRegistry>>;
+        processLike: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ShutdownProcessLike, import("@rovinos/core").ShutdownProcessLike>>;
         flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
     }, z.core.$strict>>;
 }, z.core.$strict>, z.ZodObject<{
     configPath: z.ZodString;
     overrides: z.ZodOptional<z.ZodObject<{
-        store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;
+        store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
         dataDir: z.ZodOptional<z.ZodString>;
         roleConfigDirectory: z.ZodOptional<z.ZodString>;
         readOnlyStore: z.ZodOptional<z.ZodBoolean>;
         transientVault: z.ZodOptional<z.ZodBoolean>;
-        clock: z.ZodOptional<z.ZodCustom<import("@harness/core").Clock, import("@harness/core").Clock>>;
-        ids: z.ZodOptional<z.ZodCustom<import("@harness/core").IdGenerator, import("@harness/core").IdGenerator>>;
-        model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
-        providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
+        clock: z.ZodOptional<z.ZodCustom<import("@rovinos/core").Clock, import("@rovinos/core").Clock>>;
+        ids: z.ZodOptional<z.ZodCustom<import("@rovinos/core").IdGenerator, import("@rovinos/core").IdGenerator>>;
+        model: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ModelPort, import("@rovinos/core").ModelPort>>;
+        providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@rovinos/models").ProviderAdapter, import("@rovinos/models").ProviderAdapter>>>;
         secretResolver: z.ZodOptional<z.ZodCustom<{
-            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
+            resolve(ref: import("@rovinos/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }, {
-            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
+            resolve(ref: import("@rovinos/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }>>;
         onKeysWarning: z.ZodOptional<z.ZodCustom<(code: "keys_ephemeral") => void, (code: "keys_ephemeral") => void>>;
-        tool: z.ZodOptional<z.ZodCustom<import("@harness/core").ToolPort, import("@harness/core").ToolPort>>;
-        policy: z.ZodOptional<z.ZodCustom<import("@harness/core").PolicyPort, import("@harness/core").PolicyPort>>;
-        context: z.ZodOptional<z.ZodCustom<import("@harness/core").ContextPort, import("@harness/core").ContextPort>>;
-        scopeRegistry: z.ZodOptional<z.ZodCustom<import("@harness/core").RunScopeRegistry, import("@harness/core").RunScopeRegistry>>;
-        processLike: z.ZodOptional<z.ZodCustom<import("@harness/core").ShutdownProcessLike, import("@harness/core").ShutdownProcessLike>>;
+        tool: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ToolPort, import("@rovinos/core").ToolPort>>;
+        policy: z.ZodOptional<z.ZodCustom<import("@rovinos/core").PolicyPort, import("@rovinos/core").PolicyPort>>;
+        context: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ContextPort, import("@rovinos/core").ContextPort>>;
+        scopeRegistry: z.ZodOptional<z.ZodCustom<import("@rovinos/core").RunScopeRegistry, import("@rovinos/core").RunScopeRegistry>>;
+        processLike: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ShutdownProcessLike, import("@rovinos/core").ShutdownProcessLike>>;
         flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
     }, z.core.$strict>>;
 }, z.core.$strict>]>;

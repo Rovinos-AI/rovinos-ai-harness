@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
-import type { HarnessConfig } from "@harness/config";
-import type { Runtime } from "@harness/core";
-import type { RunQueue } from "@harness/store";
+import { HarnessError } from "@rovinos/schemas";
+import type { HarnessConfig } from "@rovinos/config";
+import type { Runtime } from "@rovinos/core";
+import type { RunQueue } from "@rovinos/store";
 import { z } from "zod";
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
@@ -45,7 +45,7 @@ async function openQueue(config: HarnessConfig, context: CliContext): Promise<Ru
   if (context.openRunQueue !== undefined) {
     return context.openRunQueue(config);
   }
-  const { openConfiguredRunQueue } = await import("@harness/core");
+  const { openConfiguredRunQueue } = await import("@rovinos/core");
   return openConfiguredRunQueue(config, {
     clock: context.clock,
     ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
@@ -82,7 +82,7 @@ export function createWorkerCommand(dependencies: WorkerCommandDependencies = {}
           const processLike = dependencies.processLike ?? process;
           let stop: (() => void) | undefined;
           try {
-            const { RunAlreadyTerminalError, Worker } = await import("@harness/core");
+            const { RunAlreadyTerminalError, Worker } = await import("@rovinos/core");
             const worker = new Worker({
               queue,
               ids: runtime.ids,

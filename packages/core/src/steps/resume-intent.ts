@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { setActiveSpanAttribute } from "@harness/telemetry";
+import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import type { ModelToolCall, PolicyDecision } from "../ports.js";
 import type { ToolIntentEvent } from "../run-state.js";
 

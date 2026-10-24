@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import { InvalidEventError } from "./errors.js";
 import { parseUsageLedgerDeltas } from "./types.js";
 import { describe, expect, it } from "vitest";

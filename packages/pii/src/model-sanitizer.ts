@@ -12,9 +12,9 @@ import {
   type PiiAction,
   type PiiActionSummary,
   type PiiPolicy,
-} from "@harness/schemas";
-import { countPiiBlobHit } from "@harness/telemetry";
-import { findTokens, tokenType, type AuditingVaultResolver, type Token } from "@harness/vault";
+} from "@rovinos/schemas";
+import { countPiiBlobHit } from "@rovinos/telemetry";
+import { findTokens, tokenType, type AuditingVaultResolver, type Token } from "@rovinos/vault";
 import { evaluatePiiPolicy } from "./policy.js";
 import { detectOutsideTokenSpans } from "./tokenizer-helpers.js";
 import { PiiBlobContainsPiiError, PiiBlockedError, PiiTokenizerError } from "./errors.js";

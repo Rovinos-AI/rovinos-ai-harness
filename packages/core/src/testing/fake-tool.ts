@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code } from "@harness/schemas";
+import type { Code } from "@rovinos/schemas";
 import type {
   ModelToolCall,
   RunContext,

@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 export { createHarness } from "./harness.js";
+/** In-memory event store for tests and single-process ephemeral runs. */
+export { InMemoryEventStore } from "@rovinos/store";
+/** Persistence contract for custom SDK storage adapters. */
+export type { EventStore } from "@rovinos/store";
 export {
   SdkError,
   type ApprovalDecision,
@@ -21,4 +25,4 @@ export {
   type StartRunOptions,
   type WatchOptions,
 } from "./types.js";
-export type { SafeEvent } from "@harness/telemetry";
+export type { SafeEvent } from "@rovinos/telemetry";

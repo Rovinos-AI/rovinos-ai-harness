@@ -5,7 +5,7 @@ import {
   type Code as HarnessCode,
   type DoctorCheckStatus,
   type ServerConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   McpConnection,
   McpConnectionError,

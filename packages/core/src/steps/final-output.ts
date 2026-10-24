@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event } from "@harness/schemas";
+import type { Event } from "@rovinos/schemas";
 import { preflightModelBudget } from "./model-preflight.js";
 import { requestModel } from "./request-model.js";
 import { suspendForShutdown } from "./shutdown.js";

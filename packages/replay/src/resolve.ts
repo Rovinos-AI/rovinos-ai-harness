@@ -8,8 +8,8 @@ import {
   type Event as EventValue,
   type Id as RunId,
   type TraceId as TraceIdValue,
-} from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import { z } from "zod";
 
 const MAX_EVENTS = 1_000_000;

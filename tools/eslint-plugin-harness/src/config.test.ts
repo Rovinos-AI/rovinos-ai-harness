@@ -39,13 +39,13 @@ const ruleTester = new RuleTester({
 ruleTester.run("import-direction", harnessPlugin.rules["import-direction"], {
   valid: [
     {
-      code: "import schema from '@harness/schemas';",
+      code: "import schema from '@rovinos/schemas';",
       filename: resolve(rootDirectory, "packages/telemetry/src/layer.js"),
     },
   ],
   invalid: [
     {
-      code: "import store from '@harness/store';",
+      code: "import store from '@rovinos/store';",
       filename: resolve(rootDirectory, "packages/telemetry/src/layer.js"),
       errors: [{ messageId: "forbidden" }],
     },
@@ -209,7 +209,7 @@ describe("ESLint configuration", () => {
     ],
     [
       "forbidden package direction",
-      "import store from '@harness/store';",
+      "import store from '@rovinos/store';",
       "harness/import-direction",
       resolve(rootDirectory, "packages/telemetry/src/lint-fixture.js"),
     ],

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Logger, LogRecord } from "@opentelemetry/api-logs";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TripQueue } from "./trips.js";
 

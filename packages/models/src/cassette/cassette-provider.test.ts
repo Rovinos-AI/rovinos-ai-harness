@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelRequest } from "@harness/schemas";
+import type { ModelRequest } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
 import { assembleDeltas } from "../types.js";

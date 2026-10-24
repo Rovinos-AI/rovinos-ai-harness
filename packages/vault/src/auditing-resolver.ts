@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Event, Id } from "@harness/schemas";
+import type { Code, Event, Id } from "@rovinos/schemas";
 import type { Token } from "./token.js";
 import { tokenType } from "./token.js";
 import {

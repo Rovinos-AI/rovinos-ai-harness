@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { QuotasConfigSchema } from "@harness/schemas";
-import type { EventStore, UsageLedgerPeriod, UsageLedgerRow } from "@harness/store";
+import { QuotasConfigSchema } from "@rovinos/schemas";
+import type { EventStore, UsageLedgerPeriod, UsageLedgerRow } from "@rovinos/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QuotaExceededError, QuotaService } from "./quotas.js";
 

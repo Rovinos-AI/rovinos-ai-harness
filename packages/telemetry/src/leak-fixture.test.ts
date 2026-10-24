@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
-import { TelemetryConfigSchema } from "@harness/schemas";
+import { TelemetryConfigSchema } from "@rovinos/schemas";
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +45,7 @@ describe("telemetry leak fixture", () => {
       const definition = defineSpan(
         "harness.test.leak_fixture",
         { "harness.test.enabled": attr.bool() },
-        { taskId: "4.4", packageName: "@harness/telemetry" },
+        { taskId: "4.4", packageName: "@rovinos/telemetry" },
       );
       const registered = definition.start({ "harness.test.enabled": true });
       registered.setAttribute("http.url", `https://example.test/path?secret=${canaries[0]}`);

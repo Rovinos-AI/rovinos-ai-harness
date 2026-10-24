@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Id, VaultValueEntry } from "@harness/schemas";
+import type { Code, Id, VaultValueEntry } from "@rovinos/schemas";
 import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import {

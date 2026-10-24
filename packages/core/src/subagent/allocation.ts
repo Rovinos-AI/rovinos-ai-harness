@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id, type RunConfig } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { HarnessError, type Event, type Id, type RunConfig } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import type { RunContext } from "../ports.js";
 import { BudgetTracker } from "../budgets.js";
 import { foldRunState } from "../run-state.js";

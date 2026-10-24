@@ -368,7 +368,7 @@ const configuration = [
       "no-restricted-properties": ["error", ...restrictedProperties, ...domProperties],
     },
   },
-  browserTypeOnlyImportConfiguration(restrictedImports()[1].patterns, "@harness/schemas", [
+  browserTypeOnlyImportConfiguration(restrictedImports()[1].patterns, "@rovinos/schemas", [
     "packages/app-telemetry/src/**",
   ]),
   {

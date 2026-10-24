@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id as IdValue } from "@harness/schemas";
-import { parseJson } from "@harness/schemas";
+import type { Id as IdValue } from "@rovinos/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { Readable } from "node:stream";
 import { z } from "zod";
 import { RemoteSandboxError } from "./remote-errors.js";

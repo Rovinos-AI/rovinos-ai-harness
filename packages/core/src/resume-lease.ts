@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import type { Id } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import type { Clock } from "./recorder.js";
 
 export const RESUME_LEASE_MS = 30_000;

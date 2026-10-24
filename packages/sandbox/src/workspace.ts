@@ -2,9 +2,9 @@
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
-import { HarnessError, Id, type Id as IdValue } from "@harness/schemas";
-import { WorkspaceFileNotFoundError, WorkspacePathError } from "@harness/context";
-import type { WorkspacePort, WorkspaceReadRange } from "@harness/context";
+import { HarnessError, Id, type Id as IdValue } from "@rovinos/schemas";
+import { WorkspaceFileNotFoundError, WorkspacePathError } from "@rovinos/context";
+import type { WorkspacePort, WorkspaceReadRange } from "@rovinos/context";
 import type { Clock } from "./types.js";
 
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;

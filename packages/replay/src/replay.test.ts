@@ -6,12 +6,12 @@ import {
   type ModelToolCall,
   type PolicyPort,
   type ToolPort,
-} from "@harness/core";
-import { FakeModelPort, FakeToolPort } from "@harness/core/testing";
-import { InMemoryEventStore } from "@harness/store";
-import type { EventStore } from "@harness/store";
-import { Code, Event, Id, RunConfigSchema, type Event as EventValue } from "@harness/schemas";
-import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
+} from "@rovinos/core";
+import { FakeModelPort, FakeToolPort } from "@rovinos/core/testing";
+import { InMemoryEventStore } from "@rovinos/store";
+import type { EventStore } from "@rovinos/store";
+import { Code, Event, Id, RunConfigSchema, type Event as EventValue } from "@rovinos/schemas";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { replayRun } from "./replay.js";
 import { ResolvedRunSchema } from "./resolve.js";

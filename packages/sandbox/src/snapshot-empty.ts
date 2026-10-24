@@ -7,7 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import { createWorkspaceArchive } from "./snapshot-archive.js";
 import { ensureRunWorkspace } from "./workspace.js";
 

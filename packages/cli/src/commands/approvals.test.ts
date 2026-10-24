@@ -2,7 +2,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HarnessConfigSchema } from "@harness/config";
+import { HarnessConfigSchema } from "@rovinos/config";
 import {
   Checkpointer,
   NaiveContext,
@@ -12,9 +12,9 @@ import {
   foldRunState,
   requestApproval,
   type ToolPort,
-} from "@harness/core";
-import { FakeModelPort, FakeToolPort } from "@harness/core/testing";
-import { buildApprovalPayload } from "@harness/policy";
+} from "@rovinos/core";
+import { FakeModelPort, FakeToolPort } from "@rovinos/core/testing";
+import { buildApprovalPayload } from "@rovinos/policy";
 import {
   ApprovalListResultSchema,
   ApprovalSweepResultSchema,
@@ -25,11 +25,11 @@ import {
   parseJson,
   type Event,
   type Principal,
-} from "@harness/schemas";
-import type { EnqueueRunJob, RunQueue, RunQueueJob } from "@harness/store";
-import { InMemoryEventStore } from "@harness/store";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
-import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+} from "@rovinos/schemas";
+import type { EnqueueRunJob, RunQueue, RunQueueJob } from "@rovinos/store";
+import { InMemoryEventStore } from "@rovinos/store";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
+import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { CliContext, Interactive } from "../command.js";

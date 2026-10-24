@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { SecretRefSchema } from "@harness/schemas";
+import { SecretRefSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { AkvSecretResolver } from "./akv.js";
 

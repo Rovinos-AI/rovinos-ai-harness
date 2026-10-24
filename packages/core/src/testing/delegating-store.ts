@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { EventStore } from "@harness/store";
+import type { EventStore } from "@rovinos/store";
 
 /** Creates a distinct EventStore client that forwards every operation to the same backing store. */
 export function delegatingStore(inner: EventStore): EventStore {

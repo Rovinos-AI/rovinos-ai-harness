@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, parseJson, type HostConfig } from "@harness/schemas";
-import { countHostAppRejected } from "@harness/telemetry";
+import { Id, parseJson, type HostConfig } from "@rovinos/schemas";
+import { countHostAppRejected } from "@rovinos/telemetry";
 import {
   AppCallSchema,
   type AppCall,

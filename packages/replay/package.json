@@ -1,5 +1,5 @@
 {
-  "name": "@harness/replay",
+  "name": "@rovinos/replay",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,18 +18,18 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@harness/core": "workspace:^",
-    "@harness/models": "workspace:^",
-    "@harness/sandbox": "workspace:^",
-    "@harness/schemas": "workspace:^",
-    "@harness/store": "workspace:^",
-    "@harness/telemetry": "workspace:^",
     "@opentelemetry/api": "1.9.1",
+    "@rovinos/core": "workspace:^",
+    "@rovinos/models": "workspace:^",
+    "@rovinos/sandbox": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/store": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@harness/pii": "workspace:^",
-    "@harness/vault": "workspace:^",
+    "@rovinos/pii": "workspace:^",
+    "@rovinos/vault": "workspace:^",
     "vitest": "3.2.6"
   }
 }

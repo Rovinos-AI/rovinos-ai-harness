@@ -10,7 +10,7 @@ import type {
   ModelRetryConfig,
   ModelsConfig,
   PiiActionSummary,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { z } from "zod";
 import type {
   EnforcementResult,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
-import { Id, parseJson } from "@harness/schemas";
+import { Id, parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import { ExecResultSchema, ExecSpecSchema } from "../../src/types.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";

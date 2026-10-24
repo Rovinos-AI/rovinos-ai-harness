@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag, type SpanContext, type TraceState } from "@opentelemetry/api";
-import { ServerConfigSchema } from "@harness/schemas";
+import { ServerConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { buildRequestMeta } from "./trace-injection.js";
 

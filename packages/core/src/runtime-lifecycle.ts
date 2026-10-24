@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Runtime lifecycle helpers extracted from runtime.ts (keeps it under the max-lines limit).
-import { Code, type Event, type Id } from "@harness/schemas";
-import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
-import type { SandboxBackend } from "@harness/sandbox";
-import type { EventStore } from "@harness/store";
+import { Code, type Event, type Id } from "@rovinos/schemas";
+import { emitVaultMarkTerminalFailed } from "@rovinos/telemetry";
+import type { SandboxBackend } from "@rovinos/sandbox";
+import type { EventStore } from "@rovinos/store";
 import type { RuntimeComposition, RuntimeOverrides } from "./runtime-config.js";
 import { appApprovalContext } from "./app-approval-context.js";
 import { foldRunState, type RunState } from "./run-state.js";

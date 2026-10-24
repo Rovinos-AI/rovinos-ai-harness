@@ -7,9 +7,9 @@ import {
   type RunConfig,
   type RunInput,
   type Principal,
-} from "@harness/schemas";
-import type { EventStore } from "@harness/store";
-import type { ModelProgress } from "@harness/models";
+} from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
+import type { ModelProgress } from "@rovinos/models";
 import type { Context } from "@opentelemetry/api";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";

@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { Transform } from "node:stream";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { HarnessError } from "@harness/schemas";
-import type { Id } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
+import type { Id } from "@rovinos/schemas";
 import { SnapshotTooLargeError, WorkspaceSnapshotError } from "./snapshot-archive.js";
 
 /** Verifies stored bytes before exposing the streamed archive to an extractor. */

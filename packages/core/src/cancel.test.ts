@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, trace } from "@opentelemetry/api";
-import { FakeClock, Id, SequentialIdGenerator, Sha256Hex, type Event } from "@harness/schemas";
-import { InMemoryEventStore, type EventStore } from "@harness/store";
-import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { FakeClock, Id, SequentialIdGenerator, Sha256Hex, type Event } from "@rovinos/schemas";
+import { InMemoryEventStore, type EventStore } from "@rovinos/store";
+import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { cancelRun } from "./cancel.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";

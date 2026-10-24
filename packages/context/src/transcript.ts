@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, JsonValue, Message } from "@harness/schemas";
+import type { Event, JsonValue, Message } from "@rovinos/schemas";
 import { TranscriptSchema, type TranscriptGroup } from "./types.js";
 
 function inputText(input: JsonValue): string {

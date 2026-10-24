@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import { request as httpRequest } from "node:http";
 import { trace, type Span } from "@opentelemetry/api";
-import { createTestSpanCollector } from "@harness/telemetry/testing";
+import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { createReferenceHost, type ReferenceHost } from "./index.js";
 
 const resourceUri = "ui://test/network.html";

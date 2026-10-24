@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { SecretRefSchema, type SecretRef } from "@harness/schemas";
+import { SecretRefSchema, type SecretRef } from "@rovinos/schemas";
 import type { HarnessConfig } from "./schema.js";
 
 function parseSecretRefs(values: readonly string[]): SecretRef[] {

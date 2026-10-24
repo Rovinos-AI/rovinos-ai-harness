@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, type Code, type KeyProvider, type VaultValueEntry } from "@harness/schemas";
+import { Id, type Code, type KeyProvider, type VaultValueEntry } from "@rovinos/schemas";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
 import { VaultOperationError } from "./errors.js";

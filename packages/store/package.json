@@ -1,5 +1,5 @@
 {
-  "name": "@harness/store",
+  "name": "@rovinos/store",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -28,8 +28,8 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@harness/crypto": "workspace:^",
-    "@harness/schemas": "workspace:^",
+    "@rovinos/crypto": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
     "zod": "4.6.7"
   },
   "peerDependencies": {

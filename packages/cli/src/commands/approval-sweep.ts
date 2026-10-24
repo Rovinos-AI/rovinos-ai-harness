@@ -8,12 +8,12 @@ import {
   InputRunTerminalError,
   type Clock,
   type Runtime,
-} from "@harness/core";
-import type { ApprovalSweepStore } from "@harness/policy";
-import { ApprovalSweepResultSchema, HarnessError } from "@harness/schemas";
-import type { Event, Id } from "@harness/schemas";
-import type { HarnessConfig } from "@harness/config";
-import type { EventStore, RunQueue } from "@harness/store";
+} from "@rovinos/core";
+import type { ApprovalSweepStore } from "@rovinos/policy";
+import { ApprovalSweepResultSchema, HarnessError } from "@rovinos/schemas";
+import type { Event, Id } from "@rovinos/schemas";
+import type { HarnessConfig } from "@rovinos/config";
+import type { EventStore, RunQueue } from "@rovinos/store";
 import type { CliContext } from "../command.js";
 import { createApprovalNotifier } from "./approval-notifier.js";
 
@@ -107,7 +107,7 @@ export async function runApprovalSweep(
   context: CliContext,
   config: HarnessConfig,
 ): Promise<void> {
-  const { sweepApprovals } = await import("@harness/policy");
+  const { sweepApprovals } = await import("@rovinos/policy");
   const store: ApprovalSweepStore = {
     listRuns: (options) => runtime.store.listRuns(options),
     read: (runId) => runtime.store.read(runId),

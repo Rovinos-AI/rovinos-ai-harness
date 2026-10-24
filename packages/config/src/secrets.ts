@@ -2,7 +2,7 @@
 // File permission warnings use an injected callback because this package has no logger yet.
 import { readFile as readFileFromDisk, stat as statFromDisk } from "node:fs/promises";
 import { inspect } from "node:util";
-import { HarnessError, SecretRefSchema, type SecretRef } from "@harness/schemas";
+import { HarnessError, SecretRefSchema, type SecretRef } from "@rovinos/schemas";
 
 /** Stable error codes raised while resolving a secret reference. */
 export type SecretResolutionErrorCode =

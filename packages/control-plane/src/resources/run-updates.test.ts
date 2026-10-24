@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
+import type { Id } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
 import { describe, expect, it, vi } from "vitest";
 import { RunResourceUpdatesError, startRunResourceUpdates } from "./run-updates.js";
 

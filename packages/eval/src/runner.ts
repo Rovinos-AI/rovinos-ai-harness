@@ -6,8 +6,8 @@ import { EvalSuiteSchema } from "./schema.js";
 import { EvalVariantSchema, TrialResultSchema, TrialSpecSchema } from "./trial.js";
 import type { EvalVariant, TrialResult, TrialSpec } from "./trial.js";
 import { systemClock, type TrialExecutor } from "./executor.js";
-import type { Clock } from "@harness/core";
-import { Code, HarnessError } from "@harness/schemas";
+import type { Clock } from "@rovinos/core";
+import { Code, HarnessError } from "@rovinos/schemas";
 import { z } from "zod";
 
 const RunnerOptionsSchema = z

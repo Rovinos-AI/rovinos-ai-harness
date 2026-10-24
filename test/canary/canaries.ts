@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { Code, type Code as CodeValue } from "@harness/schemas";
+import { Code, type Code as CodeValue } from "@rovinos/schemas";
 
 const PERSON_NAMES = ["Ada", "Grace", "Katherine", "Margaret"] as const;
 

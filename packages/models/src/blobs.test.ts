@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
-import type { Message } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
+import type { Message } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { prepareMessagesForProvider } from "./blobs.js";
 

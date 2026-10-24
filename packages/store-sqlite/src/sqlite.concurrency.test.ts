@@ -6,7 +6,7 @@ import { SqliteEventStore } from "./index.js";
 import {
   runConcurrencyConformance,
   type MultiEventStoreFactoryCreator,
-} from "@harness/store/testing";
+} from "@rovinos/store/testing";
 
 const sqliteMultiFactory: MultiEventStoreFactoryCreator = async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-store-concurrency-"));

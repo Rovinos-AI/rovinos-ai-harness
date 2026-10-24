@@ -2,7 +2,7 @@
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
-import type { SecretRef, ServerConfig } from "@harness/schemas";
+import type { SecretRef, ServerConfig } from "@rovinos/schemas";
 import { McpAuthRequiredError, McpOAuthProvider, withOAuthWarningsRedacted } from "./provider.js";
 import type { OAuthTokenStore } from "./token-store.js";
 

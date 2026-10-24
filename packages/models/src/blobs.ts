@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Message } from "@harness/schemas";
+import type { Code, Message } from "@rovinos/schemas";
 
 /**
  * Prepare normalized conversation messages for a provider without discarding its reusable blobs.

@@ -14,7 +14,7 @@ World-readable secret files resolve with a `warn` result and the `secret_file_pe
 
 ## Adding a check
 
-Packages can register checks with `registerDoctorCheck` from `@harness/core`. Each check receives
+Packages can register checks with `registerDoctorCheck` from `@rovinos/core`. Each check receives
 the loaded configuration, environment, configured data directory, an abort signal, and a resolver
 that reports success or failure without returning the secret value. A timed-out check has its
 signal aborted; checks with asynchronous work should stop and clean up when their signal is aborted.

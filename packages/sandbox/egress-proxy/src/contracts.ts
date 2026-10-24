@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Duplex } from "node:stream";
-import { HarnessError } from "@harness/schemas";
-import type { SandboxEgressAllowEntrySchema } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
+import type { SandboxEgressAllowEntrySchema } from "@rovinos/schemas";
 import type { z } from "zod";
 
 /** Bounded outcomes emitted by the egress counter sink. */

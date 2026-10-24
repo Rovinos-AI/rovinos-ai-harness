@@ -9,7 +9,7 @@ import {
   type Code as HarnessCode,
   type SecretRef,
   type ServerConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { McpAuthRequiredError, McpOAuthProvider } from "./oauth/provider.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
 

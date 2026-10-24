@@ -6,7 +6,7 @@ import {
   type NewEvent,
   type RunStatus,
   type Snapshot,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 
 /** Deterministic event builders used by EventStore tests. */
 export interface EventStoreTestBuilders {

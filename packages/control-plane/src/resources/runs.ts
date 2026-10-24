@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { Code, Id } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import {
   ResourceNotFoundError,
   ResourceTemplate,

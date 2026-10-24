@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Id, type JsonValue, type Principal } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { Code, type Id, type JsonValue, type Principal } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";
 import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
 import { approveInputSchema, decisionOutputSchema } from "../schemas.js";
-import type { ApprovalDecision } from "@harness/core";
+import type { ApprovalDecision } from "@rovinos/core";
 import { findApprovalRequest } from "./run-state.js";
 
 /** One validated approval resolution request. */

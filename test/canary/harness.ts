@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { loadConfig } from "@harness/config";
-import { InMemoryWorkspace, OffloadingToolPort, type WorkspacePort } from "@harness/context";
-import { createRuntime } from "@harness/core";
-import type { Runtime, ToolPort } from "@harness/core";
-import { FileCassetteStore } from "@harness/models";
-import { Code, Id, Sha256Hex, SequentialIdGenerator } from "@harness/schemas";
-import type { Event } from "@harness/schemas";
+import { loadConfig } from "@rovinos/config";
+import { InMemoryWorkspace, OffloadingToolPort, type WorkspacePort } from "@rovinos/context";
+import { createRuntime } from "@rovinos/core";
+import type { Runtime, ToolPort } from "@rovinos/core";
+import { FileCassetteStore } from "@rovinos/models";
+import { Code, Id, Sha256Hex, SequentialIdGenerator } from "@rovinos/schemas";
+import type { Event } from "@rovinos/schemas";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

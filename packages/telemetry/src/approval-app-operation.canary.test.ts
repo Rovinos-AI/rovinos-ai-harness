@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { createTelemetrySdk } from "./sdk.js";
 import { emitApprovalAppAudit } from "./approval-app-audit.js";
@@ -28,7 +28,7 @@ describe("approval app operation audit canary", () => {
     };
 
     try {
-      emitApprovalAppAudit(audit, sdk.loggerProvider.getLogger("@harness/telemetry"));
+      emitApprovalAppAudit(audit, sdk.loggerProvider.getLogger("@rovinos/telemetry"));
       await sdk.forceFlush();
 
       const [record] = exporter.getFinishedLogRecords();

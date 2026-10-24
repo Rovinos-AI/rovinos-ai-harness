@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Approval resume wake-up, extracted from runtime.ts (keeps it under the max-lines limit).
-import type { Id } from "@harness/schemas";
-import type { RunQueue } from "@harness/store";
+import type { Id } from "@rovinos/schemas";
+import type { RunQueue } from "@rovinos/store";
 import { ApprovalAlreadyResolvedError } from "./approvals.js";
 
 /**

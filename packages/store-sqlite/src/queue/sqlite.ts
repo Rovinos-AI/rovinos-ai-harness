@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { SystemRunQueueIdGenerator } from "@harness/store";
+import { SystemRunQueueIdGenerator } from "@rovinos/store";
 import type {
   Clock,
   RunQueue,
@@ -11,7 +11,7 @@ import type {
   RunQueueIdGenerator,
   RunQueueJob,
   RunQueueOptions,
-} from "@harness/store";
+} from "@rovinos/store";
 import {
   migrate,
   EnqueueRunJobSchema,
@@ -24,7 +24,7 @@ import {
   WorkerIdSchema,
   hashIdempotencyKey,
   parseQueueInput,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { sqliteStoreError } from "../sqlite/outbox.js";
 
 interface QueueRow {

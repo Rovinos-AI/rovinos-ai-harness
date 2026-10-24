@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext } from "@opentelemetry/api";
 import { SeverityNumber, type Logger } from "@opentelemetry/api-logs";
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import { attr } from "./attr.js";
 import { defineLogRecord } from "./log-registry.js";
 import { safeEventLogger } from "./safe-event-logs.js";

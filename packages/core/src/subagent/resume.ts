@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonValue as JsonValueSchema, type Event, type Id } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { JsonValue as JsonValueSchema, type Event, type Id } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import { ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import type { ModelToolCall, ToolPort } from "../ports.js";
 import type { ToolResumeContext, ToolResumeDecision } from "../resume-policy.js";

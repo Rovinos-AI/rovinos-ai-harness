@@ -10,7 +10,7 @@ import {
   type Page,
 } from "playwright";
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import { createReferenceHost, type AppCall } from "@harness/host";
+import { createReferenceHost, type AppCall } from "@rovinos/host";
 import {
   Code,
   FakeClock,
@@ -20,22 +20,22 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   type Event as HarnessEvent,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   createRuntime,
   type ModelCompletion,
   type ModelPort,
   type Runtime,
   type ToolPort,
-} from "@harness/core";
-import { applyApprovalEdits } from "@harness/policy";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/core";
+import { applyApprovalEdits } from "@rovinos/policy";
+import { InMemoryEventStore } from "@rovinos/store";
 import {
   ApprovalPayloadSchema,
   ResolveRequest,
   RevealRequest,
   type ApprovalPayload,
-} from "@harness/schemas/browser";
+} from "@rovinos/schemas/browser";
 
 const runId = Id.parse("00000000000000000000000001");
 const approvalId = Id.parse("00000000000000000000000002");

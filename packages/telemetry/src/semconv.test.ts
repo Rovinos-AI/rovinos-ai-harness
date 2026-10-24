@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import * as incubatingSemconv from "@opentelemetry/semantic-conventions/incubating";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

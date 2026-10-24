@@ -12,7 +12,7 @@ import {
   type Capabilities,
   type ModelRequest,
   type Part,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
 import { retryAfterMs } from "./retry-after.js";

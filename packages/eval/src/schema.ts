@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ApprovalEditsSchema } from "@harness/policy";
-import { Code, JsonPointerSchema, JsonValue, ModelRefSchema } from "@harness/schemas";
+import { ApprovalEditsSchema } from "@rovinos/policy";
+import { Code, JsonPointerSchema, JsonValue, ModelRefSchema } from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Assertions that inspect an eval trial's event trajectory. */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Event } from "@harness/schemas";
+import type { Code, Event } from "@rovinos/schemas";
 import type { ModelToolCall } from "../ports.js";
 import type { RunRecorder } from "../recorder.js";
 

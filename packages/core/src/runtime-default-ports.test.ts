@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, ModelRequestSchema } from "@harness/schemas";
+import { Code, Id, ModelRequestSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 

@@ -16,7 +16,7 @@ import {
   StoreConfigSchema,
   TelemetryConfigSchema,
   VaultConfigSchema,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 
 /** The complete, strictly validated harness configuration. */
 export const HarnessConfigSchema = z

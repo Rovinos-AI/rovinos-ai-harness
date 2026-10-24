@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Scan maximal candidates once, then validate them: failed long candidates are not retried at every offset.
-import { DetectorTextSchema, HarnessError } from "@harness/schemas";
-import type { Code, Detection } from "@harness/schemas";
+import { DetectorTextSchema, HarnessError } from "@rovinos/schemas";
+import type { Code, Detection } from "@rovinos/schemas";
 
-export type { Detection } from "@harness/schemas";
+export type { Detection } from "@rovinos/schemas";
 
 /** Synchronous detector; offsets address the original UTF-16 text. */
 export interface Detector {

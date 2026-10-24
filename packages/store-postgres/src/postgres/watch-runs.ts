@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Pool } from "pg";
-import type { EventStore, RunSummary } from "@harness/store/adapter-internal";
-import { watchRunSummaries } from "@harness/store/adapter-internal";
+import type { EventStore, RunSummary } from "@rovinos/store/adapter-internal";
+import { watchRunSummaries } from "@rovinos/store/adapter-internal";
 import { runListPage, storeError, type RunSummaryRow } from "./helpers.js";
 import type { PostgresSubscriptions } from "./subscriptions.js";
 

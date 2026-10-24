@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { logs, type Logger } from "@opentelemetry/api-logs";
-import { Code, Id } from "@harness/schemas";
+import { Code, Id } from "@rovinos/schemas";
 import { z } from "zod";
 import { countDroppedTelemetry } from "../metrics.js";
 import { emitSentinelTrip } from "../safe-event-logs.js";
@@ -55,7 +55,7 @@ export class TripQueue {
    * @param options - Maximum number of retained run-scoped trips.
    */
   constructor(
-    private readonly logger: Logger = logs.getLogger("@harness/telemetry"),
+    private readonly logger: Logger = logs.getLogger("@rovinos/telemetry"),
     options: z.input<typeof TripQueueOptionsSchema> = {},
   ) {
     this.maxEntries = TripQueueOptionsSchema.parse(options).maxEntries;

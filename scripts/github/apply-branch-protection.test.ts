@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
-import { parseYaml } from "@harness/schemas";
+import { parseYaml } from "@rovinos/schemas";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const protectionScript = `${repositoryRoot}/scripts/github/apply-branch-protection.sh`;

@@ -11,7 +11,7 @@ import {
   type RunQueueIdGenerator,
   type RunQueueJob,
   type RunQueueOptions,
-} from "@harness/store";
+} from "@rovinos/store";
 import {
   migrate,
   EnqueueRunJobSchema,
@@ -21,7 +21,7 @@ import {
   WorkerIdSchema,
   hashIdempotencyKey,
   parseQueueInput,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { storeError } from "../postgres/helpers.js";
 import {
   connectionStringSchema,

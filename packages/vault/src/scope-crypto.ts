@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
-import { aesGcmDecrypt, aesGcmEncrypt, hkdfSha256 } from "@harness/crypto";
-import type { Id, KeyProvider } from "@harness/schemas";
+import { aesGcmDecrypt, aesGcmEncrypt, hkdfSha256 } from "@rovinos/crypto";
+import type { Id, KeyProvider } from "@rovinos/schemas";
 import { VaultOperationError } from "./errors.js";
 import { loadMasterKey } from "./sqlite-crypto.js";
 

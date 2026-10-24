@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { ServerConfigSchema } from "@harness/schemas";
+import { ServerConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { McpPool, createServersAuthorizedCheck, createServersReachableChecks } from "./pool.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";

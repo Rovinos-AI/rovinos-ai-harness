@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { Id, type Event } from "@harness/schemas";
+import { Id, type Event } from "@rovinos/schemas";
 import {
   PlanToolPort,
   READ_PLAN_TOOL_SPEC,

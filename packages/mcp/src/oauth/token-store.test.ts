@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
-import type { KeyProvider } from "@harness/schemas";
+import type { KeyProvider } from "@rovinos/schemas";
 import { OAuthTokenStore, OAuthTokenStoreError } from "./token-store.js";
 
 const tokenCanary = "mcp-oauth-token-store-canary";

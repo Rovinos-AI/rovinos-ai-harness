@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, trace } from "@opentelemetry/api";
-import { SpanId, TraceId, type Code, type PiiConfig } from "@harness/schemas";
+import { SpanId, TraceId, type Code, type PiiConfig } from "@rovinos/schemas";
 import {
   creditCardDetector,
   createCustomDetector,
@@ -15,14 +15,14 @@ import {
   PresidioDetector,
   PiiMessageSanitizer,
   type Detector,
-} from "@harness/pii";
+} from "@rovinos/pii";
 import {
   AuditingVaultResolver,
   type VaultScopeResolver,
   type VaultResolver,
   type VaultWriter,
-} from "@harness/vault";
-import { emitSafeEventToDefaultLogger, SafeEvent } from "@harness/telemetry";
+} from "@rovinos/vault";
+import { emitSafeEventToDefaultLogger, SafeEvent } from "@rovinos/telemetry";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { Clock } from "./recorder.js";
 

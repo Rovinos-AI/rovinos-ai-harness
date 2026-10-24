@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { Readable } from "node:stream";
 import fc from "fast-check";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRunnerRequestHandler } from "../runner/src/server.js";
 import type { Clock, ExecResult } from "./types.js";
