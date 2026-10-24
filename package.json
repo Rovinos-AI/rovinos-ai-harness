@@ -28,7 +28,7 @@
     "build": "yarn workspaces foreach --all --topological --parallel run build",
     "compose:sandbox": "corepack yarn build:schemas && corepack yarn workspace @harness/config build && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/compose/sandbox.ts",
     "quickstart": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/quickstart.ts",
-    "quickstart:down": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/quickstart.ts --down",
+    "quickstart:down": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/quickstart.ts --down",
     "start": "yarn build && yarn workspace @harness/cli start",
     "clean": "node scripts/clean.mjs",
     "deps:check": "yarn constraints && yarn dedupe --check",

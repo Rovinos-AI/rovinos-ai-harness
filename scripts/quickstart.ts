@@ -49,9 +49,12 @@ export type QuickstartErrorCode =
 
 /** A safe, typed quickstart failure with a one-line recovery hint. */
 export class QuickstartError extends Error {
-  constructor(readonly code: QuickstartErrorCode) {
+  readonly code: QuickstartErrorCode;
+
+  constructor(code: QuickstartErrorCode) {
     super(code);
     this.name = "QuickstartError";
+    this.code = code;
   }
 
   get fix(): string {
