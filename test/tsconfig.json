@@ -1,11 +1,7 @@
 {
   "extends": "../packages/schemas/tsconfig.test.json",
   "compilerOptions": {
-    "rootDir": "..",
-    "paths": {
-      "eventsource": ["../node_modules/eventsource/dist/index.d.ts"],
-      "eventsource-parser": ["../node_modules/eventsource-parser/dist/index.d.ts"]
-    }
+    "rootDir": ".."
   },
   "include": ["**/*.ts"]
 }

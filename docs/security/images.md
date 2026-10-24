@@ -3,7 +3,7 @@
 The harness and sandbox runner images use pinned base-image digests listed in
 [`infra/images.lock`](../../infra/images.lock). Dependabot checks eligible
 Dockerfile references weekly; the `jdx/mise` image is intentionally ignored
-because its updates must be coordinated manually with the pipeline toolchain.
+because its updates must be coordinated manually with the CI toolchain.
 
 Build the images from the repository root:
 
@@ -15,7 +15,7 @@ docker build --build-arg REVISION="$(git rev-parse HEAD)" -t harness-sandbox:loc
 To use a different base image, update the corresponding `FROM` references in
 both Dockerfiles and `infra/images.lock` with the registry digest for the chosen
 tag. For a `jdx/mise` image update, also update `MISE_VERSION` and `MISE_SHA256`
-in [`pipelines/templates/node-setup.yml`](../../pipelines/templates/node-setup.yml),
+in [`.github/actions/node-setup/action.yml`](../../.github/actions/node-setup/action.yml),
 the tool pins in [`mise.toml`](../../mise.toml), and the pinned Debian package
 versions in both Dockerfiles. Treat these as one coordinated change.
 Review the image's runtime contents, verify the image-hardening integration
