@@ -163,8 +163,18 @@ describe("CI workflow", () => {
     expect(steps.at(-1)).toBe(teardown);
   });
 
-  it("runs the canary release gate last", () => {
-    expect(stepRunning(jobSteps("gates"), "yarn test:canary")).toBeDefined();
+  it("runs the canary and replay release gates", () => {
+    const steps = jobSteps("gates");
+    const canary = stepRunning(steps, "yarn test:canary");
+    const replay = stepRunning(steps, "yarn test:replay");
+
+    expect(canary).toBeDefined();
+    expect(stepRunning(steps, "yarn build")).toBeDefined();
+    expect(replay).toBeDefined();
+    if (canary === undefined || replay === undefined) {
+      throw new TypeError("The gates job must run both canary and replay tests.");
+    }
+    expect(steps.indexOf(replay)).toBeGreaterThan(steps.indexOf(canary));
   });
 
   it("verifies the pinned mise download before installing it", () => {
