@@ -2207,16 +2207,15 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       expect(createTool).toHaveBeenCalledExactlyOnceWith(runtime.sandboxBackend);
       const result = await runtime.run("Execute the synthetic sandbox command.");
       expect(result.status).toBe("completed");
-      expect(responses.map(({ status }) => status)).toEqual([200]);
+      expect(responses.map(({ status }) => status)).toEqual([200, 200, 200]);
       expect(executions).toMatchObject([
         {
           outcome: "ok",
           result: { exitCode: 0, stdout: `${current.canary}\n` },
         },
       ]);
-      // The runner leases each exec; the runtime no longer holds a run-wide lease (subagents share it).
-      expect(forwarded.map(({ path }) => path)).toEqual(["/exec"]);
-      expect(forwarded[0]).toMatchObject({
+      expect(forwarded.map(({ path }) => path)).toEqual(["/lease", "/exec", "/release"]);
+      expect(forwarded[1]).toMatchObject({
         authorization: ["Bearer", token].join(" "),
         body: { spec: { argv: ["/bin/echo", current.canary] } },
       });
@@ -2302,6 +2301,8 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
         "infra/compose/docker-compose.egress.test.yml",
       ]);
     const requestSchema = z.union([
+      z.object({ runId: Id, ttlMs: z.number().int().positive().max(600_000).optional() }).strict(),
+      z.object({ runId: Id }).strict(),
       z.object({ runId: Id, request: WebFetchRequestSchema }).strict(),
       z.object({ runId: Id, request: FsOperationRequestSchema }).strict(),
     ]);
@@ -2312,7 +2313,12 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       const forward = async () => {
         expect(request.method).toBe("POST");
         const endpoint = request.url ?? "";
-        expect(endpoint === "/fetch" || endpoint.startsWith("/fs/")).toBe(true);
+        expect(
+          endpoint === "/lease" ||
+            endpoint === "/release" ||
+            endpoint === "/fetch" ||
+            endpoint.startsWith("/fs/"),
+        ).toBe(true);
         const requestLimit = endpoint.startsWith("/fs/") ? 32 * 1024 * 1024 : 2 * 1024 * 1024;
         const chunks: Buffer[] = [];
         let bytes = 0;
@@ -2457,10 +2463,14 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
         expect.arrayContaining(["fs.read", "fs.write", "fs.edit", "fs.list", "fs.search"]),
       );
       expect(decide).toHaveBeenCalledTimes(3);
-      const forwardedFetch = forwarded.find(({ request }) => "url" in request)?.request;
-      expect(forwardedFetch).toMatchObject({ url: `http://${probeHost}:8080/runtime` });
-      const forwardedFileRequests = forwarded.flatMap(({ request }) =>
-        "operation" in request ? [request] : [],
+      const forwardedFetch = forwarded.find(
+        (entry) => "request" in entry && "url" in entry.request,
+      );
+      expect(forwardedFetch).toMatchObject({
+        request: { url: `http://${probeHost}:8080/runtime` },
+      });
+      const forwardedFileRequests = forwarded.flatMap((entry) =>
+        "request" in entry && "operation" in entry.request ? [entry.request] : [],
       );
       expect(forwardedFileRequests).toEqual(
         expect.arrayContaining([
@@ -2476,7 +2486,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
           { operation: "read", input: { path: "notes.txt" } },
         ]),
       );
-      expect(responses).toHaveLength(3);
+      expect(responses).toHaveLength(5);
       expect(responses.every(({ status }) => status === 200)).toBe(true);
       expect(WebFetchResultSchema.parse(toolResult.result)).toMatchObject({
         text: "Contact <EMAIL_2>",

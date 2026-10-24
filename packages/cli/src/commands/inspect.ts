@@ -43,7 +43,7 @@ export const inspectCommand: CommandModule = {
       .action(async (value: string, options: { readonly showContent?: boolean }) => {
         const runId = Id.parse(value);
         const config = await context.loadConfig();
-        const runtime = await createCommandRuntime(context, config);
+        const runtime = await createCommandRuntime(context, config, { readOnlyStore: true });
         try {
           const events = await readEvents(runtime.store, runId);
           if (events.length === 0) {

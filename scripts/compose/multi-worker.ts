@@ -99,6 +99,27 @@ function postgresAddress(context: ComposeContext): string {
   return address;
 }
 
+function sandboxRunnerAddress(
+  context: ComposeContext,
+  service: "sandbox-runner" | "sandbox-runner-2",
+): string {
+  const runnerContainer = compose(context, ["ps", "--quiet", service]).trim();
+  const address = execFileSync(
+    "docker",
+    [
+      "inspect",
+      "--format",
+      `{{(index .NetworkSettings.Networks "${context.projectName}_sandbox").IPAddress}}`,
+      runnerContainer,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  if (isIP(address) !== 4) {
+    throw new Error("multi_worker_runner_address_unavailable");
+  }
+  return address;
+}
+
 function createScriptContainerArgs(
   context: ComposeContext,
   containerName: string,
@@ -120,6 +141,10 @@ function createScriptContainerArgs(
     `${context.projectName}_internal`,
     "--add-host",
     `postgres:${postgresAddress(context)}`,
+    "--add-host",
+    `sandbox-runner:${sandboxRunnerAddress(context, "sandbox-runner")}`,
+    "--add-host",
+    `sandbox-runner-2:${sandboxRunnerAddress(context, "sandbox-runner-2")}`,
     "--read-only",
     "--tmpfs",
     "/tmp:rw,noexec,nosuid,nodev,size=16m",

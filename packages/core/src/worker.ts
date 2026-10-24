@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { IdGenerator } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { RunLoopResult } from "./loop.js";
+import { RESUME_LEASE_MS } from "./resume-lease.js";
 
 const WorkerLimitsSchema = z
   .object({
@@ -239,12 +240,10 @@ export class Worker {
         }
         return;
       }
-      const result = await this.queue.fail(
-        job.jobId,
-        this.workerId,
-        errorCode(error),
-        this.retryAfterMs,
-      );
+      const code = errorCode(error);
+      const retryAfterMs =
+        code === "resume_conflict" ? Math.max(this.retryAfterMs, RESUME_LEASE_MS) : this.retryAfterMs;
+      const result = await this.queue.fail(job.jobId, this.workerId, code, retryAfterMs);
       outcome = result === "lease_lost" ? "lease_lost" : "failed";
     } finally {
       done = true;

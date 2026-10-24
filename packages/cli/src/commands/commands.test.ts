@@ -536,11 +536,16 @@ describe("run, resume, and inspect CLI commands", () => {
     const runId = suspendedRunResult.runId;
     harness.stdout.length = 0;
     harness.stderr.length = 0;
+    const createRuntime = vi.spyOn(harness.context, "createRuntime");
 
     const inspectCode = await main(["--json", "inspect", runId], harness.context, [inspectCommand]);
 
     expect(runCode).toBe(ExitCode.suspended);
     expect(inspectCode).toBe(ExitCode.ok);
+    expect(createRuntime).toHaveBeenLastCalledWith(
+      config,
+      expect.objectContaining({ readOnlyStore: true }),
+    );
     expect(harness.stdout.join("")).not.toContain("<EMAIL_1>");
     expect(harness.stderr.join("")).toContain('"status": "suspended"');
 
