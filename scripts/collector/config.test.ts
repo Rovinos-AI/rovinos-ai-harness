@@ -172,12 +172,23 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     expect.arrayContaining(["keep_keys(scope.attributes, [])"]),
   );
   const metricAttributes = yamlSchema.parse(processors["transform/metric_attributes"]);
-  expect(z.array(z.string()).parse(metricAttributes.metric_statements)).toEqual(
+  const metricStatements = z.array(z.unknown()).parse(metricAttributes.metric_statements);
+  expect(metricStatements).toEqual(
     expect.arrayContaining([
-      "keep_keys(scope.attributes, [])",
-      "keep_keys(exemplar.filtered_attributes, [])",
-      'keep_keys(datapoint.attributes, ["harness.host.app_rejected.reason"]) where metric.name == "harness.host.app_rejected"',
-      'keep_keys(datapoint.attributes, ["harness.telemetry.dropped.reason"]) where metric.name == "harness.telemetry.dropped"',
+      { context: "scope", statements: ["keep_keys(attributes, [])"] },
+      { context: "exemplar", statements: ["keep_keys(filtered_attributes, [])"] },
+    ]),
+  );
+  const datapointStatements = metricStatements.find(
+    (statement) => isRecord(statement) && statement.context === "datapoint",
+  );
+  const datapointGroup = z
+    .object({ context: z.literal("datapoint"), statements: z.array(z.string()) })
+    .parse(datapointStatements);
+  expect(datapointGroup.statements).toEqual(
+    expect.arrayContaining([
+      'keep_keys(attributes, ["harness.host.app_rejected.reason"]) where metric.name == "harness.host.app_rejected"',
+      'keep_keys(attributes, ["harness.telemetry.dropped.reason"]) where metric.name == "harness.telemetry.dropped"',
     ]),
   );
   expect(allowlist.service).toMatchObject({

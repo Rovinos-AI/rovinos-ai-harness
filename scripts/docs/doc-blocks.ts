@@ -15,15 +15,31 @@ export interface DocTestBlock {
   readonly expectedExitCode?: number;
 }
 
+/** Fixed repository documents supported by the documentation test runner. */
+export type DocTestDocumentPath =
+  | "docs/quickstart.md"
+  | "examples/basic-agent/README.md"
+  | "examples/approval/README.md"
+  | "examples/crash-and-resume/README.md"
+  | "examples/replay/README.md";
+
 /** Safe error raised when a documentation test directive is invalid or fails. */
 export class DocTestError extends Error {
   readonly code = "docs_quickstart_test_failed";
   readonly exitCode: number;
+  readonly documentPath: DocTestDocumentPath | undefined;
+  readonly blockIndex: number | undefined;
 
-  constructor(exitCode = 1) {
-    super("docs_quickstart_test_failed");
+  constructor(exitCode = 1, documentPath?: DocTestDocumentPath, blockIndex?: number) {
+    super(
+      documentPath === undefined
+        ? "docs_quickstart_test_failed"
+        : `docs_quickstart_test_failed: ${documentPath} block ${String(blockIndex)}`,
+    );
     this.name = "DocTestError";
     this.exitCode = exitCode === 0 ? 1 : exitCode;
+    this.documentPath = documentPath;
+    this.blockIndex = blockIndex;
   }
 }
 

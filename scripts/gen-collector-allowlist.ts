@@ -16,7 +16,12 @@ import type * as RegistrationSourceModule from "./telemetry-registration-sources
 
 type CollectorSpanDefinition = Pick<SpanDefinition<SpanDefinitionShape>, "name" | "shape">;
 type CollectorLogDefinition = Pick<LogRecordDefinition, "name" | "shape">;
-type YamlValue = string | readonly string[] | { readonly [key: string]: YamlValue };
+interface YamlObject {
+  readonly [key: string]: YamlValue;
+}
+
+type YamlListItem = string | YamlObject;
+type YamlValue = string | readonly YamlListItem[] | YamlObject;
 
 const resourceAttributeKeys = [
   "harness.policy.version",
@@ -56,8 +61,38 @@ function dropUnlessRegistered(path: string, names: readonly string[]): string {
   return `not (${conditions})`;
 }
 
+function isYamlList(value: YamlValue): value is readonly YamlListItem[] {
+  return Array.isArray(value);
+}
+
 function attributeNames(shape: LogRecordShape | SpanDefinitionShape): string[] {
   return Object.keys(shape).sort(compareNames);
+}
+
+function createMetricAttributesProcessor(
+  metricNames: readonly string[],
+  metricAllowlist: Readonly<Record<string, readonly string[]>>,
+): YamlObject {
+  return {
+    error_mode: "ignore",
+    metric_statements: [
+      {
+        context: "scope",
+        statements: [keepKeys("attributes", [])],
+      },
+      {
+        context: "exemplar",
+        statements: [keepKeys("filtered_attributes", [])],
+      },
+      {
+        context: "datapoint",
+        statements: metricNames.map(
+          (name) =>
+            `${keepKeys("attributes", metricAllowlist[name] ?? [])} where metric.name == ${ottlString(name)}`,
+        ),
+      },
+    ],
+  };
 }
 
 const pipelines: YamlValue = {
@@ -94,19 +129,35 @@ const pipelines: YamlValue = {
   },
 };
 
-function renderYamlEntry(key: string, value: YamlValue, indentation: number): string[] {
+function renderYamlEntry(
+  key: string,
+  value: YamlValue,
+  indentation: number,
+  listItem = false,
+): string[] {
   const prefix = " ".repeat(indentation);
+  const keyPrefix = `${prefix}${listItem ? "- " : ""}`;
   if (typeof value === "string") {
-    return [`${prefix}${key}: ${JSON.stringify(value)}`];
+    return [`${keyPrefix}${key}: ${JSON.stringify(value)}`];
   }
-  if (Array.isArray(value)) {
+  if (isYamlList(value)) {
     if (value.length === 0) {
-      return [`${prefix}${key}: []`];
+      return [`${keyPrefix}${key}: []`];
     }
-    return [`${prefix}${key}:`, ...value.map((item) => `${prefix}  - ${JSON.stringify(item)}`)];
+    return [
+      `${keyPrefix}${key}:`,
+      ...value.flatMap((item) => {
+        if (typeof item === "string") {
+          return [`${prefix}  - ${JSON.stringify(item)}`];
+        }
+        return Object.entries(item).flatMap(([nestedKey, nestedValue], index) =>
+          renderYamlEntry(nestedKey, nestedValue, indentation + (index === 0 ? 2 : 4), index === 0),
+        );
+      }),
+    ];
   }
   return [
-    `${prefix}${key}:`,
+    `${keyPrefix}${key}:`,
     ...Object.entries(value).flatMap(([nestedKey, nestedValue]) =>
       renderYamlEntry(nestedKey, nestedValue, indentation + 2),
     ),
@@ -172,17 +223,7 @@ function createProcessors(
       error_mode: "ignore",
       metrics: { metric: [dropUnlessRegistered("name", metricNames)] },
     },
-    "transform/metric_attributes": {
-      error_mode: "ignore",
-      metric_statements: [
-        keepKeys("scope.attributes", []),
-        keepKeys("exemplar.filtered_attributes", []),
-        ...metricNames.map(
-          (name) =>
-            `${keepKeys("datapoint.attributes", metricAllowlist[name] ?? [])} where metric.name == ${ottlString(name)}`,
-        ),
-      ],
-    },
+    "transform/metric_attributes": createMetricAttributesProcessor(metricNames, metricAllowlist),
     "transform/resource_attributes": {
       error_mode: "ignore",
       trace_statements: [keepKeys("resource.attributes", resourceAttributeKeys)],

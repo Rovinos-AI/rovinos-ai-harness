@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+exporters:
+  file/traces:
+    path: /var/otel-out/traces.jsonl
+    format: json
+    append: true
+    create_directory: true
+  file/logs:
+    path: /var/otel-out/logs.jsonl
+    format: json
+    append: true
+    create_directory: true
+  file/metrics:
+    path: /var/otel-out/metrics.jsonl
+    format: json
+    append: true
+    create_directory: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [file/traces]
+    logs:
+      receivers: [otlp]
+      exporters: [file/logs]
+    metrics:
+      receivers: [otlp]
+      exporters: [file/metrics]

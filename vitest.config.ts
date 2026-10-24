@@ -15,6 +15,7 @@ export const composeIntegrationSuites = [
   "scripts/ci/docker-image.int.test.ts",
   "scripts/ci/image-hardening.int.test.ts",
   "scripts/collector/validate.int.test.ts",
+  "test/collector-allowlist.int.test.ts",
   "scripts/compose/presidio.int.test.ts",
   "scripts/compose/prod-like.int.test.ts",
   "packages/eval/src/executors/docker.int.test.ts",
