@@ -93,6 +93,12 @@
       "version": "2.11.0",
       "reason": "Manifest says SEE LICENSE IN LICENSE; the LICENSE file grants MIT or Apache-2.0 terms, both on the allowlist.",
       "expires": "2027-01-19"
+    },
+    {
+      "package": "spawndamnit",
+      "version": "3.0.1",
+      "reason": "MIT license text in LICENSE; the package is a transitive dependency of Changesets CLI.",
+      "expires": "2027-10-24"
     }
   ]
 }

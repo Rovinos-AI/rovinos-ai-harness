@@ -35,6 +35,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/node-setup
+      - name: Check Changesets status
+        run: |
+          set -euo pipefail
+          package_changes="$(git diff --name-only origin/main...HEAD -- packages | grep -Ev '\.md$' || true)"
+          if [ -n "$package_changes" ] && ! find .changeset -maxdepth 1 -type f -name '*.md' ! -name README.md -print -quit | grep -q .; then
+            echo "Package changes require a Changeset."
+            exit 1
+          fi
+          yarn changeset status --since=origin/main
       - name: Check telemetry schemas and random strings
         run: yarn lint:telemetry
       - name: Check telemetry attribute catalog
@@ -54,6 +63,16 @@ jobs:
         run: yarn typecheck
       - name: Build packages for policy fixture commands
         run: yarn build
+      - name: Release path dry run
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/verify-release.ts --dry-run
+          for package in sdk cli store-sqlite store-postgres; do
+            (cd "packages/$package" && yarn pack --dry-run)
+          done
+          docker build --file Dockerfile --tag harness:dry-run .
+          docker build --file Dockerfile.sandbox --tag sandbox-runner:dry-run .
+          docker build --file Dockerfile.sandbox --tag sandbox-egress-proxy:dry-run .
       - name: Validate Compose security profiles
         run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/compose/validate.ts
       - name: Test policy examples

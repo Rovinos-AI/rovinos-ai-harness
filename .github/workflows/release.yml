@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify gates check run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          check_runs="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" | jq -s '[.[] | .check_runs[] | select(.name == "gates")] | sort_by(.started_at)')"
+          if ! printf '%s' "$check_runs" | jq -e 'length > 0 and last.status == "completed" and last.conclusion == "success"' >/dev/null; then
+            echo "The tagged commit does not have a successful gates check run."
+            exit 1
+          fi
+      - uses: ./.github/actions/node-setup
+      - name: Verify release metadata
+        run: |
+          yarn build:schemas
+          yarn verify:release "$GITHUB_REF_NAME"
+      - name: Build and test tagged source
+        run: |
+          yarn build
+          yarn test:unit --coverage
+          yarn test:canary
+          yarn test:replay
+          RELEASE=1 node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/docs/check-community-files.ts
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Build packages
+        run: yarn build
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+      - name: Build, push, and sign GHCR images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --name release-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+          build_and_sign() {
+            image="$1"
+            dockerfile="$2"
+            metadata="$RUNNER_TEMP/${image##*/}-metadata.json"
+            docker buildx build \
+              --file "$dockerfile" \
+              --tag "$image:$tag" \
+              --tag "$image:latest" \
+              --sbom=true \
+              --provenance=true \
+              --push \
+              --metadata-file "$metadata" \
+              .
+            digest="$(jq -r '."containerimage.digest"' "$metadata")"
+            if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+              echo "Image build did not return a registry digest."
+              exit 1
+            fi
+            cosign sign --yes "$image@$digest"
+          }
+
+          build_and_sign "ghcr.io/$owner/harness" Dockerfile
+          build_and_sign "ghcr.io/$owner/sandbox-runner" Dockerfile.sandbox
+          build_and_sign "ghcr.io/$owner/sandbox-egress-proxy" Dockerfile.sandbox
+      - name: Publish npm packages with provenance
+        run: |
+          set -euo pipefail
+          for package in sdk cli store-sqlite store-postgres; do
+            (cd "packages/$package" && npm publish --provenance --access public)
+          done
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          : > "$notes"
+          for package in sdk cli store-sqlite store-postgres; do
+            changelog="packages/$package/CHANGELOG.md"
+            if [ ! -f "$changelog" ]; then
+              echo "Missing Changesets changelog for @rovinos/$package."
+              exit 1
+            fi
+            printf '## @rovinos/%s\n\n' "$package" >> "$notes"
+            awk '/^## / { if (found) exit; found = 1 } found { print }' "$changelog" >> "$notes"
+            printf '\n' >> "$notes"
+          done
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$notes" \
+            infra/compose/docker-compose.yml \
+            infra/compose/docker-compose.prod-like.yml \
+            infra/compose/docker-compose.egress.yml

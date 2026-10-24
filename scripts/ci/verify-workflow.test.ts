@@ -142,6 +142,32 @@ describe("CI workflow", () => {
     expect(steps[0]?.with?.["fetch-depth"]).toBe(0);
   });
 
+  it("requires a Changeset for non-documentation package changes", () => {
+    const step = jobSteps("static").find(
+      (candidate) => candidate.name === "Check Changesets status",
+    );
+
+    expect(step?.run).toContain("git diff --name-only origin/main...HEAD -- packages");
+    expect(step?.run).toContain("yarn changeset status --since=origin/main");
+    expect(step?.run).toContain("Package changes require a Changeset.");
+  });
+
+  it("runs the release path in dry-run mode without publishing", () => {
+    const step = jobSteps("static").find((candidate) => candidate.name === "Release path dry run");
+
+    expect(step?.run).toContain("scripts/release/verify-release.ts --dry-run");
+    expect(step?.run).toContain('cd "packages/$package" && yarn pack --dry-run');
+    expect(step?.run).toContain("docker build --file Dockerfile --tag harness:dry-run .");
+    expect(step?.run).toContain(
+      "docker build --file Dockerfile.sandbox --tag sandbox-runner:dry-run .",
+    );
+    expect(step?.run).toContain(
+      "docker build --file Dockerfile.sandbox --tag sandbox-egress-proxy:dry-run .",
+    );
+    expect(step?.run).not.toContain("docker push");
+    expect(step?.run).not.toContain("npm publish");
+  });
+
   it("reports unit results with coverage even when tests fail", () => {
     const unit = stepRunning(jobSteps("unit"), "yarn test:unit");
 
