@@ -37,15 +37,19 @@ function hashArgs(args: JsonValue): string {
   return Sha256Hex.parse(createHash("sha256").update(canonicalJson(args)).digest("hex"));
 }
 
-function rootEvents(resolved: ResolvedRun): readonly Event[] {
-  return resolved.runs.find(({ runId }) => runId === resolved.rootRunId)?.events ?? [];
-}
-
 /** Serves recorded tool results and never invokes the current registry's executor. */
 export class ReplayToolPort implements ToolPort {
   readonly alreadyTokenized = true;
-  private readonly intents = new Map<Id, Extract<Event, { type: "tool_intent" }>>();
-  private readonly results = new Map<Id, Extract<Event, { type: "tool_result" }>>();
+  readonly getToolSpecs?: NonNullable<ToolPort["getToolSpecs"]>;
+  private readonly rootReplayRunId: Id;
+  private readonly originalRootRunId: Id;
+  private readonly runs = new Map<
+    Id,
+    {
+      readonly intents: Map<Id, Extract<Event, { type: "tool_intent" }>>;
+      readonly results: Map<Id, Extract<Event, { type: "tool_result" }>>;
+    }
+  >();
 
   /**
    * @param resolved - Resolved event logs containing tool intents and results.
@@ -54,24 +58,38 @@ export class ReplayToolPort implements ToolPort {
   constructor(
     resolved: ResolvedRun,
     private readonly registry?: Pick<ToolPort, "describe" | "getToolSpecs" | "validateInputSchema">,
+    replayRunId = resolved.rootRunId,
+    sourceRunId = resolved.rootRunId,
   ) {
-    for (const event of rootEvents(resolved)) {
-      if (event.type === "tool_intent") {
-        this.intents.set(event.callId, event);
-      } else if (event.type === "tool_result") {
-        this.results.set(event.callId, event);
+    this.rootReplayRunId = replayRunId;
+    this.originalRootRunId = sourceRunId;
+    if (registry?.getToolSpecs !== undefined) {
+      this.getToolSpecs = () => registry.getToolSpecs?.() ?? [];
+    }
+    for (const run of resolved.runs) {
+      const intents = new Map<Id, Extract<Event, { type: "tool_intent" }>>();
+      const results = new Map<Id, Extract<Event, { type: "tool_result" }>>();
+      for (const event of run.events) {
+        if (event.type === "tool_intent") {
+          intents.set(event.callId, event);
+        } else if (event.type === "tool_result") {
+          results.set(event.callId, event);
+        }
       }
+      this.runs.set(run.runId, { intents, results });
     }
   }
 
   /** Returns recorded idempotency with timeout and schema metadata from the optional registry. */
   describe(toolId: Code, args?: JsonValue): ToolDescription | undefined {
     const requestedHash = args === undefined ? undefined : hashArgs(args);
-    const intent = [...this.intents.values()].find(
-      (candidate) =>
-        candidate.toolId === toolId &&
-        (requestedHash === undefined || candidate.argsHash === requestedHash),
-    );
+    const intent = [...this.runs.values()]
+      .flatMap(({ intents }) => [...intents.values()])
+      .find(
+        (candidate) =>
+          candidate.toolId === toolId &&
+          (requestedHash === undefined || candidate.argsHash === requestedHash),
+      );
     if (intent === undefined) {
       return undefined;
     }
@@ -82,11 +100,6 @@ export class ReplayToolPort implements ToolPort {
       ...(registered?.longRunning === undefined ? {} : { longRunning: registered.longRunning }),
       ...(registered?.inputSchema === undefined ? {} : { inputSchema: registered.inputSchema }),
     };
-  }
-
-  /** Forwards model-visible specifications without forwarding execution. */
-  getToolSpecs(): ReturnType<NonNullable<ToolPort["getToolSpecs"]>> {
-    return this.registry?.getToolSpecs?.() ?? [];
   }
 
   /** Validates against the current registry without executing the tool. */
@@ -107,9 +120,11 @@ export class ReplayToolPort implements ToolPort {
   }
 
   /** Returns the recorded result or fails closed on missing or divergent input. */
-  execute(call: ModelToolCall, _context: RunContext): Promise<ToolExecutionResult> {
-    const intent = this.intents.get(call.callId);
-    const result = this.results.get(call.callId);
+  execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult> {
+    const runId = context.runId === this.rootReplayRunId ? this.originalRootRunId : context.runId;
+    const run = this.runs.get(runId);
+    const intent = run?.intents.get(call.callId);
+    const result = run?.results.get(call.callId);
     if (intent === undefined || result === undefined) {
       return Promise.reject(new ReplayMissingResultError(intent?.seq));
     }

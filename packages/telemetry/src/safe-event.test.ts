@@ -248,9 +248,13 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
       type: "run_created",
       configHash: "c".repeat(64),
       policyVersion: "run.policy.v1",
+      replayOf: "00000000000000000000000004",
     }),
     kind: "run_created",
-    fields: { configHash: "c".repeat(64) },
+    fields: {
+      configHash: "c".repeat(64),
+      replayOf: "00000000000000000000000004",
+    },
   },
 ];
 
@@ -367,6 +371,11 @@ describe("SafeEvent projection", () => {
       argsHash: "c".repeat(64),
       args: {},
     });
+    const noReplayLink = validEvent({
+      type: "run_created",
+      configHash: "c".repeat(64),
+      policyVersion: "run.policy.v1",
+    });
 
     expect(toSafeEvent(noErrorCode, "sanitizer.v1")).not.toHaveProperty("errorCode");
     expect(toSafeEvent(noWorkspaceRef, "sanitizer.v1")).toMatchObject({
@@ -375,6 +384,7 @@ describe("SafeEvent projection", () => {
     });
     expect(toSafeEvent(noParentCallId, "sanitizer.v1")).not.toHaveProperty("parentCallId");
     expect(toSafeEvent(noRuleIdIntent, "sanitizer.v1")).not.toHaveProperty("ruleId");
+    expect(toSafeEvent(noReplayLink, "sanitizer.v1")).not.toHaveProperty("replayOf");
   });
 
   it("omits raw principals by default and accepts only explicit pseudonyms", () => {

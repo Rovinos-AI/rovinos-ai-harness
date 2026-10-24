@@ -147,6 +147,7 @@ const runCreated = z
     ...commonFields,
     kind: attr.enum(["run_created"]),
     configHash: attr.hash(),
+    replayOf: attr.optional(attr.id()),
     requestedByPseudonym: attr.optional(attr.pseudonym()),
   })
   .strict();
@@ -388,6 +389,7 @@ function projectRunCreated(
     ...envelope,
     kind: "run_created",
     configHash: event.configHash,
+    ...(event.replayOf === undefined ? {} : { replayOf: event.replayOf }),
     ...(pseudonyms?.requestedBy === undefined
       ? {}
       : { requestedByPseudonym: pseudonyms.requestedBy }),

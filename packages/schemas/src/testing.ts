@@ -17,6 +17,7 @@ export const eventSamples = [
     type: "run_created",
     configHash: sha256,
     policyVersion: "policy.v1",
+    replayOf: "00000000000000000000000001",
     quotaRole: "worker",
     depth: 0,
   },

@@ -41,6 +41,7 @@ const runCreatedEvent = z
     type: z.literal("run_created"),
     configHash: Sha256Hex,
     policyVersion: Code,
+    replayOf: Id.optional(),
     parentRunId: Id.optional(),
     parentCallId: Id.optional(),
     continuationOf: Id.optional(),
