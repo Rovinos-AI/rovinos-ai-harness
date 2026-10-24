@@ -228,23 +228,7 @@ export class Worker {
       }
       outcome = result.status === "suspended" ? "suspended" : "completed";
     } catch (error) {
-      if (controller.signal.reason === "lease_lost") {
-        outcome = "lease_lost";
-        return;
-      }
-      if (controller.signal.reason === "shutdown") {
-        if (await this.queue.release(job.jobId, this.workerId)) {
-          outcome = "suspended";
-        } else {
-          outcome = "lease_lost";
-        }
-        return;
-      }
-      const code = errorCode(error);
-      const retryAfterMs =
-        code === "resume_conflict" ? Math.max(this.retryAfterMs, RESUME_LEASE_MS) : this.retryAfterMs;
-      const result = await this.queue.fail(job.jobId, this.workerId, code, retryAfterMs);
-      outcome = result === "lease_lost" ? "lease_lost" : "failed";
+      outcome = await this.handleJobError(job, controller, error);
     } finally {
       done = true;
       if (heartbeatTimer !== undefined) {
@@ -253,6 +237,24 @@ export class Worker {
       this.stopping.signal.removeEventListener("abort", stop);
       countWorkerJob(outcome);
     }
+  }
+
+  private async handleJobError(
+    job: RunQueueJob,
+    controller: AbortController,
+    error: unknown,
+  ): Promise<WorkerJobOutcome> {
+    if (controller.signal.reason === "lease_lost") {
+      return "lease_lost";
+    }
+    if (controller.signal.reason === "shutdown") {
+      return (await this.queue.release(job.jobId, this.workerId)) ? "suspended" : "lease_lost";
+    }
+    const code = errorCode(error);
+    const retryAfterMs =
+      code === "resume_conflict" ? Math.max(this.retryAfterMs, RESUME_LEASE_MS) : this.retryAfterMs;
+    const result = await this.queue.fail(job.jobId, this.workerId, code, retryAfterMs);
+    return result === "lease_lost" ? "lease_lost" : "failed";
   }
 
   private isStopping(): boolean {
