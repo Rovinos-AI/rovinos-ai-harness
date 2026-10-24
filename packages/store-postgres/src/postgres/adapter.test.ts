@@ -1075,6 +1075,36 @@ it("fails a watch when the dedicated listener cannot LISTEN", async () => {
   await store.close();
 });
 
+it("follows run notifications after the initial catch-up without rescanning idle runs", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  await store.append(runId, [builders.runCreated(runId)], 0);
+  const listRuns = vi.spyOn(store, "listRuns");
+  const controller = new AbortController();
+  const iterator = store.watchRuns({ signal: controller.signal })[Symbol.asyncIterator]();
+  try {
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { runId, status: "pending", lastSeq: 0 },
+    });
+    const next = iterator.next();
+    await vi.waitFor(() => {
+      expect(listRuns).toHaveBeenCalledTimes(2);
+    });
+    await store.append(runId, [builders.runStatusChanged(runId, "pending", "running")], 1);
+    await expect(next).resolves.toMatchObject({
+      done: false,
+      value: { runId, status: "running", lastSeq: 1 },
+    });
+    expect(listRuns).toHaveBeenCalledTimes(2);
+  } finally {
+    controller.abort();
+    await iterator.return?.();
+    await store.close();
+  }
+});
+
 it.each([
   ["missing run", false],
   ["non-terminal head", true],
