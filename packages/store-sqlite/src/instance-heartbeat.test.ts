@@ -68,7 +68,6 @@ describe("openSqliteInstanceHeartbeat", () => {
       instanceId: firstId,
       now: () => now,
       heartbeatIntervalMs: 10,
-      staleAfterMs: 50,
     });
     const database = new Database(heartbeatPath(databasePath));
     database
@@ -85,24 +84,13 @@ describe("openSqliteInstanceHeartbeat", () => {
     await heartbeat?.close();
   });
 
-  it("refuses a fresh row owned by another process and reclaims stale rows", async () => {
+  it("reclaims heartbeat rows when no process owns the SQLite lock", async () => {
     const databasePath = await createDirectory();
     migrateSqliteFile(heartbeatPath(databasePath), { appliedAt: 100_000 });
     const database = new Database(heartbeatPath(databasePath));
     database.prepare("INSERT INTO instances (id, heartbeat) VALUES (?, ?)").run(secondId, 100_000);
     database.close();
 
-    await expect(
-      openSqliteInstanceHeartbeat({
-        databasePath,
-        instanceId: firstId,
-        now: () => 100_000,
-      }),
-    ).resolves.toBeUndefined();
-
-    const stale = new Database(heartbeatPath(databasePath));
-    stale.prepare("UPDATE instances SET heartbeat = ? WHERE id = ?").run(1, secondId);
-    stale.close();
     const claimed = await openSqliteInstanceHeartbeat({
       databasePath,
       instanceId: firstId,
@@ -122,7 +110,6 @@ describe("openSqliteInstanceHeartbeat", () => {
       instanceId: firstId,
       now: () => now,
       heartbeatIntervalMs: 10,
-      staleAfterMs: 50,
     });
     now = 100_010;
     await vi.advanceTimersByTimeAsync(10);
@@ -133,8 +120,7 @@ describe("openSqliteInstanceHeartbeat", () => {
         databasePath,
         instanceId: firstId,
         now: () => now,
-        heartbeatIntervalMs: 50,
-        staleAfterMs: 50,
+        heartbeatIntervalMs: 0,
       }),
     ).rejects.toMatchObject({ code: "store_unavailable" });
 

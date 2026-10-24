@@ -13,18 +13,15 @@ const instanceOptionsSchema = z
     instanceId: IdSchema,
     now: z.custom<() => number>((value) => typeof value === "function"),
     heartbeatIntervalMs: z.number().int().positive().default(10_000),
-    staleAfterMs: z.number().int().positive().default(30_000),
   })
-  .strict()
-  .refine(({ heartbeatIntervalMs, staleAfterMs }) => heartbeatIntervalMs < staleAfterMs, {
-    path: ["heartbeatIntervalMs"],
-  });
+  .strict();
 
 type InstanceOptions = z.infer<typeof instanceOptionsSchema>;
 
 interface SharedHeartbeat {
   readonly databasePath: string;
   readonly database: Database.Database;
+  readonly lockDatabase: Database.Database;
   readonly instanceId: string;
   readonly now: () => number;
   readonly ownershipController: AbortController;
@@ -78,8 +75,16 @@ class HeartbeatHandle implements SqliteInstanceHeartbeat {
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
     } finally {
-      this.shared.database.close();
-      activeInstances.delete(this.shared.databasePath);
+      try {
+        this.shared.database.close();
+      } finally {
+        try {
+          this.shared.lockDatabase.exec("ROLLBACK");
+        } finally {
+          this.shared.lockDatabase.close();
+          activeInstances.delete(this.shared.databasePath);
+        }
+      }
     }
     return Promise.resolve();
   }
@@ -89,6 +94,30 @@ function loseOwnership(shared: SharedHeartbeat): void {
   if (!shared.ownershipController.signal.aborted) {
     shared.ownershipController.abort("deployment_single_instance_violation");
     clearInterval(shared.timer);
+  }
+}
+
+function isLockUnavailable(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    (error.code.startsWith("SQLITE_BUSY") || error.code.startsWith("SQLITE_LOCKED"))
+  );
+}
+
+function acquireProcessLock(databasePath: string): Database.Database | undefined {
+  const lockDatabase = new Database(`${databasePath}.instance-lock`);
+  try {
+    lockDatabase.pragma("busy_timeout = 0");
+    lockDatabase.exec("BEGIN EXCLUSIVE");
+    return lockDatabase;
+  } catch (error) {
+    lockDatabase.close();
+    if (isLockUnavailable(error)) {
+      return undefined;
+    }
+    throw error;
   }
 }
 
@@ -111,44 +140,53 @@ function createSharedHeartbeat(options: InstanceOptions): SharedHeartbeat | unde
   const databasePath = resolve(options.databasePath);
   const heartbeatPath = `${databasePath}.instances`;
   migrateSqliteFile(heartbeatPath, { appliedAt: options.now() });
-  const database = new Database(heartbeatPath);
-  database.pragma("busy_timeout = 5000");
-  const cutoff = options.now() - options.staleAfterMs;
-  const register = database.transaction(() => {
-    database.prepare("DELETE FROM instances WHERE heartbeat < ?").run(cutoff);
-    const occupied = database
-      .prepare("SELECT id FROM instances WHERE heartbeat >= ? LIMIT 1")
-      .get(cutoff);
-    if (occupied !== undefined) {
-      return false;
-    }
-    database
-      .prepare("INSERT INTO instances (id, heartbeat) VALUES (?, ?)")
-      .run(options.instanceId, options.now());
-    return true;
-  });
-  if (!register.immediate()) {
-    database.close();
+  const lockDatabase = acquireProcessLock(databasePath);
+  if (lockDatabase === undefined) {
     return undefined;
   }
-  const shared: SharedHeartbeat = {
-    databasePath,
-    database,
-    instanceId: options.instanceId,
-    now: options.now,
-    ownershipController: new AbortController(),
-    timer: setInterval(() => {
+  let database: Database.Database | undefined;
+  try {
+    const openedDatabase = new Database(heartbeatPath);
+    database = openedDatabase;
+    openedDatabase.pragma("busy_timeout = 5000");
+    const register = openedDatabase.transaction(() => {
+      openedDatabase.prepare("DELETE FROM instances").run();
+      openedDatabase
+        .prepare("INSERT INTO instances (id, heartbeat) VALUES (?, ?)")
+        .run(options.instanceId, options.now());
+    });
+    register.immediate();
+    const shared: SharedHeartbeat = {
+      databasePath,
+      database: openedDatabase,
+      lockDatabase,
+      instanceId: options.instanceId,
+      now: options.now,
+      ownershipController: new AbortController(),
+      timer: setInterval(() => {
+        try {
+          renewHeartbeat(shared);
+        } catch {
+          // The ownership signal fences subsequent runtime writes.
+        }
+      }, options.heartbeatIntervalMs),
+      references: 0,
+    };
+    shared.timer.unref();
+    activeInstances.set(databasePath, shared);
+    return shared;
+  } catch (error) {
+    try {
+      database?.close();
+    } finally {
       try {
-        renewHeartbeat(shared);
-      } catch {
-        // The ownership signal fences subsequent runtime writes.
+        lockDatabase.exec("ROLLBACK");
+      } finally {
+        lockDatabase.close();
       }
-    }, options.heartbeatIntervalMs),
-    references: 0,
-  };
-  shared.timer.unref();
-  activeInstances.set(databasePath, shared);
-  return shared;
+    }
+    throw error;
+  }
 }
 
 /**
