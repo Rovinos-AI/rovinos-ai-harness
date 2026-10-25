@@ -6,7 +6,7 @@ import {
   type Histogram,
   type Meter,
 } from "@opentelemetry/api";
-import { Code, type Code as CodeType, type ModelUsage } from "@harness/schemas";
+import { Code, type Code as CodeType, type ModelUsage } from "@rovinos/schemas";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
 
@@ -140,11 +140,11 @@ function createCounter<TAttributes extends Attributes>(
   name: keyof typeof METRIC_ALLOWLIST,
   factory: (meter: Meter, name: keyof typeof METRIC_ALLOWLIST) => Counter<TAttributes>,
 ): Counter<TAttributes> {
-  return factory(metrics.getMeter("@harness/telemetry"), name);
+  return factory(metrics.getMeter("@rovinos/telemetry"), name);
 }
 
 function createMetricHistogram(name: keyof typeof METRIC_ALLOWLIST): Histogram<NoMetricAttributes> {
-  return metrics.getMeter("@harness/telemetry").createHistogram<NoMetricAttributes>(name);
+  return metrics.getMeter("@rovinos/telemetry").createHistogram<NoMetricAttributes>(name);
 }
 
 function getDroppedCounter(): Counter<TelemetryDropAttributes> {

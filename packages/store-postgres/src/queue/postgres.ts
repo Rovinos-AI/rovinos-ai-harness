@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool, type PoolClient } from "pg";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   SystemRunQueueIdGenerator,
@@ -11,7 +10,7 @@ import {
   type RunQueueIdGenerator,
   type RunQueueJob,
   type RunQueueOptions,
-} from "@harness/store";
+} from "@rovinos/store";
 import {
   migrate,
   EnqueueRunJobSchema,
@@ -21,8 +20,9 @@ import {
   WorkerIdSchema,
   hashIdempotencyKey,
   parseQueueInput,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { storeError } from "../postgres/helpers.js";
+import { postgresMigrationDirectory } from "../migration-directory.js";
 import {
   connectionStringSchema,
   deadLetter,
@@ -91,7 +91,7 @@ export class PostgresRunQueue implements RunQueue {
     this.initialized ??= (async () => {
       await migrate(this.pool, "postgres", {
         appliedAt: this.now(),
-        migrationDirectory: fileURLToPath(new URL("../../migrations/postgres/", import.meta.url)),
+        migrationDirectory: postgresMigrationDirectory(),
       });
     })().catch((error: unknown) => {
       this.initialized = undefined;

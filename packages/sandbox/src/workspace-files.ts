@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstat } from "node:fs/promises";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import { ensureRunWorkspace } from "./workspace.js";
 import {
   MAX_FS_READ_BYTES,

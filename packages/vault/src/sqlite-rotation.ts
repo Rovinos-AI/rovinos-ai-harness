@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import { hmacSha256 } from "@harness/crypto";
-import { Code, Id, type KeyProvider } from "@harness/schemas";
+import { hmacSha256 } from "@rovinos/crypto";
+import { Code, Id, type KeyProvider } from "@rovinos/schemas";
 import { normalize } from "./normalize.js";
 import { VaultOperationError } from "./errors.js";
 import { deriveVaultKeys, lookupMessage, type VaultKeys } from "./sqlite-crypto.js";

@@ -11,17 +11,17 @@ import {
   SequentialIdGenerator,
   ServerConfigSchema,
   parseJson,
-} from "@harness/schemas";
-import { createRuntime } from "@harness/core";
+} from "@rovinos/schemas";
+import { createRuntime } from "@rovinos/core";
 import {
   CrashingEventStore,
   FakeModelPort,
   SimulatedCrash,
   allowAllPolicy,
-} from "@harness/core/testing";
-import { McpToolPort } from "@harness/mcp";
-import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/core/testing";
+import { McpToolPort } from "@rovinos/mcp";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
+import { InMemoryEventStore } from "@rovinos/store";
 import { baggageTrace, spansContainCanary } from "./mcp-servers.int-support.mjs";
 import { createCanaries } from "./canary/canaries.ts";
 

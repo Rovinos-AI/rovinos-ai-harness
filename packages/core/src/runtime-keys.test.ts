@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { KeysConfigSchema, RunConfigSchema } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { KeysConfigSchema, RunConfigSchema } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
 

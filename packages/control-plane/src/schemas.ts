@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue, RunStatus } from "@harness/schemas";
-import { SafeEvent } from "@harness/telemetry";
+import { Code, Id, JsonValue, RunStatus } from "@rovinos/schemas";
+import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 
 /** Validated input for the `list_runs` tool. */

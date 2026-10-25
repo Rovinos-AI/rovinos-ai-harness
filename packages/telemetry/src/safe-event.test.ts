@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EVENT_FIELD_CLASS, Event, Pseudonym, eventSamples } from "@harness/schemas";
+import { EVENT_FIELD_CLASS, Event, Pseudonym, eventSamples } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { POLICY_VERSION } from "./generated/policy-version.js";
 import { SafeEvent, safeEventSchemas, toSafeEvent } from "./safe-event.js";

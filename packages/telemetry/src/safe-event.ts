@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Event, type Code as EventCode, type Pseudonym } from "@harness/schemas";
+import { Code, type Event, type Code as EventCode, type Pseudonym } from "@rovinos/schemas";
 import { attr } from "./attr.js";
 import { POLICY_VERSION } from "./generated/policy-version.js";
 import { z } from "zod";

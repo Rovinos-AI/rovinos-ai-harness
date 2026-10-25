@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CustomDetectorSchema, isRegexSafePattern } from "@harness/schemas";
-import type { CustomDetector } from "@harness/schemas";
-import { findTokens } from "@harness/vault";
+import { CustomDetectorSchema, isRegexSafePattern } from "@rovinos/schemas";
+import type { CustomDetector } from "@rovinos/schemas";
+import { findTokens } from "@rovinos/vault";
 import { luhn } from "./credit-card.js";
 import { mod97 } from "./iban.js";
 import { PiiDetectorError, validateText } from "./types.js";

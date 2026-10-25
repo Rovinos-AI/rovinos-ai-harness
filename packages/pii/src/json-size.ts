@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { JsonValue } from "@harness/schemas";
+import type { JsonValue } from "@rovinos/schemas";
 import { PiiTokenizerError } from "./errors.js";
 
 const MAX_JSON_BYTES = 2 * 1024 * 1024;

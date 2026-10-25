@@ -11,15 +11,15 @@ import {
 } from "@modelcontextprotocol/client";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { trace } from "@opentelemetry/api";
-import { HarnessConfigSchema } from "@harness/config";
-import { McpConnection, OAuthTokenStore } from "@harness/mcp";
-import { createTestSpanCollector } from "@harness/telemetry/testing";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { McpConnection, OAuthTokenStore } from "@rovinos/mcp";
+import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import {
   DoctorResultsSchema,
   parseJson,
   ServersCheckResultSchema,
   type KeyProvider,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { CliContext } from "../command.js";
@@ -29,7 +29,7 @@ import { main } from "../main.js";
 import { createDoctorCommand } from "./doctor.js";
 import { createServersCommand } from "./servers.js";
 import { createLoginKeys } from "./servers-auth.js";
-import { LocalKeyProvider } from "@harness/vault";
+import { LocalKeyProvider } from "@rovinos/vault";
 
 const descriptionCanary = "servers-check-description-canary";
 const errorCanary = "servers-check-error-canary";

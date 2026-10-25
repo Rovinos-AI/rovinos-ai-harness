@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { lookupCapabilities, type JsonValue } from "@harness/schemas";
+import { lookupCapabilities, type JsonValue } from "@rovinos/schemas";
 import { z } from "zod";
 import {
   createEnforcementResultSchema,

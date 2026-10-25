@@ -10,7 +10,7 @@ import {
   type Event,
   type Detection,
   JsonValue,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   applyResolvedApprovals,
   createRuntime,
@@ -20,13 +20,13 @@ import {
   RUN_SPAN,
   type ModelCompletion,
   type ToolPort,
-} from "@harness/core";
-import { FakeModelPort, allowAllPolicy } from "@harness/core/testing";
-import { OffloadingToolPort, type WorkspacePort } from "@harness/context";
-import { InMemoryEventStore } from "@harness/store";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
-import { PiiToolPort, Tokenizer } from "@harness/pii";
-import { buildApprovalPayload } from "@harness/policy";
+} from "@rovinos/core";
+import { FakeModelPort, allowAllPolicy } from "@rovinos/core/testing";
+import { OffloadingToolPort, type WorkspacePort } from "@rovinos/context";
+import { InMemoryEventStore } from "@rovinos/store";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
+import { PiiToolPort, Tokenizer } from "@rovinos/pii";
+import { buildApprovalPayload } from "@rovinos/policy";
 
 const email = "pipeline-canary@example.test";
 const card = "4111111111111111";

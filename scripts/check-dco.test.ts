@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import {
   checkDco,
   DcoExemptionsSchema,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, SandboxRunnerUrlSchema, parseJson } from "@harness/schemas";
-import type { Id as IdValue } from "@harness/schemas";
+import { Id, SandboxRunnerUrlSchema, parseJson } from "@rovinos/schemas";
+import type { Id as IdValue } from "@rovinos/schemas";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 import { ExecResultSchema, MAX_EXEC_TIMEOUT_MS } from "./types.js";

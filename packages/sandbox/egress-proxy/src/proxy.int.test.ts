@@ -3,7 +3,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { Id, parseJson } from "@harness/schemas";
+import { Id, parseJson } from "@rovinos/schemas";
 import { WebFetchResultSchema } from "../../src/web-fetch-contracts.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";

@@ -2,7 +2,7 @@
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelsConfigSchema, parseYaml } from "@harness/schemas";
+import { ModelsConfigSchema, parseYaml } from "@rovinos/schemas";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocTestError } from "./doc-blocks.js";

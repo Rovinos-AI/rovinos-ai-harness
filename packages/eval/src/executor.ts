@@ -13,10 +13,10 @@ import {
   RunConfigSchema,
   StoreConfigSchema,
   VaultConfigSchema,
-} from "@harness/schemas";
-import type { RunBudgetsSchema } from "@harness/schemas";
+} from "@rovinos/schemas";
+import type { RunBudgetsSchema } from "@rovinos/schemas";
 import { z } from "zod";
-import type { Clock, RuntimeConfig } from "@harness/core";
+import type { Clock, RuntimeConfig } from "@rovinos/core";
 import type { EvalTask } from "./schema.js";
 import { EvalCassetteModeSchema } from "./trial.js";
 import type { EvalVariant, TrialResult, TrialSpec } from "./trial.js";

@@ -8,7 +8,7 @@ import type {
   NewEvent,
   RunStatus,
   Snapshot,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   ChangeEmitter,
   decodeSnapshot,
@@ -37,7 +37,7 @@ import {
   type SnapshotRow,
   type StoreKeyRotation,
   type SqliteStoreOptions,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
 import {
   claimSqliteIdempotencyKey,

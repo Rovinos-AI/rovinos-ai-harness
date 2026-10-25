@@ -12,13 +12,13 @@ import {
   type RunQueueIdGenerator,
   type StoreKeyRotation,
   SystemRunQueueIdGenerator,
-} from "@harness/store";
+} from "@rovinos/store";
 import {
   migratePostgresConnection,
   PostgresEventStore,
   PostgresRunQueue,
-} from "@harness/store-postgres";
-import { migrateSqliteFile, SqliteEventStore, SqliteRunQueue } from "@harness/store-sqlite";
+} from "@rovinos/store-postgres";
+import { migrateSqliteFile, SqliteEventStore, SqliteRunQueue } from "@rovinos/store-sqlite";
 import {
   InMemoryVault,
   PostgresVault,
@@ -27,8 +27,8 @@ import {
   type VaultAdmin,
   type VaultTerminalRunsQuery,
   type VaultKeyRotation,
-} from "@harness/vault";
-import type { Id, KeysConfig, SecretRef, StoreConfig, VaultConfig } from "@harness/schemas";
+} from "@rovinos/vault";
+import type { Id, KeysConfig, SecretRef, StoreConfig, VaultConfig } from "@rovinos/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
 import { createRuntimeKeys } from "./runtime-keys.js";

@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { HostResponse } from "./types.js";
 import { readStaticAsset, writeRequestFailure } from "./http-utils.js";
@@ -47,11 +51,27 @@ describe("writeRequestFailure", () => {
     expect(page.toString("utf8")).toContain('<script src="/host.js"');
 
     // The unbundled source tree has no host.js, so this always takes the dist fallback; that
-    // file exists only after `yarn workspace @harness/host build`.
+    // file exists only after `yarn workspace @rovinos/host build`.
     const bundle = await readStaticAsset("bundle").then(
       (contents) => contents.byteLength > 0,
       (error: unknown) => error instanceof Error,
     );
     expect(bundle).toBe(true);
+  });
+
+  it("reads packed host assets beside the bundle entry point", async () => {
+    const root = await mkdtemp(join(tmpdir(), "host-static-assets-"));
+    try {
+      const assetDirectory = join(root, "dist/assets/web");
+      await mkdir(assetDirectory, { recursive: true });
+      await writeFile(join(assetDirectory, "index.html"), "<html>packed host</html>");
+      const moduleUrl = pathToFileURL(join(root, "dist/bin.js")).href;
+
+      await expect(readStaticAsset("index", moduleUrl)).resolves.toEqual(
+        await readFile(join(assetDirectory, "index.html")),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

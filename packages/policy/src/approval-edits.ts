@@ -4,8 +4,8 @@ import {
   HarnessError,
   JsonPointerSchema,
   JsonValue as JsonValueSchema,
-} from "@harness/schemas";
-import type { Code as CodeValue, JsonValue } from "@harness/schemas";
+} from "@rovinos/schemas";
+import type { Code as CodeValue, JsonValue } from "@rovinos/schemas";
 import { z } from "zod";
 import { applyApprovalEdits, approvalEditsAreAllowed } from "./approval-edit-pointers.js";
 import { ApprovalPayloadSchema } from "./approval-payload.js";

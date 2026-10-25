@@ -19,12 +19,12 @@ import {
   UNREGISTERED_TOOL_ID,
   type Event,
   type JsonValue,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { PolicyEngine } from "@harness/policy";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { PolicyEngine } from "@rovinos/policy";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import * as telemetry from "@harness/telemetry";
+import * as telemetry from "@rovinos/telemetry";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
 import { applyResolvedApprovals } from "../approvals.js";

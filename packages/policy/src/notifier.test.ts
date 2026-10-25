@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, SecretRefSchema } from "@harness/schemas";
+import { Code, Id, SecretRefSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import {
   ApprovalNotificationSchema,

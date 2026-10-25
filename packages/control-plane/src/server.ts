@@ -5,14 +5,14 @@ import {
   type ControlPlaneConfig,
   type Id,
   type RunStatus,
-} from "@harness/schemas";
-import type { EventStore, RunQueue } from "@harness/store";
-import type { AuditingVaultResolver } from "@harness/vault";
+} from "@rovinos/schemas";
+import type { EventStore, RunQueue } from "@rovinos/store";
+import type { AuditingVaultResolver } from "@rovinos/vault";
 import { CLIENT_CAPABILITIES_META_KEY, McpServer } from "@modelcontextprotocol/server";
 import type { ServerContext } from "@modelcontextprotocol/server";
 import { serveStdio, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
-import { emitApprovalAppAudit, emitControlPlaneAudit } from "@harness/telemetry";
+import { emitApprovalAppAudit, emitControlPlaneAudit } from "@rovinos/telemetry";
 import {
   confirmationClientCapabilitiesSchema,
   ConfirmationGate,
@@ -42,7 +42,7 @@ import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/ru
 import { registerRunResources } from "./resources/runs.js";
 import type { RunResourceUpdatesError } from "./resources/run-updates.js";
 import { configureRunResourceUpdates } from "./resources/server-updates.js";
-import type { ModelProgress } from "@harness/models";
+import type { ModelProgress } from "@rovinos/models";
 import {
   controlPlanePrincipal,
   hasControlPlaneScope,

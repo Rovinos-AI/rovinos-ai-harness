@@ -21,4 +21,4 @@ export {
   type StartRunOptions,
   type WatchOptions,
 } from "./types.js";
-export type { SafeEvent } from "@harness/telemetry";
+export type { SafeEvent } from "@rovinos/telemetry";

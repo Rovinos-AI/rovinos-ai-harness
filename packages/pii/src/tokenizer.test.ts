@@ -8,8 +8,8 @@ import {
   type Detection,
   type JsonValue,
   type PiiAction,
-} from "@harness/schemas";
-import { InMemoryVault, type VaultWriter } from "@harness/vault";
+} from "@rovinos/schemas";
+import { InMemoryVault, type VaultWriter } from "@rovinos/vault";
 import { PresidioDetector } from "./detectors/presidio.js";
 import { DetectorRegistry } from "./detectors/registry.js";
 import {

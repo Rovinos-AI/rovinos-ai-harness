@@ -5,7 +5,7 @@ import { lstat, open, rename, unlink, link, type FileHandle } from "node:fs/prom
 import type { Stats } from "node:fs";
 import process from "node:process";
 import { dirname, join } from "node:path";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 import { resolveWorkspacePath } from "./workspace.js";
 import type { FsOperationErrorCode } from "./fs-tools.js";
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { PiiConfigSchema } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { runEventStoreConformance, type EventStoreFactory } from "@harness/store/testing";
-import { InMemoryVault } from "@harness/vault";
-import { PiiEventStore, Tokenizer } from "@harness/pii";
+import { PiiConfigSchema } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { runEventStoreConformance, type EventStoreFactory } from "@rovinos/store/testing";
+import { InMemoryVault } from "@rovinos/vault";
+import { PiiEventStore, Tokenizer } from "@rovinos/pii";
 
 const conformanceFactory: EventStoreFactory = () => {
   const inner = new InMemoryEventStore();

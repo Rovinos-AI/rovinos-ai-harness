@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import {
   InvalidEventError,
   UsageLedgerPeriodSchema,
   UsageLedgerRowSchema,
   type UsageLedgerPeriod,
   type UsageLedgerRow,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { sqliteStoreError } from "./outbox.js";
 
 interface UsageLedgerRowRecord {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { resolve as resolvePath } from "node:path";
-import { PolicyEngine, loadPolicy } from "@harness/policy";
+import { PolicyEngine, loadPolicy } from "@rovinos/policy";
 import type { PolicyPort } from "./ports.js";
 import type { RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 

@@ -156,13 +156,13 @@ jobs:
       - name: Build reference host browser bundle
         run: yarn build:host
       - name: Build approval app for the control-plane resource
-        run: yarn workspace @harness/approval-app build
+        run: yarn workspace @rovinos/approval-app build
       # Use the root script: a direct `yarn workspaces foreach` step lacks the root node_modules/.bin on
       # PATH, so workspaces without a local typescript pick up an older global tsc (TS6046).
       - name: Build packages for Inspector conformance
         run: yarn build
       - name: Install Chromium and Linux dependencies
-        run: yarn workspace @harness/host exec playwright install --with-deps chromium
+        run: yarn workspace @rovinos/host exec playwright install --with-deps chromium
       - name: Integration tests
         run: >
           yarn test:integration

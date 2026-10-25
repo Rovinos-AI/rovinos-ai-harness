@@ -8,7 +8,7 @@ import {
   type KeyProvider,
   type KeysConfig,
   type SecretRef,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { inspect } from "node:util";
 import { z } from "zod";
 import { LocalKeyProvider, LocalKeyProviderError } from "./local-key-provider.js";

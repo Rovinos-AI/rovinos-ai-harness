@@ -7,9 +7,9 @@ import {
   type Id,
   type JsonValue,
   type ResolveRequest,
-} from "@harness/schemas";
-import { findTokens, type AuditingVaultResolver } from "@harness/vault";
-import { applyApprovalEdits, approvalEditsAreAllowed } from "@harness/policy";
+} from "@rovinos/schemas";
+import { findTokens, type AuditingVaultResolver } from "@rovinos/vault";
+import { applyApprovalEdits, approvalEditsAreAllowed } from "@rovinos/policy";
 import type { ApprovalAppAudit, ApprovalAppToolOptions } from "./approvals-app.js";
 import type { ConfirmationRequest } from "../confirmation-gate.js";
 import type { ServerContext } from "@modelcontextprotocol/server";

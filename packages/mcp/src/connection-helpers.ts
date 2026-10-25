@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, specTypeSchemas, type Transport } from "@modelcontextprotocol/client";
-import { compileJsonSchema, type ServerConfig } from "@harness/schemas";
+import { compileJsonSchema, type ServerConfig } from "@rovinos/schemas";
 import type { McpConnectionDependencies } from "./connection-types.js";
 import { withOAuthWarningsRedacted } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";

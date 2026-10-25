@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id, Snapshot } from "@harness/schemas";
+import type { Event, Id, Snapshot } from "@rovinos/schemas";
 import type { Link } from "@opentelemetry/api";
-import type { EventStore } from "@harness/store";
-import type { WorkspaceSnapshotPort } from "@harness/sandbox";
+import type { EventStore } from "@rovinos/store";
+import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import { CorruptLogError } from "./run-state.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id, JsonValue, Principal, RunStatus } from "@harness/schemas";
-import type { RuntimeOverrides } from "@harness/core";
-import { HarnessConfigSchema } from "@harness/config";
-import { SafeEvent } from "@harness/telemetry";
+import { Code, HarnessError, Id, JsonValue, Principal, RunStatus } from "@rovinos/schemas";
+import type { RuntimeOverrides } from "@rovinos/core";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 
 function hasMethod(value: unknown, name: string): boolean {

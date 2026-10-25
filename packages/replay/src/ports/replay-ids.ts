@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { Id } from "@harness/schemas";
-import type { Event, Id as IdValue } from "@harness/schemas";
-import type { IdGenerator } from "@harness/core";
+import { Id } from "@rovinos/schemas";
+import type { Event, Id as IdValue } from "@rovinos/schemas";
+import type { IdGenerator } from "@rovinos/core";
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CAPACITY = 32n ** 16n;

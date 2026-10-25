@@ -235,7 +235,7 @@ export const noRawTracerRule: NoRawTracerRule = {
     ],
     messages: {
       forbidden:
-        "Use defineSpan(...).start(...) or withSpan(...) from @harness/telemetry instead of raw OpenTelemetry span APIs.",
+        "Use defineSpan(...).start(...) or withSpan(...) from @rovinos/telemetry instead of raw OpenTelemetry span APIs.",
     },
   },
   create: createNoRawTracerRule,

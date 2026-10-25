@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, type Event } from "@harness/schemas";
-import { InMemoryEventStore, RunQueueJobSchema } from "@harness/store";
+import { Code, Id, type Event } from "@rovinos/schemas";
+import { InMemoryEventStore, RunQueueJobSchema } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import { sweepPendingInputs } from "./approval-sweep.js";
 

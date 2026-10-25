@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { aesGcmEncrypt, hmacSha256 } from "@harness/crypto";
-import { Code, FakeClock, Id, type KeyProvider } from "@harness/schemas";
-import { VaultRunView, type VaultRunReader } from "@harness/telemetry";
+import { aesGcmEncrypt, hmacSha256 } from "@rovinos/crypto";
+import { Code, FakeClock, Id, type KeyProvider } from "@rovinos/schemas";
+import { VaultRunView, type VaultRunReader } from "@rovinos/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryVault } from "./memory.js";
 import { runVaultConformance } from "./conformance.test-helpers.js";
@@ -16,6 +17,7 @@ import { purgeExpired } from "./purger.js";
 import { deriveVaultKeys, lookupMessage } from "./sqlite-crypto.js";
 import { normalize } from "./normalize.js";
 import { decryptScopeValue, encryptScopeValue, unwrapScopeKey } from "./scope-crypto.js";
+import { vaultMigrationPath } from "./sqlite-migrations.js";
 import type { Token as TokenValue } from "./token.js";
 
 const runId = "A".repeat(26);
@@ -131,6 +133,29 @@ runVaultConformance("SqliteVault conformance", () => {
 });
 
 describe("SqliteVault", () => {
+  it("resolves bundled vault migrations and source migration fallbacks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vault-migration-path-"));
+    temporaryDirectories.push(root);
+    const moduleUrl = pathToFileURL(join(root, "app/dist/sqlite-migrations.js")).href;
+    const bundledPath = join(root, "app/dist/migrations/vault/sqlite/0001_init.sql");
+    await mkdir(join(root, "app/dist/migrations/vault/sqlite"), { recursive: true });
+    await writeFile(bundledPath, "-- bundled vault migration");
+    expect(vaultMigrationPath("sqlite", "0001_init.sql", moduleUrl)).toBe(bundledPath);
+
+    const workspaceModuleUrl = pathToFileURL(
+      join(root, "workspace/packages/vault/src/sqlite-migrations.js"),
+    ).href;
+    const workspacePath = join(root, "workspace/packages/vault/migrations/sqlite/0001_init.sql");
+    await mkdir(join(root, "workspace/packages/vault/migrations/sqlite"), { recursive: true });
+    await writeFile(workspacePath, "-- workspace vault migration");
+    expect(vaultMigrationPath("sqlite", "0001_init.sql", workspaceModuleUrl)).toBe(workspacePath);
+
+    const missingModuleUrl = pathToFileURL(join(root, "missing/dist/sqlite-migrations.js")).href;
+    expect(vaultMigrationPath("postgres", "0001_init.sql", missingModuleUrl)).toBe(
+      join(root, "missing/migrations/postgres/0001_init.sql"),
+    );
+  });
+
   it("retries a row skipped after a concurrent vault update", async () => {
     let currentKeyId = "key-a";
     let token: TokenValue | undefined;

@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 import { VaultOperationError } from "./errors.js";
+import { vaultMigrationPath } from "./sqlite-migrations.js";
 
-const POSTGRES_MIGRATION = fileURLToPath(
-  new URL("../migrations/postgres/0001_init.sql", import.meta.url),
-);
+const POSTGRES_MIGRATION = vaultMigrationPath("postgres", "0001_init.sql");
 
 interface DatabaseIdentity extends QueryResultRow {
   system_identifier: string;

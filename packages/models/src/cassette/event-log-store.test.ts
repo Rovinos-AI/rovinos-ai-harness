@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Sha256Hex, type Code, type Event, type ModelRequest } from "@harness/schemas";
+import { Sha256Hex, type Code, type Event, type ModelRequest } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import type { ProviderContext } from "../types.js";
 import {

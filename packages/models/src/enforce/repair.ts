@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { JsonValue, ModelRequest, Part } from "@harness/schemas";
+import type { JsonValue, ModelRequest, Part } from "@rovinos/schemas";
 import type { EnforcementIssue, EnforcementRung } from "./index.js";
 
 function schemaObject(value: JsonValue | undefined): Record<string, JsonValue> | undefined {

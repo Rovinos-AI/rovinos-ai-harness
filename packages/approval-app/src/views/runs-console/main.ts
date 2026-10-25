@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { App } from "@modelcontextprotocol/ext-apps";
 import { z } from "zod";
-import { createAppTelemetry } from "@harness/app-telemetry";
-import { ApprovalAppInputSchema } from "@harness/schemas/browser";
+import { createAppTelemetry } from "@rovinos/app-telemetry";
+import { ApprovalAppInputSchema } from "@rovinos/schemas/browser";
 import { applyHostContext } from "../../kit/theme.js";
 import { getStrings } from "../../kit/strings.js";
 import { showApprovalTransition } from "./approval-transition.js";

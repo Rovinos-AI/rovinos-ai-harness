@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CompositeSecretResolver, type HarnessConfig } from "@harness/config";
-import { AkvSecretResolver } from "@harness/vault";
+import { CompositeSecretResolver, type HarnessConfig } from "@rovinos/config";
+import { AkvSecretResolver } from "@rovinos/vault";
 import {
   McpConnection,
   McpConnectionError,
@@ -9,9 +9,9 @@ import {
   ToolRegistryError,
   type McpConnectionDependencies,
   type McpTool,
-} from "@harness/mcp";
-import { Code, HarnessError, ServersCheckResultSchema, type ServerConfig } from "@harness/schemas";
-import type { LocalKeyProvider } from "@harness/vault";
+} from "@rovinos/mcp";
+import { Code, HarnessError, ServersCheckResultSchema, type ServerConfig } from "@rovinos/schemas";
+import type { LocalKeyProvider } from "@rovinos/vault";
 import { join } from "node:path";
 import { z } from "zod";
 import type { CommandModule } from "../command.js";
@@ -302,7 +302,7 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
           );
           try {
             if (hasOAuthServers && config.keys !== undefined) {
-              const core = await import("@harness/core");
+              const core = await import("@rovinos/core");
               keys = createLoginKeys(config, context);
               store = await OAuthTokenStore.open(
                 join(core.resolveDataDir(process.env), "mcp-oauth.db"),

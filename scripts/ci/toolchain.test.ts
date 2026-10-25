@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");

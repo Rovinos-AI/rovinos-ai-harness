@@ -1,5 +1,5 @@
 {
-  "name": "@harness/models",
+  "name": "@rovinos/models",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -26,8 +26,8 @@
     "@anthropic-ai/sdk": "0.135.0",
     "@aws-sdk/client-bedrock-runtime": "3.1152.0",
     "@google/genai": "2.30.0",
-    "@harness/schemas": "workspace:^",
-    "@harness/telemetry": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
     "openai": "7.34.0",
     "zod": "4.6.7"
   },

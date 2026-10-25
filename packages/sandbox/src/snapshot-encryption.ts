@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
-import { Code } from "@harness/schemas";
-import type { Id, KeyProvider } from "@harness/schemas";
+import { aesGcmDecrypt, aesGcmEncrypt } from "@rovinos/crypto";
+import { Code } from "@rovinos/schemas";
+import type { Id, KeyProvider } from "@rovinos/schemas";
 import { WorkspaceSnapshotError } from "./snapshot-archive.js";
 
 const ENCRYPTION_HEADER = Buffer.from("WSENC01", "ascii");

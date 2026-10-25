@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, Sha256Hex, type ModelRequest, type Code } from "@harness/schemas";
+import { HarnessError, Sha256Hex, type ModelRequest, type Code } from "@rovinos/schemas";
 import { z } from "zod";
 import { ProviderError } from "../errors.js";
 import {

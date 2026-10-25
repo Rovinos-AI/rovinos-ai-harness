@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import type { KeysConfig } from "@harness/schemas";
-import { LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
+import type { KeysConfig } from "@rovinos/schemas";
+import { LocalKeyProvider, LocalKeyProviderError } from "@rovinos/vault";
 import type { RuntimeOverrides } from "./runtime-config.js";
 
 const keyProviderLogger = diag.createComponentLogger({ namespace: "harness.core" });

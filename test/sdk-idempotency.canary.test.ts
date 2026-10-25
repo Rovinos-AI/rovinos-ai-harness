@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { HarnessConfigSchema } from "@harness/config";
-import type { ModelPort } from "@harness/core";
-import { createHarness } from "@harness/sdk";
-import { Code, FakeClock, Id, SequentialIdGenerator } from "@harness/schemas";
-import { SqliteEventStore } from "@harness/store-sqlite";
+import { HarnessConfigSchema } from "@rovinos/config";
+import type { ModelPort } from "@rovinos/core";
+import { createHarness } from "@rovinos/sdk";
+import { Code, FakeClock, Id, SequentialIdGenerator } from "@rovinos/schemas";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { randomBytes, createHash } from "node:crypto";
 import { tmpdir } from "node:os";

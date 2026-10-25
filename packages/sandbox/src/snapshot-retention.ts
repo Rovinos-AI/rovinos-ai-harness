@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstat, readdir, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { Id, WorkspaceRef } from "@harness/schemas";
+import { Id, WorkspaceRef } from "@rovinos/schemas";
 import { WorkspaceSnapshotError, workspaceSnapshotRefParts } from "./snapshot-archive.js";
 
 function codeOf(error: unknown): string | undefined {

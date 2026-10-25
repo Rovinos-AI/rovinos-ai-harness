@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ModelsConfigSchema } from "@harness/schemas";
+import { ModelsConfigSchema } from "@rovinos/schemas";
 import { RoleRegistry, RoleRegistryError, resolveRole } from "./roles.js";
 
 const directoryPrefix = join(tmpdir(), "harness-roles-");

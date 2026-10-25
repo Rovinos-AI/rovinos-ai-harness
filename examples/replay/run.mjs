@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
-import { createRuntime } from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
+import { createRuntime } from "@rovinos/core";
+import { FakeModelPort } from "@rovinos/core/testing";
 import {
   KeysConfigSchema,
   PiiConfigSchema,
   RunConfigSchema,
   TelemetryConfigSchema,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { createTestContextManager } from "@harness/telemetry/testing";
-import { createTelemetrySdk } from "@harness/telemetry";
-import { replayRun, resolveRun } from "@harness/replay";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createTestContextManager } from "@rovinos/telemetry/testing";
+import { createTelemetrySdk } from "@rovinos/telemetry";
+import { replayRun, resolveRun } from "@rovinos/replay";
 
 const canary = "REPLAY_CANARY_21_11_SYNTHETIC";
 const exportedSpans = [];

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { TelemetryConfigSchema } from "@harness/schemas";
+import { TelemetryConfigSchema } from "@rovinos/schemas";
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

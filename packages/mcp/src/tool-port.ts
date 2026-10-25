@@ -4,9 +4,9 @@ import {
   ProtocolError,
   type CallToolResult,
 } from "@modelcontextprotocol/client";
-import { Code, compileJsonSchema } from "@harness/schemas";
-import type { JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
-import * as telemetry from "@harness/telemetry";
+import { Code, compileJsonSchema } from "@rovinos/schemas";
+import type { JsonValue as JsonValueType, ServerConfig } from "@rovinos/schemas";
+import * as telemetry from "@rovinos/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
 import type { McpConnection, McpConnectionDependencies } from "./connection.js";
@@ -26,7 +26,7 @@ const MCP_CALL_SPAN = telemetry.defineSemconvSpan(
     "harness.tool.id": telemetry.attr.code(),
     "harness.outcome": telemetry.attr.enum(["ok", "error"]),
   },
-  { taskId: "6.5", packageName: "@harness/mcp" },
+  { taskId: "6.5", packageName: "@rovinos/mcp" },
 );
 
 /** An MCP tool invocation structurally compatible with the core tool port. */

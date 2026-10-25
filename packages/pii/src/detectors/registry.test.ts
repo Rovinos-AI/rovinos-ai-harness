@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { countPiiDetectorDegraded } from "@harness/telemetry";
+import { countPiiDetectorDegraded } from "@rovinos/telemetry";
 import { DetectorRegistry } from "./registry.js";
 import { PiiDetectorError } from "./types.js";
 import type { AsyncDetector, Detection, Detector } from "./types.js";
 
-vi.mock("@harness/telemetry", () => ({ countPiiDetectorDegraded: vi.fn() }));
+vi.mock("@rovinos/telemetry", () => ({ countPiiDetectorDegraded: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();

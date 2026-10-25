@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import type { Code, Id, RunStatus } from "@harness/schemas";
+import type { Code, Id, RunStatus } from "@rovinos/schemas";
 import {
   InvalidEventError,
   SeqConflictError,
   UsageLimitExceededError,
   type EncodedSnapshot,
   type UsageLedgerDelta,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import type { EncodedEvent } from "./event-encoding.js";
 import { assertExecutionLease, nextRunStatus } from "./append-helpers.js";
 import { sqliteStoreError } from "./outbox.js";

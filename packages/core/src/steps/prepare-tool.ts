@@ -6,12 +6,12 @@ import {
   type Code,
   type Event,
   type Part,
-} from "@harness/schemas";
-import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
+} from "@rovinos/schemas";
+import { UNREGISTERED_TOOL_ID } from "@rovinos/schemas";
 import type { ModelCompletion, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import { RunEventRecordingError, type RunRecorder } from "../recorder.js";
-import type { VaultAudit } from "@harness/vault";
-import type { ElicitationRetry } from "@harness/mcp";
+import type { VaultAudit } from "@rovinos/vault";
+import type { ElicitationRetry } from "@rovinos/mcp";
 import type { ToolIntentEvent } from "../run-state.js";
 
 /** Internal preparation outcome, retained until the tool loop consumes it. */

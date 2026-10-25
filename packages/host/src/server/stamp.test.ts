@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { trace } from "@opentelemetry/api";
-import { FakeClock } from "@harness/schemas";
-import { ActiveRuns, AllowlistSpanProcessor, SentinelGate, VaultRunView } from "@harness/telemetry";
-import { createTestSpanCollector } from "@harness/telemetry/testing";
+import { FakeClock } from "@rovinos/schemas";
+import { ActiveRuns, AllowlistSpanProcessor, SentinelGate, VaultRunView } from "@rovinos/telemetry";
+import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ingestBatch } from "./app-telemetry.js";
 import { UI_SESSION_SPAN } from "./ui-session.js";

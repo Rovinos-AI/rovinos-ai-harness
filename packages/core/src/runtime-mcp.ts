@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { McpConnectionError, McpToolPort, OAuthTokenStore } from "@harness/mcp";
-import type { McpLogger } from "@harness/mcp";
-import type { LocalKeyProvider } from "@harness/vault";
+import { McpConnectionError, McpToolPort, OAuthTokenStore } from "@rovinos/mcp";
+import type { McpLogger } from "@rovinos/mcp";
+import type { LocalKeyProvider } from "@rovinos/vault";
 import type { RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 
 const diagnosticLogger = diag.createComponentLogger({ namespace: "harness.mcp" });

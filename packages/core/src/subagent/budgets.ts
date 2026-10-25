@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Optional child step totals preserve old logs while keeping inherited budgets cumulative.
-import { HarnessError, type RunConfig, type RoleBudgets } from "@harness/schemas";
+import { HarnessError, type RunConfig, type RoleBudgets } from "@rovinos/schemas";
 import { BudgetTracker } from "../budgets.js";
 import type { RunState } from "../run-state.js";
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { RuntimeOverrides } from "@harness/core";
+import type { RuntimeOverrides } from "@rovinos/core";
 import type { HarnessOverrides } from "./types.js";
 
 function storageOverrides(

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createStrategyRegistry, HeuristicTokenCounter } from "@harness/context";
-import { Code, type Event, type Id, type Message } from "@harness/schemas";
-import { validateWithTokens } from "@harness/pii";
-import type { AuditingVaultResolver } from "@harness/vault";
-import type { ValueTransform } from "@harness/models";
-import type { EventStore } from "@harness/store";
-import type { SandboxBackend, WorkspaceSnapshotPort } from "@harness/sandbox";
+import { createStrategyRegistry, HeuristicTokenCounter } from "@rovinos/context";
+import { Code, type Event, type Id, type Message } from "@rovinos/schemas";
+import { validateWithTokens } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
+import type { ValueTransform } from "@rovinos/models";
+import type { EventStore } from "@rovinos/store";
+import type { SandboxBackend, WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import { parseRuntimeModelsConfig, type RuntimeConfig } from "../runtime-config.js";
 import { RunRecorder, type Clock } from "../recorder.js";
 import { configHash } from "../runtime-ids.js";

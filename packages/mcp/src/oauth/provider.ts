@@ -10,7 +10,7 @@ import type {
   StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
 import { randomBytes, randomInt } from "node:crypto";
-import { HarnessError, SecretRefSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
+import { HarnessError, SecretRefSchema, type SecretRef, type ServerConfig } from "@rovinos/schemas";
 import type { OAuthCredentialRecord, OAuthTokenStore } from "./token-store.js";
 
 type HttpTransportConfig = Extract<ServerConfig["transport"], { kind: "http" }>;

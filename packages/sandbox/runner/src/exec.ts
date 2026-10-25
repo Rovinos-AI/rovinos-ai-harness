@@ -2,9 +2,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import process from "node:process";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 import { activateRunWorkspace, resolveWorkspacePath } from "../../src/workspace.js";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 
 const PRLIMIT_PATH = "/usr/bin/prlimit";

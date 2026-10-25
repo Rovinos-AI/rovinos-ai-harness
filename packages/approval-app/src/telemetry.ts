@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { AppTelemetry } from "@harness/app-telemetry";
+import type { AppTelemetry } from "@rovinos/app-telemetry";
 
 type ApprovalAppTelemetry = AppTelemetry<
   readonly ["ui.render", "ui.decision", "ui.error", "ui.interaction"]

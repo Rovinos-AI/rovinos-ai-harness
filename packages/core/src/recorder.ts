@@ -20,15 +20,15 @@ import {
   type NewEvent,
   type Snapshot,
   type WorkspaceRef,
-} from "@harness/schemas";
-import { SeqConflictError, type EventStore, type UsageLedgerDelta } from "@harness/store";
+} from "@rovinos/schemas";
+import { SeqConflictError, type EventStore, type UsageLedgerDelta } from "@rovinos/store";
 import {
   sentinelTripQueue,
   setActiveSpanAttribute,
   type SpanDefinition,
   type SpanDefinitionShape,
   type TripQueue,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 import { RUN_SPAN } from "./spans.js";
 import { DeploymentStartupError } from "./runtime-deployment.js";
 

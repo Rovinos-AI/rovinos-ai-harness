@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 
 interface SqliteExecutionLeaseOptions {
   readonly db: Database.Database;

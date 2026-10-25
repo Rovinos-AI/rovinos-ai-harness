@@ -5,8 +5,8 @@ import { chmod, open, lstat, mkdir, realpath, rename, rm } from "node:fs/promise
 import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { HarnessError, Id, WorkspaceRef } from "@harness/schemas";
-import type { KeyProvider } from "@harness/schemas";
+import { HarnessError, Id, WorkspaceRef } from "@rovinos/schemas";
+import type { KeyProvider } from "@rovinos/schemas";
 import { ensureRunWorkspace } from "./workspace.js";
 import { createEmptyWorkspaceArchive } from "./snapshot-empty.js";
 import {

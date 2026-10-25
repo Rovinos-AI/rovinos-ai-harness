@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
-import { Code, type Event, type Message } from "@harness/schemas";
+import { Code, type Event, type Message } from "@rovinos/schemas";
 
 const PlanItemSchema = z
   .object({

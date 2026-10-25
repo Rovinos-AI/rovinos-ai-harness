@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { AppSpan } from "@harness/schemas";
+import type { AppSpan } from "@rovinos/schemas";
 import type { AppTelemetryBridge, AppTelemetryStats, AppTraceContext } from "./types.js";
 
 const activationTimeoutMs = 2_000;

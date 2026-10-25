@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createEventBuilders } from "@harness/store/testing";
+import { createEventBuilders } from "@rovinos/store/testing";
 import { openSqliteEventStore } from "./sqlite-worker-open.js";
 
 describe("openSqliteEventStore", () => {

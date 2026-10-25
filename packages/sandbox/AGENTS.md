@@ -10,7 +10,7 @@ Tool execution backends, runner service, egress proxy, workspace, snapshots.
 
 ## Allowed internal imports
 
-- `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`, `@harness/context`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/context`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

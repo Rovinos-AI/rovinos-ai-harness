@@ -6,12 +6,12 @@ import {
   JsonPointerSchema,
   JsonValue as JsonValueSchema,
   type ApprovalPayload,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 
 const APPROVAL_RESOURCE_URI = "ui://harness/approval/v1";
 
-export { ApprovalPayloadSchema, type ApprovalPayload } from "@harness/schemas";
+export { ApprovalPayloadSchema, type ApprovalPayload } from "@rovinos/schemas";
 
 const ApprovalPayloadBuildOptionsSchema = z
   .object({

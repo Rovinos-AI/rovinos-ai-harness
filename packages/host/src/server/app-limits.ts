@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Clock } from "@harness/core";
-import type { HostConfig } from "@harness/schemas";
+import type { Clock } from "@rovinos/core";
+import type { HostConfig } from "@rovinos/schemas";
 
 interface AppSessionLimitState {
   batchTokens: number;

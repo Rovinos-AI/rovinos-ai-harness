@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id as IdType, JsonValue, NewEvent } from "@harness/schemas";
+import type { Event, Id as IdType, JsonValue, NewEvent } from "@rovinos/schemas";
 import { threadId, Worker } from "node:worker_threads";
 import { describe, expect, it } from "vitest";
 import { concurrencyWorkerSource } from "./concurrency-worker.js";

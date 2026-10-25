@@ -20,3 +20,5 @@ reports/
 harness.db*
 vault.db*
 .tmp/
+/packages/sdk/migrations/
+/packages/cli/migrations/

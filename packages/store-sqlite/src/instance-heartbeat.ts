@@ -2,8 +2,8 @@
 // A shared per-process heartbeat lets multiple runtimes in one process use one SQLite instance row.
 import { resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Id as IdSchema } from "@harness/schemas";
-import { StoreUnavailableError } from "@harness/store";
+import { Id as IdSchema } from "@rovinos/schemas";
+import { StoreUnavailableError } from "@rovinos/store";
 import { z } from "zod";
 import { migrateSqliteFile } from "./migrate-file.js";
 

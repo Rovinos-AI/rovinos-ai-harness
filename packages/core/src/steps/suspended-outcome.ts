@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event } from "@harness/schemas";
+import type { Event } from "@rovinos/schemas";
 
 /** Returns the latest durable suspension event from a run history. */
 export function suspendedOutcome(events: readonly Event[]): Event {

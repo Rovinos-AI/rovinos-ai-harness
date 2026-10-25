@@ -6,8 +6,8 @@ import { join, resolve as resolvePath } from "node:path";
 import type { ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import { expect, it } from "vitest";
-import { Id } from "@harness/schemas";
-import { openSqliteInstanceHeartbeat } from "@harness/store-sqlite";
+import { Id } from "@rovinos/schemas";
+import { openSqliteInstanceHeartbeat } from "@rovinos/store-sqlite";
 
 const instanceId = Id.parse("00000000000000000000000001");
 const lockHolderSource = `

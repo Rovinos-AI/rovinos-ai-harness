@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, it } from "vitest";
-import { FakeClock, Id } from "@harness/schemas";
+import { FakeClock, Id } from "@rovinos/schemas";
 import {
   EnqueueRunJobSchema,
   InvalidRunQueueInputError,

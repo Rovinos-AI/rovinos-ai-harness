@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ContractError } from "@harness/schemas";
+import { ContractError } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { suite as basicSuite } from "../../../examples/evals/basic.suite.js";
 import {

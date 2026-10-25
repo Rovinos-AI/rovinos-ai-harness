@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { Id } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RESUME_LEASE_MS, startLeaseRenewal } from "./resume-lease.js";
 

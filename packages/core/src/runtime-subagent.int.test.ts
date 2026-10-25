@@ -13,14 +13,14 @@ import {
   type Id as IdValue,
   type NewEvent,
   type RunConfig,
-} from "@harness/schemas";
-import type { SandboxBackend } from "@harness/sandbox";
+} from "@rovinos/schemas";
+import type { SandboxBackend } from "@rovinos/sandbox";
 import type { ModelPort, ModelRequest, ModelCompletion, ToolPort } from "./ports.js";
-import { InMemoryEventStore, type EventStore } from "@harness/store";
+import { InMemoryEventStore, type EventStore } from "@rovinos/store";
 import { delegatingStore } from "./testing/delegating-store.js";
-import { InMemoryVault, AuditingVaultResolver, Token } from "@harness/vault";
-import { PiiToolPort, Tokenizer } from "@harness/pii";
-import { InMemoryWorkspace, OffloadedStub } from "@harness/context";
+import { InMemoryVault, AuditingVaultResolver, Token } from "@rovinos/vault";
+import { PiiToolPort, Tokenizer } from "@rovinos/pii";
+import { InMemoryWorkspace, OffloadedStub } from "@rovinos/context";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import type { RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";

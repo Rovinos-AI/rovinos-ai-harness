@@ -14,10 +14,10 @@ The SDK defaults `OTEL_SEMCONV_STABILITY_OPT_IN` to `http` only when it is unset
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.app.id` | Code | Required | `@harness/core` |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
+| `harness.app.id` | Code | Required | `@rovinos/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
 
 Owner task: `3.8`.
 
@@ -25,9 +25,9 @@ Owner task: `3.8`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
 
 Owner task: `4.1`.
 
@@ -35,10 +35,10 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.checkpoint.reason` | Code | Optional | `@harness/core` |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
+| `harness.checkpoint.reason` | Code | Optional | `@rovinos/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
 
 Owner task: `4.1`.
 
@@ -46,9 +46,9 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
 
 Owner task: `4.1`.
 
@@ -56,14 +56,14 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.input.action` | enum: `accept`, `decline`, `cancel` | Required | `@harness/core` |
-| `harness.input.mode` | enum: `form`, `url` | Required | `@harness/core` |
-| `harness.input.round` | integer | Required | `@harness/core` |
-| `harness.input.source` | enum: `mcp_mrtr`, `mcp_legacy`, `agent` | Required | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
-| `harness.wait_ms` | integer | Required | `@harness/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.input.action` | enum: `accept`, `decline`, `cancel` | Required | `@rovinos/core` |
+| `harness.input.mode` | enum: `form`, `url` | Required | `@rovinos/core` |
+| `harness.input.round` | integer | Required | `@rovinos/core` |
+| `harness.input.source` | enum: `mcp_mrtr`, `mcp_legacy`, `agent` | Required | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
+| `harness.wait_ms` | integer | Required | `@rovinos/core` |
 
 Owner task: `25.3`.
 
@@ -71,20 +71,20 @@ Owner task: `25.3`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.context.estimated_tokens` | integer | Required | `@harness/core` |
-| `harness.context.message_count` | integer | Required | `@harness/core` |
-| `harness.context.strategy` | Code | Required | `@harness/core` |
-| `harness.context.strategy_version` | Code | Required | `@harness/core` |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.model.attempts` | integer | Optional | `@harness/core` |
-| `harness.model.cache_read_tokens` | integer | Optional | `@harness/core` |
-| `harness.model.cache_write_tokens` | integer | Optional | `@harness/core` |
-| `harness.model.cost_micros` | integer | Optional | `@harness/core` |
-| `harness.model.input_tokens` | integer | Optional | `@harness/core` |
-| `harness.model.output_tokens` | integer | Optional | `@harness/core` |
-| `harness.model.repair_attempts` | integer | Optional | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
+| `harness.context.estimated_tokens` | integer | Required | `@rovinos/core` |
+| `harness.context.message_count` | integer | Required | `@rovinos/core` |
+| `harness.context.strategy` | Code | Required | `@rovinos/core` |
+| `harness.context.strategy_version` | Code | Required | `@rovinos/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.model.attempts` | integer | Optional | `@rovinos/core` |
+| `harness.model.cache_read_tokens` | integer | Optional | `@rovinos/core` |
+| `harness.model.cache_write_tokens` | integer | Optional | `@rovinos/core` |
+| `harness.model.cost_micros` | integer | Optional | `@rovinos/core` |
+| `harness.model.input_tokens` | integer | Optional | `@rovinos/core` |
+| `harness.model.output_tokens` | integer | Optional | `@rovinos/core` |
+| `harness.model.repair_attempts` | integer | Optional | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
 
 Owner task: `4.1`.
 
@@ -92,8 +92,8 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/replay` |
-| `harness.replay.original_run_id` | Id | Required | `@harness/replay` |
+| `harness.error.code` | Code | Optional | `@rovinos/replay` |
+| `harness.replay.original_run_id` | Id | Required | `@rovinos/replay` |
 
 Owner task: `9.3`.
 
@@ -101,13 +101,13 @@ Owner task: `9.3`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.run.continuation_of` | Id | Optional | `@harness/core` |
-| `harness.run.depth` | integer | Optional | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
-| `harness.run.parent_id` | Id | Optional | `@harness/core` |
-| `harness.segment.id` | Id | Required | `@harness/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.run.continuation_of` | Id | Optional | `@rovinos/core` |
+| `harness.run.depth` | integer | Optional | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
+| `harness.run.parent_id` | Id | Optional | `@rovinos/core` |
+| `harness.segment.id` | Id | Required | `@rovinos/core` |
 
 Owner task: `4.1`.
 
@@ -115,12 +115,12 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/core` |
-| `harness.event.seq` | integer | Optional | `@harness/core` |
-| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Optional | `@harness/core` |
-| `harness.policy.rule_id` | Code | Optional | `@harness/core` |
-| `harness.run.id` | Id | Required | `@harness/core` |
-| `harness.subagent.completion_record_failed` | boolean | Optional | `@harness/core` |
+| `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.event.seq` | integer | Optional | `@rovinos/core` |
+| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Optional | `@rovinos/core` |
+| `harness.policy.rule_id` | Code | Optional | `@rovinos/core` |
+| `harness.run.id` | Id | Required | `@rovinos/core` |
+| `harness.subagent.completion_record_failed` | boolean | Optional | `@rovinos/core` |
 
 Owner task: `4.1`.
 
@@ -128,12 +128,12 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.app.id` | Code | Required | `@harness/host` |
-| `harness.error.code` | Code | Optional | `@harness/host` |
-| `harness.run.id` | Id | Required | `@harness/host` |
-| `harness.ui.decision` | enum: `approve`, `deny`, `edit` | Required | `@harness/host` |
-| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
-| `harness.ui.session_id` | Id | Required | `@harness/host` |
+| `harness.app.id` | Code | Required | `@rovinos/host` |
+| `harness.error.code` | Code | Optional | `@rovinos/host` |
+| `harness.run.id` | Id | Required | `@rovinos/host` |
+| `harness.ui.decision` | enum: `approve`, `deny`, `edit` | Required | `@rovinos/host` |
+| `harness.ui.duration_ms` | integer | Required | `@rovinos/host` |
+| `harness.ui.session_id` | Id | Required | `@rovinos/host` |
 
 Owner task: `3.6`.
 
@@ -141,11 +141,11 @@ Owner task: `3.6`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.app.id` | Code | Required | `@harness/host` |
-| `harness.error.code` | Code | Optional | `@harness/host` |
-| `harness.run.id` | Id | Required | `@harness/host` |
-| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
-| `harness.ui.session_id` | Id | Required | `@harness/host` |
+| `harness.app.id` | Code | Required | `@rovinos/host` |
+| `harness.error.code` | Code | Optional | `@rovinos/host` |
+| `harness.run.id` | Id | Required | `@rovinos/host` |
+| `harness.ui.duration_ms` | integer | Required | `@rovinos/host` |
+| `harness.ui.session_id` | Id | Required | `@rovinos/host` |
 
 Owner task: `3.6`.
 
@@ -153,13 +153,13 @@ Owner task: `3.6`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.app.id` | Code | Required | `@harness/host` |
-| `harness.error.code` | Code | Optional | `@harness/host` |
-| `harness.run.id` | Id | Required | `@harness/host` |
-| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
-| `harness.ui.interaction.count` | integer | Required | `@harness/host` |
-| `harness.ui.interaction.kind` | enum: `click`, `focus`, `edit` | Required | `@harness/host` |
-| `harness.ui.session_id` | Id | Required | `@harness/host` |
+| `harness.app.id` | Code | Required | `@rovinos/host` |
+| `harness.error.code` | Code | Optional | `@rovinos/host` |
+| `harness.run.id` | Id | Required | `@rovinos/host` |
+| `harness.ui.duration_ms` | integer | Required | `@rovinos/host` |
+| `harness.ui.interaction.count` | integer | Required | `@rovinos/host` |
+| `harness.ui.interaction.kind` | enum: `click`, `focus`, `edit` | Required | `@rovinos/host` |
+| `harness.ui.session_id` | Id | Required | `@rovinos/host` |
 
 Owner task: `3.6`.
 
@@ -167,11 +167,11 @@ Owner task: `3.6`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.app.id` | Code | Required | `@harness/host` |
-| `harness.error.code` | Code | Optional | `@harness/host` |
-| `harness.run.id` | Id | Required | `@harness/host` |
-| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
-| `harness.ui.session_id` | Id | Required | `@harness/host` |
+| `harness.app.id` | Code | Required | `@rovinos/host` |
+| `harness.error.code` | Code | Optional | `@rovinos/host` |
+| `harness.run.id` | Id | Required | `@rovinos/host` |
+| `harness.ui.duration_ms` | integer | Required | `@rovinos/host` |
+| `harness.ui.session_id` | Id | Required | `@rovinos/host` |
 
 Owner task: `3.6`.
 
@@ -179,10 +179,10 @@ Owner task: `3.6`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.app.id` | Code | Required | `@harness/host` |
-| `harness.error.code` | Code | Optional | `@harness/host` |
-| `harness.run.id` | Id | Required | `@harness/host` |
-| `harness.ui.session_id` | Id | Required | `@harness/host` |
+| `harness.app.id` | Code | Required | `@rovinos/host` |
+| `harness.error.code` | Code | Optional | `@rovinos/host` |
+| `harness.run.id` | Id | Required | `@rovinos/host` |
+| `harness.ui.session_id` | Id | Required | `@rovinos/host` |
 
 Owner task: `3.2`.
 
@@ -190,11 +190,11 @@ Owner task: `3.2`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/mcp` |
-| `harness.mcp.server_id` | Code | Required | `@harness/mcp` |
-| `harness.outcome` | enum: `ok`, `error` | Required | `@harness/mcp` |
-| `harness.tool.id` | Code | Required | `@harness/mcp` |
-| `mcp.method.name` | enum: `tools/call` | Required | `@harness/mcp` |
+| `harness.error.code` | Code | Optional | `@rovinos/mcp` |
+| `harness.mcp.server_id` | Code | Required | `@rovinos/mcp` |
+| `harness.outcome` | enum: `ok`, `error` | Required | `@rovinos/mcp` |
+| `harness.tool.id` | Code | Required | `@rovinos/mcp` |
+| `mcp.method.name` | enum: `tools/call` | Required | `@rovinos/mcp` |
 
 Owner task: `6.5`.
 
@@ -204,228 +204,228 @@ Owner task: `6.5`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.approval.outcome` | Code | Required | `@harness/telemetry` |
-| `harness.approval.tool` | Code | Required | `@harness/telemetry` |
-| `harness.approval.value_count` | integer | Required | `@harness/telemetry` |
-| `harness.auth.token.id` | Code | Required | `@harness/telemetry` |
+| `harness.approval.outcome` | Code | Required | `@rovinos/telemetry` |
+| `harness.approval.tool` | Code | Required | `@rovinos/telemetry` |
+| `harness.approval.value_count` | integer | Required | `@rovinos/telemetry` |
+| `harness.auth.token.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.control_plane.operation`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.auth.token.id` | Code | Required | `@harness/telemetry` |
-| `harness.control_plane.outcome` | Code | Required | `@harness/telemetry` |
-| `harness.control_plane.tool` | Code | Required | `@harness/telemetry` |
+| `harness.auth.token.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.control_plane.outcome` | Code | Required | `@rovinos/telemetry` |
+| `harness.control_plane.tool` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.keys.rotated`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.keys.store.rows_rotated` | integer | Required | `@harness/telemetry` |
-| `harness.keys.vault.rows_rotated` | integer | Required | `@harness/telemetry` |
+| `harness.keys.store.rows_rotated` | integer | Required | `@rovinos/telemetry` |
+| `harness.keys.vault.rows_rotated` | integer | Required | `@rovinos/telemetry` |
 
 ### `harness.model.pricing_cache_missing`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.model.name` | Code | Required | `@harness/telemetry` |
-| `harness.model.provider` | Code | Required | `@harness/telemetry` |
+| `harness.model.name` | Code | Required | `@rovinos/telemetry` |
+| `harness.model.provider` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.model.pricing_missing`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.model.name` | Code | Required | `@harness/telemetry` |
-| `harness.model.provider` | Code | Required | `@harness/telemetry` |
+| `harness.model.name` | Code | Required | `@rovinos/telemetry` |
+| `harness.model.provider` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.approval_wait`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.approval.approver_pseudonym` | Pseudonym | Optional | `@harness/telemetry` |
-| `harness.approval.decided_by` | enum: `human`, `policy`, `expiry` | Required | `@harness/telemetry` |
-| `harness.approval.decision` | enum: `approve`, `deny`, `edit` | Required | `@harness/telemetry` |
-| `harness.approval.reason` | Code | Optional | `@harness/telemetry` |
-| `harness.approval.wait_ms` | integer | Required | `@harness/telemetry` |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.approval.approver_pseudonym` | Pseudonym | Optional | `@rovinos/telemetry` |
+| `harness.approval.decided_by` | enum: `human`, `policy`, `expiry` | Required | `@rovinos/telemetry` |
+| `harness.approval.decision` | enum: `approve`, `deny`, `edit` | Required | `@rovinos/telemetry` |
+| `harness.approval.reason` | Code | Optional | `@rovinos/telemetry` |
+| `harness.approval.wait_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.budget_exceeded`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.budget.kind` | enum: `steps`, `cost`, `wall_clock`, `quota` | Required | `@harness/telemetry` |
-| `harness.budget.limit` | finite number | Required | `@harness/telemetry` |
-| `harness.budget.observed` | finite number | Required | `@harness/telemetry` |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.budget.kind` | enum: `steps`, `cost`, `wall_clock`, `quota` | Required | `@rovinos/telemetry` |
+| `harness.budget.limit` | finite number | Required | `@rovinos/telemetry` |
+| `harness.budget.observed` | finite number | Required | `@rovinos/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.checkpoint`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.checkpoint.has_workspace_ref` | boolean | Required | `@harness/telemetry` |
-| `harness.checkpoint.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.checkpoint.has_workspace_ref` | boolean | Required | `@rovinos/telemetry` |
+| `harness.checkpoint.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.input_wait`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.input.action` | enum: `accept`, `decline`, `cancel` | Required | `@harness/telemetry` |
-| `harness.input.decided_by` | enum: `human`, `simulated`, `expiry`, `timeout`, `policy` | Required | `@harness/telemetry` |
-| `harness.input.mode` | enum: `form`, `url` | Required | `@harness/telemetry` |
-| `harness.input.round` | integer | Required | `@harness/telemetry` |
-| `harness.input.source` | enum: `mcp_mrtr`, `mcp_legacy`, `agent` | Required | `@harness/telemetry` |
-| `harness.input.wait_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.input.action` | enum: `accept`, `decline`, `cancel` | Required | `@rovinos/telemetry` |
+| `harness.input.decided_by` | enum: `human`, `simulated`, `expiry`, `timeout`, `policy` | Required | `@rovinos/telemetry` |
+| `harness.input.mode` | enum: `form`, `url` | Required | `@rovinos/telemetry` |
+| `harness.input.round` | integer | Required | `@rovinos/telemetry` |
+| `harness.input.source` | enum: `mcp_mrtr`, `mcp_legacy`, `agent` | Required | `@rovinos/telemetry` |
+| `harness.input.wait_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.model_call`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.model.finish_reason` | Code | Required | `@harness/telemetry` |
-| `harness.model.input_tokens` | integer | Required | `@harness/telemetry` |
-| `harness.model.latency_ms` | integer | Required | `@harness/telemetry` |
-| `harness.model.name` | Code | Required | `@harness/telemetry` |
-| `harness.model.output_tokens` | integer | Required | `@harness/telemetry` |
-| `harness.model.provider` | Code | Required | `@harness/telemetry` |
-| `harness.model.repair_attempts` | integer | Required | `@harness/telemetry` |
-| `harness.model.schema_valid` | boolean | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.model.finish_reason` | Code | Required | `@rovinos/telemetry` |
+| `harness.model.input_tokens` | integer | Required | `@rovinos/telemetry` |
+| `harness.model.latency_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.model.name` | Code | Required | `@rovinos/telemetry` |
+| `harness.model.output_tokens` | integer | Required | `@rovinos/telemetry` |
+| `harness.model.provider` | Code | Required | `@rovinos/telemetry` |
+| `harness.model.repair_attempts` | integer | Required | `@rovinos/telemetry` |
+| `harness.model.schema_valid` | boolean | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.pii_action`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.pii.action` | enum: `tokenized`, `redacted`, `blocked`, `allowed`, `detokenized` | Required | `@harness/telemetry` |
-| `harness.pii.boundary` | enum: `model_input`, `tool_input`, `tool_output`, `storage`, `ui`, `telemetry_export` | Required | `@harness/telemetry` |
-| `harness.pii.entity_count` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.pii.action` | enum: `tokenized`, `redacted`, `blocked`, `allowed`, `detokenized` | Required | `@rovinos/telemetry` |
+| `harness.pii.boundary` | enum: `model_input`, `tool_input`, `tool_output`, `storage`, `ui`, `telemetry_export` | Required | `@rovinos/telemetry` |
+| `harness.pii.entity_count` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.policy_decision`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Required | `@harness/telemetry` |
-| `harness.policy.rule_id` | Code | Optional | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.tool.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Required | `@rovinos/telemetry` |
+| `harness.policy.rule_id` | Code | Optional | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.tool.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.run_created`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.config_hash` | SHA-256 hash | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.run.requested_by_pseudonym` | Pseudonym | Optional | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.config_hash` | SHA-256 hash | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.run.requested_by_pseudonym` | Pseudonym | Optional | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.run_status`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.run.status.from` | enum: `pending`, `running`, `suspended`, `completed`, `failed`, `cancelled` | Required | `@harness/telemetry` |
-| `harness.run.status.reason` | Code | Required | `@harness/telemetry` |
-| `harness.run.status.to` | enum: `pending`, `running`, `suspended`, `completed`, `failed`, `cancelled` | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.run.status.from` | enum: `pending`, `running`, `suspended`, `completed`, `failed`, `cancelled` | Required | `@rovinos/telemetry` |
+| `harness.run.status.reason` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.status.to` | enum: `pending`, `running`, `suspended`, `completed`, `failed`, `cancelled` | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.subagent_completed`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.subagent.input_tokens` | integer | Required | `@harness/telemetry` |
-| `harness.subagent.outcome` | enum: `completed`, `failed`, `cancelled` | Required | `@harness/telemetry` |
-| `harness.subagent.output_tokens` | integer | Required | `@harness/telemetry` |
-| `harness.subagent.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.subagent.input_tokens` | integer | Required | `@rovinos/telemetry` |
+| `harness.subagent.outcome` | enum: `completed`, `failed`, `cancelled` | Required | `@rovinos/telemetry` |
+| `harness.subagent.output_tokens` | integer | Required | `@rovinos/telemetry` |
+| `harness.subagent.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.subagent_spawned`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.subagent.parent_call.id` | Id | Optional | `@harness/telemetry` |
-| `harness.subagent.role` | Code | Required | `@harness/telemetry` |
-| `harness.subagent.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.subagent.parent_call.id` | Id | Optional | `@rovinos/telemetry` |
+| `harness.subagent.role` | Code | Required | `@rovinos/telemetry` |
+| `harness.subagent.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.safe.tool_call`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Optional | `@harness/telemetry` |
-| `harness.event.seq` | integer | Required | `@harness/telemetry` |
-| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.version` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
-| `harness.span.id` | Code | Required | `@harness/telemetry` |
-| `harness.tool.id` | Code | Required | `@harness/telemetry` |
-| `harness.tool.latency_ms` | integer | Required | `@harness/telemetry` |
-| `harness.tool.outcome` | enum: `ok`, `error`, `denied`, `timeout` | Required | `@harness/telemetry` |
-| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+| `harness.error.code` | Code | Optional | `@rovinos/telemetry` |
+| `harness.event.seq` | integer | Required | `@rovinos/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.policy.version` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |
+| `harness.span.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.tool.id` | Code | Required | `@rovinos/telemetry` |
+| `harness.tool.latency_ms` | integer | Required | `@rovinos/telemetry` |
+| `harness.tool.outcome` | enum: `ok`, `error`, `denied`, `timeout` | Required | `@rovinos/telemetry` |
+| `harness.trace.id` | Code | Required | `@rovinos/telemetry` |
 
 ### `harness.sentinel.trip`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.run.id` | Id | Optional | `@harness/telemetry` |
-| `harness.sentinel.trip.count` | integer | Required | `@harness/telemetry` |
+| `harness.run.id` | Id | Optional | `@rovinos/telemetry` |
+| `harness.sentinel.trip.count` | integer | Required | `@rovinos/telemetry` |
 
 ### `harness.vault.mark_terminal_failed`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.error.code` | Code | Required | `@harness/telemetry` |
-| `harness.run.id` | Id | Required | `@harness/telemetry` |
+| `harness.error.code` | Code | Required | `@rovinos/telemetry` |
+| `harness.run.id` | Id | Required | `@rovinos/telemetry` |

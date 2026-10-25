@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, resolve as resolvePath } from "node:path";
-import { InspectResultSchema, RunResultSchema, parseJson } from "@harness/schemas";
+import { InspectResultSchema, RunResultSchema, parseJson } from "@rovinos/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const projectName = `harness-prod-like-${String(process.pid)}`;
@@ -153,9 +153,9 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
     const shutdownRunScript = [
       'import { Command } from "commander";',
       'import { writeFileSync } from "node:fs";',
-      'import { createDefaultContext, createOutput, main } from "@harness/cli/programmatic";',
-      'import { FakeModelPort } from "@harness/core/testing";',
-      'import { openConfiguredRunQueue } from "@harness/core";',
+      'import { createDefaultContext, createOutput, main } from "@rovinos/cli/programmatic";',
+      'import { FakeModelPort } from "@rovinos/core/testing";',
+      'import { openConfiguredRunQueue } from "@rovinos/core";',
       "const action = process.env.HARNESS_E2E_ACTION;",
       "const context = createDefaultContext(new Command(), createOutput());",
       "const config = await context.loadConfig();",

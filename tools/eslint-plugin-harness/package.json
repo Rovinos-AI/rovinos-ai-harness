@@ -1,5 +1,5 @@
 {
-  "name": "@harness/eslint-plugin-harness",
+  "name": "@rovinos/eslint-plugin-harness",
   "version": "0.0.0",
   "private": true,
   "type": "module",

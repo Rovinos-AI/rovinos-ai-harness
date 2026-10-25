@@ -1,5 +1,5 @@
 {
-  "name": "@harness/control-plane",
+  "name": "@rovinos/control-plane",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,16 +18,16 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@harness/approval-app": "workspace:^",
-    "@harness/core": "workspace:^",
-    "@harness/models": "workspace:^",
-    "@harness/policy": "workspace:^",
-    "@harness/schemas": "workspace:^",
-    "@harness/store": "workspace:^",
-    "@harness/telemetry": "workspace:^",
-    "@harness/vault": "workspace:^",
     "@modelcontextprotocol/node": "2.1.1",
     "@modelcontextprotocol/server": "2.3.1",
+    "@rovinos/approval-app": "workspace:^",
+    "@rovinos/core": "workspace:^",
+    "@rovinos/models": "workspace:^",
+    "@rovinos/policy": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/store": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
+    "@rovinos/vault": "workspace:^",
     "zod": "4.6.7"
   },
   "devDependencies": {

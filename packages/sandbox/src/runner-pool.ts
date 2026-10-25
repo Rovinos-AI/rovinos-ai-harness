@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Readable } from "node:stream";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import { RemoteSandboxError } from "./remote-errors.js";
 import type { FsOperation, FsToolResult, WorkspaceFileToolBackend } from "./fs-tools.js";
 import type { WebFetchRequest, WebFetchResult } from "./web-fetch-contracts.js";

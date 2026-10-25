@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type ModelRequest } from "@harness/schemas";
+import { HarnessError, type Code, type ModelRequest } from "@rovinos/schemas";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
 
 /** Raised when a scripted fake provider has no result left to replay. */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id, JsonValue, type HostConfig } from "@harness/schemas";
-import { countHostAppRejected, type HostAppRejectedReason } from "@harness/telemetry";
+import { Code, HarnessError, Id, JsonValue, type HostConfig } from "@rovinos/schemas";
+import { countHostAppRejected, type HostAppRejectedReason } from "@rovinos/telemetry";
 import type { CallToolResult, ListToolsResult, Tool } from "@modelcontextprotocol/client";
 import { ToolSchema } from "@modelcontextprotocol/core";
 import { isToolVisibilityModelOnly } from "@modelcontextprotocol/ext-apps/app-bridge";
@@ -10,7 +10,7 @@ import type {
   PolicyPort,
   RunContext,
   ToolPort,
-} from "@harness/core";
+} from "@rovinos/core";
 import { z } from "zod";
 import { AppSpanBatchSchema } from "./app-telemetry.js";
 import type { AppCall, AppInstance } from "./types.js";

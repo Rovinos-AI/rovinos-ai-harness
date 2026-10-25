@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
-import { HarnessError, parseJson } from "@harness/schemas";
-import type { KeyProvider } from "@harness/schemas";
+import { aesGcmDecrypt, aesGcmEncrypt } from "@rovinos/crypto";
+import { HarnessError, parseJson } from "@rovinos/schemas";
+import type { KeyProvider } from "@rovinos/schemas";
 import { chmod, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";

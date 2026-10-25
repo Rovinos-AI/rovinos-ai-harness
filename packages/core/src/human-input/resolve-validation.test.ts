@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, type Event, type InputRequest } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { AuditingVaultResolver } from "@harness/vault";
+import { Id, type Event, type InputRequest } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { AuditingVaultResolver } from "@rovinos/vault";
 import { describe, expect, it } from "vitest";
 import { foldRunState, type InputRequestedEvent, type RunState } from "../run-state.js";
 import { InputDestinationUnavailableError, InputSchemaUnavailableError } from "./resolve-errors.js";

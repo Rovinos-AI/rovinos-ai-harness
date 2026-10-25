@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { PiiPresidioConfigSchema } from "@harness/schemas";
-import * as telemetry from "@harness/telemetry";
+import { PiiPresidioConfigSchema } from "@rovinos/schemas";
+import * as telemetry from "@rovinos/telemetry";
 import { Response as UndiciResponse } from "undici";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {

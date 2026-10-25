@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code } from "@harness/schemas";
+import { HarnessError, type Code } from "@rovinos/schemas";
 
 /** Raised when the caller's expected sequence number is stale. */
 export class SeqConflictError extends HarnessError {

@@ -9,7 +9,7 @@ Shared design for this epic:
 - It is deliberately independent of the PII detectors. Its only input is the vault's list of raw values for the relevant runs.
 - Scope per payload: spans and logs carry `harness.run.id`, so the sentinel scans against that run's values. Payloads without a run id are scanned against the values of all runs active in this process (plus recently finished ones for a short grace period).
 - Fail closed: scan error, timeout, or matcher unavailable all mean **drop**.
-- Code location: `packages/telemetry/src/sentinel/`. It depends only on the `VaultReader` interface from `@harness/vault` types re-exported through `@harness/schemas` (the interface file has no implementation dependencies).
+- Code location: `packages/telemetry/src/sentinel/`. It depends only on the `VaultReader` interface from `@rovinos/vault` types re-exported through `@rovinos/schemas` (the interface file has no implementation dependencies).
 
 ---
 

@@ -5,8 +5,8 @@ import {
   PiiConfigSchema,
   type PiiActionSummary,
   type JsonValue,
-} from "@harness/schemas";
-import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@harness/vault";
+} from "@rovinos/schemas";
+import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@rovinos/vault";
 import { PiiToolPort, type PiiToolPortLike, type PiiToolCall } from "./pii-tool-port.js";
 import { Tokenizer } from "./tokenizer.js";
 import { PiiBlockedError } from "./errors.js";

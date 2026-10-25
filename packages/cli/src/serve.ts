@@ -5,13 +5,13 @@ import {
   ServeResultSchema,
   type Id,
   type RunStatus,
-} from "@harness/schemas";
-import type { ControlPlaneOperations } from "@harness/control-plane";
-import type { Runtime, ToolPort } from "@harness/core";
-import type { HarnessConfig } from "@harness/config";
+} from "@rovinos/schemas";
+import type { ControlPlaneOperations } from "@rovinos/control-plane";
+import type { Runtime, ToolPort } from "@rovinos/core";
+import type { HarnessConfig } from "@rovinos/config";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { IdempotencyKeyHashSchema, type RunQueue } from "@harness/store";
+import { IdempotencyKeyHashSchema, type RunQueue } from "@rovinos/store";
 import { z } from "zod";
 import type { CliContext, CommandModule } from "./command.js";
 import { createCommandRuntime } from "./command.js";
@@ -76,7 +76,7 @@ export const serveCommand: CommandModule = {
           let closeServer: (() => Promise<void>) | undefined;
           try {
             const { startControlPlaneHttp, startControlPlaneStdio } =
-              await import("@harness/control-plane");
+              await import("@rovinos/control-plane");
             const operations = createControlPlaneOperations(runtime);
             const controlPlaneOptions = {
               ...(config.controlPlane === undefined ? {} : { controlPlane: config.controlPlane }),
@@ -116,7 +116,7 @@ async function openRunQueue(context: CliContext, config: HarnessConfig): Promise
   if (context.openRunQueue !== undefined) {
     return context.openRunQueue(config);
   }
-  const { openConfiguredRunQueue } = await import("@harness/core");
+  const { openConfiguredRunQueue } = await import("@rovinos/core");
   return openConfiguredRunQueue(config, {
     clock: context.clock,
     ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
@@ -218,7 +218,7 @@ async function startControlPlaneRun(
       if (allowedExistingRunIds !== undefined && !allowedExistingRunIds.includes(runId)) {
         throw new ServeRuntimeError("run_not_found");
       }
-      const { foldRunState } = await import("@harness/core");
+      const { foldRunState } = await import("@rovinos/core");
       return { runId, status: foldRunState(events).status };
     }
   }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Principal, type QuotaConfig } from "@harness/schemas";
-import { type EventStore, type UsageLedgerDelta, type UsageLedgerPeriod } from "@harness/store";
-import { countQuotaRejection } from "@harness/telemetry";
+import { HarnessError, type Code, type Principal, type QuotaConfig } from "@rovinos/schemas";
+import { type EventStore, type UsageLedgerDelta, type UsageLedgerPeriod } from "@rovinos/store";
+import { countQuotaRejection } from "@rovinos/telemetry";
 import type { Clock } from "./recorder.js";
 import type { BudgetViolation } from "./budgets.js";
 

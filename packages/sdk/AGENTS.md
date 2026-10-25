@@ -1,6 +1,6 @@
 # AGENTS.md: packages/sdk
 
-Public programmatic API (`@harness/sdk`), the run queue and workers it drives, multi-replica deployment, quotas, and performance budgets (epic 24).
+Public programmatic API (`@rovinos/sdk`), the run queue and workers it drives, multi-replica deployment, quotas, and performance budgets (epic 24).
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
@@ -10,7 +10,7 @@ Public programmatic API (`@harness/sdk`), the run queue and workers it drives, m
 
 ## Allowed internal imports
 
-- `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`, `@harness/store`, `@harness/store-postgres`, `@harness/store-sqlite`, `@harness/vault`, `@harness/pii`, `@harness/models`, `@harness/context`, `@harness/policy`, `@harness/mcp`, `@harness/sandbox`, `@harness/core`, `@harness/config`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/store`, `@rovinos/store-postgres`, `@rovinos/store-sqlite`, `@rovinos/vault`, `@rovinos/pii`, `@rovinos/models`, `@rovinos/context`, `@rovinos/policy`, `@rovinos/mcp`, `@rovinos/sandbox`, `@rovinos/core`, `@rovinos/config`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

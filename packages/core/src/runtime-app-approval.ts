@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Apps use the same tool step, approval request, and resume executor as model calls.
-import { Code, Id, JsonValue, type Event } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { Code, Id, JsonValue, type Event } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import { Checkpointer } from "./checkpoint.js";
 import {
   PolicyDecisionSchema,

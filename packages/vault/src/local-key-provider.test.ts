@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { KeysConfigSchema, type SecretRef } from "@harness/schemas";
+import { KeysConfigSchema, type SecretRef } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { LocalKeyProvider, type KeySecretResolver } from "./local-key-provider.js";
 

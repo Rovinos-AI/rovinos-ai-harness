@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
-import { CrashingEventStore } from "@harness/core/testing";
-import { HarnessConfigSchema } from "@harness/config";
-import { InMemoryEventStore } from "@harness/store";
-import { SqliteEventStore } from "@harness/store-sqlite";
+import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
+import { CrashingEventStore } from "@rovinos/core/testing";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { InMemoryEventStore } from "@rovinos/store";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
 import {
   Code,
   FakeClock,
@@ -11,7 +11,7 @@ import {
   Principal,
   SequentialIdGenerator,
   type Event,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createHarness } from "./index.js";
 import { GetRunContentOptionsSchema, ListRunsFilterSchema } from "./types.js";
 import type { Harness } from "./types.js";
-import type { EventStore } from "@harness/store";
+import type { EventStore } from "@rovinos/store";
 
 function fakeModel(responses?: readonly string[]): ModelPort {
   let index = 0;
@@ -220,7 +220,7 @@ afterEach(async () => {
   await Promise.all(harnesses.splice(0).map((harness) => harness.close()));
 });
 
-describe("@harness/sdk", () => {
+describe("@rovinos/sdk", () => {
   it("starts detached runs idempotently and exposes metadata only", async () => {
     const { harness, store } = await createTestHarness();
     const request = {

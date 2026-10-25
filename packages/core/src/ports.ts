@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, JsonPointerSchema } from "@harness/schemas";
+import { Code, JsonPointerSchema } from "@rovinos/schemas";
 import type {
   Event,
   Id,
@@ -15,16 +15,16 @@ import type {
   RunConfig,
   Sha256Hex,
   ToolSpec,
-} from "@harness/schemas";
-import type { TranscriptGroup } from "@harness/context";
-import type { VaultAuditHandler } from "@harness/vault";
+} from "@rovinos/schemas";
+import type { TranscriptGroup } from "@rovinos/context";
+import type { VaultAuditHandler } from "@rovinos/vault";
 import type {
   ModelProgress,
   ModelGatewayResponse,
   TokenizedModelGatewayResponse,
   ValueTransform,
-} from "@harness/models";
-import type { ElicitationPort, ElicitationRetry } from "@harness/mcp";
+} from "@rovinos/models";
+import type { ElicitationPort, ElicitationRetry } from "@rovinos/mcp";
 import type { ToolResumeStrategy } from "./resume-policy.js";
 import { z } from "zod";
 

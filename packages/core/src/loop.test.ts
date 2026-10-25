@@ -33,25 +33,25 @@ import {
   UNREGISTERED_TOOL_ID,
   type Event as StoredEvent,
   type JsonValue as JsonValueType,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   InMemoryEventStore,
   RunExecutionLeaseLostError,
   SeqConflictError,
   type EventStore,
-} from "@harness/store";
-import { SqliteEventStore } from "@harness/store-sqlite";
+} from "@rovinos/store";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { delegatingStore } from "./testing/delegating-store.js";
 import {
   CalibratingTokenCounter,
   HeuristicTokenCounter,
   NaiveStrategy,
   SummarizingStrategy,
-} from "@harness/context";
-import { activeRuns, TripQueue } from "@harness/telemetry";
-import { buildApprovalPayload, sweepApprovals, type ApprovalSweepStore } from "@harness/policy";
-import { emailDetector, PiiToolPort, Tokenizer } from "@harness/pii";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
+} from "@rovinos/context";
+import { activeRuns, TripQueue } from "@rovinos/telemetry";
+import { buildApprovalPayload, sweepApprovals, type ApprovalSweepStore } from "@rovinos/policy";
+import { emailDetector, PiiToolPort, Tokenizer } from "@rovinos/pii";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";

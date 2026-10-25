@@ -60,11 +60,11 @@ const createImportDirection = (packageLayers, layerNames) => {
     /** @type {(node: Node) => void} */
     const check = (node) => {
       const source = importSource(node);
-      if (typeof source !== "string" || !source.startsWith("@harness/")) {
+      if (typeof source !== "string" || !source.startsWith("@rovinos/")) {
         return;
       }
 
-      const targetPackage = source.slice("@harness/".length).split("/")[0];
+      const targetPackage = source.slice("@rovinos/".length).split("/")[0];
       const sourceDependencies = packageLayers[sourcePackage];
       if (
         targetPackage !== undefined &&
@@ -303,7 +303,7 @@ export const createHarnessPlugin = (packageLayers) => {
       schema: [],
       messages: {
         forbidden:
-          "Package '{{source}}' cannot import '@harness/{{target}}'; update docs/engineering/layers.json if this boundary should change.",
+          "Package '{{source}}' cannot import '@rovinos/{{target}}'; update docs/engineering/layers.json if this boundary should change.",
       },
     },
     create: createImportDirection(packageLayers, layerNames),
@@ -315,7 +315,7 @@ export const createHarnessPlugin = (packageLayers) => {
       docs: { description: "require package names for imports across package boundaries" },
       schema: [],
       messages: {
-        forbidden: "Use an '@harness/*' package import instead of a relative cross-package import.",
+        forbidden: "Use an '@rovinos/*' package import instead of a relative cross-package import.",
       },
     },
     create: createNoRelativePackages(layerNames),
@@ -346,7 +346,7 @@ export const createHarnessPlugin = (packageLayers) => {
   };
 
   return {
-    meta: { name: "@harness/eslint-plugin-harness" },
+    meta: { name: "@rovinos/eslint-plugin-harness" },
     rules: {
       "import-direction": importDirection,
       "no-relative-packages": noRelativePackages,

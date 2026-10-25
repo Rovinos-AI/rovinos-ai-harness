@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, SequentialIdGenerator, type Event, type JsonValue } from "@harness/schemas";
+import { Id, SequentialIdGenerator, type Event, type JsonValue } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import {
   InMemoryWorkspace,

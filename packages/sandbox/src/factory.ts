@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // 19.11: Compose owns the runner's egress topology; never emulate it on the host.
-import { SandboxConfigSchema, type SecretRef } from "@harness/schemas";
+import { SandboxConfigSchema, type SecretRef } from "@rovinos/schemas";
 import type { z } from "zod";
 import { InProcessBackend, type InProcessBackendOptions } from "./inprocess.js";
 import { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";

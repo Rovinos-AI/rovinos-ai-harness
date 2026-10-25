@@ -6,8 +6,8 @@ import {
   HarnessError,
   UNREGISTERED_TOOL_ID,
   type Event,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import type { ModelCompletion, ToolPort } from "../ports.js";
 import { RunRecorder } from "../recorder.js";
 import {

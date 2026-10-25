@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { ModelsConfigSchema, type ModelRequest } from "@harness/schemas";
-import { attr, defineSpan, withSpan } from "@harness/telemetry";
-import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { ModelsConfigSchema, type ModelRequest } from "@rovinos/schemas";
+import { attr, defineSpan, withSpan } from "@rovinos/telemetry";
+import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { context, trace } from "@opentelemetry/api";
 import { z } from "zod";
 import { ModelOutputInvalidError, ProviderError } from "./errors.js";
@@ -283,7 +283,7 @@ describe("RoutingModelGateway", () => {
         "harness.model.cache_write_tokens": attr.optional(attr.nonnegativeInt()),
         "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
       },
-      { taskId: "14.14", packageName: "@harness/models" },
+      { taskId: "14.14", packageName: "@rovinos/models" },
     );
     const invalidResult: ProviderResult = {
       parts: [{ type: "text", text: '{"answer":"invalid"}' }],

@@ -2,9 +2,11 @@
 // Docker calls are asynchronous on purpose: a cold image build can take minutes, and a
 // synchronous child process would block the Vitest worker long enough for its RPC to time out.
 import { execFile } from "node:child_process";
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { HARNESS_VERSION } from "@harness/schemas";
+import { HARNESS_VERSION } from "@rovinos/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -56,8 +58,8 @@ describe("Docker image", () => {
     expect(version).toBe(HARNESS_VERSION);
   });
 
-  it("includes both dialect migrations and opens a SQLite store", async () => {
-    const output = await runDocker([
+  it("includes package-relative assets and opens a SQLite store", async () => {
+    const assets = await runDocker([
       "run",
       "--rm",
       "--entrypoint",
@@ -65,10 +67,82 @@ describe("Docker image", () => {
       imageName,
       "--input-type=module",
       "-e",
-      "import { existsSync } from 'node:fs'; import { SqliteEventStore } from '@harness/store-sqlite'; const paths = ['/app/packages/store-sqlite/migrations/sqlite/0001_init.sql', '/app/packages/store-postgres/migrations/postgres/0001_init.sql']; if (paths.some((path) => !existsSync(path))) throw new Error('migration_files_missing'); const path = '/tmp/harness-store-image-smoke.sqlite'; const store = new SqliteEventStore(path); await store.close(); if (!existsSync(path)) throw new Error('sqlite_store_not_created'); process.stdout.write('migration_files_and_sqlite_store_ok');",
+      "import { existsSync } from 'node:fs'; const paths = ['/app/dist/migrations/sqlite/0001_init.sql', '/app/dist/migrations/postgres/0001_init.sql', '/app/dist/migrations/vault/sqlite/0001_init.sql', '/app/dist/migrations/vault/postgres/0001_init.sql', '/app/dist/assets/approval.html', '/app/dist/assets/runs-console.html', '/app/dist/assets/web/index.html', '/app/dist/assets/web/host.js']; if (paths.some((path) => !existsSync(path))) throw new Error('runtime_assets_missing'); process.stdout.write('runtime_assets_ok');",
     ]);
-    expect(output.trim()).toBe("migration_files_and_sqlite_store_ok");
+    expect(assets.trim()).toBe("runtime_assets_ok");
+
+    const migrationOutput = await runDocker([
+      "run",
+      "--rm",
+      "--env",
+      "HARNESS_DATA_DIR=/tmp/harness-store-image-smoke",
+      imageName,
+      "--json",
+      "store",
+      "migrate",
+    ]);
+    expect(migrationOutput).toContain('"0009"');
   });
+
+  it("starts the bundled HTTP server with package-relative runtime assets", async () => {
+    const temporaryDirectory = join(repositoryRoot, ".tmp");
+    await mkdir(temporaryDirectory, { recursive: true });
+    const secretDirectory = await mkdtemp(join(temporaryDirectory, "docker-image-secret-"));
+    const containerName = `${projectName}-serve`;
+    await chmod(secretDirectory, 0o755);
+    await writeFile(
+      join(secretDirectory, "control_plane_token"),
+      "synthetic-image-test-token-0123456789",
+      { mode: 0o444 },
+    );
+    try {
+      await runDocker([
+        "run",
+        "--detach",
+        "--name",
+        containerName,
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,size=64m",
+        "--env",
+        "HARNESS_CONFIG=/run/control-plane.yaml",
+        "--env",
+        "HARNESS_DATA_DIR=/tmp/harness",
+        "--mount",
+        `type=bind,source=${join(repositoryRoot, "test/fixtures/control-plane-auth.yaml")},target=/run/control-plane.yaml,readonly`,
+        "--mount",
+        `type=bind,source=${secretDirectory},target=/run/secrets,readonly`,
+        imageName,
+        "serve",
+        "--http",
+        "--port",
+        "0",
+      ]);
+
+      const deadline = Date.now() + 30_000;
+      let output = "";
+      while (Date.now() < deadline) {
+        output = await runDocker(["logs", containerName]);
+        if (output.includes("http://127.0.0.1:")) {
+          break;
+        }
+        const status = (
+          await runDocker(["inspect", "--format", "{{.State.Status}}", containerName])
+        ).trim();
+        if (status !== "running") {
+          const exitCode = (
+            await runDocker(["inspect", "--format", "{{.State.ExitCode}}", containerName])
+          ).trim();
+          throw new Error(`bundled_server_exited:${status}:${exitCode}:${output}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(output).toContain("http://127.0.0.1:");
+    } finally {
+      await runDocker(["rm", "--force", containerName]).catch(() => "");
+      await rm(secretDirectory, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("starts healthy with a read-only root filesystem under Compose", async () => {
     composeStarted = true;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { UsageLedgerDelta } from "@harness/store";
+import type { UsageLedgerDelta } from "@rovinos/store";
 import type { BudgetViolation } from "./budgets.js";
 import type { RunLoopExecutionOptions } from "./loop.js";
 

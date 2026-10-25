@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { HostRequest, HostResponse } from "./types.js";
@@ -75,16 +76,20 @@ export async function readBody(
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Reads the packaged host page or browser bundle from the workspace build output. */
-export function readStaticAsset(asset: "index" | "bundle"): Promise<Buffer> {
-  const path =
+/** Reads the host asset beside a bundle, with the workspace source layout as a fallback. */
+export function readStaticAsset(
+  asset: "index" | "bundle",
+  moduleUrl = import.meta.url,
+): Promise<Buffer> {
+  const filename = asset === "index" ? "index.html" : "host.js";
+  const bundledAsset = new URL(`./assets/web/${filename}`, moduleUrl);
+  const bundledPath = fileURLToPath(bundledAsset);
+  if (existsSync(bundledPath)) {
+    return readFile(bundledPath);
+  }
+  const sourceAsset =
     asset === "index"
-      ? new URL("../web/index.html", import.meta.url)
-      : new URL("../web/host.js", import.meta.url);
-  return readFile(fileURLToPath(path)).catch((error: unknown) => {
-    if (asset === "index") {
-      throw error;
-    }
-    return readFile(fileURLToPath(new URL("../../dist/web/host.js", import.meta.url)));
-  });
+      ? new URL("../web/index.html", moduleUrl)
+      : new URL("../../dist/web/host.js", moduleUrl);
+  return readFile(fileURLToPath(sourceAsset));
 }

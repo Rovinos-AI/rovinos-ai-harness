@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 export const MAX_TOTAL_PATTERN_CHARS = 1_000_000;
 

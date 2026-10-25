@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event } from "@harness/schemas";
+import type { Event } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { NaiveContext } from "./naive-context.js";
 

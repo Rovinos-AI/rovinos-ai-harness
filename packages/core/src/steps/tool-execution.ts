@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import type { ElicitationInputOutcome } from "@harness/mcp";
+import type { ElicitationInputOutcome } from "@rovinos/mcp";
 import {
   Code,
   HarnessError,
@@ -8,10 +8,10 @@ import {
   type Event,
   type Id,
   type JsonValue,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
-import { isSanitizedField, markSanitizedField } from "@harness/pii";
-import { setActiveSpanAttribute } from "@harness/telemetry";
+import { isSanitizedField, markSanitizedField } from "@rovinos/pii";
+import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import {
   RunEventRecordingError,
   type Clock,

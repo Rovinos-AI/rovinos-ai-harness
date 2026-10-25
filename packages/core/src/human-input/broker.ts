@@ -6,9 +6,9 @@ import {
   type Event,
   type Id,
   type InputRequest,
-} from "@harness/schemas";
-import type { Tokenizer } from "@harness/pii";
-import type { EventStore, RunQueue } from "@harness/store";
+} from "@rovinos/schemas";
+import type { Tokenizer } from "@rovinos/pii";
+import type { EventStore, RunQueue } from "@rovinos/store";
 import { assertApproverMayResolve } from "../approval-principals.js";
 import { foldRunState, type InputRequestedEvent, type ToolIntentEvent } from "../run-state.js";
 import type { Clock } from "../recorder.js";

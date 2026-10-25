@@ -6,7 +6,7 @@ import {
   type Capabilities,
   type Id,
   type ModelRequest,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type {
   ChatCompletionAssistantMessageParam,
   ChatCompletionCreateParamsNonStreaming,

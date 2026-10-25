@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApiError } from "@google/genai";
-import { JsonValue, parseJson } from "@harness/schemas";
+import { JsonValue, parseJson } from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
 import { retryAfterMs } from "./retry-after.js";
 

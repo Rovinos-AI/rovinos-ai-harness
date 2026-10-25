@@ -10,7 +10,7 @@ EventStore interface, in-memory store, conformance suites, snapshots, outbox, mi
 
 ## Allowed internal imports
 
-- `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

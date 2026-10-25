@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type ToolSpec } from "@harness/schemas";
+import { HarnessError, type Code, type ToolSpec } from "@rovinos/schemas";
 import {
   createFsTools,
   createWebFetchTool,
   InProcessBackend,
   RemoteSandboxBackend,
   RunnerPool,
-} from "@harness/sandbox";
-import type { SandboxBackend } from "@harness/sandbox";
+} from "@rovinos/sandbox";
+import type { SandboxBackend } from "@rovinos/sandbox";
 import type { ToolPort } from "./ports.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 

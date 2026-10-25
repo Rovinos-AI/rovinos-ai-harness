@@ -2,15 +2,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Id, type KeyProvider, type NewEvent } from "@harness/schemas";
+import { Id, type KeyProvider, type NewEvent } from "@rovinos/schemas";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { AesGcmContentCodec, JsonContentCodec, type ContentCodec } from "@harness/store";
+import { AesGcmContentCodec, JsonContentCodec, type ContentCodec } from "@rovinos/store";
 import { SqliteEventStore } from "./index.js";
 import {
   createEventBuilders,
   runEventStoreConformance,
   type EventStoreFactory,
-} from "@harness/store/testing";
+} from "@rovinos/store/testing";
 
 let directory: string | undefined;
 const conformanceKeyId = "sqlite-conformance-key";

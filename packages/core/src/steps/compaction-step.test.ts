@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { ensureTracingFallback } from "@harness/telemetry";
-import { FakeClock, SequentialIdGenerator, type Event, type ModelRef } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { eventsToTranscript, type TranscriptGroup, SummarizingStrategy } from "@harness/context";
+import { ensureTracingFallback } from "@rovinos/telemetry";
+import { FakeClock, SequentialIdGenerator, type Event, type ModelRef } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { eventsToTranscript, type TranscriptGroup, SummarizingStrategy } from "@rovinos/context";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { ModelPortSummarizer, compactionStep, SummarizerResponseError } from "./compaction-step.js";
 import { FakeModelPort } from "../testing/fake-model.js";

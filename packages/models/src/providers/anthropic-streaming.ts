@@ -3,7 +3,7 @@ import type {
   MessageCreateParamsStreaming,
   RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages";
-import { JsonValue, type Id, type ModelUsage } from "@harness/schemas";
+import { JsonValue, type Id, type ModelUsage } from "@rovinos/schemas";
 import { z as zod } from "zod";
 import type { ProviderContext, ProviderDelta } from "../types.js";
 

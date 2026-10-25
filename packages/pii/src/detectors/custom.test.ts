@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { PiiConfigSchema, parseYaml } from "@harness/schemas";
+import { PiiConfigSchema, parseYaml } from "@rovinos/schemas";
 import { createCustomDetector, PiiDetectorError } from "../index.js";
 
 describe("custom detectors", () => {

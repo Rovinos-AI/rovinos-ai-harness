@@ -3,7 +3,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 
 const execFileAsync = promisify(execFile);

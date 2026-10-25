@@ -12,9 +12,9 @@ import {
   VaultConfigSchema,
   FakeClock,
   SequentialIdGenerator,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { openSqliteInstanceHeartbeat } from "@harness/store-sqlite";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { openSqliteInstanceHeartbeat } from "@rovinos/store-sqlite";
 import { DeploymentStartupError, validateDeploymentTopology } from "./runtime-deployment.js";
 import { createRuntime } from "./runtime.js";
 

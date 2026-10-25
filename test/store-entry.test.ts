@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
-import { parseJson } from "@harness/schemas";
-import * as store from "@harness/store";
-import { runEventStoreConformance } from "@harness/store/testing";
+import { parseJson } from "@rovinos/schemas";
+import * as store from "@rovinos/store";
+import { runEventStoreConformance } from "@rovinos/store/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -11,7 +11,7 @@ const manifestSchema = z.looseObject({
   devDependencies: z.record(z.string(), z.string()).optional(),
 });
 
-describe("@harness/store entry point", () => {
+describe("@rovinos/store entry point", () => {
   it("does not export test-only conformance helpers", () => {
     expect("runEventStoreConformance" in store).toBe(false);
   });

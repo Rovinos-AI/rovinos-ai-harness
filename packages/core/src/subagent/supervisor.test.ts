@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
-import { ensureTracingFallback } from "@harness/telemetry";
-import { FakeClock, Id, JsonValue, RunConfigSchema } from "@harness/schemas";
-import type { Event } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { ensureTracingFallback } from "@rovinos/telemetry";
+import { FakeClock, Id, JsonValue, RunConfigSchema } from "@rovinos/schemas";
+import type { Event } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "../recorder.js";
 import type { IdGenerator, ModelToolCall, RunContext, ToolPort } from "../ports.js";

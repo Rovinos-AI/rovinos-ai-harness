@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { AppTelemetry } from "@harness/app-telemetry";
+import type { AppTelemetry } from "@rovinos/app-telemetry";
 import {
   RunConsoleDetailSchema,
   RunConsoleListSchema,
   type RunConsoleDetail,
   type RunConsoleRun,
-} from "@harness/schemas/browser";
+} from "@rovinos/schemas/browser";
 import { createEmptyState } from "../../kit/components.js";
 import { getStrings } from "../../kit/strings.js";
 import { nextVisibleRunPage, runsConsolePageSize, runsConsoleResultValue } from "./list.js";

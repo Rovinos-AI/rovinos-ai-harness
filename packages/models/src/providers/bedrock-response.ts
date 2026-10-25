@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ContentBlock, ConverseResponse } from "@aws-sdk/client-bedrock-runtime";
-import { Code, JsonValue, type ModelUsage, type Part } from "@harness/schemas";
+import { Code, JsonValue, type ModelUsage, type Part } from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
 import type { ProviderContext, ProviderResult } from "../types.js";
 import {

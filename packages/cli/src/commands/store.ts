@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, StoreMigrateResultSchema, StorePurgeResultSchema } from "@harness/schemas";
-import type { HarnessConfig } from "@harness/config";
-import { purgeWorkspaceSnapshots } from "@harness/sandbox";
-import type { EventStore } from "@harness/store";
-import { purgeExpired, type VaultAdmin } from "@harness/vault";
+import { HarnessError, StoreMigrateResultSchema, StorePurgeResultSchema } from "@rovinos/schemas";
+import type { HarnessConfig } from "@rovinos/config";
+import { purgeWorkspaceSnapshots } from "@rovinos/sandbox";
+import type { EventStore } from "@rovinos/store";
+import { purgeExpired, type VaultAdmin } from "@rovinos/vault";
 import { join } from "node:path";
 import type { CliContext, CommandModule } from "../command.js";
 
@@ -47,7 +47,7 @@ interface StoreCommandInput {
 
 const defaultOperations: StoreCommandOperations = {
   async migrate(config, dryRun, appliedAt, secretResolver) {
-    const core = await import("@harness/core");
+    const core = await import("@rovinos/core");
     return core.migrateConfiguredStore(config, {
       dryRun,
       appliedAt,
@@ -55,7 +55,7 @@ const defaultOperations: StoreCommandOperations = {
     });
   },
   async openStore(config, dryRun, secretResolver, dataDir) {
-    const core = await import("@harness/core");
+    const core = await import("@rovinos/core");
     return core.openConfiguredStore(config, {
       readOnly: dryRun,
       ...(dataDir === undefined ? {} : { dataDir }),
@@ -63,7 +63,7 @@ const defaultOperations: StoreCommandOperations = {
     });
   },
   async openVaultAdmin(config, clock, secretResolver, dataDir) {
-    const core = await import("@harness/core");
+    const core = await import("@rovinos/core");
     return core.openConfiguredVaultAdmin(config, {
       clock,
       ...(dataDir === undefined ? {} : { dataDir }),
@@ -140,7 +140,7 @@ async function writePurgeResult({
     throw new StoreCommandError("retention_not_configured");
   }
   const store = await operations.openStore(config, dryRun, context.secretResolver, context.dataDir);
-  const core = await import("@harness/core");
+  const core = await import("@rovinos/core");
   const snapshotRoot = join(core.resolveDataDir(process.env, context.dataDir), "snapshots");
   let vault: (VaultAdmin & { close(): void | Promise<void> }) | undefined;
   try {
@@ -154,7 +154,7 @@ async function writePurgeResult({
             context.dataDir,
           );
     vault = vaultAdmin;
-    const { purgeExpiredRuns } = await import("@harness/store");
+    const { purgeExpiredRuns } = await import("@rovinos/store");
     const result = await purgeExpiredRuns({
       store,
       clock: context.clock,

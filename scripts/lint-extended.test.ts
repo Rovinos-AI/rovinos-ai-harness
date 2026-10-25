@@ -55,6 +55,31 @@ it("builds extended lint commands through the injected runner", () => {
   }
 });
 
+it("pulls the same pinned images used by the container lint modes", () => {
+  const calls: { command: string; args: string[]; tool: string }[] = [];
+
+  expect(
+    lint("pull-images", [], {
+      runner: (command, args, tool) => {
+        calls.push({ command, args, tool });
+        return true;
+      },
+    }),
+  ).toBe(true);
+  expect(calls.map(({ command, args }) => [command, ...args])).toEqual([
+    [
+      "docker",
+      "pull",
+      "hadolint/hadolint:v2.14.0-debian@sha256:158cd0184dcaa18bd8ec20b61f4c1cabdf8b32a592d062f57bdcb8e4c1d312e2",
+    ],
+    [
+      "docker",
+      "pull",
+      "ghcr.io/editorconfig-checker/editorconfig-checker:4.0.2@sha256:2ba6232bfa0058f72f5f7d7816711590aa764afab1542af30b3ecb4553587918",
+    ],
+  ]);
+});
+
 it("rejects shell fixtures without strict mode before invoking ShellCheck", () => {
   const temporaryRoot = mkdtempSync(resolve(rootDirectory, ".lint-shell-fixture-"));
   let invoked = false;

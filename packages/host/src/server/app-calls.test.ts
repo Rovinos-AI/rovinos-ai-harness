@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { Code, Id, ToolSpecSchema } from "@harness/schemas";
+import { Code, Id, ToolSpecSchema } from "@rovinos/schemas";
 import type { ListToolsResult, Tool } from "@modelcontextprotocol/client";
 import { isToolVisibilityAppOnly } from "@modelcontextprotocol/ext-apps/app-bridge";
 import {

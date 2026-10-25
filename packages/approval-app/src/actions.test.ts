@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApprovalPayload } from "@harness/schemas/browser";
+import type { ApprovalPayload } from "@rovinos/schemas/browser";
 import {
   mountApprovalActions,
   type ApprovalActions,

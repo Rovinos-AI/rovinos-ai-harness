@@ -3,7 +3,7 @@ import { isSpanContextValid, type SpanContext, type Context } from "@opentelemet
 import type { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
-import { Code, Id, type TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@rovinos/schemas";
 import { countDroppedTelemetry } from "../metrics.js";
 import { assertSentinelGate, type SentinelGate } from "../sentinel/gate.js";
 import { lookupLogDefinition, type LogRecordDefinition } from "../log-registry.js";
@@ -79,7 +79,7 @@ function sanitizedCopy(
     hrTimeObserved: [record.hrTimeObserved[0], record.hrTimeObserved[1]],
     ...(spanContext === undefined ? {} : { spanContext }),
     resource: resourceFromAttributes(sanitizeResourceAttributes(record.resource.attributes)),
-    instrumentationScope: { name: "@harness/telemetry" },
+    instrumentationScope: { name: "@rovinos/telemetry" },
     attributes,
     ...(severityNumber === undefined ? {} : { severityNumber }),
     body: definition.name,

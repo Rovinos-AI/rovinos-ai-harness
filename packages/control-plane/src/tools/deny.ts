@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { Code } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";

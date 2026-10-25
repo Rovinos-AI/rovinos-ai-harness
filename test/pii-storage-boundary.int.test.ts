@@ -11,10 +11,10 @@ import {
   SequentialIdGenerator,
   type Event,
   type NewEvent,
-} from "@harness/schemas";
-import { emailDetector, PiiEventStore, Tokenizer } from "@harness/pii";
-import { SqliteEventStore } from "@harness/store-sqlite";
-import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
+} from "@rovinos/schemas";
+import { emailDetector, PiiEventStore, Tokenizer } from "@rovinos/pii";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
+import { LocalKeyProvider, SqliteVault, Token } from "@rovinos/vault";
 
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);

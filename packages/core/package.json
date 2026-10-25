@@ -1,5 +1,5 @@
 {
-  "name": "@harness/core",
+  "name": "@rovinos/core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -23,19 +23,19 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@harness/context": "workspace:^",
-    "@harness/mcp": "workspace:^",
-    "@harness/models": "workspace:^",
-    "@harness/pii": "workspace:^",
-    "@harness/policy": "workspace:^",
-    "@harness/sandbox": "workspace:^",
-    "@harness/schemas": "workspace:^",
-    "@harness/store": "workspace:^",
-    "@harness/store-postgres": "workspace:^",
-    "@harness/store-sqlite": "workspace:^",
-    "@harness/telemetry": "workspace:^",
-    "@harness/vault": "workspace:^",
     "@opentelemetry/api": "1.9.1",
+    "@rovinos/context": "workspace:^",
+    "@rovinos/mcp": "workspace:^",
+    "@rovinos/models": "workspace:^",
+    "@rovinos/pii": "workspace:^",
+    "@rovinos/policy": "workspace:^",
+    "@rovinos/sandbox": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/store": "workspace:^",
+    "@rovinos/store-postgres": "workspace:^",
+    "@rovinos/store-sqlite": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
+    "@rovinos/vault": "workspace:^",
     "zod": "4.6.7"
   },
   "devDependencies": {

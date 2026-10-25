@@ -2,8 +2,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as Apps from "@modelcontextprotocol/ext-apps";
-import type * as AppTelemetry from "@harness/app-telemetry";
-import type { AppSpanName, CreateAppTelemetryOptions } from "@harness/app-telemetry";
+import type * as AppTelemetry from "@rovinos/app-telemetry";
+import type { AppSpanName, CreateAppTelemetryOptions } from "@rovinos/app-telemetry";
 import type * as ApprovalActionsModule from "./actions.js";
 import type * as ApprovalTelemetryModule from "./telemetry.js";
 
@@ -49,7 +49,7 @@ vi.mock("@modelcontextprotocol/ext-apps", async (importOriginal) => {
   };
 });
 
-vi.mock("@harness/app-telemetry", async (importOriginal) => {
+vi.mock("@rovinos/app-telemetry", async (importOriginal) => {
   const actual = await importOriginal<typeof AppTelemetry>();
   return {
     ...actual,

@@ -9,16 +9,16 @@ import {
   type InputRequest,
   type InputResponse,
   type JsonValue,
-} from "@harness/schemas";
-import { formSchemaToZod } from "@harness/schemas";
+} from "@rovinos/schemas";
+import { formSchemaToZod } from "@rovinos/schemas";
 import { LeaseLostError, RunRecorder, type Clock } from "../recorder.js";
 import { assertApproverMayResolve } from "../approval-principals.js";
 import type { InputRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
 import { INPUT_WAIT_SPAN } from "../spans.js";
 import { ensureTracing } from "../runtime-tracing-init.js";
-import type { Tokenizer } from "@harness/pii";
-import type { AuditingVaultResolver } from "@harness/vault";
-import type { EventStore, RunQueue } from "@harness/store";
+import type { Tokenizer } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
+import type { EventStore, RunQueue } from "@rovinos/store";
 import { pendingRequest, readRunLog } from "./resolve-log.js";
 import {
   inputDestination,

@@ -5,7 +5,7 @@ import type {
   ModelRequest,
   ModelResponse,
   ModelUsage,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { EnforcementIssue, EnforcementRung } from "./enforce/index.js";
 import { appendRepairMessages } from "./enforce/repair.js";
 import { ModelOutputInvalidError, attachModelFailureMetadata } from "./errors.js";

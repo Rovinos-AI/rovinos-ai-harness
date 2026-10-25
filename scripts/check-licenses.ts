@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import parseSpdx from "spdx-expression-parse";
 

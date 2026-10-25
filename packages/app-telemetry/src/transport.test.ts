@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AppSpan } from "@harness/schemas";
+import type { AppSpan } from "@rovinos/schemas";
 import { createAppTelemetry } from "./index.js";
 import { createAppTelemetryTransport } from "./transport.js";
 import type { AppTelemetryBridge } from "./types.js";

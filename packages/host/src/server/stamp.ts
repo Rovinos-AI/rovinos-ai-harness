@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ROOT_CONTEXT, isSpanContextValid, trace, type SpanContext } from "@opentelemetry/api";
-import type { Code, Id } from "@harness/schemas";
+import type { Code, Id } from "@rovinos/schemas";
 import {
   attr,
   defineSpan,
   type SpanDefinition,
   type SpanDefinitionShape,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 import type { AppSpan, AppTelemetryRejectReason } from "./app-telemetry.js";
 
 interface Clock {
@@ -46,7 +46,7 @@ const identityShape = {
 export const UI_RENDER_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.ui.render",
   identityShape,
-  { taskId: "3.6", packageName: "@harness/host" },
+  { taskId: "3.6", packageName: "@rovinos/host" },
 );
 
 /** Registered host span definition for app decision events. */
@@ -56,14 +56,14 @@ export const UI_DECISION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     ...identityShape,
     "harness.ui.decision": attr.enum(["approve", "deny", "edit"]),
   },
-  { taskId: "3.6", packageName: "@harness/host" },
+  { taskId: "3.6", packageName: "@rovinos/host" },
 );
 
 /** Registered host span definition for app error events. */
 export const UI_ERROR_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.ui.error",
   identityShape,
-  { taskId: "3.6", packageName: "@harness/host" },
+  { taskId: "3.6", packageName: "@rovinos/host" },
 );
 
 /** Registered host span definition for app interaction events. */
@@ -74,7 +74,7 @@ export const UI_INTERACTION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSp
     "harness.ui.interaction.kind": attr.enum(["click", "focus", "edit"]),
     "harness.ui.interaction.count": attr.nonnegativeInt(),
   },
-  { taskId: "3.6", packageName: "@harness/host" },
+  { taskId: "3.6", packageName: "@rovinos/host" },
 );
 
 function startStampedSpan(

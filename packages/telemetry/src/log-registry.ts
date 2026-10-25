@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError } from "@harness/schemas";
+import { Code, HarnessError } from "@rovinos/schemas";
 import { env } from "node:process";
 import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";

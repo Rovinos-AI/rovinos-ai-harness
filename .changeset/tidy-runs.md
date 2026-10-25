@@ -1,5 +1,5 @@
 ---
-"@harness/sdk": minor
+"@rovinos/sdk": minor
 ---
 
 # Model-driven control-plane run creation

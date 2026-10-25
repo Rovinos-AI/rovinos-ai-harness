@@ -5,7 +5,7 @@ import {
   KeyGenerateResultSchema,
   RunResultSchema,
   parseJson,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   chmodSync,
   closeSync,

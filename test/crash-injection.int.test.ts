@@ -15,7 +15,7 @@ import {
   type Message,
   type NewEvent,
   type Part,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   createRuntime,
   NaiveContext,
@@ -32,8 +32,8 @@ import {
   type ModelRequest,
   type PolicyPort,
   type ToolPort,
-} from "@harness/core";
-import { SummarizingStrategy } from "@harness/context";
+} from "@rovinos/core";
+import { SummarizingStrategy } from "@rovinos/context";
 import {
   CrashingEventStore,
   FakeModelPort,
@@ -42,12 +42,12 @@ import {
   SimulatedCrash,
   type FakeModelOptions,
   type FakeToolDefinition,
-} from "@harness/core/testing";
-import type { EventStore } from "@harness/store";
-import { SqliteEventStore } from "@harness/store-sqlite";
+} from "@rovinos/core/testing";
+import type { EventStore } from "@rovinos/store";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ensureTracingFallback } from "@harness/telemetry";
+import { ensureTracingFallback } from "@rovinos/telemetry";
 
 const config = {
   run: RunConfigSchema.parse({

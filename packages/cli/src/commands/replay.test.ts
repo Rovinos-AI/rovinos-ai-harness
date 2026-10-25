@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema } from "@harness/config";
-import { NaiveContext, createRuntime, type ModelCompletion } from "@harness/core";
-import { FakeModelPort, FakeToolPort } from "@harness/core/testing";
-import { FakeClock, Id, SequentialIdGenerator, type NewEvent } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { NaiveContext, createRuntime, type ModelCompletion } from "@rovinos/core";
+import { FakeModelPort, FakeToolPort } from "@rovinos/core/testing";
+import { FakeClock, Id, SequentialIdGenerator, type NewEvent } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";

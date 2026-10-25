@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FakeClock, type Id, type RunStatus, type StoreRetentionConfig } from "@harness/schemas";
+import { FakeClock, type Id, type RunStatus, type StoreRetentionConfig } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryEventStore } from "./memory.js";
 import { purgeExpiredRuns, type RetentionLogger } from "./retention.js";

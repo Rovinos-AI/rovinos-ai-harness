@@ -2,10 +2,10 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { metrics, trace } from "@opentelemetry/api";
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
-import { Code, parseJson, Traceparent } from "@harness/schemas";
-import { createTestMetricCollector, createTestSpanCollector } from "@harness/telemetry/testing";
-import type { HostAppRejectedReason } from "@harness/telemetry";
-import type { PolicyPort, ToolPort } from "@harness/core";
+import { Code, parseJson, Traceparent } from "@rovinos/schemas";
+import { createTestMetricCollector, createTestSpanCollector } from "@rovinos/telemetry/testing";
+import type { HostAppRejectedReason } from "@rovinos/telemetry";
+import type { PolicyPort, ToolPort } from "@rovinos/core";
 import { z } from "zod";
 import {
   APP_TELEMETRY_TOOL_NAME,

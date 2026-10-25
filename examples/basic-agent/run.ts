@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createRuntime, type ModelCompletion, type ToolPort } from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
-import { InMemoryEventStore } from "@harness/store";
-import { Code, Id, JsonValue, RunConfigSchema, ToolSpecSchema } from "@harness/schemas";
+import { createRuntime, type ModelCompletion, type ToolPort } from "@rovinos/core";
+import { FakeModelPort } from "@rovinos/core/testing";
+import { InMemoryEventStore } from "@rovinos/store";
+import { Code, Id, JsonValue, RunConfigSchema, ToolSpecSchema } from "@rovinos/schemas";
 import { z } from "zod";
 
 const toolId = Code.parse("example.lookup");

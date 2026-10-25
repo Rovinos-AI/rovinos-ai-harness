@@ -8,7 +8,7 @@ import {
   type JsonValue as JsonValueType,
   type ToolSpec,
   SandboxEgressAllowlistSchema,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   MAX_WEB_FETCH_TIMEOUT_MS,
   WebFetchRequestSchema,

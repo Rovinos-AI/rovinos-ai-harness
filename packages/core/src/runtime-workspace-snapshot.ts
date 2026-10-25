@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { join } from "node:path";
-import type { LocalKeyProvider } from "@harness/vault";
-import { WorkspaceSnapshotter } from "@harness/sandbox";
-import type { RemoteWorkspaceSnapshotPort } from "@harness/sandbox";
+import type { LocalKeyProvider } from "@rovinos/vault";
+import { WorkspaceSnapshotter } from "@rovinos/sandbox";
+import type { RemoteWorkspaceSnapshotPort } from "@rovinos/sandbox";
 import type { IdGenerator } from "./ports.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 

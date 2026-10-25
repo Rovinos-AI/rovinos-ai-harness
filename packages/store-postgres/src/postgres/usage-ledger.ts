@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Code as CodeType } from "@harness/schemas";
+import { Code, type Code as CodeType } from "@rovinos/schemas";
 import {
   InvalidEventError,
   UsageLedgerPeriodSchema,
   UsageLedgerRowSchema,
   type UsageLedgerPeriod,
   type UsageLedgerRow,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
 import { integer, storeError } from "./helpers.js";
 
 interface UsageLedgerRowRecord {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { NaiveStrategy } from "@harness/context";
-import type { TokenCounter } from "@harness/context";
-import type { ModelRef } from "@harness/schemas";
+import { NaiveStrategy } from "@rovinos/context";
+import type { TokenCounter } from "@rovinos/context";
+import type { ModelRef } from "@rovinos/schemas";
 import { StrategyContextPort } from "./context-port.js";
 
 const defaultModel: ModelRef = { provider: "default", model: "default" };

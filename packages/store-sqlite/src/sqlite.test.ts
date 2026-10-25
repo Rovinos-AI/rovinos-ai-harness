@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { Id, type Event, type KeyProvider, type NewEvent, type RunStatus } from "@harness/schemas";
+import { Id, type Event, type KeyProvider, type NewEvent, type RunStatus } from "@rovinos/schemas";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,7 +20,7 @@ import {
   decodeStoreRotationCursor,
   type ContentCodec,
   type ContentCodecContext,
-} from "@harness/store";
+} from "@rovinos/store";
 import { SqliteEventStore } from "./index.js";
 
 const runId = Id.parse("00000000000000000000000001");

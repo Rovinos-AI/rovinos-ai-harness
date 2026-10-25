@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { generatePiiCorpus, PiiCorpusSampleSchema } from "./gen-pii-corpus.js";
 

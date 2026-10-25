@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { inspect } from "node:util";
-import { Code, Id } from "@harness/schemas";
+import { Code, Id } from "@rovinos/schemas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { countSkippedShortValues } from "../metrics.js";
 import { StaticVaultReader } from "../testing.js";

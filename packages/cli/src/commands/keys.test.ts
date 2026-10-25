@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { KeyGenerateResultSchema, KeyRetireResultSchema, parseJson } from "@harness/schemas";
-import { HarnessConfigSchema } from "@harness/config";
+import { KeyGenerateResultSchema, KeyRetireResultSchema, parseJson } from "@rovinos/schemas";
+import { HarnessConfigSchema } from "@rovinos/config";
 import { describe, expect, it } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";

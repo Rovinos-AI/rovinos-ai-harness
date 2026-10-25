@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, InputRequest, InputResponse } from "@harness/schemas";
+import type { Code, InputRequest, InputResponse } from "@rovinos/schemas";
 
 /** A registered channel that can present a recorded input request to a human. */
 export interface HumanInputChannel {

@@ -86,7 +86,7 @@ flowchart LR
 
   subgraph Clients["Entry points"]
     CLI["harness CLI"]
-    SDKC["Applications via @harness/sdk"]
+    SDKC["Applications via @rovinos/sdk"]
     MCPC["MCP clients (any)"]
     HOST["Reference MCP Apps host (sandboxed iframes)"]
   end
@@ -153,7 +153,7 @@ flowchart LR
 
 ## Package architecture
 
-All code lives in a Yarn workspace of ESM TypeScript packages under the `@harness/` scope. The import direction is fixed. The canonical allowlist is [`docs/engineering/layers.json`](docs/engineering/layers.json), and a lint rule (task 1.2) enforces it. There are no cycles.
+All code lives in a Yarn workspace of ESM TypeScript packages under the `@rovinos/` scope. The import direction is fixed. The canonical allowlist is [`docs/engineering/layers.json`](docs/engineering/layers.json), and a lint rule (task 1.2) enforces it. There are no cycles.
 
 ```mermaid
 flowchart BT
@@ -675,7 +675,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  APPS["Applications (@harness/sdk)"] --> ENQ["startRun / continueRun / resume"]
+  APPS["Applications (@rovinos/sdk)"] --> ENQ["startRun / continueRun / resume"]
   MCPCL["MCP clients: start_run, continue_run"] --> ENQ
   ENQ --> EV[("Events: run_created + run_input (status pending)")]
   ENQ --> QUEUE[("Run queue: ids only, leases, retries, dead letters")]
@@ -692,7 +692,7 @@ flowchart LR
   QUOTA -.-> W1
 ```
 
-- **SDK.** `@harness/sdk` is the only semver-stable API, with a snapshot-tested public surface. It returns metadata and safe events by default.
+- **SDK.** `@rovinos/sdk` is the only semver-stable API, with a snapshot-tested public surface. It returns metadata and safe events by default.
 - **Queue and workers.** Run input is recorded as events before a job is enqueued, so queue rows hold ids only. Workers claim jobs with leases (`SKIP LOCKED` on Postgres), heartbeat, and on SIGTERM suspend their runs and requeue them. A crashed worker's run is reclaimed after lease expiry, and the store's `seq` conflict blocks stale appends. Approved runs resume automatically.
 - **Live updates.** Store subscriptions (Postgres `LISTEN/NOTIFY` carrying ids, SQLite polling) feed SDK `watch` and MCP resource subscriptions. The run console stops polling.
 - **Topology.** `single` mode (SQLite, one process) is the default and refuses a second instance on the same files. `multi` mode requires Postgres for store, vault, and queue, and is tested by killing a worker mid-run.
@@ -934,7 +934,7 @@ The full index is [`docs/engineering/tasks/README.md`](docs/engineering/tasks/RE
 ## Repository layout and contributing
 
 ```text
-packages/        @harness/* libraries and apps (specs live next to the code: epic-*.md)
+packages/        @rovinos/* libraries and apps (specs live next to the code: epic-*.md)
 infra/           compose, collector, Kusto, dashboards, alerts, k8s examples
 security/        scanner rules and policies
 pipelines/       Azure Key Vault nightly pipeline configuration

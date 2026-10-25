@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { parseJson, ServerConfigSchema } from "@harness/schemas";
-import type { KeyProvider } from "@harness/schemas";
+import { parseJson, ServerConfigSchema } from "@rovinos/schemas";
+import type { KeyProvider } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "../connection.js";
 import { z } from "zod";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import type { Logger, LogRecord } from "@opentelemetry/api-logs";
 import { describe, expect, it, vi } from "vitest";
 import { emitControlPlaneAudit } from "./control-plane-audit.js";

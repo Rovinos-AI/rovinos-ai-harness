@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Runtime, RuntimeOverrides, ModelCompletion, ToolPort } from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
-import { Code, Id } from "@harness/schemas";
-import type { VaultValueEntry } from "@harness/schemas";
-import { findTokens, tokenType } from "@harness/vault";
-import type { Token } from "@harness/vault";
+import type { Runtime, RuntimeOverrides, ModelCompletion, ToolPort } from "@rovinos/core";
+import { FakeModelPort } from "@rovinos/core/testing";
+import { Code, Id } from "@rovinos/schemas";
+import type { VaultValueEntry } from "@rovinos/schemas";
+import { findTokens, tokenType } from "@rovinos/vault";
+import type { Token } from "@rovinos/vault";
 import type { CanarySet } from "./canaries.js";
 
 export const ECHO_TOOL = Code.parse("canary.echo");
