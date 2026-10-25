@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { Client, type Notification, type Pool } from "pg";
-import { ChangeEmitter, type ChangeSubscription } from "@harness/store/adapter-internal";
-import { StoreUnavailableError } from "@harness/store/adapter-internal";
+import { ChangeEmitter, type ChangeSubscription } from "@rovinos/store/adapter-internal";
+import { StoreUnavailableError } from "@rovinos/store/adapter-internal";
 import { integer, storeError } from "./helpers.js";
 
 /** Listen for committed harness event notifications on a dedicated connection. */

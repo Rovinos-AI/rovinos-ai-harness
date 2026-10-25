@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Command } from "commander";
-import type { HarnessConfig } from "@harness/config";
-import { Code, HarnessError, Principal } from "@harness/schemas";
-import type { RunQueue } from "@harness/store";
+import type { HarnessConfig } from "@rovinos/config";
+import { Code, HarnessError, Principal } from "@rovinos/schemas";
+import type { RunQueue } from "@rovinos/store";
 import type {
   ApprovalResolutionMetadata,
   ConfiguredKeyRotation,
   Runtime,
   RuntimeOverrides,
   ToolPort,
-} from "@harness/core";
-import type { AuditingVaultResolver } from "@harness/vault";
+} from "@rovinos/core";
+import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { Output } from "./output.js";
 
 /** A clock interface injected into every CLI command. */
@@ -113,6 +113,6 @@ export async function createCommandRuntime(
     return context.createRuntime(config, overrides);
   }
 
-  const core = await import("@harness/core");
+  const core = await import("@rovinos/core");
   return core.createRuntime(config, overrides);
 }

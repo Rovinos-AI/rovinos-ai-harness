@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { DetectionSchema, type Detection, type PiiAction } from "@harness/schemas";
+import { DetectionSchema, type Detection, type PiiAction } from "@rovinos/schemas";
 import { PiiDetectorError } from "./detectors/types.js";
-import { findTokens } from "@harness/vault";
+import { findTokens } from "@rovinos/vault";
 import { PiiTokenizerError } from "./errors.js";
 
 const ACTION_PRIORITY: Readonly<Record<PiiAction, number>> = {

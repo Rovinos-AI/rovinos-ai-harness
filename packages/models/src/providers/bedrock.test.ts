@@ -2,8 +2,8 @@
 import { readFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { ModelErrorException } from "@aws-sdk/client-bedrock-runtime";
-import { JsonValue, parseJson } from "@harness/schemas";
-import type { ModelRequest } from "@harness/schemas";
+import { JsonValue, parseJson } from "@rovinos/schemas";
+import type { ModelRequest } from "@rovinos/schemas";
 import { Headers, Response, type fetch as undiciFetch } from "undici";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createRuntime, type ModelPort, type PolicyPort, type ToolPort } from "@harness/core";
-import { FakeModelPort, ObedientModel } from "@harness/core/testing";
+import { createRuntime, type ModelPort, type PolicyPort, type ToolPort } from "@rovinos/core";
+import { FakeModelPort, ObedientModel } from "@rovinos/core/testing";
 import {
   FakeClock,
   Id,
@@ -8,9 +8,9 @@ import {
   RunConfigSchema,
   type ModelRequest,
   type SequentialIdGenerator,
-} from "@harness/schemas";
-import type { InMemoryEventStore } from "@harness/store";
-import { InProcessBackend, ensureRunWorkspace } from "@harness/sandbox";
+} from "@rovinos/schemas";
+import type { InMemoryEventStore } from "@rovinos/store";
+import { InProcessBackend, ensureRunWorkspace } from "@rovinos/sandbox";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

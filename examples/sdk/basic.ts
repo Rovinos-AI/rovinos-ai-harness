@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHarness } from "@harness/sdk";
+import { createHarness } from "@rovinos/sdk";
 
 const harness = await createHarness({ configPath: "harness.config.yaml" });
 const { runId } = await harness.startRun({

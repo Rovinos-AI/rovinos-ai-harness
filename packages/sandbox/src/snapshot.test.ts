@@ -16,7 +16,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Id, WorkspaceRef, type KeyProvider } from "@harness/schemas";
+import { Id, WorkspaceRef, type KeyProvider } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SnapshotTooLargeError,

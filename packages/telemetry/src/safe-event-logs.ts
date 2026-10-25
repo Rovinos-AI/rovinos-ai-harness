@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
-import { Code, type Id } from "@harness/schemas";
+import { Code, type Id } from "@rovinos/schemas";
 import { attr } from "./attr.js";
 import { defineLogRecord, type LogRecordDefinition } from "./log-registry.js";
 import { SafeEvent, type SafeEvent as SafeEventType } from "./safe-event.js";
@@ -142,7 +142,7 @@ const sentinelTripDefinition = defineLogRecord("harness.sentinel.trip", {
   "harness.sentinel.trip.count": attr.nonnegativeInt(),
 });
 /** Logger for registered metadata-only event records. */
-export const safeEventLogger = logs.getLogger("@harness/core");
+export const safeEventLogger = logs.getLogger("@rovinos/core");
 
 function scalarValue(value: unknown): string | number | boolean | undefined {
   if (

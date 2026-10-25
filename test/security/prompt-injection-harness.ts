@@ -5,9 +5,9 @@ import {
   type ModelToolCall,
   type PolicyPort,
   type ToolPort,
-} from "@harness/core";
-import { FakeModelPort, ObedientModel } from "@harness/core/testing";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/core";
+import { FakeModelPort, ObedientModel } from "@rovinos/core/testing";
+import { InMemoryEventStore } from "@rovinos/store";
 import {
   Code,
   JsonValue,
@@ -16,9 +16,9 @@ import {
   type Detection,
   type Event,
   type ModelRequest,
-} from "@harness/schemas";
-import { PiiToolPort, Tokenizer } from "@harness/pii";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
+} from "@rovinos/schemas";
+import { PiiToolPort, Tokenizer } from "@rovinos/pii";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { executeRuntimeScenario, type RuntimeScenarioResult } from "./prompt-injection-runtime.js";

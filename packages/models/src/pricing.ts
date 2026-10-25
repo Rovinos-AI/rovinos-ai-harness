@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelPricingRate, ModelRef, ModelUsage } from "@harness/schemas";
+import type { ModelPricingRate, ModelRef, ModelUsage } from "@rovinos/schemas";
 import { ModelUsageError } from "./errors.js";
 
 /** Prices keyed by the configured `provider/model` reference. */

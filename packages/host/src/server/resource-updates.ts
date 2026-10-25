@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, parseJson } from "@harness/schemas";
+import { Id, parseJson } from "@rovinos/schemas";
 import { readBody, MAX_HOST_REQUEST_BYTES, writeError } from "./http-utils.js";
 import type { AppInstance, HostRequest, HostResponse, ReferenceHostDependencies } from "./types.js";
 import { z } from "zod";

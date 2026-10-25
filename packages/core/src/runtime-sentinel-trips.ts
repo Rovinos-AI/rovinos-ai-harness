@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, ROOT_CONTEXT, trace } from "@opentelemetry/api";
-import { type Event, type Id } from "@harness/schemas";
-import { type EventStore } from "@harness/store";
-import { countDroppedTelemetry, sentinelTripQueue } from "@harness/telemetry";
+import { type Event, type Id } from "@rovinos/schemas";
+import { type EventStore } from "@rovinos/store";
+import { countDroppedTelemetry, sentinelTripQueue } from "@rovinos/telemetry";
 import { RunRecorder } from "./recorder.js";
 import type { Clock } from "./recorder.js";
 import type { RunLoopResult } from "./loop.js";

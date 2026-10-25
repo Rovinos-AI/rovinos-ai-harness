@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, expect, it, vi } from "vitest";
-import { Code, Id, parseJson, type KeyProvider } from "@harness/schemas";
-import { AesGcmContentCodec } from "@harness/store";
-import type { ContentCodec } from "@harness/store/adapter-internal";
-import { InvalidEventError, StoreUnavailableError } from "@harness/store/adapter-internal";
+import { Code, Id, parseJson, type KeyProvider } from "@rovinos/schemas";
+import { AesGcmContentCodec } from "@rovinos/store";
+import type { ContentCodec } from "@rovinos/store/adapter-internal";
+import { InvalidEventError, StoreUnavailableError } from "@rovinos/store/adapter-internal";
 import { PostgresEventStore } from "./adapter.js";
-import { createEventBuilders, runEventStoreConformance } from "@harness/store/testing";
+import { createEventBuilders, runEventStoreConformance } from "@rovinos/store/testing";
 import { z } from "zod";
 
 interface FakeRun {

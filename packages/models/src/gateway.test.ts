@@ -6,11 +6,11 @@ import {
   parseJson,
   type JsonValue as JsonValueType,
   type ModelRequest,
-} from "@harness/schemas";
-import { attr, defineSpan, withSpan } from "@harness/telemetry";
-import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+} from "@rovinos/schemas";
+import { attr, defineSpan, withSpan } from "@rovinos/telemetry";
+import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { context, trace } from "@opentelemetry/api";
-import * as telemetry from "@harness/telemetry";
+import * as telemetry from "@rovinos/telemetry";
 import { z } from "zod";
 import { ModelOutputInvalidError, ProviderError } from "./errors.js";
 import { ModelGateway } from "./gateway.js";
@@ -586,7 +586,7 @@ describe("ModelGateway", () => {
         "harness.model.cache_write_tokens": attr.optional(attr.nonnegativeInt()),
         "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
       },
-      { taskId: "4.7", packageName: "@harness/models" },
+      { taskId: "4.7", packageName: "@rovinos/models" },
     );
     let calls = 0;
     const complete = vi.fn((_request: ModelRequest, _context: ProviderContext) => {

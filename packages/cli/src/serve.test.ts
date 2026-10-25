@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema } from "@harness/config";
-import type * as ControlPlane from "@harness/control-plane";
-import { foldRunState, type RunLoopResult, type Runtime } from "@harness/core";
-import { Code, Id, Principal } from "@harness/schemas";
+import { HarnessConfigSchema } from "@rovinos/config";
+import type * as ControlPlane from "@rovinos/control-plane";
+import { foldRunState, type RunLoopResult, type Runtime } from "@rovinos/core";
+import { Code, Id, Principal } from "@rovinos/schemas";
 import {
   IdempotencyKeyHashSchema,
   InMemoryEventStore,
   type RunQueue,
   type RunQueueJob,
-} from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
+} from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "./command.js";
@@ -43,7 +43,7 @@ const controlPlaneMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@harness/control-plane", async (importOriginal) => ({
+vi.mock("@rovinos/control-plane", async (importOriginal) => ({
   ...(await importOriginal<typeof ControlPlane>()),
   startControlPlaneHttp: controlPlaneMocks.startHttp,
   startControlPlaneStdio: controlPlaneMocks.startStdio,

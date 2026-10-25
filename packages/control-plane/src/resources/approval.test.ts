@@ -1,15 +1,70 @@
 // SPDX-License-Identifier: Apache-2.0
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   APPROVAL_RESOURCE_URI,
   MCP_APP_HTML_MIME_TYPE,
+  approvalAppResourcePath,
   loadApprovalHtml,
   registerApprovalResource,
 } from "./approval.js";
 
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+  temporaryDirectories.length = 0;
+});
+
 describe("approval app resource", () => {
+  it("resolves both app assets beside a bundle and from the workspace source tree", async () => {
+    const root = await mkdtemp(join(tmpdir(), "approval-resource-"));
+    temporaryDirectories.push(root);
+    const layouts = [
+      ["bundle", "cli/dist/chunk.js", "cli/dist/assets"],
+      [
+        "workspace",
+        "packages/control-plane/src/resources/approval.js",
+        "packages/approval-app/dist",
+      ],
+    ] as const;
+
+    for (const [layout, modulePath, assetDirectory] of layouts) {
+      for (const filename of ["approval.html", "runs-console.html"] as const) {
+        const assetPath = join(root, assetDirectory, filename);
+        await mkdir(join(root, assetDirectory), { recursive: true });
+        await writeFile(assetPath, `${layout}:${filename}`);
+        expect(approvalAppResourcePath(filename, pathToFileURL(join(root, modulePath)).href)).toBe(
+          assetPath,
+        );
+      }
+    }
+  });
+
+  it("returns the bundle-relative path when the asset is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "approval-resource-missing-"));
+    temporaryDirectories.push(root);
+    const moduleUrl = pathToFileURL(join(root, "cli/dist/approval.js")).href;
+    expect(approvalAppResourcePath("approval.html", moduleUrl)).toBe(
+      fileURLToPath(new URL("./assets/approval.html", moduleUrl)),
+    );
+  });
+
+  it("loads the built approval HTML", async () => {
+    const root = await mkdtemp(join(tmpdir(), "approval-resource-load-"));
+    temporaryDirectories.push(root);
+    const htmlPath = join(root, "approval.html");
+    await writeFile(htmlPath, "<html>approval</html>");
+    expect(loadApprovalHtml(htmlPath)).toBe("<html>approval</html>");
+  });
+
   it("serves the approval HTML with the MCP Apps MIME type and empty permissions", async () => {
     const html = "<!doctype html><html><body>built approval</body></html>";
     const server = new McpServer({ name: "approval-resource-test", version: "1.0.0" });

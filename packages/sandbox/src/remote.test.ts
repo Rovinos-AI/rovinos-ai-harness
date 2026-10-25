@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { describe, expect, it, vi } from "vitest";

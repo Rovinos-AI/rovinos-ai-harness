@@ -2,8 +2,8 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import { Code, HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
-import { countHostAppSpansAccepted } from "@harness/telemetry";
+import { Code, HarnessError, HostConfigSchema, Id, type HostConfig } from "@rovinos/schemas";
+import { countHostAppSpansAccepted } from "@rovinos/telemetry";
 import {
   AppCallRouter,
   AppCallRouterError,

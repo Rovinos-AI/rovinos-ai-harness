@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Readable } from "node:stream";
-import { Event as EventSchema, Id, type Event, type Id as RunId } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { Event as EventSchema, Id, type Event, type Id as RunId } from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import { ResolvedRunSchema, resolveRun } from "./index.js";
 

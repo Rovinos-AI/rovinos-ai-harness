@@ -1,5 +1,5 @@
 {
-  "name": "@harness/mcp",
+  "name": "@rovinos/mcp",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,11 +18,11 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@harness/crypto": "workspace:^",
-    "@harness/schemas": "workspace:^",
-    "@harness/telemetry": "workspace:^",
     "@modelcontextprotocol/client": "2.3.1",
     "@opentelemetry/api": "1.9.1",
+    "@rovinos/crypto": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
     "better-sqlite3": "13.0.3",
     "zod": "4.6.7"
   },

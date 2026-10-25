@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { specTypeSchemas, type InputResponses } from "@modelcontextprotocol/client";
-import type { Code, Id, InputResponse } from "@harness/schemas";
+import type { Code, Id, InputResponse } from "@rovinos/schemas";
 import type { ValidatedInputRequest } from "./validate.js";
 
 /** Durable request data handed from the MCP boundary to the run loop. */

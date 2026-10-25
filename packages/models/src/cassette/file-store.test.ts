@@ -2,7 +2,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ContractError, type ModelRequest } from "@harness/schemas";
+import { ContractError, type ModelRequest } from "@rovinos/schemas";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ProviderResult } from "../types.js";
 import { FileCassetteStore } from "./file-store.js";

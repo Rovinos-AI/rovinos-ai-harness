@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import type { HostConfig } from "@harness/schemas";
+import type { HostConfig } from "@rovinos/schemas";
 import { AppRateLimiter } from "./app-limits.js";
 
 const defaultLimits: HostConfig["limits"] = {

@@ -7,8 +7,8 @@ import {
   type NewEvent,
   type Snapshot,
   type TraceId,
-} from "@harness/schemas";
-import type { EventStore, ListRunsOptions, RunSummary } from "@harness/store";
+} from "@rovinos/schemas";
+import type { EventStore, ListRunsOptions, RunSummary } from "@rovinos/store";
 
 /** Error thrown at the selected append boundary. */
 export class SimulatedCrash extends HarnessError {

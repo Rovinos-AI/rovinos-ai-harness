@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import type { ModelRequest } from "@harness/schemas";
-import { AdapterRegistry, ModelGateway, type ProviderAdapter } from "@harness/models";
-import { validateWithTokens } from "@harness/pii";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
+import type { ModelRequest } from "@rovinos/schemas";
+import { AdapterRegistry, ModelGateway, type ProviderAdapter } from "@rovinos/models";
+import { validateWithTokens } from "@rovinos/pii";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { z } from "zod";
 import { createCanaries } from "./canary/canaries.js";
 

@@ -13,9 +13,9 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { FakeClock, Id, type Event } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { TripQueue } from "@harness/telemetry";
+import { FakeClock, Id, type Event } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { TripQueue } from "@rovinos/telemetry";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LeaseLostError,

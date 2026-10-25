@@ -2,7 +2,7 @@
 import { request as createHttpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as createHttpsRequest, Agent as HttpsAgent } from "node:https";
 import { connect as connectTls } from "node:tls";
-import { HarnessError, Id, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import { HarnessError, Id, parseJson, SandboxEgressAllowlistSchema } from "@rovinos/schemas";
 import { z } from "zod";
 import { htmlToText } from "./html-text.js";
 import {

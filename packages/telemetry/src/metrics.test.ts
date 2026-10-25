@@ -26,7 +26,7 @@ import {
   type TelemetryDropReason,
 } from "./metrics.js";
 
-const meter = metrics.getMeter("@harness/telemetry");
+const meter = metrics.getMeter("@rovinos/telemetry");
 const counter = meter.createCounter("harness.telemetry.dropped");
 const histogram = meter.createHistogram("harness.worker.queue_lag_ms");
 const getMeter = vi.spyOn(metrics, "getMeter").mockReturnValue(meter);
@@ -77,7 +77,7 @@ describe("countDroppedTelemetry", () => {
       countDroppedTelemetry(reason);
     }
 
-    expect(getMeter).toHaveBeenCalledWith("@harness/telemetry");
+    expect(getMeter).toHaveBeenCalledWith("@rovinos/telemetry");
     expect(createCounter).toHaveBeenCalledWith("harness.telemetry.dropped");
     expect(add.mock.calls).toEqual(
       dropReasons.map((reason) => [1, { "harness.telemetry.dropped.reason": reason }]),
@@ -187,7 +187,7 @@ describe("countDroppedTelemetry", () => {
   it("counts skipped short sentinel values without attributes", () => {
     countSkippedShortValues(3);
 
-    expect(getMeter).toHaveBeenCalledWith("@harness/telemetry");
+    expect(getMeter).toHaveBeenCalledWith("@rovinos/telemetry");
     expect(createCounter).toHaveBeenCalledWith("harness.sentinel.short_values_skipped");
     expect(add).toHaveBeenCalledWith(3);
     expectAddCallsAreAllowlisted("harness.sentinel.short_values_skipped");

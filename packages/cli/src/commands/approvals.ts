@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from "node:fs/promises";
 import type { Command } from "commander";
-import type { HarnessConfig } from "@harness/config";
-import type { Runtime, RunState } from "@harness/core";
+import type { HarnessConfig } from "@rovinos/config";
+import type { Runtime, RunState } from "@rovinos/core";
 import {
   ApprovalListResultSchema,
   ApprovalResolveResultSchema,
@@ -13,7 +13,7 @@ import {
   parseJson,
   type ApprovalSummary,
   type Event,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { CliContext, CommandModule } from "../command.js";
 import { cliApprovalMetadata } from "../command.js";
 import { waitForShutdown } from "../serve.js";
@@ -82,7 +82,7 @@ async function pendingForRun(store: Store, runId: Id): Promise<PendingApproval[]
   if (events.length === 0) {
     return [];
   }
-  const { foldRunState } = await import("@harness/core");
+  const { foldRunState } = await import("@rovinos/core");
   const state = foldRunState(events);
   return [...state.pendingApprovals.values()].map((request) => ({
     runId,
@@ -105,7 +105,7 @@ async function findPending(store: Store, approvalId: Id): Promise<PendingApprova
 }
 
 async function summarize(pending: PendingApproval, now: number): Promise<ApprovalSummary> {
-  const { ApprovalPayloadSchema } = await import("@harness/policy");
+  const { ApprovalPayloadSchema } = await import("@rovinos/policy");
   const { request, state, runId } = pending;
   const payload = ApprovalPayloadSchema.safeParse(request.payload);
   return {
@@ -280,7 +280,7 @@ async function showApprovalDetails(input: {
   readonly resolverLease: Awaited<ReturnType<typeof createApprovalResolverLease>> | undefined;
 }): Promise<void> {
   const summary = await summarize(input.pending, input.context.clock.now());
-  const { ApprovalPayloadSchema } = await import("@harness/policy");
+  const { ApprovalPayloadSchema } = await import("@rovinos/policy");
   const payload = ApprovalPayloadSchema.safeParse(input.pending.request.payload);
   const showArgs = input.options.showArgs === true || input.options.reveal === true;
   const args = payload.success ? payload.data.args : null;
@@ -392,7 +392,7 @@ function registerSweep(approvals: Command, context: CliContext): void {
         context,
         undefined,
         async (runtime, config) => {
-          // Loaded on demand: the sweep imports @harness/core, which `approvals` must not load eagerly.
+          // Loaded on demand: the sweep imports @rovinos/core, which `approvals` must not load eagerly.
           const { runApprovalSweep } = await import("./approval-sweep.js");
           await runApprovalSweep(runtime, context, config);
         },

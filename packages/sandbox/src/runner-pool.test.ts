@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Readable } from "node:stream";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { RemoteSandboxError } from "./remote-errors.js";
 import { RunnerPool } from "./runner-pool.js";

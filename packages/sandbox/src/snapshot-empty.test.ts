@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import * as tar from "tar";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceSnapshotter, type RemoteWorkspaceSnapshotPort } from "./snapshot.js";

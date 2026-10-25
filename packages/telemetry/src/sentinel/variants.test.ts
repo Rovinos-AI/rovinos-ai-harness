@@ -2,7 +2,7 @@
 import { performance } from "node:perf_hooks";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { Code, Id } from "@harness/schemas";
+import { Code, Id } from "@rovinos/schemas";
 import { ActiveRuns } from "./active-runs.js";
 import { SentinelGate } from "./gate.js";
 import { VaultRunView, type VaultRunReader } from "./run-values.js";

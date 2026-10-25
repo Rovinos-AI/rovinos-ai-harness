@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type ModelRequest, type Part } from "@harness/schemas";
+import { Code, type ModelRequest, type Part } from "@rovinos/schemas";
 import type { z } from "zod";
 import { extractJson } from "./extract-json.js";
 import {

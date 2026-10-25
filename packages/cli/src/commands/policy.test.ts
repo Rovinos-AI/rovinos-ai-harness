@@ -2,8 +2,8 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HarnessConfigSchema } from "@harness/config";
-import { parseJson, PolicyLintResultSchema, PolicyTestResultSchema } from "@harness/schemas";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { parseJson, PolicyLintResultSchema, PolicyTestResultSchema } from "@rovinos/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";

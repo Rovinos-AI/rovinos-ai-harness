@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJson, RunConfigSchema } from "@harness/schemas";
+import { parseJson, RunConfigSchema } from "@rovinos/schemas";
 import { z } from "zod";
 
 const composeConfigSchema = z.object({

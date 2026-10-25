@@ -5,8 +5,8 @@ import {
   type Code as CodeType,
   type Id,
   type JsonValue,
-} from "@harness/schemas";
-import { findTokens, type AuditingVaultResolver, type VaultAuditHandler } from "@harness/vault";
+} from "@rovinos/schemas";
+import { findTokens, type AuditingVaultResolver, type VaultAuditHandler } from "@rovinos/vault";
 import { z } from "zod";
 
 /** A value-free validation issue. */

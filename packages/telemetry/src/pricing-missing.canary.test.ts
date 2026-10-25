@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { createTelemetrySdk } from "./sdk.js";
 import { emitPricingCacheMissing, emitPricingMissing } from "./safe-event-logs.js";
@@ -22,7 +22,7 @@ describe("pricing_missing telemetry canary", () => {
       emitPricingMissing(
         Code.parse("sample"),
         Code.parse("model_a"),
-        sdk.loggerProvider.getLogger("@harness/telemetry"),
+        sdk.loggerProvider.getLogger("@rovinos/telemetry"),
       );
       await sdk.forceFlush();
 
@@ -56,7 +56,7 @@ describe("pricing_missing telemetry canary", () => {
       emitPricingCacheMissing(
         Code.parse("sample"),
         Code.parse("model_a"),
-        sdk.loggerProvider.getLogger("@harness/telemetry"),
+        sdk.loggerProvider.getLogger("@rovinos/telemetry"),
       );
       await sdk.forceFlush();
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, Id, Code, type SecretRef, SecretRefSchema } from "@harness/schemas";
+import { HarnessError, Id, Code, type SecretRef, SecretRefSchema } from "@rovinos/schemas";
 import { z } from "zod";
 
 const WebhookUrlSchema = z.url().pipe(

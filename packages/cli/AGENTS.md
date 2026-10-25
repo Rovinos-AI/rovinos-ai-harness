@@ -10,7 +10,7 @@ The `harness` CLI. Epic 20 defines the framework; commands are added by the epic
 
 ## Allowed internal imports
 
-- `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`, `@harness/store`, `@harness/store-postgres`, `@harness/store-sqlite`, `@harness/vault`, `@harness/pii`, `@harness/models`, `@harness/context`, `@harness/policy`, `@harness/mcp`, `@harness/sandbox`, `@harness/core`, `@harness/config`, `@harness/control-plane`, `@harness/host`, `@harness/replay`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/store`, `@rovinos/store-postgres`, `@rovinos/store-sqlite`, `@rovinos/vault`, `@rovinos/pii`, `@rovinos/models`, `@rovinos/context`, `@rovinos/policy`, `@rovinos/mcp`, `@rovinos/sandbox`, `@rovinos/core`, `@rovinos/config`, `@rovinos/control-plane`, `@rovinos/host`, `@rovinos/replay`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

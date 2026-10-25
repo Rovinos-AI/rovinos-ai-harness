@@ -6,7 +6,7 @@ import {
   Sha256Hex,
   type ModelRequest,
   type Sha256Hex as Sha256HexType,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import {
   CassetteEntrySchema,

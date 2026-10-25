@@ -9,11 +9,11 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
-} from "@harness/schemas";
-import { RunnerPool, type RunnerPoolRunner, type SandboxBackend } from "@harness/sandbox";
-import { InMemoryEventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
+} from "@rovinos/schemas";
+import { RunnerPool, type RunnerPoolRunner, type SandboxBackend } from "@rovinos/sandbox";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import { FakeModelPort } from "./testing/fake-model.js";

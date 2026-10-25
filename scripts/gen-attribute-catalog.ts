@@ -9,7 +9,7 @@ import {
   type SpanDefinition,
   type SpanDefinitionShape,
   type LogRecordShape,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -99,7 +99,7 @@ export function renderAttributeCatalog(
   const logSections = [...logs]
     .sort((left, right) => compareNames(left.name, right.name))
     .map((definition) =>
-      renderAttributeTable(definition.name, definition.shape, "@harness/telemetry"),
+      renderAttributeTable(definition.name, definition.shape, "@rovinos/telemetry"),
     );
 
   return [

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseYaml } from "@harness/schemas";
+import { parseYaml } from "@rovinos/schemas";
 import {
   ArgMatcherSchema,
   compilePolicy,

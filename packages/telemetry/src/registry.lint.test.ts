@@ -22,7 +22,7 @@ const propertySpan = defineSpan(
     "harness.test.enabled": attr.bool(),
     "harness.test.ratio": attr.num(),
   },
-  { taskId: "4.7", packageName: "@harness/telemetry" },
+  { taskId: "4.7", packageName: "@rovinos/telemetry" },
 );
 
 describe("telemetry schema lint", () => {

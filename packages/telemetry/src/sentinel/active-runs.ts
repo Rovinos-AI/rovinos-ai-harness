@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import { z } from "zod";
 
 const ActiveRunsOptionsSchema = z

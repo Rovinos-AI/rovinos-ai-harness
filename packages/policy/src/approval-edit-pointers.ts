@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonPointerSchema } from "@harness/schemas";
-import type { JsonPointer, JsonValue } from "@harness/schemas";
+import { JsonPointerSchema } from "@rovinos/schemas";
+import type { JsonPointer, JsonValue } from "@rovinos/schemas";
 import type { ApprovalEdit } from "./approval-edits.js";
 import type { ApprovalPayload } from "./approval-payload.js";
 

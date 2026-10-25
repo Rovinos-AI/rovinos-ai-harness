@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id, InputResponse } from "@harness/schemas";
-import type { ElicitationInputRequired, ElicitationPort, ElicitationRetry } from "@harness/mcp";
+import type { Event, Id, InputResponse } from "@rovinos/schemas";
+import type { ElicitationInputRequired, ElicitationPort, ElicitationRetry } from "@rovinos/mcp";
 import type { Checkpointer } from "../checkpoint.js";
 import {
   RunEventRecordingError,

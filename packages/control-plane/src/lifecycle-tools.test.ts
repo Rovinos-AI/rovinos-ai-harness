@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import type { EventStore } from "@harness/store";
-import { InMemoryEventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { Code, JsonValue, type Id, type NewEvent } from "@harness/schemas";
-import { ApprovalEditError } from "@harness/policy";
+import type { EventStore } from "@rovinos/store";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { Code, JsonValue, type Id, type NewEvent } from "@rovinos/schemas";
+import { ApprovalEditError } from "@rovinos/policy";
 import type { ServerContext } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmationGate, type ConfirmationRequest } from "./confirmation-gate.js";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { aesGcmDecrypt } from "@harness/crypto";
-import { Id, type KeyProvider } from "@harness/schemas";
+import { aesGcmDecrypt } from "@rovinos/crypto";
+import { Id, type KeyProvider } from "@rovinos/schemas";
 import { deriveVaultKeys } from "./sqlite-crypto.js";
 import {
   createWrappedScopeKey,

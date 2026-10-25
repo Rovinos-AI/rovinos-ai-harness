@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { HarnessConfig } from "@harness/config";
-import type { Runtime, RunState } from "@harness/core";
-import { HarnessError } from "@harness/schemas";
-import type { Event, Id, JsonValue } from "@harness/schemas";
-import type { VaultAuditPiiAction } from "@harness/vault";
+import type { HarnessConfig } from "@rovinos/config";
+import type { Runtime, RunState } from "@rovinos/core";
+import { HarnessError } from "@rovinos/schemas";
+import type { Event, Id, JsonValue } from "@rovinos/schemas";
+import type { VaultAuditPiiAction } from "@rovinos/vault";
 import type { CliContext } from "../command.js";
 import { collectApprovalTokens, revealApprovalTokens } from "./approval-args.js";
 
@@ -55,7 +55,7 @@ async function recordRevealAudit(
   if (lastEvent === undefined) {
     return;
   }
-  const { APPROVAL_WAIT_SPAN, RunRecorder } = await import("@harness/core");
+  const { APPROVAL_WAIT_SPAN, RunRecorder } = await import("@rovinos/core");
   const recorder = new RunRecorder(
     store,
     pending.runId,
@@ -83,7 +83,7 @@ export async function revealApprovalArgs(options: {
   readonly toolId: string;
 }): Promise<JsonValue> {
   const { context, resolver, store, pending, args, toolId } = options;
-  const { findTokens, vaultAuditToPiiAction } = await import("@harness/vault");
+  const { findTokens, vaultAuditToPiiAction } = await import("@rovinos/vault");
   const audits: VaultAuditPiiAction[] = [];
   const tokens = new Set<string>();
   collectApprovalTokens(args, tokens, findTokens);

@@ -6,7 +6,7 @@ Instruction precedence: explicit user instructions, then the nearest `AGENTS.md`
 
 ## Current state
 
-The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks add the remaining packages and tooling. `docs/progress/` tracks completed tasks with one marker file per task id.
+The Yarn workspace and `@rovinos/schemas` package are scaffolded; later tasks add the remaining packages and tooling. `docs/progress/` tracks completed tasks with one marker file per task id.
 
 ## How to work here
 

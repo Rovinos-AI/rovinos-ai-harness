@@ -1,4 +1,4 @@
-# `@harness/app-telemetry`
+# `@rovinos/app-telemetry`
 
 Browser-safe, manifest-scoped telemetry for MCP Apps. The shim activates only
 after the host confirms `harness.telemetry.emit` is available. Pass `hostReady`

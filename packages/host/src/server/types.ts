@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { CallToolResult, ListToolsResult } from "@modelcontextprotocol/client";
-import { Code, Id } from "@harness/schemas";
+import { Code, Id } from "@rovinos/schemas";
 import type { HostDiagnosticCode } from "./resource.js";
 import type { UiSession, UiSessionContext } from "./ui-session.js";
 import { z } from "zod";
@@ -10,7 +10,7 @@ import type {
   AppCallRejectedReason,
 } from "./app-calls.js";
 import type { AppContentEnvelope, AppContentTokenizer } from "./app-requests.js";
-import type { PolicyPort, ToolPort } from "@harness/core";
+import type { PolicyPort, ToolPort } from "@rovinos/core";
 
 /** Validated app-originated call payload accepted at the host boundary. */
 export const AppCallSchema = z

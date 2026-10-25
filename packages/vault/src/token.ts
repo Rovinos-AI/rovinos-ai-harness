@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseTokenType } from "@harness/schemas";
-import type { Code } from "@harness/schemas";
+import { parseTokenType } from "@rovinos/schemas";
+import type { Code } from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Runtime schema for the stable placeholder token format. */

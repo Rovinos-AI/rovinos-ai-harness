@@ -12,10 +12,10 @@ import {
   type Event,
   type NewEvent,
   type RunStatus,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
-import { InMemoryVault } from "@harness/vault";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
+import { InMemoryVault } from "@rovinos/vault";
 import { describe, expect, it } from "vitest";
 import {
   ContinuationChainTooLongError,

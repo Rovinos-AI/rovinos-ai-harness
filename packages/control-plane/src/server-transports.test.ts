@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { InMemoryEventStore } from "@harness/store";
-import { ControlPlaneConfigSchema, HarnessError, Id } from "@harness/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { ControlPlaneConfigSchema, HarnessError, Id } from "@rovinos/schemas";
 import type * as McpServerModule from "@modelcontextprotocol/server";
 import type { ControlPlaneServerOptions } from "./server.js";
 import { MAX_CONTROL_PLANE_REQUEST_BYTES } from "./resources/run-resource-access.js";

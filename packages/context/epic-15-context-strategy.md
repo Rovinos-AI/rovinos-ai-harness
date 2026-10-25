@@ -16,7 +16,7 @@ Shared design for this epic:
 **Parent:** #15 Context strategy
 **Task Description:** Define the strategy interface, build the pure transcript reconstruction, add the missing `run_input` event, and bridge strategies to the run loop's `ContextPort`.
 **Expected Inputs:** `Event[]`, optional snapshot, token budget, model reference.
-**Expected Output:** `packages/context/src/{types.ts,transcript.ts,context-port.ts,index.ts}`, new event type `run_input` in `@harness/schemas`, `ContextPort.snapshot/restore` implementation, package scaffold.
+**Expected Output:** `packages/context/src/{types.ts,transcript.ts,context-port.ts,index.ts}`, new event type `run_input` in `@rovinos/schemas`, `ContextPort.snapshot/restore` implementation, package scaffold.
 **Dependencies:** none.
 **Items it depends on:** 7.1, 14.2, 2.3, 2.6.
 **Implementation guidance:**

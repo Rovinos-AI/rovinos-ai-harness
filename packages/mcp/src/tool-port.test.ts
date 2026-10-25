@@ -17,9 +17,9 @@ import {
   ServerConfigSchema,
   type JsonValue as JsonValueType,
   type ServerConfig,
-} from "@harness/schemas";
-import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
-import { lookupSpanDefinition } from "@harness/telemetry";
+} from "@rovinos/schemas";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
+import { lookupSpanDefinition } from "@rovinos/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
 import { handleInputRequiredCall } from "./input-required-call.js";

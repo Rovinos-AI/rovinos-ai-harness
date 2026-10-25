@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Runtimes without a policy deny every tool; tests that exercise tool execution opt in here.
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import type { PolicyPort } from "../ports.js";
 
 /** Test policy that allows every tool call with a fixed rule, reason, and version. */

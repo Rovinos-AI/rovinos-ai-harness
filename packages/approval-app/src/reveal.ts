@@ -4,7 +4,7 @@ import {
   RevealRequest,
   RevealResponse,
   type ApprovalPayload,
-} from "@harness/schemas/browser";
+} from "@rovinos/schemas/browser";
 import { formatMessage, getStrings } from "./kit/strings.js";
 
 /** Host and view callbacks required by the time-limited sensitive-value reveal. */

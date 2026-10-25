@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema, Secret } from "@harness/config";
-import { LogNotifier, WebhookNotifier } from "@harness/policy";
-import { Code, Id, type SecretRef } from "@harness/schemas";
+import { HarnessConfigSchema, Secret } from "@rovinos/config";
+import { LogNotifier, WebhookNotifier } from "@rovinos/policy";
+import { Code, Id, type SecretRef } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { createApprovalNotifier } from "./approval-notifier.js";
 

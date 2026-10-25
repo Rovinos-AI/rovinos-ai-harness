@@ -19,6 +19,9 @@ let masterKeyFile = "";
 let storeUrlFile = "";
 let vaultUrlFile = "";
 let postgresPasswordFile = "";
+let blockWorkerEnvironmentFile = "";
+let completeWorkerEnvironmentFile = "";
+let verificationEnvironmentFile = "";
 const workerContainers = [firstWorkerContainer, secondWorkerContainer];
 const secretFiles = {
   runnerToken: runnerTokenFile,
@@ -30,21 +33,24 @@ const secretFiles = {
 };
 const docker = createMultiWorkerCompose({ projectName, root, secretFiles });
 
-function workerScript(mode: "block" | "complete"): string {
+function workerScript(): string {
   return [
     'import { Pool } from "pg";',
     'import { readFileSync } from "node:fs";',
     'import { Command } from "commander";',
-    'import { createDefaultContext, createOutput } from "@harness/cli/programmatic";',
-    'import { Worker, createRuntime, openConfiguredRunQueue } from "@harness/core";',
-    'import { allowAllPolicy } from "@harness/core/testing";',
+    'import { createDefaultContext, createOutput } from "@rovinos/cli/programmatic";',
+    'import { Worker, createRuntime, openConfiguredRunQueue } from "@rovinos/core";',
+    'import { allowAllPolicy } from "@rovinos/core/testing";',
     "const context = createDefaultContext(new Command(), createOutput());",
     "const config = await context.loadConfig();",
     "const queue = await openConfiguredRunQueue(config, { clock: context.clock, secretResolver: context.secretResolver });",
     "const sql = new Pool({ connectionString: readFileSync('/run/secrets/store_database_url', 'utf8').trim() });",
+    "const mode = process.env.MULTI_WORKER_MODE;",
+    "const rawCanary = process.env.MULTI_WORKER_RAW_CANARY;",
+    "if ((mode !== 'block' && mode !== 'complete') || rawCanary === undefined) throw new Error('multi_worker_environment_invalid');",
     "let modelCalls = 0;",
     "const completion = (parts, finishReason) => ({ provider: 'synthetic', model: 'multi-worker', parts, providerBlobs: null, usage: { inputTokens: 1, outputTokens: 1 }, finishReason, latencyMs: 0, schemaValid: true, repairAttempts: 0, fallbackDepth: 0 });",
-    `const model = { complete: async (_request, runContext) => { modelCalls += 1; if (${JSON.stringify(mode)} === 'block' && modelCalls === 1) return completion([{ type: 'tool_call', callId: '00000000000000000000000002', toolId: 'test.multi_worker', args: { email: ${JSON.stringify(rawCanary)} } }], 'tool_calls'); if (${JSON.stringify(mode)} === 'block' && modelCalls === 2) { const events = []; for await (const event of runtime.store.read(runContext.runId)) events.push(event); if (!events.some((event) => event.type === 'tool_result' && event.toolId === 'test.multi_worker')) throw new Error('multi_worker_tool_result_not_durable'); process.stdout.write('WORKER_TOOL_RESULT_DURABLE\\n'); process.stdout.write('WORKER_BLOCKED ' + runContext.runId + '\\n'); return new Promise(() => undefined); } return completion([{ type: 'text', text: 'finished' }], 'stop'); } };`,
+    "const model = { complete: async (_request, runContext) => { modelCalls += 1; if (mode === 'block' && modelCalls === 1) return completion([{ type: 'tool_call', callId: '00000000000000000000000002', toolId: 'test.multi_worker', args: { email: rawCanary } }], 'tool_calls'); if (mode === 'block' && modelCalls === 2) { const events = []; for await (const event of runtime.store.read(runContext.runId)) events.push(event); if (!events.some((event) => event.type === 'tool_result' && event.toolId === 'test.multi_worker')) throw new Error('multi_worker_tool_result_not_durable'); process.stdout.write('WORKER_TOOL_RESULT_DURABLE\\n'); process.stdout.write('WORKER_BLOCKED ' + runContext.runId + '\\n'); return new Promise(() => undefined); } return completion([{ type: 'text', text: 'finished' }], 'stop'); } };",
     "const tool = { describe: () => ({ idempotent: false, timeoutMs: 10000 }), execute: async (_call, runContext) => { await sql.query('INSERT INTO multi_worker_side_effects (run_id, executions) VALUES ($1, 1) ON CONFLICT (run_id) DO UPDATE SET executions = multi_worker_side_effects.executions + 1', [runContext.runId]); return { outcome: 'ok', result: { ok: true } }; } };",
     "const runtime = await createRuntime(config, { queue, clock: context.clock, secretResolver: context.secretResolver, policy: allowAllPolicy, model, tool });",
     "const worker = new Worker({ queue, ids: runtime.ids, clock: runtime.clock, leaseMs: 3000, pollIntervalMs: 100, execute: async (job, signal) => { const result = await runtime.resume(job.runId, { signal }); process.stdout.write('WORKER_RESULT ' + result.status + '\\n'); return result; } });",
@@ -60,9 +66,9 @@ function workerScript(mode: "block" | "complete"): string {
 function verificationScript(): string {
   return [
     'import { Command } from "commander";',
-    'import { createDefaultContext, createOutput } from "@harness/cli/programmatic";',
-    'import { createRuntime, openConfiguredRunQueue } from "@harness/core";',
-    'import { allowAllPolicy } from "@harness/core/testing";',
+    'import { createDefaultContext, createOutput } from "@rovinos/cli/programmatic";',
+    'import { createRuntime, openConfiguredRunQueue } from "@rovinos/core";',
+    'import { allowAllPolicy } from "@rovinos/core/testing";',
     "const context = createDefaultContext(new Command(), createOutput());",
     "const config = await context.loadConfig();",
     "const queue = await openConfiguredRunQueue(config, { clock: context.clock, secretResolver: context.secretResolver });",
@@ -70,7 +76,8 @@ function verificationScript(): string {
     `const runId = ${JSON.stringify(runId)};`,
     "const events = [];",
     "for await (const event of runtime.store.read(runId)) events.push(event);",
-    `const raw = ${JSON.stringify(rawCanary)};`,
+    "const raw = process.env.MULTI_WORKER_RAW_CANARY;",
+    "if (raw === undefined) throw new Error('multi_worker_environment_invalid');",
     "if (JSON.stringify(events).includes(raw)) throw new Error('multi_worker_raw_value_persisted');",
     "const intent = events.find((event) => event.type === 'tool_intent' && event.toolId === 'test.multi_worker');",
     "if (intent === undefined || intent.args === null || typeof intent.args !== 'object' || Array.isArray(intent.args) || typeof intent.args.email !== 'string') throw new Error('multi_worker_token_missing');",
@@ -93,6 +100,9 @@ describe.skipIf(!docker.available)("multi-worker deployment", () => {
     storeUrlFile = join(secretDirectory, "store_database_url");
     vaultUrlFile = join(secretDirectory, "vault_database_url");
     postgresPasswordFile = join(secretDirectory, "postgres_password");
+    blockWorkerEnvironmentFile = join(secretDirectory, "worker-block.env");
+    completeWorkerEnvironmentFile = join(secretDirectory, "worker-complete.env");
+    verificationEnvironmentFile = join(secretDirectory, "verification.env");
     secretFiles.runnerToken = runnerTokenFile;
     secretFiles.controlPlaneToken = controlPlaneTokenFile;
     secretFiles.masterKey = masterKeyFile;
@@ -110,6 +120,19 @@ describe.skipIf(!docker.available)("multi-worker deployment", () => {
         mode: 0o444,
       }),
       writeFile(vaultUrlFile, `postgresql://harness:${postgresPassword}@postgres/harness_vault`, {
+        mode: 0o444,
+      }),
+      writeFile(
+        blockWorkerEnvironmentFile,
+        `MULTI_WORKER_MODE=block\nMULTI_WORKER_RAW_CANARY=${rawCanary}\n`,
+        { mode: 0o444 },
+      ),
+      writeFile(
+        completeWorkerEnvironmentFile,
+        `MULTI_WORKER_MODE=complete\nMULTI_WORKER_RAW_CANARY=${rawCanary}\n`,
+        { mode: 0o444 },
+      ),
+      writeFile(verificationEnvironmentFile, `MULTI_WORKER_RAW_CANARY=${rawCanary}\n`, {
         mode: 0o444,
       }),
     ]);
@@ -165,8 +188,8 @@ describe.skipIf(!docker.available)("multi-worker deployment", () => {
     const seedScript = [
       'import { readFileSync } from "node:fs";',
       'import { Pool } from "pg";',
-      'import { Id } from "@harness/schemas";',
-      'import { PostgresEventStore, PostgresRunQueue } from "@harness/store-postgres";',
+      'import { Id } from "@rovinos/schemas";',
+      'import { PostgresEventStore, PostgresRunQueue } from "@rovinos/store-postgres";',
       `const runId = Id.parse(${JSON.stringify(runId)});`,
       "const storeUrl = readFileSync('/run/secrets/store_database_url', 'utf8').trim();",
       "const connection = new Pool({ connectionString: storeUrl });",
@@ -183,12 +206,17 @@ describe.skipIf(!docker.available)("multi-worker deployment", () => {
     ].join("\n");
     docker.runHarnessScript(seedScript);
 
-    docker.runHarnessScript(workerScript("block"), { name: firstWorkerContainer, detach: true });
+    docker.runHarnessScript(workerScript(), {
+      name: firstWorkerContainer,
+      detach: true,
+      envFile: blockWorkerEnvironmentFile,
+    });
     await docker.waitForLog(firstWorkerContainer, `WORKER_BLOCKED ${runId}`);
 
-    docker.runHarnessScript(workerScript("complete"), {
+    docker.runHarnessScript(workerScript(), {
       name: secondWorkerContainer,
       detach: true,
+      envFile: completeWorkerEnvironmentFile,
     });
     docker.killContainer(firstWorkerContainer);
     const logs = await docker.waitForLog(secondWorkerContainer, `WORKER_RESULT completed`, 90_000);
@@ -210,7 +238,9 @@ describe.skipIf(!docker.available)("multi-worker deployment", () => {
       .trim();
     expect(sideEffects).toBe("1");
 
-    const verification = docker.runHarnessScript(verificationScript());
+    const verification = docker.runHarnessScript(verificationScript(), {
+      envFile: verificationEnvironmentFile,
+    });
     expect(verification).toContain("MULTI_WORKER_VERIFY_OK");
     docker.stopContainer(secondWorkerContainer);
   }, 300_000);

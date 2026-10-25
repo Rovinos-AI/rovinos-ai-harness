@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue, ModelUsageSchema, PartSchema, parseJson } from "@harness/schemas";
-import type { Capabilities, ModelRequest, ModelUsage, Part } from "@harness/schemas";
+import { Code, Id, JsonValue, ModelUsageSchema, PartSchema, parseJson } from "@rovinos/schemas";
+import type { Capabilities, ModelRequest, ModelUsage, Part } from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Clock used by provider adapters for deterministic elapsed-time measurements. */

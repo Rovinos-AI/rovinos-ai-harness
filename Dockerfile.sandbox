@@ -22,7 +22,7 @@ COPY --from=manifests /manifests/ ./
 RUN mise exec -- yarn install --immutable
 COPY . .
 RUN mise exec -- yarn build \
-    && mise exec -- yarn workspaces focus @harness/sandbox --production
+    && mise exec -- yarn workspaces focus @rovinos/sandbox --production
 
 FROM node:26-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS runtime
 

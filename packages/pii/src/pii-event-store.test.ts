@@ -12,13 +12,13 @@ import {
   type JsonValue,
   type NewEvent,
   type Snapshot,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   AuditingVaultResolver,
   InMemoryVault,
   type VaultAudit,
   type VaultWriter,
-} from "@harness/vault";
+} from "@rovinos/vault";
 import { emailDetector } from "./detectors/email.js";
 import {
   PiiEventStore,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { VaultRunView, type VaultRunReader } from "@harness/telemetry";
+import { VaultRunView, type VaultRunReader } from "@rovinos/telemetry";
 import type { VaultAdmin, VaultReader, VaultResolver, VaultWriter } from "./types.js";
 
 const resolveContext = { boundary: "tool_input" } as const;

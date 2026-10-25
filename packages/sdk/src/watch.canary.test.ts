@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelPort } from "@harness/core";
-import { HarnessConfigSchema } from "@harness/config";
-import { InMemoryEventStore } from "@harness/store";
-import { Code, FakeClock, SequentialIdGenerator } from "@harness/schemas";
-import type { SafeEvent } from "@harness/telemetry";
+import type { ModelPort } from "@rovinos/core";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { InMemoryEventStore } from "@rovinos/store";
+import { Code, FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
+import type { SafeEvent } from "@rovinos/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness } from "./index.js";
 import type { Harness } from "./types.js";

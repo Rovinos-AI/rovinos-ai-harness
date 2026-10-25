@@ -4,7 +4,7 @@ import { mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import process from "node:process";
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ensureRunWorkspace,

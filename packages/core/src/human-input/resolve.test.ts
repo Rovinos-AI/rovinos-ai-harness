@@ -7,10 +7,10 @@ import {
   type Event,
   type InputRequest,
   type NewEvent,
-} from "@harness/schemas";
-import { InMemoryEventStore, RunQueueJobSchema, SeqConflictError } from "@harness/store";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
-import { Tokenizer } from "@harness/pii";
+} from "@rovinos/schemas";
+import { InMemoryEventStore, RunQueueJobSchema, SeqConflictError } from "@rovinos/store";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
+import { Tokenizer } from "@rovinos/pii";
 import { describe, expect, it, vi } from "vitest";
 import {
   resolveInput,

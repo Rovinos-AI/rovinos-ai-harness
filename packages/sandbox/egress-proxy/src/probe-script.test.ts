@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EventEmitter } from "node:events";
 import { runInNewContext } from "node:vm";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { egressProbeScript, probeHelpers } from "./probe-script.js";

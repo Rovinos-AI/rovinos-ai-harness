@@ -1,6 +1,6 @@
 # MCP Apps reference host
 
-The reference host in `@harness/host` loads configured `ui://` resources into a sandboxed iframe. The embedding process supplies a reader connected to the MCP server that owns each resource:
+The reference host in `@rovinos/host` loads configured `ui://` resources into a sandboxed iframe. The embedding process supplies a reader connected to the MCP server that owns each resource:
 
 ```ts
 const host = await createReferenceHost(hostConfig, {
@@ -60,10 +60,10 @@ This setup assumes a trusted local host page and a browser that enforces iframe 
 
 ### Approval screen (task 5.3)
 
-`yarn workspace @harness/approval-app build` produces `packages/approval-app/dist/approval.html`,
+`yarn workspace @rovinos/approval-app build` produces `packages/approval-app/dist/approval.html`,
 a single document with inline script/style and a SHA-256 content comment. The view validates
 tool-input arguments, structured tool results, or JSON text results against the shared
-`ApprovalPayloadSchema` (`@harness/schemas/browser`). Invalid payloads replace the screen with
+`ApprovalPayloadSchema` (`@rovinos/schemas/browser`). Invalid payloads replace the screen with
 a fixed error state and report only `ui.error` / `payload_invalid` through the host.
 
 The screen displays tokenized arguments as a collapsible tree. Pills label entity types and

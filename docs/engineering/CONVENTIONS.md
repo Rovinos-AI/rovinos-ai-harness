@@ -14,7 +14,7 @@ Each task has: Parent, Task Name, Task Description, Expected Inputs, Expected Ou
 
 ## 1. Repository layout
 
-Yarn 4 workspaces. All packages are ESM, TypeScript, scope `@harness/`.
+Yarn 4 workspaces. All packages are ESM, TypeScript, scope `@rovinos/`.
 
 ```text
 packages/
@@ -37,7 +37,7 @@ packages/
   replay/         replay + trace diff
   eval/           eval runner and graders
   config/         Zod config loading
-  sdk/            public programmatic API (@harness/sdk), the only semver-stable surface
+  sdk/            public programmatic API (@rovinos/sdk), the only semver-stable surface
   cli/            `harness` CLI (bin)
 infra/
   compose/        docker-compose files (dev, test, prod-like)
@@ -54,7 +54,7 @@ test/             cross-package integration, canary, replay tests
 Dependency direction: the canonical allowlist is `docs/engineering/layers.json`. The ESLint import rule from task 1.2 reads it, and the table below is generated from it (`node scripts/gen-agents-index.mjs`). Summary: `schemas` and `crypto` are leaves; `telemetry` imports `schemas` only; mid-layer packages import `schemas` and `telemetry`, plus `crypto` (`store`, `vault`, `sandbox`, per task 12.2) or `vault` (`pii`, per epic 13); `core` imports all of those; `host`, `control-plane`, `replay`, `eval`, `cli` import `core` and below. No cycles. To change a boundary, edit `layers.json` in the same PR as the code that needs it.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
-| Package | May import (`@harness/*`) |
+| Package | May import (`@rovinos/*`) |
 | --- | --- |
 | `schemas` | nothing (leaf) |
 | `crypto` | nothing (leaf) |
@@ -92,10 +92,10 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 ## 3. Coding rules
 
 1. No `any`, no non-null assertions, no `as` casts except in narrowly commented adapters.
-2. Every exported function that crosses a package boundary validates input with Zod or accepts an already-validated type from `@harness/schemas`.
+2. Every exported function that crosses a package boundary validates input with Zod or accepts an already-validated type from `@rovinos/schemas`.
 3. Inject nondeterminism: `Clock { now(): number }`, `IdGenerator { next(): string }`, `Random`. Production uses system implementations; tests use fakes from `packages/schemas/src/testing.ts` (created in task 1.1 as stubs, extended later).
 4. Errors are classes extending `HarnessError` with a closed `code` (`^[a-z0-9_.-]{1,64}$`). Telemetry and logs carry only `code`, never `message`.
-5. No `console.*`. Use the sanctioned logger from `@harness/telemetry` (task 20.5). Until it exists, use a local no-op logger interface and do not print.
+5. No `console.*`. Use the sanctioned logger from `@rovinos/telemetry` (task 20.5). Until it exists, use a local no-op logger interface and do not print.
 6. Pure functions for decision logic (state transitions, policy evaluation, diffing). Side effects only at the edges (stores, network, fs).
 7. Every file starts with `// SPDX-License-Identifier: Apache-2.0` (after a shebang if present).
 8. Public interfaces have TSDoc. Non-obvious behavior has a header comment explaining why.
@@ -105,11 +105,11 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 ## 4. Domain model (shared vocabulary)
 
 - **Run**: one execution of an agent task. Identified by `runId` (ULID). Has a monotonically increasing `seq` of events starting at 0.
-- **Event**: immutable envelope `{ runId, seq, ts, type, v, traceId, spanId, segmentId, ... }` where `v` is the schema version of that event type. Event types (canonical set, extended only by adding to `@harness/schemas`): `run_created`, `run_input` (added by task 15.1), `run_status_changed`, `model_request`, `model_response`, `tool_intent`, `tool_result`, `approval_requested`, `approval_resolved`, `checkpoint_written`, `context_compacted`, `pii_action`, `budget_exceeded`, `subagent_spawned`, `subagent_completed`, `input_requested`, `input_resolved` (added by task 25.1).
+- **Event**: immutable envelope `{ runId, seq, ts, type, v, traceId, spanId, segmentId, ... }` where `v` is the schema version of that event type. Event types (canonical set, extended only by adding to `@rovinos/schemas`): `run_created`, `run_input` (added by task 15.1), `run_status_changed`, `model_request`, `model_response`, `tool_intent`, `tool_result`, `approval_requested`, `approval_resolved`, `checkpoint_written`, `context_compacted`, `pii_action`, `budget_exceeded`, `subagent_spawned`, `subagent_completed`, `input_requested`, `input_resolved` (added by task 25.1).
 - **Schema evolution** (task 7.13): until the first tagged release, event schemas may change in place with golden updates. From the first release on, any change to an existing event type bumps its `v` and adds an upcaster; meta fields are never removed; new required fields need an upcaster default. `event-schema.lock.json` and the legacy-log tests enforce this.
 - **Principal**: who acted, as a Code with a kind prefix (`token.<id>`, `cli.<name>`, `eval.simulated`, `system.sweeper`), recorded as `requestedBy` and `approverId` (task 17.9).
 - **Field classification**: every event field is `meta` (safe for telemetry: IDs, enums, counts, timings, codes) or `content` (anything user- or model-derived). New fields default to `content`.
-- **SafeEvent**: closed, `.strict()` projection of an event containing only `meta`-classified fields from an explicit allowlist. Built by `toSafeEvent()` in `@harness/telemetry`.
+- **SafeEvent**: closed, `.strict()` projection of an event containing only `meta`-classified fields from an explicit allowlist. Built by `toSafeEvent()` in `@rovinos/telemetry`.
 - **Code**: string matching `^[a-z0-9_.-]{1,64}$`. **Id**: 26-char ULID.
 - **Token**: placeholder for a raw sensitive value, format `<TYPE_N>` (for example `<EMAIL_1>`), run-scoped. The **vault** maps tokens to raw values.
 - **Boundary**: where data crosses a trust line: `model_input`, `tool_input`, `tool_output`, `storage`, `ui`, `telemetry_export`.

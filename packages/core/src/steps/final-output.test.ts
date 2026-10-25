@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ensureTracingFallback } from "@harness/telemetry";
+import { ensureTracingFallback } from "@rovinos/telemetry";
 import {
   FakeClock,
   Id,
   QuotasConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import { NaiveContext } from "../context/naive-context.js";

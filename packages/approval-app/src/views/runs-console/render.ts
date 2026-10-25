@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { RunStatus, type RunConsoleDetail, type RunConsoleRun } from "@harness/schemas/browser";
+import { RunStatus, type RunConsoleDetail, type RunConsoleRun } from "@rovinos/schemas/browser";
 import { createEmptyState, createStatusBadge } from "../../kit/components.js";
 import { formatMessage, formatNumber } from "../../kit/strings.js";
 import type { getStrings } from "../../kit/strings.js";

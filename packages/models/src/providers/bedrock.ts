@@ -10,7 +10,7 @@ import {
   type Capabilities,
   type Code,
   type ModelRequest,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { mapBedrockError } from "./bedrock-errors.js";
 import {
   buildMessages,

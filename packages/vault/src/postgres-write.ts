@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hmacSha256 } from "@harness/crypto";
-import type { Code, Id, KeyProvider } from "@harness/schemas";
+import { hmacSha256 } from "@rovinos/crypto";
+import type { Code, Id, KeyProvider } from "@rovinos/schemas";
 import type { PoolClient, QueryResultRow } from "pg";
 import { VaultOperationError } from "./errors.js";
 import { normalize } from "./normalize.js";

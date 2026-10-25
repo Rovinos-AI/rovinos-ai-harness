@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { trace, type SpanContext } from "@opentelemetry/api";
-import { createTestSpanCollector } from "@harness/telemetry/testing";
+import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { UiSession } from "./ui-session.js";
 

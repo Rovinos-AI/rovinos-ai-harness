@@ -7,8 +7,8 @@ import {
   ModelRefSchema,
   type Event,
   type ModelRef,
-} from "@harness/schemas";
-import type { ContextBudget, ContextResult, ContextStrategy } from "@harness/context";
+} from "@rovinos/schemas";
+import type { ContextBudget, ContextResult, ContextStrategy } from "@rovinos/context";
 import { InvalidArgumentError } from "commander";
 import { z } from "zod";
 import { createCommandRuntime, type CliContext, type CommandModule } from "../command.js";
@@ -58,7 +58,7 @@ async function inspection(input: {
   showContent: boolean;
 }) {
   const { runId, events, strategy, model, budget, built, showContent } = input;
-  const { eventsToTranscript, OffloadedStub } = await import("@harness/context");
+  const { eventsToTranscript, OffloadedStub } = await import("@rovinos/context");
   const groupCount = eventsToTranscript(events).length;
   return ContextInspectionSchema.parse({
     runId,
@@ -149,7 +149,7 @@ async function comparisonReport(input: {
   budget: ContextBudget;
 }) {
   const { compareStrategies, coverage, HeuristicTokenCounter, StrategyComparisonReportSchema } =
-    await import("@harness/context");
+    await import("@rovinos/context");
   const comparisons = await compareStrategies(input.events, input.strategies, {
     budget: input.budget,
     model: input.model,
@@ -245,13 +245,13 @@ async function inspectStoredRun(input: {
     };
     if (options.compare !== undefined) {
       const report = await comparisonReport({ events, strategies, model, budget });
-      context.out.json((await import("@harness/context")).StrategyComparisonReportSchema, report);
+      context.out.json((await import("@rovinos/context")).StrategyComparisonReportSchema, report);
       if (!jsonMode) {
         context.out.table(comparisonTableRows(report));
       }
       return;
     }
-    const { HeuristicTokenCounter } = await import("@harness/context");
+    const { HeuristicTokenCounter } = await import("@rovinos/context");
     const built = await strategy.build({
       events,
       budget,
@@ -290,7 +290,7 @@ async function runContextCommand(
   if (!runId.success) {
     throw new ContextCommandError("usage");
   }
-  const { createStrategyRegistry, lookupContextStrategy } = await import("@harness/context");
+  const { createStrategyRegistry, lookupContextStrategy } = await import("@rovinos/context");
   const registryModel = { provider: "heuristic", model: "default" };
   const names = selectedStrategyNames(options, createStrategyRegistry(registryModel), context);
   const config = await context.loadConfig();

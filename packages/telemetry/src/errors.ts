@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 import type { z } from "zod";
 
 /** Closed SDK startup failure. */

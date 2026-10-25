@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelRequest, Part } from "@harness/schemas";
+import type { ModelRequest, Part } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { ProviderError } from "./errors.js";
 import {

@@ -10,11 +10,11 @@ Shared design for this epic:
 - **The app never sees raw sensitive values by default.** It renders tokenized args. Raw values appear only after an explicit, audited human "reveal" (5.4), are held in memory, and are auto-hidden.
 - Views use the `App` class from `@modelcontextprotocol/ext-apps` (extension `io.modelcontextprotocol/ui`, specification revision 2026-01-26 per CONVENTIONS section 10). Resources are served as `ui://harness/<view>/v1` with MIME type `text/html;profile=mcp-app`, no `_meta.ui.csp` domains, and no `_meta.ui.permissions`.
 - This package holds **every harness MCP App view** (approval, human input, run console, run inspector, reports) and the shared UI kit (5.7). Each view builds to its own single-file HTML; the control plane serves them.
-- Packages: `packages/app-telemetry` (browser-safe, no Node APIs, no dependencies), `packages/approval-app` (builds to a single HTML file served as `ui://harness/approval/v1`). Shared browser-safe schemas live in `@harness/schemas` (`app-span.ts`, `approval-tools.ts`).
+- Packages: `packages/app-telemetry` (browser-safe, no Node APIs, no dependencies), `packages/approval-app` (builds to a single HTML file served as `ui://harness/approval/v1`). Shared browser-safe schemas live in `@rovinos/schemas` (`app-span.ts`, `approval-tools.ts`).
 
 ---
 
-## 5.1 `@harness/app-telemetry` shim: typed `start`/`end` for manifest-declared spans
+## 5.1 `@rovinos/app-telemetry` shim: typed `start`/`end` for manifest-declared spans
 
 **Parent:** #5 MCP App
 **Task Description:** Create the tiny browser library that apps use to record the closed set of UI spans.
@@ -24,7 +24,7 @@ Shared design for this epic:
 **Items it depends on:** 3.4, 1.1.
 **Implementation guidance:**
 
-1. Move the `AppSpan` Zod schema from the host into `@harness/schemas/src/app-span.ts` (browser-safe) and update 3.4 to import it. The shim uses the inferred **types** only.
+1. Move the `AppSpan` Zod schema from the host into `@rovinos/schemas/src/app-span.ts` (browser-safe) and update 3.4 to import it. The shim uses the inferred **types** only.
 2. API:
 
 ```ts
@@ -85,7 +85,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Items it depends on:** 5.1, 17.4, 3.1.
 **Implementation guidance:**
 
-1. Connect with the SDK app class, receive tool input/result, validate with the shared `ApprovalPayload` schema (import from `@harness/schemas`; the payload schema must be browser-safe). Invalid payload renders an error state and reports `ui.error` code `payload_invalid`.
+1. Connect with the SDK app class, receive tool input/result, validate with the shared `ApprovalPayload` schema (import from `@rovinos/schemas`; the payload schema must be browser-safe). Invalid payload renders an error state and reports `ui.error` code `payload_invalid`.
 2. Layout: heading (`summary`), meta row (tool id, rule id, reason, expiry countdown), arguments viewer (collapsible tree). In strings, tokens matching the token pattern render as pills showing the entity type (`<EMAIL_1>` -> pill "email 1") with the token as the accessible name; never attempt to resolve them here.
 3. Buttons: **Approve**, **Deny**, and **Edit** (only when `editableFields` is non-empty); focus starts on the heading; buttons are real `<button>` elements with visible focus rings; support keyboard shortcuts only through standard focus order.
 4. Accessibility: semantic landmarks, ARIA labels, live region for status changes, contrast at least 4.5:1, respects `prefers-color-scheme` and `prefers-reduced-motion`, works at 320 px width.

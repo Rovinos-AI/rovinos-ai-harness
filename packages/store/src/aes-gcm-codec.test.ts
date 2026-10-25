@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ContractError, Id, type KeyProvider } from "@harness/schemas";
+import { ContractError, Id, type KeyProvider } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, MAX_CONTENT_BYTES } from "./codec.js";

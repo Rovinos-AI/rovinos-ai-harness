@@ -1,5 +1,5 @@
 {
-  "name": "@harness/vault",
+  "name": "@rovinos/vault",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,19 +16,19 @@
     }
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json"
+    "build": "tsc -b tsconfig.build.json && node copy-migrations.mjs"
   },
   "dependencies": {
     "@azure/identity": "4.14.0",
     "@azure/keyvault-secrets": "4.11.2",
-    "@harness/crypto": "workspace:^",
-    "@harness/schemas": "workspace:^",
+    "@rovinos/crypto": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
     "better-sqlite3": "13.0.3",
     "pg": "8.23.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@harness/telemetry": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
     "@types/better-sqlite3": "9.6.0",
     "@types/pg": "8.23.1",
     "vitest": "3.2.6"

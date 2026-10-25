@@ -8,7 +8,7 @@ import {
   type Id,
   type JsonValue as JsonValueType,
   type ToolSpec,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   createPlanReducerState,
   planReducer,

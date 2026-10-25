@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelPort } from "@harness/core";
-import { AdapterRegistry, ModelGateway } from "@harness/models";
+import type { ModelPort } from "@rovinos/core";
+import { AdapterRegistry, ModelGateway } from "@rovinos/models";
 import { describe, expect, it } from "vitest";
 
 describe("ModelGateway port compatibility", () => {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id } from "@harness/schemas";
+import { Code, Id } from "@rovinos/schemas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { countSentinelScopeReduced } from "../metrics.js";
 import { ActiveRuns } from "./active-runs.js";

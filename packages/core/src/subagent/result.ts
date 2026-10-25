@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue, safeParseJson, type Event } from "@harness/schemas";
+import { Code, Id, JsonValue, safeParseJson, type Event } from "@rovinos/schemas";
 import { z } from "zod";
 
 const SubagentUsageSchema = z

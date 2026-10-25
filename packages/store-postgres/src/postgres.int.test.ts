@@ -2,26 +2,24 @@
 import { Pool, type Notification, type PoolClient } from "pg";
 import { randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { Code, Id, type KeyProvider, type NewEvent } from "@harness/schemas";
+import { Code, Id, type KeyProvider, type NewEvent } from "@rovinos/schemas";
 import { afterAll, expect, it } from "vitest";
-import { AesGcmContentCodec, JsonContentCodec, type ContentCodec } from "@harness/store";
-import { migrate } from "@harness/store/adapter-internal";
+import { AesGcmContentCodec, JsonContentCodec, type ContentCodec } from "@rovinos/store";
+import { migrate } from "@rovinos/store/adapter-internal";
 import { PostgresEventStore } from "./postgres/adapter.js";
 import { openPostgresEventStore } from "./postgres/open.js";
 import { encodeEvents } from "./postgres/helpers.js";
+import { postgresMigrationDirectory } from "./migration-directory.js";
 import {
   assertWatchSubscriptionConformance,
   createEventBuilders,
   runConcurrencyConformance,
   runEventStoreConformance,
-} from "@harness/store/testing";
-import type { EventStoreFactory, MultiEventStoreFactoryCreator } from "@harness/store/testing";
+} from "@rovinos/store/testing";
+import type { EventStoreFactory, MultiEventStoreFactoryCreator } from "@rovinos/store/testing";
 
 // Derived from the migration files so adding a migration does not break these assertions.
-const postgresMigrationVersions = (
-  await readdir(new URL("../migrations/postgres/", import.meta.url))
-)
+const postgresMigrationVersions = (await readdir(postgresMigrationDirectory()))
   .filter((file) => file.endsWith(".sql"))
   .map((file) => file.slice(0, 4))
   .sort();
@@ -442,10 +440,10 @@ it("serializes concurrent Postgres migration startup", async () => {
   try {
     const results = await Promise.all([
       migrate(migrationPool, "postgres", {
-        migrationDirectory: fileURLToPath(new URL("../migrations/postgres/", import.meta.url)),
+        migrationDirectory: postgresMigrationDirectory(),
       }),
       migrate(migrationPool, "postgres", {
-        migrationDirectory: fileURLToPath(new URL("../migrations/postgres/", import.meta.url)),
+        migrationDirectory: postgresMigrationDirectory(),
       }),
     ]);
     expect(results.flat()).toHaveLength(postgresMigrationVersions.length);

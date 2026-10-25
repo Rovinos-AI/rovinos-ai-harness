@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FakeClock, SequentialIdGenerator } from "@harness/schemas";
-import { createRuntime } from "@harness/core";
-import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
+import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
+import { createRuntime } from "@rovinos/core";
+import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
 import { TrialResultSchema } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";

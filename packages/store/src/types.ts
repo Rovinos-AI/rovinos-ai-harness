@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Event, Id, NewEvent, RunStatus, Snapshot, TraceId } from "@harness/schemas";
-import { Code as CodeSchema } from "@harness/schemas";
+import type { Code, Event, Id, NewEvent, RunStatus, Snapshot, TraceId } from "@rovinos/schemas";
+import { Code as CodeSchema } from "@rovinos/schemas";
 import { z } from "zod";
 import { InvalidEventError } from "./errors.js";
 

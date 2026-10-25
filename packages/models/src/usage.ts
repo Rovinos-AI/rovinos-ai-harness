@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelRef, ModelUsage } from "@harness/schemas";
-import { countModelUsage, setActiveSpanAttribute } from "@harness/telemetry";
+import type { ModelRef, ModelUsage } from "@rovinos/schemas";
+import { countModelUsage, setActiveSpanAttribute } from "@rovinos/telemetry";
 
 function aggregateOptionalTokens(
   previous: number | undefined,

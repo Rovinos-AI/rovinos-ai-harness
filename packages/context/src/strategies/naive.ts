@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code } from "@harness/schemas";
+import type { Code } from "@rovinos/schemas";
 import { OffloadedStub } from "../offload.js";
 import { derivePlan, renderPlanMessage } from "../plan.js";
 import { ContextResultSchema, type ContextResult, type ContextStrategy } from "../types.js";

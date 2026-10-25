@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, type Event, type HarnessError, type NewEvent, type RunStatus } from "@harness/schemas";
+import { Id, type Event, type HarnessError, type NewEvent, type RunStatus } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import {

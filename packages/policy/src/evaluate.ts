@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every evaluation includes all matches so callers can choose when to show explain output.
-import { Code, JsonPointerSchema, JsonValue, parseTokenType } from "@harness/schemas";
-import type { Code as CodeValue, JsonPointer, JsonValue as JsonValueType } from "@harness/schemas";
+import { Code, JsonPointerSchema, JsonValue, parseTokenType } from "@rovinos/schemas";
+import type { Code as CodeValue, JsonPointer, JsonValue as JsonValueType } from "@rovinos/schemas";
 import { z } from "zod";
 import { PolicyDocumentSchema } from "./schema.js";
 import type { ArgMatcher, PolicyDocument, Rule } from "./schema.js";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseTokenType } from "@harness/schemas/browser";
+import { parseTokenType } from "@rovinos/schemas/browser";
 import { z } from "zod";
 import { formatDate, formatMessage, getStrings } from "./strings.js";
 

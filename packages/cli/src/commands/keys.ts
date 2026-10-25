@@ -7,7 +7,7 @@ import {
   KeyGenerateResultSchema,
   KeyRetireResultSchema,
   KeyRotationResultSchema,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { CliContext, CommandModule } from "../command.js";
 import type { Command } from "commander";
 

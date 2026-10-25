@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event as EventSchema, Id, type Event } from "@harness/schemas";
+import { Event as EventSchema, Id, type Event } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { ReplayIdGenerator } from "./replay-ids.js";
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { resolveRun, ReplayInputError } from "@harness/replay";
-import { HarnessError, Id } from "@harness/schemas";
+import { resolveRun, ReplayInputError } from "@rovinos/replay";
+import { HarnessError, Id } from "@rovinos/schemas";
 import { z } from "zod";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";

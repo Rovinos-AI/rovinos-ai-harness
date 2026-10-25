@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { type Event, type ModelRef } from "@harness/schemas";
+import { type Event, type ModelRef } from "@rovinos/schemas";
 import { compareStrategies, coverage } from "./compare.js";
 import { createStrategyRegistry, lookupContextStrategy } from "./registry.js";
 import { NaiveStrategy } from "./strategies/naive.js";

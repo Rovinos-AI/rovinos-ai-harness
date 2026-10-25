@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, type Id as RunId } from "@harness/schemas";
+import { Id, type Id as RunId } from "@rovinos/schemas";
 import { InvalidEventError } from "./errors.js";
 import {
   IdempotencyKeyHashSchema,

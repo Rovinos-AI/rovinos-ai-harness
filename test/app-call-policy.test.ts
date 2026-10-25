@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id } from "@harness/schemas";
-import type { ModelToolCall, PolicyPort, RunContext, ToolPort } from "@harness/core";
-import { PolicyEngine } from "@harness/policy";
-import { createPolicyCheckedAppCallHandler, type AppCall } from "@harness/host";
+import { Code, Id } from "@rovinos/schemas";
+import type { ModelToolCall, PolicyPort, RunContext, ToolPort } from "@rovinos/core";
+import { PolicyEngine } from "@rovinos/policy";
+import { createPolicyCheckedAppCallHandler, type AppCall } from "@rovinos/host";
 import { describe, expect, it, vi } from "vitest";
 
 const runId = Id.parse("00000000000000000000000001");

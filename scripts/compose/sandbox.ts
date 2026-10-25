@@ -3,8 +3,8 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "@harness/config";
-import type { HarnessConfig } from "@harness/config";
+import { loadConfig } from "@rovinos/config";
+import type { HarnessConfig } from "@rovinos/config";
 
 /** Docker Compose arguments and environment rendered from sandbox config. */
 export interface SandboxComposeInvocation {

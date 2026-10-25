@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
-import type { EventStore, RunSummary } from "@harness/store";
-import type { Id } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
+import type { EventStore, RunSummary } from "@rovinos/store";
+import type { Id } from "@rovinos/schemas";
 import { RUNS_RESOURCE_URI, RUN_RESOURCE_URI_TEMPLATE } from "./runs.js";
 
 const terminalStatuses = new Set(["completed", "failed", "cancelled"]);

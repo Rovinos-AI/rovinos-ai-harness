@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, JsonValue } from "@harness/schemas";
+import { Id, JsonValue } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_WEB_FETCH_TIMEOUT_MS } from "./web-fetch-contracts.js";
 import { createWebFetchTool, WebFetchTool } from "./web-fetch-tool.js";

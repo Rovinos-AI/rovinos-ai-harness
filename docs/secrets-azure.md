@@ -27,8 +27,8 @@ The resolver uses `DefaultAzureCredential` and creates a `SecretClient` for the 
 The CLI registers this resolver in its default composite resolver. Embedded callers can register it explicitly:
 
 ```ts
-import { CompositeSecretResolver } from "@harness/config";
-import { AkvSecretResolver } from "@harness/vault";
+import { CompositeSecretResolver } from "@rovinos/config";
+import { AkvSecretResolver } from "@rovinos/vault";
 
 const resolver = new CompositeSecretResolver({ akv: new AkvSecretResolver() });
 ```

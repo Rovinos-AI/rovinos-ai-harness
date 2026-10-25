@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, RunConfig } from "@harness/schemas";
+import type { Event, RunConfig } from "@rovinos/schemas";
 import { accountForOpenChildren, type BudgetTracker, type BudgetViolation } from "../budgets.js";
 import type { Checkpointer } from "../checkpoint.js";
 import type { RunRecorder } from "../recorder.js";

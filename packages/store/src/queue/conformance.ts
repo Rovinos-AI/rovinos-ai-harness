@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { FakeClock } from "@harness/schemas";
+import { FakeClock } from "@rovinos/schemas";
 import type { Clock } from "../types.js";
 import type { RunQueue } from "./types.js";
 

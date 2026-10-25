@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import type { ModelRequest } from "@harness/schemas";
+import type { ModelRequest } from "@rovinos/schemas";
 import { z } from "zod";
 import { enforcePromptOutput } from "./rung-prompt.js";
 import { appendRepairMessages } from "./repair.js";

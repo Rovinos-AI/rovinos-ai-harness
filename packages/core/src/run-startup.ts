@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event } from "@harness/schemas";
-import { UsageLimitExceededError } from "@harness/store";
+import type { Event } from "@rovinos/schemas";
+import { UsageLimitExceededError } from "@rovinos/store";
 import type { EventPartial } from "./recorder.js";
 import type { RunLoopOptions } from "./loop.js";
 import { QuotaExceededError } from "./quotas.js";

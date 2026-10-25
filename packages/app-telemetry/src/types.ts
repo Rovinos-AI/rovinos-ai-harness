@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { AppSpan } from "@harness/schemas";
+import type { AppSpan } from "@rovinos/schemas";
 
 /** Closed set of span names accepted by the host. */
 export type AppSpanName = AppSpan["name"];

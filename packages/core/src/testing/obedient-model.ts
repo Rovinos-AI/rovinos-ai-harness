@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue, parseJson } from "@harness/schemas";
+import { Code, Id, JsonValue, parseJson } from "@rovinos/schemas";
 import type {
   IdGenerator,
   ModelCompletion,

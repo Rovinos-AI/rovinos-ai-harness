@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { authorizedHeaders } from "./host.js";
 import type { LaunchDetails } from "./host.js";
 import { z } from "zod";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { DeploymentConfigSchema, HarnessError } from "@harness/schemas";
-import type { DeploymentConfig, StoreConfig, VaultConfig } from "@harness/schemas";
+import { DeploymentConfigSchema, HarnessError } from "@rovinos/schemas";
+import type { DeploymentConfig, StoreConfig, VaultConfig } from "@rovinos/schemas";
 
 /** Startup error for a topology that cannot meet its configured deployment mode. */
 export class DeploymentStartupError extends HarnessError {

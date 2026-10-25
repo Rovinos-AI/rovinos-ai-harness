@@ -1,5 +1,5 @@
 {
-  "name": "@harness/pii",
+  "name": "@rovinos/pii",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,9 +15,9 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@harness/schemas": "workspace:^",
-    "@harness/telemetry": "workspace:^",
-    "@harness/vault": "workspace:^",
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
+    "@rovinos/vault": "workspace:^",
     "undici": "8.12.2",
     "zod": "4.6.7"
   },

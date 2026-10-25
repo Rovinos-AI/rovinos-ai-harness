@@ -2,20 +2,20 @@
 import { chmod, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { HarnessError, PiiConfigSchema } from "@harness/schemas";
-import type { PiiConfig } from "@harness/schemas";
-import { openSqliteInstanceHeartbeat } from "@harness/store-sqlite";
-import type { SqliteInstanceHeartbeat } from "@harness/store-sqlite";
-import { PiiToolPort } from "@harness/pii";
-import type { McpToolPort } from "@harness/mcp";
-import type { LocalKeyProvider } from "@harness/vault";
-import type { EventStore } from "@harness/store";
+import { HarnessError, PiiConfigSchema } from "@rovinos/schemas";
+import type { PiiConfig } from "@rovinos/schemas";
+import { openSqliteInstanceHeartbeat } from "@rovinos/store-sqlite";
+import type { SqliteInstanceHeartbeat } from "@rovinos/store-sqlite";
+import { PiiToolPort } from "@rovinos/pii";
+import type { McpToolPort } from "@rovinos/mcp";
+import type { LocalKeyProvider } from "@rovinos/vault";
+import type { EventStore } from "@rovinos/store";
 import {
   createSandboxBackend,
   RemoteSandboxBackend,
   RunnerPool,
   type SandboxBackend,
-} from "@harness/sandbox";
+} from "@rovinos/sandbox";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimeModelAndStore } from "./runtime-setup-model.js";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, ROOT_CONTEXT, TraceFlags, trace } from "@opentelemetry/api";
-import { foldRunState, type Runtime, type RuntimeConfig } from "@harness/core";
-import { attr, defineSpan, safeRecordError } from "@harness/telemetry";
+import { foldRunState, type Runtime, type RuntimeConfig } from "@rovinos/core";
+import { attr, defineSpan, safeRecordError } from "@rovinos/telemetry";
 import {
   Event,
   Id,
@@ -9,8 +9,8 @@ import {
   TraceId,
   type Event as EventValue,
   type Id as IdValue,
-} from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import type { EventStore } from "@rovinos/store";
 import { z } from "zod";
 import { ReplayApprovalMissingError } from "./ports/replay-human.js";
 import {
@@ -26,7 +26,7 @@ import type { BuildReplayRuntimeOptions } from "./replay-runtime.js";
 const REPLAY_SPAN = defineSpan(
   "harness.replay",
   { "harness.replay.original_run_id": attr.id() },
-  { taskId: "9.3", packageName: "@harness/replay" },
+  { taskId: "9.3", packageName: "@rovinos/replay" },
 );
 
 const ReplayDivergenceSchema = z

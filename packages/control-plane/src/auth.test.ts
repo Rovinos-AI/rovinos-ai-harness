@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, ControlPlaneConfigSchema, Id } from "@harness/schemas";
+import { Code, ControlPlaneConfigSchema, Id } from "@rovinos/schemas";
 import type { ServerContext } from "@modelcontextprotocol/server";
 import { describe, expect, it, vi } from "vitest";
 import {

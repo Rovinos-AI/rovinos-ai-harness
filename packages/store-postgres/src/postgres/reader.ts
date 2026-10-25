@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id } from "@harness/schemas";
+import type { Event, Id } from "@rovinos/schemas";
 import type { Pool } from "pg";
-import type { ContentCodec } from "@harness/store/adapter-internal";
+import type { ContentCodec } from "@rovinos/store/adapter-internal";
 import { integer, storeError, eventFromRow, READ_PAGE_SIZE, type EventRow } from "./helpers.js";
 
 /** Dependencies required for reading and decoding Postgres event rows. */

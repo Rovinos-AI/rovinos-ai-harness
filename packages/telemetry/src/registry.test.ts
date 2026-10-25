@@ -6,7 +6,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError } from "@rovinos/schemas";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "node:process";
@@ -31,7 +31,7 @@ import { getTracer } from "./tracer.js";
 
 const exporter = new InMemorySpanExporter();
 const testId = "00000000000000000000000000";
-const testOwnerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
+const testOwnerTask = { taskId: "4.7", packageName: "@rovinos/telemetry" } as const;
 const provider = new BasicTracerProvider({
   spanProcessors: [new SimpleSpanProcessor(exporter)],
 });
@@ -175,7 +175,7 @@ describe("span registry", () => {
       defineSpan(
         "harness.test.unowned",
         {},
-        { taskId: "not-a-task", packageName: "@harness/telemetry" },
+        { taskId: "not-a-task", packageName: "@rovinos/telemetry" },
       ),
     ).toThrowError("span_owner_task_invalid");
     expect(() => {
@@ -427,7 +427,7 @@ describe("span registry", () => {
   });
 
   it("exposes the registered tracer used by span starts", () => {
-    expect(getTracer()).toBe(provider.getTracer("@harness/telemetry"));
+    expect(getTracer()).toBe(provider.getTracer("@rovinos/telemetry"));
   });
 
   it("protects the test-only registry reset", () => {

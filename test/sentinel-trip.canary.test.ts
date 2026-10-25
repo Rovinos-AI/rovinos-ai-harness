@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from "node:crypto";
-import { Code, Id, SequentialIdGenerator } from "@harness/schemas";
-import { ActiveRuns, SentinelGate, TripQueue, VaultRunView } from "@harness/telemetry";
+import { Code, Id, SequentialIdGenerator } from "@rovinos/schemas";
+import { ActiveRuns, SentinelGate, TripQueue, VaultRunView } from "@rovinos/telemetry";
 import { describe, expect, it, vi } from "vitest";
 
 describe("sentinel trip canary", () => {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonValue, safeParseJson } from "@harness/schemas";
+import { JsonValue, safeParseJson } from "@rovinos/schemas";
 
 /** Result of extracting one JSON object or array from model text. */
 export type ExtractJsonResult =

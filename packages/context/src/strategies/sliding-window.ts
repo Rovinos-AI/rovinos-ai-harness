@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Message } from "@harness/schemas";
+import { HarnessError, type Code, type Message } from "@rovinos/schemas";
 import { ContextResultSchema, type ContextResult, type ContextStrategy } from "../types.js";
 import { derivePlan, renderPlanMessage } from "../plan.js";
 import { eventsToTranscript } from "../transcript.js";

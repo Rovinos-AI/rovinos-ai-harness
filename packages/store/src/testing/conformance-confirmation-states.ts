@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, it } from "vitest";
-import type { Event } from "@harness/schemas";
+import type { Event } from "@rovinos/schemas";
 import type { EventStoreFactory } from "./conformance.js";
 import type { EventStoreTestBuilders } from "./testing.js";
 

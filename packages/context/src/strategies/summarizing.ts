@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ModelRefSchema, type Code, type Event, type ModelRef } from "@harness/schemas";
+import { ModelRefSchema, type Code, type Event, type ModelRef } from "@rovinos/schemas";
 import { derivePlan, renderPlanMessage } from "../plan.js";
 import { eventsToTranscript } from "../transcript.js";
 import {

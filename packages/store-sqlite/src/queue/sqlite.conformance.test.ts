@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { expect, it } from "vitest";
-import { SequentialIdGenerator } from "@harness/schemas";
-import type { Clock } from "@harness/store";
+import { SequentialIdGenerator } from "@rovinos/schemas";
+import type { Clock } from "@rovinos/store";
 import { SqliteRunQueue } from "./sqlite.js";
-import { runQueueConformance, type RunQueueFactoryCreator } from "@harness/store/testing";
+import { runQueueConformance, type RunQueueFactoryCreator } from "@rovinos/store/testing";
 
 let nextDirectory = 0;
 

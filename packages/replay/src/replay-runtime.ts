@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createRuntime } from "@harness/core";
-import type { PolicyPort, Runtime, RuntimeConfig, ToolPort } from "@harness/core";
-import { PiiConfigSchema, VaultConfigSchema } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import type { SandboxBackend } from "@harness/sandbox";
+import { createRuntime } from "@rovinos/core";
+import type { PolicyPort, Runtime, RuntimeConfig, ToolPort } from "@rovinos/core";
+import { PiiConfigSchema, VaultConfigSchema } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import type { SandboxBackend } from "@rovinos/sandbox";
 import { z } from "zod";
-import type { Id } from "@harness/schemas";
+import type { Id } from "@rovinos/schemas";
 import { ResolvedRunSchema } from "./resolve.js";
 import type { ResolvedRun } from "./resolve.js";
 import { ReplayClock } from "./ports/replay-clock.js";

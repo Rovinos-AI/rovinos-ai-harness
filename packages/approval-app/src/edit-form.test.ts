@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 import axe from "axe-core";
 import { describe, expect, it, vi } from "vitest";
-import type { ApprovalPayload } from "@harness/schemas/browser";
+import type { ApprovalPayload } from "@rovinos/schemas/browser";
 import { createEditForm } from "./edit-form.js";
 
 const payload: ApprovalPayload = {

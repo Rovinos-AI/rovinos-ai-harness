@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
-import { Id, type KeyProvider } from "@harness/schemas";
+import { Id, type KeyProvider } from "@rovinos/schemas";
 import { afterAll, expect, it } from "vitest";
 import { runVaultConformance } from "./conformance.test-helpers.js";
 import { PostgresVault } from "./postgres.js";

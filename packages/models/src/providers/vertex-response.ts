@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { GenerateContentResponse } from "@google/genai";
-import { Code, JsonValue, type Part } from "@harness/schemas";
+import { Code, JsonValue, type Part } from "@rovinos/schemas";
 import type { z } from "zod";
 import type { ProviderContext, ProviderResult } from "../types.js";
 import type { VertexFunctionCall } from "./vertex-request.js";

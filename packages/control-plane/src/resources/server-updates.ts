@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { EventStore } from "@harness/store";
+import type { EventStore } from "@rovinos/store";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { startRunResourceUpdates } from "./run-updates.js";
 import type { RunResourceUpdatesError } from "./run-updates.js";

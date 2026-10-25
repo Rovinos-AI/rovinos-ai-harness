@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { OffloadingToolPort } from "@harness/context";
-import type { Code } from "@harness/schemas";
-import { PiiToolPort } from "@harness/pii";
+import { OffloadingToolPort } from "@rovinos/context";
+import type { Code } from "@rovinos/schemas";
+import { PiiToolPort } from "@rovinos/pii";
 import type { ModelToolCall, ToolPort } from "./ports.js";
 import type { RunState } from "./run-state.js";
 import type { ToolResumeContext } from "./resume-policy.js";

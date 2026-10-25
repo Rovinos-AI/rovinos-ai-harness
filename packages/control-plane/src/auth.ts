@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
-import { Code, ControlPlaneAuthScopeSchema, HarnessError, Id } from "@harness/schemas";
-import type { ControlPlaneConfig, ControlPlaneAuthScope, SecretRef } from "@harness/schemas";
-import { emitControlPlaneAudit } from "@harness/telemetry";
+import { Code, ControlPlaneAuthScopeSchema, HarnessError, Id } from "@rovinos/schemas";
+import type { ControlPlaneConfig, ControlPlaneAuthScope, SecretRef } from "@rovinos/schemas";
+import { emitControlPlaneAudit } from "@rovinos/telemetry";
 import type { AuthInfo, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 

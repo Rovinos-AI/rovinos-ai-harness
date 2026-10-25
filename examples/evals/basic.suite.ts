@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // This example uses synthetic data only.
-import { defineSuite } from "@harness/eval";
+import { defineSuite } from "@rovinos/eval";
 
 export const suite = defineSuite({
   schemaVersion: 1,

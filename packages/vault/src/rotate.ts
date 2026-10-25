@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
-import { parseJson } from "@harness/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { VaultOperationError } from "./errors.js";
 
 /** Input for one bounded vault key-rotation batch. */

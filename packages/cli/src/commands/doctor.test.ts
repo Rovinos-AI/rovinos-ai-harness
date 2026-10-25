@@ -7,10 +7,10 @@ import {
   HarnessConfigSchema,
   loadConfig as loadConfigFromFile,
   Secret,
-} from "@harness/config";
-import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
-import { SqliteRunQueue } from "@harness/store-sqlite";
-import { AkvSecretResolverError } from "@harness/vault";
+} from "@rovinos/config";
+import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@rovinos/schemas";
+import { SqliteRunQueue } from "@rovinos/store-sqlite";
+import { AkvSecretResolverError } from "@rovinos/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, TraceId } from "@harness/schemas";
+import { Id, TraceId } from "@rovinos/schemas";
 import type Database from "better-sqlite3";
-import { InvalidEventError } from "@harness/store/adapter-internal";
+import { InvalidEventError } from "@rovinos/store/adapter-internal";
 import { sqliteStoreError } from "./outbox.js";
 
 /** Finds run ids by a trace identifier through the SQLite event index. */

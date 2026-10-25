@@ -12,18 +12,18 @@ import {
   SequentialIdGenerator,
   Sha256Hex,
   type Event as HarnessEvent,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { SqliteEventStore } from "@harness/store-sqlite";
-import { createEventBuilders } from "@harness/store/testing";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
+import { createEventBuilders } from "@rovinos/store/testing";
 import {
   createTestContextManager,
   createTestSpanCollector,
   createTestTracerProvider,
-} from "@harness/telemetry/testing";
-import * as telemetry from "@harness/telemetry";
-import { SqliteVault, VaultOperationError } from "@harness/vault";
-import { sentinelTripQueue } from "@harness/telemetry";
+} from "@rovinos/telemetry/testing";
+import * as telemetry from "@rovinos/telemetry";
+import { SqliteVault, VaultOperationError } from "@rovinos/vault";
+import { sentinelTripQueue } from "@rovinos/telemetry";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
 import { cancelRun } from "./cancel.js";

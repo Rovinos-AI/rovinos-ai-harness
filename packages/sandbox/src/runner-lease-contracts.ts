@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
+import { Id } from "@rovinos/schemas";
 import { z } from "zod";
 
 export const RunnerOkResponseSchema = z.object({ status: z.literal("ok") }).strict();

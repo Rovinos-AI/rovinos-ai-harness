@@ -15,17 +15,17 @@ import {
   SecretRefSchema,
   SequentialIdGenerator,
   type WorkspaceRef,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import {
   InProcessBackend,
   RemoteSandboxBackend,
   RunnerPool,
   type RunnerPoolRunner,
   type SandboxBackend,
-} from "@harness/sandbox";
-import { SqliteVault } from "@harness/vault";
-import { compilePolicy, PolicyDocumentSchema } from "@harness/policy";
+} from "@rovinos/sandbox";
+import { SqliteVault } from "@rovinos/vault";
+import { compilePolicy, PolicyDocumentSchema } from "@rovinos/policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import { withSandboxLease } from "./runtime-lifecycle.js";

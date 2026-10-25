@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ensureTracingFallback } from "@harness/telemetry";
+import { ensureTracingFallback } from "@rovinos/telemetry";
 import { RUN_SPAN } from "./spans.js";
 import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
 

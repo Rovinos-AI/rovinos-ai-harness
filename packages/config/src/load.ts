@@ -9,7 +9,7 @@ import {
   SecretRefSchema,
   parseJson,
   parseYaml,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 

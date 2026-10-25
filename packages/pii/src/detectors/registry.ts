@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { DetectionSchema } from "@harness/schemas";
-import { countPiiDetectorDegraded } from "@harness/telemetry";
+import { DetectionSchema } from "@rovinos/schemas";
+import { countPiiDetectorDegraded } from "@rovinos/telemetry";
 import { PiiDetectorError, validateText } from "./types.js";
 import type { AsyncDetector, Detection, Detector } from "./types.js";
 

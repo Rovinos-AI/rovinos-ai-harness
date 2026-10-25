@@ -13,7 +13,7 @@ import {
   type Snapshot,
   type Code,
   type TraceId,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { PiiStorageFailedError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
 import { isMarked } from "./sanitization-markers.js";

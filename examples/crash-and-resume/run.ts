@@ -6,9 +6,9 @@ import {
   type ModelCompletion,
   type ModelToolCall,
   type ToolPort,
-} from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
-import { Code, Id, JsonValue, parseJson, RunConfigSchema, ToolSpecSchema } from "@harness/schemas";
+} from "@rovinos/core";
+import { FakeModelPort } from "@rovinos/core/testing";
+import { Code, Id, JsonValue, parseJson, RunConfigSchema, ToolSpecSchema } from "@rovinos/schemas";
 import { z } from "zod";
 
 const toolId = Code.parse("example.increment");

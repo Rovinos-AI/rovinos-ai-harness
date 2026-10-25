@@ -1,10 +1,10 @@
 # Public SDK
 
-`@harness/sdk` is the stable programmatic interface for applications that embed the harness.
+`@rovinos/sdk` is the stable programmatic interface for applications that embed the harness.
 Create a harness from a validated configuration object or a config file path:
 
 ```ts
-import { createHarness } from "@harness/sdk";
+import { createHarness } from "@rovinos/sdk";
 
 const harness = await createHarness({ configPath: "harness.config.yaml" });
 const { runId } = await harness.startRun({
@@ -19,6 +19,9 @@ Idempotency keys are deduplicated across `Harness` instances sharing the same st
 across restarts. Use opaque identifiers only; do not include sensitive data. The store retains only
 the domain-separated, unsalted SHA-256 hash, never the raw key, so low-entropy keys may be guessed
 from the table. Run the worker-backed queue mode only after task 24.2 is available.
+
+`InMemoryEventStore` is exported for ephemeral runs and tests. Durable SQLite and Postgres stores
+are available through their separate adapter packages.
 
 An optional `role` is passed to model routing. `requestedBy` records the run's requesting principal
 in `run_created` metadata; it is not an authorization mechanism.

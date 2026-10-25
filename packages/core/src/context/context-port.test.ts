@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import type { Event, JsonValue } from "@harness/schemas";
-import { NaiveStrategy, type ContextStrategy } from "@harness/context";
+import type { Event, JsonValue } from "@rovinos/schemas";
+import { NaiveStrategy, type ContextStrategy } from "@rovinos/context";
 import { StrategyContextPort } from "./context-port.js";
 
 const runId = "00000000000000000000000000";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
-import type { RunStatus } from "@harness/schemas";
+import type { RunStatus } from "@rovinos/schemas";
 import { canTransition, RUN_TRIGGERS, transition, type RunTrigger } from "./index.js";
 
 const statuses: readonly RunStatus[] = [

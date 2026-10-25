@@ -2,7 +2,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { ContractError } from "@harness/schemas";
+import { ContractError } from "@rovinos/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadSuite } from "./load.js";
 

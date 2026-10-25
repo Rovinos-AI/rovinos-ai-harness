@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, RunConfig } from "@harness/schemas";
+import type { Event, RunConfig } from "@rovinos/schemas";
 import { foldRunState, type RunState } from "./run-state.js";
 
 /** Budget dimensions checked before a model or tool operation. */

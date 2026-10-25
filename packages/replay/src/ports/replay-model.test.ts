@@ -5,8 +5,8 @@ import {
   ModelRequestSchema,
   type Event,
   type ModelRequest,
-} from "@harness/schemas";
-import { requestHash } from "@harness/models";
+} from "@rovinos/schemas";
+import { requestHash } from "@rovinos/models";
 import { ResolvedRunSchema } from "../resolve.js";
 import { describe, expect, it } from "vitest";
 import { ReplayDivergenceError, ReplayModelPort } from "./replay-model.js";

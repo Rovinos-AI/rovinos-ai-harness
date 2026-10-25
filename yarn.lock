@@ -1648,414 +1648,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@harness/app-telemetry@workspace:^, @harness/app-telemetry@workspace:packages/app-telemetry":
-  version: 0.0.0-use.local
-  resolution: "@harness/app-telemetry@workspace:packages/app-telemetry"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    esbuild: "npm:0.28.2"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-  languageName: unknown
-  linkType: soft
-
-"@harness/approval-app@workspace:^, @harness/approval-app@workspace:packages/approval-app":
-  version: 0.0.0-use.local
-  resolution: "@harness/approval-app@workspace:packages/approval-app"
-  dependencies:
-    "@harness/app-telemetry": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@modelcontextprotocol/client": "npm:2.3.1"
-    "@modelcontextprotocol/core": "npm:2.3.1"
-    "@modelcontextprotocol/ext-apps": "npm:2.0.3"
-    "@types/jsdom": "npm:30.0.0"
-    axe-core: "npm:4.14.0"
-    esbuild: "npm:0.28.2"
-    jsdom: "npm:30.1.3"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/cli@workspace:^, @harness/cli@workspace:packages/cli":
-  version: 0.0.0-use.local
-  resolution: "@harness/cli@workspace:packages/cli"
-  dependencies:
-    "@harness/config": "workspace:^"
-    "@harness/context": "workspace:^"
-    "@harness/control-plane": "workspace:^"
-    "@harness/core": "workspace:^"
-    "@harness/host": "workspace:^"
-    "@harness/mcp": "workspace:^"
-    "@harness/pii": "workspace:^"
-    "@harness/policy": "workspace:^"
-    "@harness/replay": "workspace:^"
-    "@harness/sandbox": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@harness/store-postgres": "workspace:^"
-    "@harness/store-sqlite": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@harness/vault": "workspace:^"
-    "@modelcontextprotocol/client": "npm:2.3.1"
-    "@modelcontextprotocol/core": "npm:2.3.1"
-    "@modelcontextprotocol/server": "npm:2.3.1"
-    "@opentelemetry/api": "npm:1.9.1"
-    commander: "npm:15.0.0"
-    pg: "npm:8.23.1"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  bin:
-    harness: ./dist/bin.js
-  languageName: unknown
-  linkType: soft
-
-"@harness/config@workspace:^, @harness/config@workspace:packages/config":
-  version: 0.0.0-use.local
-  resolution: "@harness/config@workspace:packages/config"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/context@workspace:^, @harness/context@workspace:packages/context":
-  version: 0.0.0-use.local
-  resolution: "@harness/context@workspace:packages/context"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/control-plane@workspace:^, @harness/control-plane@workspace:packages/control-plane":
-  version: 0.0.0-use.local
-  resolution: "@harness/control-plane@workspace:packages/control-plane"
-  dependencies:
-    "@harness/approval-app": "workspace:^"
-    "@harness/core": "workspace:^"
-    "@harness/models": "workspace:^"
-    "@harness/policy": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@harness/vault": "workspace:^"
-    "@modelcontextprotocol/client": "npm:2.3.1"
-    "@modelcontextprotocol/node": "npm:2.1.1"
-    "@modelcontextprotocol/server": "npm:2.3.1"
-    "@types/node": "npm:26.6.5"
-    fast-check: "npm:4.10.2"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/core@workspace:^, @harness/core@workspace:packages/core":
-  version: 0.0.0-use.local
-  resolution: "@harness/core@workspace:packages/core"
-  dependencies:
-    "@harness/context": "workspace:^"
-    "@harness/mcp": "workspace:^"
-    "@harness/models": "workspace:^"
-    "@harness/pii": "workspace:^"
-    "@harness/policy": "workspace:^"
-    "@harness/sandbox": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@harness/store-postgres": "workspace:^"
-    "@harness/store-sqlite": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@harness/vault": "workspace:^"
-    "@modelcontextprotocol/server": "npm:2.3.1"
-    "@opentelemetry/api": "npm:1.9.1"
-    fast-check: "npm:4.10.2"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/crypto@workspace:^, @harness/crypto@workspace:packages/crypto":
-  version: 0.0.0-use.local
-  resolution: "@harness/crypto@workspace:packages/crypto"
-  dependencies:
-    vitest: "npm:3.2.6"
-  languageName: unknown
-  linkType: soft
-
-"@harness/eslint-plugin-harness@workspace:^, @harness/eslint-plugin-harness@workspace:tools/eslint-plugin-harness":
-  version: 0.0.0-use.local
-  resolution: "@harness/eslint-plugin-harness@workspace:tools/eslint-plugin-harness"
-  dependencies:
-    "@typescript-eslint/rule-tester": "npm:8.71.2"
-    "@typescript-eslint/utils": "npm:8.71.2"
-    eslint: "npm:9.39.2"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-  peerDependencies:
-    eslint: ^9.39.2
-  languageName: unknown
-  linkType: soft
-
-"@harness/eval@workspace:^, @harness/eval@workspace:packages/eval":
-  version: 0.0.0-use.local
-  resolution: "@harness/eval@workspace:packages/eval"
-  dependencies:
-    "@harness/core": "workspace:^"
-    "@harness/policy": "workspace:^"
-    "@harness/sandbox": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/host@workspace:^, @harness/host@workspace:packages/host":
-  version: 0.0.0-use.local
-  resolution: "@harness/host@workspace:packages/host"
-  dependencies:
-    "@harness/core": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@modelcontextprotocol/client": "npm:2.3.1"
-    "@modelcontextprotocol/core": "npm:2.3.1"
-    "@modelcontextprotocol/ext-apps": "npm:2.0.3"
-    "@opentelemetry/api": "npm:1.9.1"
-    "@types/node": "npm:26.6.5"
-    esbuild: "npm:0.28.2"
-    playwright: "npm:1.64.1"
-    tldts: "npm:7.4.18"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/mcp@workspace:^, @harness/mcp@workspace:packages/mcp":
-  version: 0.0.0-use.local
-  resolution: "@harness/mcp@workspace:packages/mcp"
-  dependencies:
-    "@harness/crypto": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@modelcontextprotocol/client": "npm:2.3.1"
-    "@modelcontextprotocol/server": "npm:2.3.1"
-    "@opentelemetry/api": "npm:1.9.1"
-    "@types/better-sqlite3": "npm:9.6.0"
-    "@types/node": "npm:26.6.5"
-    better-sqlite3: "npm:13.0.3"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/models@workspace:^, @harness/models@workspace:packages/models":
-  version: 0.0.0-use.local
-  resolution: "@harness/models@workspace:packages/models"
-  dependencies:
-    "@anthropic-ai/sdk": "npm:0.135.0"
-    "@aws-sdk/client-bedrock-runtime": "npm:3.1152.0"
-    "@google/genai": "npm:2.30.0"
-    "@harness/schemas": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@opentelemetry/api": "npm:1.9.1"
-    ajv: "npm:8.20.0"
-    google-auth-library: "npm:10.9.1"
-    openai: "npm:7.34.0"
-    undici: "npm:8.12.2"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  peerDependencies:
-    undici: ^8.11.2
-    vitest: ^3.2.6
-  peerDependenciesMeta:
-    undici:
-      optional: true
-    vitest:
-      optional: true
-  languageName: unknown
-  linkType: soft
-
-"@harness/pii@workspace:^, @harness/pii@workspace:packages/pii":
-  version: 0.0.0-use.local
-  resolution: "@harness/pii@workspace:packages/pii"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@harness/vault": "workspace:^"
-    undici: "npm:8.12.2"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/policy@workspace:^, @harness/policy@workspace:packages/policy":
-  version: 0.0.0-use.local
-  resolution: "@harness/policy@workspace:packages/policy"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    fast-check: "npm:4.10.2"
-    vitest: "npm:3.2.6"
-    yaml: "npm:2.9.1"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/replay@workspace:^, @harness/replay@workspace:packages/replay":
-  version: 0.0.0-use.local
-  resolution: "@harness/replay@workspace:packages/replay"
-  dependencies:
-    "@harness/core": "workspace:^"
-    "@harness/models": "workspace:^"
-    "@harness/pii": "workspace:^"
-    "@harness/sandbox": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@harness/vault": "workspace:^"
-    "@opentelemetry/api": "npm:1.9.1"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/sandbox@workspace:^, @harness/sandbox@workspace:packages/sandbox":
-  version: 0.0.0-use.local
-  resolution: "@harness/sandbox@workspace:packages/sandbox"
-  dependencies:
-    "@harness/context": "workspace:^"
-    "@harness/crypto": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@opentelemetry/api": "npm:1.9.1"
-    "@opentelemetry/core": "npm:2.12.0"
-    "@types/node": "npm:26.6.5"
-    fast-check: "npm:4.10.2"
-    parse5: "npm:8.0.1"
-    tar: "npm:7.5.22"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/schemas@workspace:^, @harness/schemas@workspace:packages/schemas":
-  version: 0.0.0-use.local
-  resolution: "@harness/schemas@workspace:packages/schemas"
-  dependencies:
-    ajv: "npm:8.20.0"
-    ajv-formats: "npm:3.0.1"
-    vitest: "npm:3.2.6"
-    yaml: "npm:2.9.1"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/sdk@workspace:^, @harness/sdk@workspace:packages/sdk":
-  version: 0.0.0-use.local
-  resolution: "@harness/sdk@workspace:packages/sdk"
-  dependencies:
-    "@harness/config": "workspace:^"
-    "@harness/core": "workspace:^"
-    "@harness/models": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@harness/store-postgres": "workspace:^"
-    "@harness/store-sqlite": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@harness/vault": "workspace:^"
-    "@types/pg": "npm:8.23.1"
-    pg: "npm:8.23.1"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/store-postgres@workspace:^, @harness/store-postgres@workspace:packages/store-postgres":
-  version: 0.0.0-use.local
-  resolution: "@harness/store-postgres@workspace:packages/store-postgres"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@types/pg": "npm:8.23.1"
-    pg: "npm:8.23.1"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/store-sqlite@workspace:^, @harness/store-sqlite@workspace:packages/store-sqlite":
-  version: 0.0.0-use.local
-  resolution: "@harness/store-sqlite@workspace:packages/store-sqlite"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@types/better-sqlite3": "npm:9.6.0"
-    better-sqlite3: "npm:13.0.3"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/store@workspace:^, @harness/store@workspace:packages/store":
-  version: 0.0.0-use.local
-  resolution: "@harness/store@workspace:packages/store"
-  dependencies:
-    "@harness/crypto": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    typescript: "npm:5.9.3"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  peerDependencies:
-    vitest: ^3.2.6
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: unknown
-  linkType: soft
-
-"@harness/telemetry@workspace:^, @harness/telemetry@workspace:packages/telemetry":
-  version: 0.0.0-use.local
-  resolution: "@harness/telemetry@workspace:packages/telemetry"
-  dependencies:
-    "@harness/schemas": "workspace:^"
-    "@opentelemetry/api": "npm:1.9.1"
-    "@opentelemetry/api-logs": "npm:0.223.0"
-    "@opentelemetry/context-async-hooks": "npm:2.12.0"
-    "@opentelemetry/resources": "npm:2.12.0"
-    "@opentelemetry/sdk-logs": "npm:0.223.0"
-    "@opentelemetry/sdk-metrics": "npm:2.12.0"
-    "@opentelemetry/sdk-trace-base": "npm:2.12.0"
-    "@opentelemetry/semantic-conventions": "npm:1.43.0"
-    "@types/node": "npm:26.6.5"
-    fast-check: "npm:4.10.2"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
-"@harness/vault@workspace:^, @harness/vault@workspace:packages/vault":
-  version: 0.0.0-use.local
-  resolution: "@harness/vault@workspace:packages/vault"
-  dependencies:
-    "@azure/identity": "npm:4.14.0"
-    "@azure/keyvault-secrets": "npm:4.11.2"
-    "@harness/crypto": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@types/better-sqlite3": "npm:9.6.0"
-    "@types/pg": "npm:8.23.1"
-    better-sqlite3: "npm:13.0.3"
-    pg: "npm:8.23.1"
-    vitest: "npm:3.2.6"
-    zod: "npm:4.6.7"
-  languageName: unknown
-  linkType: soft
-
 "@hono/node-server@npm:^1.19.9":
   version: 1.19.17
   resolution: "@hono/node-server@npm:1.19.17"
@@ -2145,7 +1737,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jridgewell/gen-mapping@npm:^0.3.5":
+"@jridgewell/gen-mapping@npm:^0.3.2, @jridgewell/gen-mapping@npm:^0.3.5":
   version: 0.3.13
   resolution: "@jridgewell/gen-mapping@npm:0.3.13"
   dependencies:
@@ -2784,180 +2376,660 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@rollup/rollup-android-arm-eabi@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-android-arm-eabi@npm:4.64.2"
+"@rollup/rollup-android-arm-eabi@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-android-arm-eabi@npm:4.64.12"
   conditions: os=android & cpu=arm
   languageName: node
   linkType: hard
 
-"@rollup/rollup-android-arm64@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-android-arm64@npm:4.64.2"
+"@rollup/rollup-android-arm64@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-android-arm64@npm:4.64.12"
   conditions: os=android & cpu=arm64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-darwin-arm64@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-darwin-arm64@npm:4.64.2"
+"@rollup/rollup-darwin-arm64@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-darwin-arm64@npm:4.64.12"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-darwin-x64@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-darwin-x64@npm:4.64.2"
+"@rollup/rollup-darwin-x64@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-darwin-x64@npm:4.64.12"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-freebsd-arm64@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-freebsd-arm64@npm:4.64.2"
+"@rollup/rollup-freebsd-arm64@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-freebsd-arm64@npm:4.64.12"
   conditions: os=freebsd & cpu=arm64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-freebsd-x64@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-freebsd-x64@npm:4.64.2"
+"@rollup/rollup-freebsd-x64@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-freebsd-x64@npm:4.64.12"
   conditions: os=freebsd & cpu=x64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-arm-gnueabihf@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-arm-gnueabihf@npm:4.64.2"
+"@rollup/rollup-linux-arm-gnueabihf@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-arm-gnueabihf@npm:4.64.12"
   conditions: os=linux & cpu=arm & libc=glibc
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-arm-musleabihf@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-arm-musleabihf@npm:4.64.2"
+"@rollup/rollup-linux-arm-musleabihf@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-arm-musleabihf@npm:4.64.12"
   conditions: os=linux & cpu=arm & libc=musl
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-arm64-gnu@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-arm64-gnu@npm:4.64.2"
+"@rollup/rollup-linux-arm64-gnu@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-arm64-gnu@npm:4.64.12"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-arm64-musl@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-arm64-musl@npm:4.64.2"
+"@rollup/rollup-linux-arm64-musl@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-arm64-musl@npm:4.64.12"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-loong64-gnu@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-loong64-gnu@npm:4.64.2"
+"@rollup/rollup-linux-loong64-gnu@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-loong64-gnu@npm:4.64.12"
   conditions: os=linux & cpu=loong64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-loong64-musl@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-loong64-musl@npm:4.64.2"
+"@rollup/rollup-linux-loong64-musl@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-loong64-musl@npm:4.64.12"
   conditions: os=linux & cpu=loong64 & libc=musl
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-ppc64-gnu@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-ppc64-gnu@npm:4.64.2"
+"@rollup/rollup-linux-ppc64-gnu@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-ppc64-gnu@npm:4.64.12"
   conditions: os=linux & cpu=ppc64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-ppc64-musl@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-ppc64-musl@npm:4.64.2"
+"@rollup/rollup-linux-ppc64-musl@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-ppc64-musl@npm:4.64.12"
   conditions: os=linux & cpu=ppc64 & libc=musl
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-riscv64-gnu@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-riscv64-gnu@npm:4.64.2"
+"@rollup/rollup-linux-riscv64-gnu@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-riscv64-gnu@npm:4.64.12"
   conditions: os=linux & cpu=riscv64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-riscv64-musl@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-riscv64-musl@npm:4.64.2"
+"@rollup/rollup-linux-riscv64-musl@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-riscv64-musl@npm:4.64.12"
   conditions: os=linux & cpu=riscv64 & libc=musl
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-s390x-gnu@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-s390x-gnu@npm:4.64.2"
+"@rollup/rollup-linux-s390x-gnu@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-s390x-gnu@npm:4.64.12"
   conditions: os=linux & cpu=s390x & libc=glibc
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-x64-gnu@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-x64-gnu@npm:4.64.2"
+"@rollup/rollup-linux-x64-gnu@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-x64-gnu@npm:4.64.12"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@rollup/rollup-linux-x64-musl@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-linux-x64-musl@npm:4.64.2"
+"@rollup/rollup-linux-x64-musl@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-linux-x64-musl@npm:4.64.12"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"@rollup/rollup-openbsd-x64@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-openbsd-x64@npm:4.64.2"
+"@rollup/rollup-openbsd-x64@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-openbsd-x64@npm:4.64.12"
   conditions: os=openbsd & cpu=x64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-openharmony-arm64@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-openharmony-arm64@npm:4.64.2"
+"@rollup/rollup-openharmony-arm64@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-openharmony-arm64@npm:4.64.12"
   conditions: os=openharmony & cpu=arm64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-win32-arm64-msvc@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-win32-arm64-msvc@npm:4.64.2"
+"@rollup/rollup-win32-arm64-msvc@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-win32-arm64-msvc@npm:4.64.12"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-win32-ia32-msvc@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-win32-ia32-msvc@npm:4.64.2"
+"@rollup/rollup-win32-ia32-msvc@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-win32-ia32-msvc@npm:4.64.12"
   conditions: os=win32 & cpu=ia32
   languageName: node
   linkType: hard
 
-"@rollup/rollup-win32-x64-gnu@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-win32-x64-gnu@npm:4.64.2"
+"@rollup/rollup-win32-x64-gnu@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-win32-x64-gnu@npm:4.64.12"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"@rollup/rollup-win32-x64-msvc@npm:4.64.2":
-  version: 4.64.2
-  resolution: "@rollup/rollup-win32-x64-msvc@npm:4.64.2"
+"@rollup/rollup-win32-x64-msvc@npm:4.64.12":
+  version: 4.64.12
+  resolution: "@rollup/rollup-win32-x64-msvc@npm:4.64.12"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
+
+"@rovinos/app-telemetry@workspace:^, @rovinos/app-telemetry@workspace:packages/app-telemetry":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/app-telemetry@workspace:packages/app-telemetry"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    esbuild: "npm:0.28.2"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/approval-app@workspace:^, @rovinos/approval-app@workspace:packages/approval-app":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/approval-app@workspace:packages/approval-app"
+  dependencies:
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/core": "npm:2.3.1"
+    "@modelcontextprotocol/ext-apps": "npm:2.0.3"
+    "@rovinos/app-telemetry": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@types/jsdom": "npm:30.0.0"
+    axe-core: "npm:4.14.0"
+    esbuild: "npm:0.28.2"
+    jsdom: "npm:30.1.3"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/cli@workspace:^, @rovinos/cli@workspace:packages/cli":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/cli@workspace:packages/cli"
+  dependencies:
+    "@anthropic-ai/sdk": "npm:0.135.0"
+    "@aws-sdk/client-bedrock-runtime": "npm:3.1152.0"
+    "@azure/identity": "npm:4.14.0"
+    "@azure/keyvault-secrets": "npm:4.11.2"
+    "@google/genai": "npm:2.30.0"
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/core": "npm:2.3.1"
+    "@modelcontextprotocol/ext-apps": "npm:2.0.3"
+    "@modelcontextprotocol/node": "npm:2.1.1"
+    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@opentelemetry/api": "npm:1.9.1"
+    "@opentelemetry/api-logs": "npm:0.223.0"
+    "@opentelemetry/context-async-hooks": "npm:2.12.0"
+    "@opentelemetry/resources": "npm:2.12.0"
+    "@opentelemetry/sdk-logs": "npm:0.223.0"
+    "@opentelemetry/sdk-metrics": "npm:2.12.0"
+    "@opentelemetry/sdk-trace-base": "npm:2.12.0"
+    "@opentelemetry/semantic-conventions": "npm:1.43.0"
+    "@rovinos/approval-app": "workspace:^"
+    "@rovinos/config": "workspace:^"
+    "@rovinos/context": "workspace:^"
+    "@rovinos/control-plane": "workspace:^"
+    "@rovinos/core": "workspace:^"
+    "@rovinos/host": "workspace:^"
+    "@rovinos/mcp": "workspace:^"
+    "@rovinos/pii": "workspace:^"
+    "@rovinos/policy": "workspace:^"
+    "@rovinos/replay": "workspace:^"
+    "@rovinos/sandbox": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@rovinos/store-postgres": "workspace:^"
+    "@rovinos/store-sqlite": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@rovinos/vault": "workspace:^"
+    ajv: "npm:8.20.0"
+    ajv-formats: "npm:3.0.1"
+    better-sqlite3: "npm:13.0.3"
+    commander: "npm:15.0.0"
+    openai: "npm:7.34.0"
+    parse5: "npm:8.0.1"
+    pg: "npm:8.23.1"
+    tar: "npm:7.5.22"
+    tldts: "npm:7.4.18"
+    tsup: "npm:9.0.0"
+    undici: "npm:8.12.2"
+    vitest: "npm:3.2.6"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  bin:
+    harness: ./dist/bin.js
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/config@workspace:^, @rovinos/config@workspace:packages/config":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/config@workspace:packages/config"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/context@workspace:^, @rovinos/context@workspace:packages/context":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/context@workspace:packages/context"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/control-plane@workspace:^, @rovinos/control-plane@workspace:packages/control-plane":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/control-plane@workspace:packages/control-plane"
+  dependencies:
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/node": "npm:2.1.1"
+    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@rovinos/approval-app": "workspace:^"
+    "@rovinos/core": "workspace:^"
+    "@rovinos/models": "workspace:^"
+    "@rovinos/policy": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@rovinos/vault": "workspace:^"
+    "@types/node": "npm:26.6.5"
+    fast-check: "npm:4.10.2"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/core@workspace:^, @rovinos/core@workspace:packages/core":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/core@workspace:packages/core"
+  dependencies:
+    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@opentelemetry/api": "npm:1.9.1"
+    "@rovinos/context": "workspace:^"
+    "@rovinos/mcp": "workspace:^"
+    "@rovinos/models": "workspace:^"
+    "@rovinos/pii": "workspace:^"
+    "@rovinos/policy": "workspace:^"
+    "@rovinos/sandbox": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@rovinos/store-postgres": "workspace:^"
+    "@rovinos/store-sqlite": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@rovinos/vault": "workspace:^"
+    fast-check: "npm:4.10.2"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/crypto@workspace:^, @rovinos/crypto@workspace:packages/crypto":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/crypto@workspace:packages/crypto"
+  dependencies:
+    vitest: "npm:3.2.6"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/eslint-plugin-harness@workspace:^, @rovinos/eslint-plugin-harness@workspace:tools/eslint-plugin-harness":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/eslint-plugin-harness@workspace:tools/eslint-plugin-harness"
+  dependencies:
+    "@typescript-eslint/rule-tester": "npm:8.71.2"
+    "@typescript-eslint/utils": "npm:8.71.2"
+    eslint: "npm:9.39.2"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+  peerDependencies:
+    eslint: ^9.39.2
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/eval@workspace:^, @rovinos/eval@workspace:packages/eval":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/eval@workspace:packages/eval"
+  dependencies:
+    "@rovinos/core": "workspace:^"
+    "@rovinos/policy": "workspace:^"
+    "@rovinos/sandbox": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/host@workspace:^, @rovinos/host@workspace:packages/host":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/host@workspace:packages/host"
+  dependencies:
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/core": "npm:2.3.1"
+    "@modelcontextprotocol/ext-apps": "npm:2.0.3"
+    "@opentelemetry/api": "npm:1.9.1"
+    "@rovinos/core": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@types/node": "npm:26.6.5"
+    esbuild: "npm:0.28.2"
+    playwright: "npm:1.64.1"
+    tldts: "npm:7.4.18"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/mcp@workspace:^, @rovinos/mcp@workspace:packages/mcp":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/mcp@workspace:packages/mcp"
+  dependencies:
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@opentelemetry/api": "npm:1.9.1"
+    "@rovinos/crypto": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@types/better-sqlite3": "npm:9.6.0"
+    "@types/node": "npm:26.6.5"
+    better-sqlite3: "npm:13.0.3"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/models@workspace:^, @rovinos/models@workspace:packages/models":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/models@workspace:packages/models"
+  dependencies:
+    "@anthropic-ai/sdk": "npm:0.135.0"
+    "@aws-sdk/client-bedrock-runtime": "npm:3.1152.0"
+    "@google/genai": "npm:2.30.0"
+    "@opentelemetry/api": "npm:1.9.1"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    ajv: "npm:8.20.0"
+    google-auth-library: "npm:10.9.1"
+    openai: "npm:7.34.0"
+    undici: "npm:8.12.2"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  peerDependencies:
+    undici: ^8.11.2
+    vitest: ^3.2.6
+  peerDependenciesMeta:
+    undici:
+      optional: true
+    vitest:
+      optional: true
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/pii@workspace:^, @rovinos/pii@workspace:packages/pii":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/pii@workspace:packages/pii"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@rovinos/vault": "workspace:^"
+    undici: "npm:8.12.2"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/policy@workspace:^, @rovinos/policy@workspace:packages/policy":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/policy@workspace:packages/policy"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    fast-check: "npm:4.10.2"
+    vitest: "npm:3.2.6"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/replay@workspace:^, @rovinos/replay@workspace:packages/replay":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/replay@workspace:packages/replay"
+  dependencies:
+    "@opentelemetry/api": "npm:1.9.1"
+    "@rovinos/core": "workspace:^"
+    "@rovinos/models": "workspace:^"
+    "@rovinos/pii": "workspace:^"
+    "@rovinos/sandbox": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@rovinos/vault": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/sandbox@workspace:^, @rovinos/sandbox@workspace:packages/sandbox":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/sandbox@workspace:packages/sandbox"
+  dependencies:
+    "@opentelemetry/api": "npm:1.9.1"
+    "@opentelemetry/core": "npm:2.12.0"
+    "@rovinos/context": "workspace:^"
+    "@rovinos/crypto": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@types/node": "npm:26.6.5"
+    fast-check: "npm:4.10.2"
+    parse5: "npm:8.0.1"
+    tar: "npm:7.5.22"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/schemas@workspace:^, @rovinos/schemas@workspace:packages/schemas":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/schemas@workspace:packages/schemas"
+  dependencies:
+    ajv: "npm:8.20.0"
+    ajv-formats: "npm:3.0.1"
+    vitest: "npm:3.2.6"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/sdk@workspace:^, @rovinos/sdk@workspace:packages/sdk":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/sdk@workspace:packages/sdk"
+  dependencies:
+    "@anthropic-ai/sdk": "npm:0.135.0"
+    "@aws-sdk/client-bedrock-runtime": "npm:3.1152.0"
+    "@azure/identity": "npm:4.14.0"
+    "@azure/keyvault-secrets": "npm:4.11.2"
+    "@google/genai": "npm:2.30.0"
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@opentelemetry/api": "npm:1.9.1"
+    "@opentelemetry/api-logs": "npm:0.223.0"
+    "@opentelemetry/context-async-hooks": "npm:2.12.0"
+    "@opentelemetry/resources": "npm:2.12.0"
+    "@opentelemetry/sdk-logs": "npm:0.223.0"
+    "@opentelemetry/sdk-metrics": "npm:2.12.0"
+    "@opentelemetry/sdk-trace-base": "npm:2.12.0"
+    "@opentelemetry/semantic-conventions": "npm:1.43.0"
+    "@rovinos/config": "workspace:^"
+    "@rovinos/core": "workspace:^"
+    "@rovinos/models": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@rovinos/store-postgres": "workspace:^"
+    "@rovinos/store-sqlite": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@rovinos/vault": "workspace:^"
+    "@types/better-sqlite3": "npm:9.6.0"
+    "@types/pg": "npm:8.23.1"
+    ajv: "npm:8.20.0"
+    ajv-formats: "npm:3.0.1"
+    better-sqlite3: "npm:13.0.3"
+    openai: "npm:7.34.0"
+    parse5: "npm:8.0.1"
+    pg: "npm:8.23.1"
+    tar: "npm:7.5.22"
+    tsup: "npm:9.0.0"
+    typescript: "npm:5.9.3"
+    undici: "npm:8.12.2"
+    vitest: "npm:3.2.6"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  dependenciesMeta:
+    better-sqlite3:
+      optional: true
+    pg:
+      optional: true
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/store-postgres@workspace:^, @rovinos/store-postgres@workspace:packages/store-postgres":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/store-postgres@workspace:packages/store-postgres"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@types/pg": "npm:8.23.1"
+    ajv: "npm:8.20.0"
+    ajv-formats: "npm:3.0.1"
+    pg: "npm:8.23.1"
+    tsup: "npm:9.0.0"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  peerDependencies:
+    "@rovinos/sdk": "*"
+  peerDependenciesMeta:
+    "@rovinos/sdk":
+      optional: true
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/store-sqlite@workspace:^, @rovinos/store-sqlite@workspace:packages/store-sqlite":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/store-sqlite@workspace:packages/store-sqlite"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@types/better-sqlite3": "npm:9.6.0"
+    ajv: "npm:8.20.0"
+    ajv-formats: "npm:3.0.1"
+    better-sqlite3: "npm:13.0.3"
+    tsup: "npm:9.0.0"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  peerDependencies:
+    "@rovinos/sdk": "*"
+  peerDependenciesMeta:
+    "@rovinos/sdk":
+      optional: true
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/store@workspace:^, @rovinos/store@workspace:packages/store":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/store@workspace:packages/store"
+  dependencies:
+    "@rovinos/crypto": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  peerDependencies:
+    vitest: ^3.2.6
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/telemetry@workspace:^, @rovinos/telemetry@workspace:packages/telemetry":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/telemetry@workspace:packages/telemetry"
+  dependencies:
+    "@opentelemetry/api": "npm:1.9.1"
+    "@opentelemetry/api-logs": "npm:0.223.0"
+    "@opentelemetry/context-async-hooks": "npm:2.12.0"
+    "@opentelemetry/resources": "npm:2.12.0"
+    "@opentelemetry/sdk-logs": "npm:0.223.0"
+    "@opentelemetry/sdk-metrics": "npm:2.12.0"
+    "@opentelemetry/sdk-trace-base": "npm:2.12.0"
+    "@opentelemetry/semantic-conventions": "npm:1.43.0"
+    "@rovinos/schemas": "workspace:^"
+    "@types/node": "npm:26.6.5"
+    fast-check: "npm:4.10.2"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@rovinos/vault@workspace:^, @rovinos/vault@workspace:packages/vault":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/vault@workspace:packages/vault"
+  dependencies:
+    "@azure/identity": "npm:4.14.0"
+    "@azure/keyvault-secrets": "npm:4.11.2"
+    "@rovinos/crypto": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@types/better-sqlite3": "npm:9.6.0"
+    "@types/pg": "npm:8.23.1"
+    better-sqlite3: "npm:13.0.3"
+    pg: "npm:8.23.1"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
 
 "@sindresorhus/base62@npm:^1.0.0":
   version: 1.0.0
@@ -3775,6 +3847,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"any-promise@npm:^1.0.0":
+  version: 1.3.0
+  resolution: "any-promise@npm:1.3.0"
+  checksum: 10c0/60f0298ed34c74fef50daab88e8dab786036ed5a7fad02e012ab57e376e0a0b4b29e83b95ea9b5e7d89df762f5f25119b83e00706ecaccb22cfbacee98d74889
+  languageName: node
+  linkType: hard
+
 "are-docs-informative@npm:^0.1.1":
   version: 0.1.1
   resolution: "are-docs-informative@npm:0.1.1"
@@ -4050,10 +4129,28 @@ __metadata:
   languageName: node
   linkType: hard
 
+"bundle-require@npm:^5.1.0":
+  version: 5.1.0
+  resolution: "bundle-require@npm:5.1.0"
+  dependencies:
+    load-tsconfig: "npm:^0.2.3"
+  peerDependencies:
+    esbuild: ">=0.18"
+  checksum: 10c0/8bff9df68eb686f05af952003c78e70ffed2817968f92aebb2af620cc0b7428c8154df761d28f1b38508532204278950624ef86ce63644013dc57660a9d1810f
+  languageName: node
+  linkType: hard
+
 "cac@npm:^6.7.14":
   version: 6.7.14
   resolution: "cac@npm:6.7.14"
   checksum: 10c0/4ee06aaa7bab8981f0d54e5f5f9d4adcd64058e9697563ce336d8a3878ed018ee18ebe5359b2430eceae87e0758e62ea2019c3f52ae6e211b1bd2e133856cd10
+  languageName: node
+  linkType: hard
+
+"cac@npm:^7.1.0":
+  version: 7.1.0
+  resolution: "cac@npm:7.1.0"
+  checksum: 10c0/8bfeef75404cf7d1799abdf6e07b276f3bb646caacdef4d492c64dcff6d4277ec81254612343d041e00ede588fd57117d1a46238b6db18770461dcb2cb1f7487
   languageName: node
   linkType: hard
 
@@ -4193,6 +4290,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"chokidar@npm:^5.0.0":
+  version: 5.0.0
+  resolution: "chokidar@npm:5.0.0"
+  dependencies:
+    readdirp: "npm:^5.0.0"
+  checksum: 10c0/42fc907cb2a7ff5c9e220f84dae75380a77997f851c2a5e7865a2cf9ae45dd407a23557208cdcdbf3ac8c93341135a1748e4c48c31855f3bfa095e5159b6bdec
+  languageName: node
+  linkType: hard
+
 "chownr@npm:^3.0.0":
   version: 3.0.0
   resolution: "chownr@npm:3.0.0"
@@ -4265,6 +4371,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"commander@npm:^4.0.0":
+  version: 4.1.1
+  resolution: "commander@npm:4.1.1"
+  checksum: 10c0/84a76c08fe6cc08c9c93f62ac573d2907d8e79138999312c92d4155bc2325d487d64d13f669b2000c9f8caf70493c1be2dac74fec3c51d5a04f8bc3ae1830bab
+  languageName: node
+  linkType: hard
+
 "commander@npm:^8.3.0":
   version: 8.3.0
   resolution: "commander@npm:8.3.0"
@@ -4293,6 +4406,20 @@ __metadata:
   version: 0.0.1
   resolution: "concat-map@npm:0.0.1"
   checksum: 10c0/c996b1cfdf95b6c90fee4dae37e332c8b6eb7d106430c17d538034c0ad9a1630cb194d2ab37293b1bdd4d779494beee7786d586a50bd9376fd6f7bcc2bd4c98f
+  languageName: node
+  linkType: hard
+
+"confbox@npm:^0.1.8":
+  version: 0.1.8
+  resolution: "confbox@npm:0.1.8"
+  checksum: 10c0/fc2c68d97cb54d885b10b63e45bd8da83a8a71459d3ecf1825143dd4c7f9f1b696b3283e07d9d12a144c1301c2ebc7842380bdf0014e55acc4ae1c9550102418
+  languageName: node
+  linkType: hard
+
+"consola@npm:^3.4.2":
+  version: 3.4.2
+  resolution: "consola@npm:3.4.2"
+  checksum: 10c0/7cebe57ecf646ba74b300bcce23bff43034ed6fbec9f7e39c27cee1dc00df8a21cd336b466ad32e304ea70fba04ec9e890c200270de9a526ce021ba8a7e4c11a
   languageName: node
   linkType: hard
 
@@ -4906,7 +5033,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"esbuild@npm:0.28.2, esbuild@npm:^0.27.0 || ^0.28.0":
+"esbuild@npm:0.28.2, esbuild@npm:^0.27.0 || ^0.28.0, esbuild@npm:^0.28.2":
   version: 0.28.2
   resolution: "esbuild@npm:0.28.2"
   dependencies:
@@ -5563,6 +5690,17 @@ __metadata:
     locate-path: "npm:^6.0.0"
     path-exists: "npm:^4.0.0"
   checksum: 10c0/062c5a83a9c02f53cdd6d175a37ecf8f87ea5bbff1fdfb828f04bfa021441bc7583e8ebc0872a4c1baab96221fb8a8a275a19809fb93fbc40bd69ec35634069a
+  languageName: node
+  linkType: hard
+
+"fix-dts-default-cjs-exports@npm:^1.0.1":
+  version: 1.0.1
+  resolution: "fix-dts-default-cjs-exports@npm:1.0.1"
+  dependencies:
+    magic-string: "npm:^0.30.17"
+    mlly: "npm:^1.7.4"
+    rollup: "npm:^4.34.8"
+  checksum: 10c0/61a3cbe32b6c29df495ef3aded78199fe9dbb52e2801c899fe76d9ca413d3c8c51f79986bac83f8b4b2094ebde883ddcfe47b68ce469806ba13ca6ed4e7cd362
   languageName: node
   linkType: hard
 
@@ -6565,6 +6703,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"joycon@npm:^3.1.1":
+  version: 3.1.1
+  resolution: "joycon@npm:3.1.1"
+  checksum: 10c0/131fb1e98c9065d067fd49b6e685487ac4ad4d254191d7aa2c9e3b90f4e9ca70430c43cad001602bdbdabcf58717d3b5c5b7461c1bd8e39478c8de706b3fe6ae
+  languageName: node
+  linkType: hard
+
 "js-tokens@npm:^10.0.0":
   version: 10.0.0
   resolution: "js-tokens@npm:10.0.0"
@@ -6914,12 +7059,33 @@ __metadata:
   languageName: node
   linkType: hard
 
+"lilconfig@npm:^3.1.1":
+  version: 3.1.4
+  resolution: "lilconfig@npm:3.1.4"
+  checksum: 10c0/20ed0899f58a26b7be69564b8b2f2be770378a242b7bfe2522a9f88056a5cbe2b11ac533c3acdd7c27ce9f8317168040c41c0c037061e9da21e3bbe29393f3f8
+  languageName: node
+  linkType: hard
+
+"lines-and-columns@npm:^1.1.6":
+  version: 1.2.4
+  resolution: "lines-and-columns@npm:1.2.4"
+  checksum: 10c0/3da6ee62d4cd9f03f5dc90b4df2540fb85b352081bee77fe4bbcd12c9000ead7f35e0a38b8d09a9bb99b13223446dd8689ff3c4959807620726d788701a83d2d
+  languageName: node
+  linkType: hard
+
 "linkify-it@npm:^6.0.0":
   version: 6.1.0
   resolution: "linkify-it@npm:6.1.0"
   dependencies:
     uc.micro: "npm:^3.0.0"
   checksum: 10c0/9b2b25244088dc345698fae7d3801c505f001dd0fa052298236bbc49f34e9c744ea73b53801635909a6a411e3b046074b13047aba47b72e26922114a89fea691
+  languageName: node
+  linkType: hard
+
+"load-tsconfig@npm:^0.2.3":
+  version: 0.2.5
+  resolution: "load-tsconfig@npm:0.2.5"
+  checksum: 10c0/bf2823dd26389d3497b6567f07435c5a7a58d9df82e879b0b3892f87d8db26900f84c85bc329ef41c0540c0d6a448d1c23ddc64a80f3ff6838b940f3915a3fcb
   languageName: node
   linkType: hard
 
@@ -7563,10 +7729,33 @@ __metadata:
   languageName: node
   linkType: hard
 
+"mlly@npm:^1.7.4":
+  version: 1.8.2
+  resolution: "mlly@npm:1.8.2"
+  dependencies:
+    acorn: "npm:^8.16.0"
+    pathe: "npm:^2.0.3"
+    pkg-types: "npm:^1.3.1"
+    ufo: "npm:^1.6.3"
+  checksum: 10c0/aa826683a6daddf2aef65f9c8142e362731cf8e415a5591faf92fd51040a76697e45ab6dbb7a3b38be74e0f8c464825a7eabe827750455c7472421953f5da733
+  languageName: node
+  linkType: hard
+
 "ms@npm:^2.1.1, ms@npm:^2.1.3":
   version: 2.1.3
   resolution: "ms@npm:2.1.3"
   checksum: 10c0/d924b57e7312b3b63ad21fc5b3dc0af5e78d61a1fc7cfb5457edaf26326bf62be5307cc87ffb6862ef1c2b33b0233cdb5d4f01c4c958cc0d660948b65a287a48
+  languageName: node
+  linkType: hard
+
+"mz@npm:^2.7.0":
+  version: 2.7.0
+  resolution: "mz@npm:2.7.0"
+  dependencies:
+    any-promise: "npm:^1.0.0"
+    object-assign: "npm:^4.0.1"
+    thenify-all: "npm:^1.0.0"
+  checksum: 10c0/103114e93f87362f0b56ab5b2e7245051ad0276b646e3902c98397d18bb8f4a77f2ea4a2c9d3ad516034ea3a56553b60d3f5f78220001ca4c404bd711bd0af39
   languageName: node
   linkType: hard
 
@@ -7672,6 +7861,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"object-assign@npm:^4.0.1":
+  version: 4.1.1
+  resolution: "object-assign@npm:4.1.1"
+  checksum: 10c0/1f4df9945120325d041ccf7b86f31e8bcc14e73d29171e37a7903050e96b81323784ec59f93f102ec635bcf6fa8034ba3ea0a8c7e69fa202b87ae3b6cec5a414
+  languageName: node
+  linkType: hard
+
 "object-deep-merge@npm:^2.0.1":
   version: 2.0.1
   resolution: "object-deep-merge@npm:2.0.1"
@@ -7716,6 +7912,13 @@ __metadata:
     define-properties: "npm:^1.2.1"
     es-object-atoms: "npm:^1.1.1"
   checksum: 10c0/d4b8c1e586650407da03370845f029aa14076caca4e4d4afadbc69cfb5b78035fd3ee7be417141abdb0258fa142e59b11923b4c44d8b1255b28f5ffcc50da7db
+  languageName: node
+  linkType: hard
+
+"obug@npm:^3.0.0":
+  version: 3.0.0
+  resolution: "obug@npm:3.0.0"
+  checksum: 10c0/985625b70ea05a39956da94f406040a0c7d27b1699a14af87b1ea75cba915b5957b75c4acdaccaefa2a86eaf40fc968bc00f6c28755a91496fc91a92b1513b38
   languageName: node
   linkType: hard
 
@@ -7936,7 +8139,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pathe@npm:^2.0.3":
+"pathe@npm:^2.0.1, pathe@npm:^2.0.3":
   version: 2.0.3
   resolution: "pathe@npm:2.0.3"
   checksum: 10c0/c118dc5a8b5c4166011b2b70608762e260085180bb9e33e80a50dcdb1e78c010b1624f4280c492c92b05fc276715a4c357d1f9edc570f8f1b3d90b6839ebaca1
@@ -8089,10 +8292,28 @@ __metadata:
   languageName: node
   linkType: hard
 
+"pirates@npm:^4.0.1":
+  version: 4.0.7
+  resolution: "pirates@npm:4.0.7"
+  checksum: 10c0/a51f108dd811beb779d58a76864bbd49e239fa40c7984cd11596c75a121a8cc789f1c8971d8bb15f0dbf9d48b76c05bb62fcbce840f89b688c0fa64b37e8478a
+  languageName: node
+  linkType: hard
+
 "pkce-challenge@npm:^5.0.0":
   version: 5.0.1
   resolution: "pkce-challenge@npm:5.0.1"
   checksum: 10c0/207f4cb976682f27e8324eb49cf71937c98fbb8341a0b8f6142bc6f664825b30e049a54a21b5c034e823ee3c3d412f10d74bd21de78e17452a6a496c2991f57c
+  languageName: node
+  linkType: hard
+
+"pkg-types@npm:^1.3.1":
+  version: 1.3.1
+  resolution: "pkg-types@npm:1.3.1"
+  dependencies:
+    confbox: "npm:^0.1.8"
+    mlly: "npm:^1.7.4"
+    pathe: "npm:^2.0.1"
+  checksum: 10c0/19e6cb8b66dcc66c89f2344aecfa47f2431c988cfa3366bdfdcfb1dd6695f87dcce37fbd90fe9d1605e2f4440b77f391e83c23255347c35cf84e7fd774d7fcea
   languageName: node
   linkType: hard
 
@@ -8127,6 +8348,29 @@ __metadata:
   version: 1.1.0
   resolution: "possible-typed-array-names@npm:1.1.0"
   checksum: 10c0/c810983414142071da1d644662ce4caebce890203eb2bc7bf119f37f3fe5796226e117e6cca146b521921fa6531072674174a3325066ac66fce089a53e1e5196
+  languageName: node
+  linkType: hard
+
+"postcss-load-config@npm:^6.0.1":
+  version: 6.0.1
+  resolution: "postcss-load-config@npm:6.0.1"
+  dependencies:
+    lilconfig: "npm:^3.1.1"
+  peerDependencies:
+    jiti: ">=1.21.0"
+    postcss: ">=8.0.9"
+    tsx: ^4.8.1
+    yaml: ^2.4.2
+  peerDependenciesMeta:
+    jiti:
+      optional: true
+    postcss:
+      optional: true
+    tsx:
+      optional: true
+    yaml:
+      optional: true
+  checksum: 10c0/74173a58816dac84e44853f7afbd283f4ef13ca0b6baeba27701214beec33f9e309b128f8102e2b173e8d45ecba45d279a9be94b46bf48d219626aa9b5730848
   languageName: node
   linkType: hard
 
@@ -8302,6 +8546,13 @@ __metadata:
   version: 4.1.2
   resolution: "readdirp@npm:4.1.2"
   checksum: 10c0/60a14f7619dec48c9c850255cd523e2717001b0e179dc7037cfa0895da7b9e9ab07532d324bfb118d73a710887d1e35f79c495fa91582784493e085d18c72c62
+  languageName: node
+  linkType: hard
+
+"readdirp@npm:^5.0.0":
+  version: 5.1.1
+  resolution: "readdirp@npm:5.1.1"
+  checksum: 10c0/5e99755684b9104761e48801828f4d2614efa33b1698629929c5985184dc63a7f8233c827832c40dc7be16b00cc871d303cf9de396d2fb74b9465ee2aa2424a1
   languageName: node
   linkType: hard
 
@@ -8528,36 +8779,36 @@ __metadata:
   languageName: node
   linkType: hard
 
-"rollup@npm:^4.43.0":
-  version: 4.64.2
-  resolution: "rollup@npm:4.64.2"
+"rollup@npm:^4.34.8, rollup@npm:^4.43.0, rollup@npm:^4.64.6":
+  version: 4.64.12
+  resolution: "rollup@npm:4.64.12"
   dependencies:
     "@napi-rs/lzma-linux-x64-gnu": "npm:1.5.1"
-    "@rollup/rollup-android-arm-eabi": "npm:4.64.2"
-    "@rollup/rollup-android-arm64": "npm:4.64.2"
-    "@rollup/rollup-darwin-arm64": "npm:4.64.2"
-    "@rollup/rollup-darwin-x64": "npm:4.64.2"
-    "@rollup/rollup-freebsd-arm64": "npm:4.64.2"
-    "@rollup/rollup-freebsd-x64": "npm:4.64.2"
-    "@rollup/rollup-linux-arm-gnueabihf": "npm:4.64.2"
-    "@rollup/rollup-linux-arm-musleabihf": "npm:4.64.2"
-    "@rollup/rollup-linux-arm64-gnu": "npm:4.64.2"
-    "@rollup/rollup-linux-arm64-musl": "npm:4.64.2"
-    "@rollup/rollup-linux-loong64-gnu": "npm:4.64.2"
-    "@rollup/rollup-linux-loong64-musl": "npm:4.64.2"
-    "@rollup/rollup-linux-ppc64-gnu": "npm:4.64.2"
-    "@rollup/rollup-linux-ppc64-musl": "npm:4.64.2"
-    "@rollup/rollup-linux-riscv64-gnu": "npm:4.64.2"
-    "@rollup/rollup-linux-riscv64-musl": "npm:4.64.2"
-    "@rollup/rollup-linux-s390x-gnu": "npm:4.64.2"
-    "@rollup/rollup-linux-x64-gnu": "npm:4.64.2"
-    "@rollup/rollup-linux-x64-musl": "npm:4.64.2"
-    "@rollup/rollup-openbsd-x64": "npm:4.64.2"
-    "@rollup/rollup-openharmony-arm64": "npm:4.64.2"
-    "@rollup/rollup-win32-arm64-msvc": "npm:4.64.2"
-    "@rollup/rollup-win32-ia32-msvc": "npm:4.64.2"
-    "@rollup/rollup-win32-x64-gnu": "npm:4.64.2"
-    "@rollup/rollup-win32-x64-msvc": "npm:4.64.2"
+    "@rollup/rollup-android-arm-eabi": "npm:4.64.12"
+    "@rollup/rollup-android-arm64": "npm:4.64.12"
+    "@rollup/rollup-darwin-arm64": "npm:4.64.12"
+    "@rollup/rollup-darwin-x64": "npm:4.64.12"
+    "@rollup/rollup-freebsd-arm64": "npm:4.64.12"
+    "@rollup/rollup-freebsd-x64": "npm:4.64.12"
+    "@rollup/rollup-linux-arm-gnueabihf": "npm:4.64.12"
+    "@rollup/rollup-linux-arm-musleabihf": "npm:4.64.12"
+    "@rollup/rollup-linux-arm64-gnu": "npm:4.64.12"
+    "@rollup/rollup-linux-arm64-musl": "npm:4.64.12"
+    "@rollup/rollup-linux-loong64-gnu": "npm:4.64.12"
+    "@rollup/rollup-linux-loong64-musl": "npm:4.64.12"
+    "@rollup/rollup-linux-ppc64-gnu": "npm:4.64.12"
+    "@rollup/rollup-linux-ppc64-musl": "npm:4.64.12"
+    "@rollup/rollup-linux-riscv64-gnu": "npm:4.64.12"
+    "@rollup/rollup-linux-riscv64-musl": "npm:4.64.12"
+    "@rollup/rollup-linux-s390x-gnu": "npm:4.64.12"
+    "@rollup/rollup-linux-x64-gnu": "npm:4.64.12"
+    "@rollup/rollup-linux-x64-musl": "npm:4.64.12"
+    "@rollup/rollup-openbsd-x64": "npm:4.64.12"
+    "@rollup/rollup-openharmony-arm64": "npm:4.64.12"
+    "@rollup/rollup-win32-arm64-msvc": "npm:4.64.12"
+    "@rollup/rollup-win32-ia32-msvc": "npm:4.64.12"
+    "@rollup/rollup-win32-x64-gnu": "npm:4.64.12"
+    "@rollup/rollup-win32-x64-msvc": "npm:4.64.12"
     "@types/estree": "npm:1.0.9"
     fsevents: "npm:~2.3.2"
   dependenciesMeta:
@@ -8617,7 +8868,7 @@ __metadata:
       optional: true
   bin:
     rollup: dist/bin/rollup
-  checksum: 10c0/730bbc65dfc6f03d37c1cee3c1ef561b146d36c63fd26a62b8a3f9b310560585ef409d178f2411d119a69eda1ab28dae5218bd61ef8a7d3422d98796ccdc745c
+  checksum: 10c0/a9196df9ef1eb667bbeab8ca89addeedbc288422c63791bb0c44d76b056de04b961a213caa3750aade863360ef4780341af2f2bccb7565131db8ac222fa2c78d
   languageName: node
   linkType: hard
 
@@ -8626,27 +8877,6 @@ __metadata:
   resolution: "rovinos-ai-harness@workspace:."
   dependencies:
     "@eslint-community/eslint-plugin-eslint-comments": "npm:4.8.1"
-    "@harness/cli": "workspace:^"
-    "@harness/config": "workspace:^"
-    "@harness/context": "workspace:^"
-    "@harness/control-plane": "workspace:^"
-    "@harness/core": "workspace:^"
-    "@harness/eslint-plugin-harness": "workspace:^"
-    "@harness/eval": "workspace:^"
-    "@harness/host": "workspace:^"
-    "@harness/mcp": "workspace:^"
-    "@harness/models": "workspace:^"
-    "@harness/pii": "workspace:^"
-    "@harness/policy": "workspace:^"
-    "@harness/replay": "workspace:^"
-    "@harness/sandbox": "workspace:^"
-    "@harness/schemas": "workspace:^"
-    "@harness/sdk": "workspace:^"
-    "@harness/store": "workspace:^"
-    "@harness/store-postgres": "workspace:^"
-    "@harness/store-sqlite": "workspace:^"
-    "@harness/telemetry": "workspace:^"
-    "@harness/vault": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
     "@modelcontextprotocol/inspector": "npm:2.11.0"
     "@modelcontextprotocol/node": "npm:2.1.1"
@@ -8654,6 +8884,27 @@ __metadata:
     "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/core": "npm:2.12.0"
+    "@rovinos/cli": "workspace:^"
+    "@rovinos/config": "workspace:^"
+    "@rovinos/context": "workspace:^"
+    "@rovinos/control-plane": "workspace:^"
+    "@rovinos/core": "workspace:^"
+    "@rovinos/eslint-plugin-harness": "workspace:^"
+    "@rovinos/eval": "workspace:^"
+    "@rovinos/host": "workspace:^"
+    "@rovinos/mcp": "workspace:^"
+    "@rovinos/models": "workspace:^"
+    "@rovinos/pii": "workspace:^"
+    "@rovinos/policy": "workspace:^"
+    "@rovinos/replay": "workspace:^"
+    "@rovinos/sandbox": "workspace:^"
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/sdk": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@rovinos/store-postgres": "workspace:^"
+    "@rovinos/store-sqlite": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
+    "@rovinos/vault": "workspace:^"
     "@types/node": "npm:26.6.5"
     "@types/spdx-expression-parse": "npm:4.0.0"
     "@vitest/coverage-v8": "npm:3.2.6"
@@ -9196,6 +9447,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"sucrase@npm:^3.35.1":
+  version: 3.35.1
+  resolution: "sucrase@npm:3.35.1"
+  dependencies:
+    "@jridgewell/gen-mapping": "npm:^0.3.2"
+    commander: "npm:^4.0.0"
+    lines-and-columns: "npm:^1.1.6"
+    mz: "npm:^2.7.0"
+    pirates: "npm:^4.0.1"
+    tinyglobby: "npm:^0.2.11"
+    ts-interface-checker: "npm:^0.1.9"
+  bin:
+    sucrase: bin/sucrase
+    sucrase-node: bin/sucrase-node
+  checksum: 10c0/6fa22329c261371feb9560630d961ad0d0b9c87dce21ea74557c5f3ffbe5c1ee970ea8bcce9962ae9c90c3c47165ffa7dd41865c7414f5d8ea7a40755d612c5c
+  languageName: node
+  linkType: hard
+
 "supports-color@npm:^7.1.0":
   version: 7.2.0
   resolution: "supports-color@npm:7.2.0"
@@ -9257,6 +9526,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"thenify-all@npm:^1.0.0":
+  version: 1.6.0
+  resolution: "thenify-all@npm:1.6.0"
+  dependencies:
+    thenify: "npm:>= 3.1.0 < 4"
+  checksum: 10c0/9b896a22735e8122754fe70f1d65f7ee691c1d70b1f116fda04fea103d0f9b356e3676cb789506e3909ae0486a79a476e4914b0f92472c2e093d206aed4b7d6b
+  languageName: node
+  linkType: hard
+
+"thenify@npm:>= 3.1.0 < 4":
+  version: 3.3.1
+  resolution: "thenify@npm:3.3.1"
+  dependencies:
+    any-promise: "npm:^1.0.0"
+  checksum: 10c0/f375aeb2b05c100a456a30bc3ed07ef03a39cbdefe02e0403fb714b8c7e57eeaad1a2f5c4ecfb9ce554ce3db9c2b024eba144843cd9e344566d9fcee73b04767
+  languageName: node
+  linkType: hard
+
 "thread-stream@npm:^3.0.0":
   version: 3.2.0
   resolution: "thread-stream@npm:3.2.0"
@@ -9280,7 +9567,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tinyglobby@npm:^0.2.12, tinyglobby@npm:^0.2.14, tinyglobby@npm:^0.2.15, tinyglobby@npm:^0.2.17":
+"tinyexec@npm:^1.3.1":
+  version: 1.3.1
+  resolution: "tinyexec@npm:1.3.1"
+  checksum: 10c0/c590369cb3fa73cc18a3998caec8a00f9712d91309c881be3ac52b160fb2f80c7b1fbf3591858ab6abab47ad55385b0c86ec19982e32441a01f55298dab9ccd2
+  languageName: node
+  linkType: hard
+
+"tinyglobby@npm:^0.2.11, tinyglobby@npm:^0.2.12, tinyglobby@npm:^0.2.14, tinyglobby@npm:^0.2.15, tinyglobby@npm:^0.2.17":
   version: 0.2.17
   resolution: "tinyglobby@npm:0.2.17"
   dependencies:
@@ -9366,6 +9660,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"tree-kill@npm:^1.2.2":
+  version: 1.2.2
+  resolution: "tree-kill@npm:1.2.2"
+  bin:
+    tree-kill: cli.js
+  checksum: 10c0/7b1b7c7f17608a8f8d20a162e7957ac1ef6cd1636db1aba92f4e072dc31818c2ff0efac1e3d91064ede67ed5dc57c565420531a8134090a12ac10cf792ab14d2
+  languageName: node
+  linkType: hard
+
 "ts-algebra@npm:^2.0.0":
   version: 2.0.0
   resolution: "ts-algebra@npm:2.0.0"
@@ -9382,10 +9685,59 @@ __metadata:
   languageName: node
   linkType: hard
 
+"ts-interface-checker@npm:^0.1.9":
+  version: 0.1.13
+  resolution: "ts-interface-checker@npm:0.1.13"
+  checksum: 10c0/232509f1b84192d07b81d1e9b9677088e590ac1303436da1e92b296e9be8e31ea042e3e1fd3d29b1742ad2c959e95afe30f63117b8f1bc3a3850070a5142fea7
+  languageName: node
+  linkType: hard
+
 "tslib@npm:^2.2.0, tslib@npm:^2.4.0, tslib@npm:^2.6.2, tslib@npm:^2.8.1":
   version: 2.8.1
   resolution: "tslib@npm:2.8.1"
   checksum: 10c0/9c4759110a19c53f992d9aae23aac5ced636e99887b51b9e61def52611732872ff7668757d4e4c61f19691e36f4da981cd9485e869b4a7408d689f6bf1f14e62
+  languageName: node
+  linkType: hard
+
+"tsup@npm:9.0.0":
+  version: 9.0.0
+  resolution: "tsup@npm:9.0.0"
+  dependencies:
+    bundle-require: "npm:^5.1.0"
+    cac: "npm:^7.1.0"
+    chokidar: "npm:^5.0.0"
+    consola: "npm:^3.4.2"
+    esbuild: "npm:^0.28.2"
+    fix-dts-default-cjs-exports: "npm:^1.0.1"
+    joycon: "npm:^3.1.1"
+    obug: "npm:^3.0.0"
+    picocolors: "npm:^1.1.1"
+    postcss-load-config: "npm:^6.0.1"
+    resolve-from: "npm:^5.0.0"
+    rollup: "npm:^4.64.6"
+    source-map-js: "npm:^1.2.2"
+    sucrase: "npm:^3.35.1"
+    tinyexec: "npm:^1.3.1"
+    tinyglobby: "npm:^0.2.17"
+    tree-kill: "npm:^1.2.2"
+  peerDependencies:
+    "@microsoft/api-extractor": ^7.36.0
+    "@swc/core": ^1
+    postcss: ^8.4.12
+    typescript: ">=4.5.0"
+  peerDependenciesMeta:
+    "@microsoft/api-extractor":
+      optional: true
+    "@swc/core":
+      optional: true
+    postcss:
+      optional: true
+    typescript:
+      optional: true
+  bin:
+    tsup: dist/cli-default.js
+    tsup-node: dist/cli-node.js
+  checksum: 10c0/0a073f6e484239e254ec98700e5ac6c827d58346ce6163138a52874a0c1406efb0145eae9e4bf9ea562f1180facde545b8bbfbcf97b3cf3694b5d24e74b52c46
   languageName: node
   linkType: hard
 
@@ -9498,6 +9850,13 @@ __metadata:
   version: 3.0.0
   resolution: "uc.micro@npm:3.0.0"
   checksum: 10c0/891907f5a389cdd48c5bad1a5516242a6db3a700620765b5bfe8b117a5632ccd276177382b0bd37aac85b56c90577840038cdd54f437dfbc30714cd2086a637a
+  languageName: node
+  linkType: hard
+
+"ufo@npm:^1.6.3":
+  version: 1.6.4
+  resolution: "ufo@npm:1.6.4"
+  checksum: 10c0/3a2b29e7e3d772fbf6893d7d23bf442981457adb2fe122828abdbda89bedcb81aafd0dcc080e41b45f9a877db00cb42cbfee9639753a19d9b9bd39b5627039cf
   languageName: node
   linkType: hard
 

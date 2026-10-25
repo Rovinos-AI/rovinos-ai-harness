@@ -7,7 +7,7 @@ import {
   type Event,
   type ApprovalSweepResult,
   type Principal,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import { z } from "zod";
 import { ApprovalPayloadSchema } from "./approval-payload.js";
 import {

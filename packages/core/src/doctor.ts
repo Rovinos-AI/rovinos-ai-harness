@@ -9,8 +9,8 @@ import {
   type DoctorCheckStatus,
   type DoctorCheckResult,
   type SecretRef,
-} from "@harness/schemas";
-import { AkvSecretResolverError } from "@harness/vault";
+} from "@rovinos/schemas";
+import { AkvSecretResolverError } from "@rovinos/vault";
 
 /** Inputs available to registered environment checks. */
 export interface DoctorContext {

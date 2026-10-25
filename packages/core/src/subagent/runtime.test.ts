@@ -8,12 +8,12 @@ import {
   Principal,
   RunConfigSchema,
   SequentialIdGenerator,
-} from "@harness/schemas";
-import type { Event, Id as IdType } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { HeuristicTokenCounter } from "@harness/context";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
-import { ensureTracingFallback } from "@harness/telemetry";
+} from "@rovinos/schemas";
+import type { Event, Id as IdType } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { HeuristicTokenCounter } from "@rovinos/context";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
+import { ensureTracingFallback } from "@rovinos/telemetry";
 import { describe, expect, it } from "vitest";
 import type {
   ModelCompletion,

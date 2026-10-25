@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, JsonValue, PiiConfigSchema, SequentialIdGenerator, parseJson } from "@harness/schemas";
-import { InMemoryWorkspace, OffloadedStub, OffloadingToolPort } from "@harness/context";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
-import { PiiToolPort, Tokenizer } from "@harness/pii";
-import { WebFetchResultSchema, MAX_WEB_FETCH_BYTES, WebFetchTool } from "@harness/sandbox";
+import { Id, JsonValue, PiiConfigSchema, SequentialIdGenerator, parseJson } from "@rovinos/schemas";
+import { InMemoryWorkspace, OffloadedStub, OffloadingToolPort } from "@rovinos/context";
+import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
+import { PiiToolPort, Tokenizer } from "@rovinos/pii";
+import { WebFetchResultSchema, MAX_WEB_FETCH_BYTES, WebFetchTool } from "@rovinos/sandbox";
 import { describe, expect, it } from "vitest";
 
 const runId = Id.parse("00000000000000000000000001");

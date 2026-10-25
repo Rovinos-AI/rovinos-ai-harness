@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ControlPlaneConfigSchema, Id, Principal } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { ControlPlaneConfigSchema, Id, Principal } from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createControlPlaneServer, type ControlPlaneOperations } from "./server.js";

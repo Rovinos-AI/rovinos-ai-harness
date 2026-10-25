@@ -4,14 +4,14 @@ import {
   type Capabilities,
   type ModelsConfig,
   type SecretRef,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   AnthropicAdapter,
   createRoutingModelGateway,
   OpenAIAdapter,
   type RequestSanitizer,
   type ProviderAdapter,
-} from "@harness/models";
+} from "@rovinos/models";
 import type { ModelPort, IdGenerator } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import { parseRuntimeModelsConfig } from "./runtime-config.js";

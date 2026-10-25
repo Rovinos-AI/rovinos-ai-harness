@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, PiiConfigSchema, PiiPresidioConfigSchema, type Message } from "@harness/schemas";
-import * as telemetry from "@harness/telemetry";
-import { AuditingVaultResolver, InMemoryVault, Token, type VaultAudit } from "@harness/vault";
+import { Code, Id, PiiConfigSchema, PiiPresidioConfigSchema, type Message } from "@rovinos/schemas";
+import * as telemetry from "@rovinos/telemetry";
+import { AuditingVaultResolver, InMemoryVault, Token, type VaultAudit } from "@rovinos/vault";
 import { Response as UndiciResponse } from "undici";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emailDetector } from "./detectors/email.js";

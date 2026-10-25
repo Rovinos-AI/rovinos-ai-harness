@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FakeClock, Id } from "@harness/schemas";
+import { FakeClock, Id } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryVault } from "./memory.js";
 import { purgeExpired, VaultPurger } from "./purger.js";

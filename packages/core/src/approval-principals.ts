@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Event, type Principal } from "@harness/schemas";
+import { HarnessError, type Code, type Event, type Principal } from "@rovinos/schemas";
 import type { ToolIntentEvent } from "./run-state.js";
 
 /** Metadata describing who or what resolved an approval. */

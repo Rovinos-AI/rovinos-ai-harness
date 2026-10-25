@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code } from "@rovinos/schemas";
 import type { ControlPlanePrincipal } from "../auth.js";
 import { describe, expect, it, vi } from "vitest";
 import {

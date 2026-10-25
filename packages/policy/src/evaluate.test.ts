@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
-import type { JsonValue } from "@harness/schemas";
+import type { JsonValue } from "@rovinos/schemas";
 import { compilePolicy, evaluate, type PolicyCall, PolicyCallSchema } from "./index.js";
 import { PolicyDocumentSchema, RuleSchema } from "./schema.js";
 import type { ArgMatcher, PolicyDocument, Rule } from "./schema.js";

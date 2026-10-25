@@ -2,10 +2,10 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { HarnessError, VaultConfigSchema } from "@harness/schemas";
-import type { Id, SecretRef } from "@harness/schemas";
-import { PostgresVault, SqliteVault, VaultOperationError } from "@harness/vault";
-import type { TokenType, VaultTerminalRunsQuery } from "@harness/vault";
+import { HarnessError, VaultConfigSchema } from "@rovinos/schemas";
+import type { Id, SecretRef } from "@rovinos/schemas";
+import { PostgresVault, SqliteVault, VaultOperationError } from "@rovinos/vault";
+import type { TokenType, VaultTerminalRunsQuery } from "@rovinos/vault";
 import type {
   RuntimeComposition,
   RuntimeConfig,

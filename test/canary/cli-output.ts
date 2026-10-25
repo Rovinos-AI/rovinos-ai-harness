@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Runtime } from "@harness/core";
-import type { HarnessConfig } from "@harness/config";
-import { createOutput, ExitCode, main, type CliContext } from "@harness/cli/programmatic";
+import type { Runtime } from "@rovinos/core";
+import type { HarnessConfig } from "@rovinos/config";
+import { createOutput, ExitCode, main, type CliContext } from "@rovinos/cli/programmatic";
 
 /** Run the public CLI against the runtime's persistent store and capture both output streams. */
 export async function captureCliOutput(input: {

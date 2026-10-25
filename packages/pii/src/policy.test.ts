@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { PiiPolicySchema } from "@harness/schemas";
+import { PiiPolicySchema } from "@rovinos/schemas";
 import { evaluatePiiPolicy, explainPiiPolicy } from "./index.js";
 
 describe("PII policy evaluation", () => {

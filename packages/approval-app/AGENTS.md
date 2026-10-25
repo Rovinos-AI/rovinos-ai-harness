@@ -10,7 +10,7 @@ All harness MCP App views (approval, human input, run console, run inspector, re
 
 ## Allowed internal imports
 
-- `@harness/schemas`, `@harness/app-telemetry`. Nothing else from `@harness/*`.
+- `@rovinos/schemas`, `@rovinos/app-telemetry`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { PiiEventStore } from "@harness/pii";
+import { PiiEventStore } from "@rovinos/pii";
 import {
   Code,
   Event as EventSchema,
@@ -8,10 +8,10 @@ import {
   RunConfigSchema,
   StoreConfigSchema,
   VaultConfigSchema,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { ExecSpecSchema } from "@harness/sandbox";
-import { InMemoryVault } from "@harness/vault";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { ExecSpecSchema } from "@rovinos/sandbox";
+import { InMemoryVault } from "@rovinos/vault";
 import { describe, expect, it, vi } from "vitest";
 import { resolveRun, ResolvedRunSchema } from "./resolve.js";
 import { buildReplayRuntime } from "./replay-runtime.js";

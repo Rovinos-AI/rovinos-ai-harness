@@ -11,7 +11,7 @@ import {
   type JsonValue as JsonValueType,
   type ServerConfig,
   type ToolSpec,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type { McpTool } from "./tool-list.js";
 
 export { UNREGISTERED_TOOL_ID };

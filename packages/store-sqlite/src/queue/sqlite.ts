@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { SystemRunQueueIdGenerator } from "@harness/store";
+import { SystemRunQueueIdGenerator } from "@rovinos/store";
 import type {
   Clock,
   RunQueue,
@@ -11,7 +10,7 @@ import type {
   RunQueueIdGenerator,
   RunQueueJob,
   RunQueueOptions,
-} from "@harness/store";
+} from "@rovinos/store";
 import {
   migrate,
   EnqueueRunJobSchema,
@@ -24,7 +23,8 @@ import {
   WorkerIdSchema,
   hashIdempotencyKey,
   parseQueueInput,
-} from "@harness/store/adapter-internal";
+} from "@rovinos/store/adapter-internal";
+import { sqliteMigrationDirectory } from "../migration-directory.js";
 import { sqliteStoreError } from "../sqlite/outbox.js";
 
 interface QueueRow {
@@ -143,7 +143,7 @@ export class SqliteRunQueue implements RunQueue {
         this.db.pragma("foreign_keys = ON");
         migrate(this.db, "sqlite", {
           appliedAt: this.now(),
-          migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
+          migrationDirectory: sqliteMigrationDirectory(),
         });
       }
       this.enqueueStatement = this.db.prepare<

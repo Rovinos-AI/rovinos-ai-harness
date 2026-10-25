@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id } from "@harness/schemas";
-import type { ElicitationRetry } from "@harness/mcp";
+import type { Event, Id } from "@rovinos/schemas";
+import type { ElicitationRetry } from "@rovinos/mcp";
 import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, RunRecorder } from "../recorder.js";
 import type { IdGenerator, RunContext, ToolPort } from "../ports.js";

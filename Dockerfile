@@ -23,18 +23,15 @@ COPY --from=manifests /manifests/ ./
 RUN mise exec -- yarn install --immutable
 COPY . .
 RUN mise exec -- yarn build
-RUN mise exec -- yarn workspaces focus @harness/cli --production \
+RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store-sqlite --production \
     && mkdir -p /out/dist /out/packages \
     && cp -a node_modules /out/node_modules \
     && for package in packages/*/; do \
          if [ -d "${package}dist" ]; then \
            mkdir -p "/out/${package}" && cp -a "${package}package.json" "${package}dist" "/out/${package}"; \
-           if [ -d "${package}migrations" ]; then \
-             cp -a "${package}migrations" "/out/${package}"; \
-           fi; \
          fi; \
        done \
-    && cp -a packages/cli/dist/. /out/dist/
+    && cp -a packages/cli/dist /out/
 
 FROM node:26-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS runtime
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { AppCallExecutionContext, ReferenceHostDependencies } from "@harness/host";
-import { HarnessConfigSchema } from "@harness/config";
-import { createEventBuilders } from "@harness/store/testing";
+import type { AppCallExecutionContext, ReferenceHostDependencies } from "@rovinos/host";
+import { HarnessConfigSchema } from "@rovinos/config";
+import { createEventBuilders } from "@rovinos/store/testing";
 import {
   AppContentEnvelopeSchema,
   Code,
@@ -9,9 +9,9 @@ import {
   Id,
   type JsonValue,
   type NewEvent,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { AuditingVaultResolver } from "@harness/vault";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { AuditingVaultResolver } from "@rovinos/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOutput } from "../output.js";
 import { createApprovalViewHost } from "./approval-view.js";
@@ -29,7 +29,7 @@ const hostMock = vi.hoisted(() => {
   };
 });
 
-vi.mock("@harness/host", () => ({
+vi.mock("@rovinos/host", () => ({
   createReferenceHost: hostMock.createReferenceHost,
 }));
 
@@ -43,7 +43,7 @@ class MissingApprovalHtmlError extends HarnessError {
   }
 }
 
-vi.mock("@harness/control-plane", () => ({
+vi.mock("@rovinos/control-plane", () => ({
   APPROVAL_RESOURCE_URI: "ui://harness/approval/v1",
   MCP_APP_HTML_MIME_TYPE: "text/html;profile=mcp-app",
   loadApprovalHtml: approvalHtmlMock,

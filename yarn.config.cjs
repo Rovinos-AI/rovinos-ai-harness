@@ -5,6 +5,12 @@ const rootManifest = require("./package.json");
 const miseConfig = readFileSync(join(__dirname, "mise.toml"), "utf8");
 const nodeVersion = /^node\s*=\s*"([^"]+)"$/m.exec(miseConfig)?.[1];
 const nodeTypesRange = rootManifest.devDependencies["@types/node"];
+const publishedWorkspaceIdents = new Set([
+  "@rovinos/cli",
+  "@rovinos/sdk",
+  "@rovinos/store-postgres",
+  "@rovinos/store-sqlite",
+]);
 
 module.exports = {
   async constraints({ Yarn }) {
@@ -25,11 +31,17 @@ module.exports = {
     for (const workspace of workspaces) {
       workspace.set("type", "module");
       workspace.set("license", "Apache-2.0");
-      workspace.set("private", true);
+      if (!publishedWorkspaceIdents.has(workspace.ident)) {
+        workspace.set("private", true);
+      }
     }
 
     for (const dependency of Yarn.dependencies()) {
-      if (dependency.type === "peerDependencies") {
+      if (
+        dependency.type === "peerDependencies" ||
+        dependency.ident === "better-sqlite3" ||
+        dependency.ident === "pg"
+      ) {
         continue;
       }
 

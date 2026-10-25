@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Event, FakeClock, Id, type Event as StoredEvent } from "@harness/schemas";
+import { Code, Event, FakeClock, Id, type Event as StoredEvent } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { buildApprovalPayload } from "./approval-payload.js";
 import {

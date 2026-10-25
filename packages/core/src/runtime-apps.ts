@@ -6,9 +6,9 @@ import {
   Id,
   JsonValue,
   type Event,
-} from "@harness/schemas";
-import type { Tokenizer } from "@harness/pii";
-import type { EventStore } from "@harness/store";
+} from "@rovinos/schemas";
+import type { Tokenizer } from "@rovinos/pii";
+import type { EventStore } from "@rovinos/store";
 import type { Clock } from "./recorder.js";
 import { RunRecorder } from "./recorder.js";
 import type { RunState } from "./run-state.js";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError } from "@harness/schemas";
+import { Code, HarnessError } from "@rovinos/schemas";
 import type { z } from "zod";
 
 /** Output destinations used by the CLI; injectable for tests. */

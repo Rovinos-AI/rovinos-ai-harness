@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   loadRunsConsoleHtml,
   registerRunsConsoleResource,
@@ -9,7 +12,24 @@ import {
 } from "./runs-console.js";
 import { MCP_APP_HTML_MIME_TYPE } from "./approval.js";
 
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+  temporaryDirectories.length = 0;
+});
+
 describe("runs console resource", () => {
+  it("loads the built runs console HTML", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "runs-console-resource-"));
+    temporaryDirectories.push(directory);
+    const htmlPath = join(directory, "runs-console.html");
+    await writeFile(htmlPath, "<html>runs</html>");
+    expect(loadRunsConsoleHtml(htmlPath)).toBe("<html>runs</html>");
+  });
+
   it("serves the built HTML with the MCP Apps MIME type and no CSP grants", async () => {
     const html = "<!doctype html><html><body>built runs console</body></html>";
     const server = new McpServer({ name: "runs-resource-test", version: "1.0.0" });

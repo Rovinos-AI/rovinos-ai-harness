@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { PiiConfigSchema, type JsonValue } from "@harness/schemas";
-import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@harness/vault";
+import { PiiConfigSchema, type JsonValue } from "@rovinos/schemas";
+import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@rovinos/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 
 const runId = "00000000000000000000000001";

@@ -15,7 +15,7 @@ export const healthcheckCommand: CommandModule = {
       .command("healthcheck")
       .description("Check local harness state without network calls")
       .action(async () => {
-        const core = await import("@harness/core");
+        const core = await import("@rovinos/core");
         const dataDir = core.resolveDataDir(process.env);
         const dataDirs = new Set([dataDir, process.env.HARNESS_VAULT_DATA_DIR ?? dataDir]);
         for (const directory of dataDirs) {

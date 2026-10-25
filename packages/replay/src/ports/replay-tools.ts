@@ -7,14 +7,14 @@ import {
   type Event,
   type Id,
   type JsonValue,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import type {
   ModelToolCall,
   RunContext,
   ToolDescription,
   ToolExecutionResult,
   ToolPort,
-} from "@harness/core";
+} from "@rovinos/core";
 import type { ResolvedRun } from "../resolve.js";
 import { ReplayDivergenceError, ReplayMissingResultError } from "./replay-model.js";
 

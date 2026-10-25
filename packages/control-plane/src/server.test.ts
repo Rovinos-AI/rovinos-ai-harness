@@ -14,10 +14,10 @@ import {
   type EventType,
   type NewEvent,
   type RunStatus,
-} from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { POLICY_VERSION } from "@harness/telemetry";
-import { createEventBuilders } from "@harness/store/testing";
+} from "@rovinos/schemas";
+import { InMemoryEventStore } from "@rovinos/store";
+import { POLICY_VERSION } from "@rovinos/telemetry";
+import { createEventBuilders } from "@rovinos/store/testing";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {

@@ -38,20 +38,20 @@ import {
   ExitCode,
   main,
   type CliContext,
-} from "@harness/cli/programmatic";
+} from "@rovinos/cli/programmatic";
 import {
   createControlPlaneServer,
   startControlPlaneHttp,
   startRunOutputSchema,
-} from "@harness/control-plane";
-import { createHarness } from "@harness/sdk";
+} from "@rovinos/control-plane";
+import { createHarness } from "@rovinos/sdk";
 import {
   CompositeSecretResolver,
   EnvSecretResolver,
   FileSecretResolver,
   loadConfig,
   HarnessConfigSchema,
-} from "@harness/config";
+} from "@rovinos/config";
 import {
   Checkpointer,
   createRuntime,
@@ -66,8 +66,8 @@ import {
   type ModelCompletion,
   type PolicyPort,
   type ToolPort,
-} from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
+} from "@rovinos/core";
+import { FakeModelPort } from "@rovinos/core/testing";
 import {
   ExecSpecSchema,
   FsOperationRequestSchema,
@@ -77,14 +77,14 @@ import {
   WebFetchResultSchema,
   SandboxExecTool,
   type SandboxBackend,
-} from "@harness/sandbox";
-import { InMemoryEventStore, type EventStore } from "@harness/store";
-import { createEventBuilders } from "@harness/store/testing";
-import { createPolicyCheckedAppCallHandler } from "@harness/host";
-import { SqliteEventStore } from "@harness/store-sqlite";
-import { ProviderError, type ProviderAdapter } from "@harness/models";
-import { FakeProvider } from "@harness/models/testing";
-import { ApprovalNotificationSchema, buildApprovalPayload } from "@harness/policy";
+} from "@rovinos/sandbox";
+import { InMemoryEventStore, type EventStore } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { createPolicyCheckedAppCallHandler } from "@rovinos/host";
+import { SqliteEventStore } from "@rovinos/store-sqlite";
+import { ProviderError, type ProviderAdapter } from "@rovinos/models";
+import { FakeProvider } from "@rovinos/models/testing";
+import { ApprovalNotificationSchema, buildApprovalPayload } from "@rovinos/policy";
 import {
   ApprovalListResultSchema,
   ApprovalShowResultSchema,
@@ -108,14 +108,14 @@ import {
   StoreMigrateResultSchema,
   StorePurgeResultSchema,
   parseJson,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   AkvKeyProvider,
   AkvSecretResolver,
   LocalKeyProvider,
   SqliteVault,
   Token,
-} from "@harness/vault";
+} from "@rovinos/vault";
 import {
   attr,
   createTelemetrySdk,
@@ -128,7 +128,7 @@ import {
   type TelemetrySdkOptions,
   VaultRunView,
   withSpan,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 import { z } from "zod";
 import { createSandboxComposeInvocation } from "../scripts/compose/sandbox.js";
 import { runNetworkIsolationCompose } from "../scripts/ci/network-isolation.js";
@@ -451,7 +451,7 @@ beforeAll(async () => {
       "harness.run.id": attr.id(),
       "harness.e2e.canary": attr.enum([canary]),
     },
-    { taskId: "8.4", packageName: "@harness/telemetry" },
+    { taskId: "8.4", packageName: "@rovinos/telemetry" },
   );
   const spanExporter: TelemetrySdkOptions["spanExporter"] = {
     export: (finished, callback) => {
@@ -506,7 +506,7 @@ beforeAll(async () => {
   if (logs.getLoggerProvider() !== telemetry.loggerProvider) {
     throw new Error("The end-to-end logger provider could not be registered.");
   }
-  const logger = logs.getLogger("@harness/telemetry");
+  const logger = logs.getLogger("@rovinos/telemetry");
   logger.emit({
     eventName: logDefinition.name,
     severityNumber: SeverityNumber.INFO,

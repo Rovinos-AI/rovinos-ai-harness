@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseYaml } from "@harness/schemas";
+import { parseYaml } from "@rovinos/schemas";
 import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));

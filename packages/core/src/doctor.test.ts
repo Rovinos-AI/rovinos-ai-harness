@@ -2,8 +2,8 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SecretRefSchema } from "@harness/schemas";
-import { AkvSecretResolverError } from "@harness/vault";
+import { SecretRefSchema } from "@rovinos/schemas";
+import { AkvSecretResolverError } from "@rovinos/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DOCTOR_TIMEOUT_MS,

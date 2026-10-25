@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Event, type Id, type JsonValue } from "@rovinos/schemas";
 import {
   ApprovalEditError,
   ApprovalPayloadSchema,
   approvalEditsAreAllowed,
   diffToEdits,
   validateEdits,
-} from "@harness/policy";
+} from "@rovinos/policy";
 import type { ToolPort } from "./ports.js";
 import type { RunRecorder } from "./recorder.js";
 import { prepareToolCall, toolRunContext } from "./steps/prepare-tool.js";

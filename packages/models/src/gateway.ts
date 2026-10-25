@@ -8,12 +8,12 @@ import {
   type ModelRequest,
   type ModelUsage,
   type ModelRetryConfig,
-} from "@harness/schemas";
+} from "@rovinos/schemas";
 import {
   emitPricingCacheMissing,
   emitPricingMissing,
   setActiveSpanAttribute,
-} from "@harness/telemetry";
+} from "@rovinos/telemetry";
 import type { z } from "zod";
 import type { ProviderAdapter } from "./types.js";
 import { collectProviderStream } from "./streaming.js";
