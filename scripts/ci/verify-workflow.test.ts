@@ -37,6 +37,18 @@ const workflowSchema = z.looseObject({
 const actionSchema = z.looseObject({
   runs: z.looseObject({ using: z.literal("composite"), steps: z.array(stepSchema) }),
 });
+const copilotSetupWorkflowSchema = z.looseObject({
+  on: z.record(z.string(), z.unknown()),
+  jobs: z.record(
+    z.string(),
+    z.looseObject({
+      "runs-on": z.string(),
+      "timeout-minutes": z.number().int().positive(),
+      permissions: z.record(z.string(), z.string()),
+      steps: z.array(stepSchema),
+    }),
+  ),
+});
 
 type Step = z.infer<typeof stepSchema>;
 
@@ -48,6 +60,13 @@ function readSetupAction(): z.infer<typeof actionSchema> {
   return parseYaml(
     actionSchema,
     readFileSync(resolve(root, ".github/actions/node-setup/action.yml"), "utf8"),
+  );
+}
+
+function readCopilotSetupWorkflow(): z.infer<typeof copilotSetupWorkflowSchema> {
+  return parseYaml(
+    copilotSetupWorkflowSchema,
+    readFileSync(resolve(root, ".github/workflows/copilot-setup-steps.yml"), "utf8"),
   );
 }
 
@@ -65,7 +84,7 @@ function stepRunning(steps: readonly Step[], command: string): Step | undefined 
 
 const pinnedAction = /^[\w.-]+\/[\w.-]+(?:\/[\w./-]+)?@[0-9a-f]{40}$/u;
 
-describe("CI workflow", () => {
+describe("GitHub workflows", () => {
   it("runs on pull requests to main without privileged triggers", () => {
     const workflow = readWorkflow();
 
@@ -73,6 +92,53 @@ describe("CI workflow", () => {
     expect(workflow.on.pull_request).toEqual({
       branches: ["main"],
       types: ["opened", "synchronize", "reopened", "ready_for_review"],
+    });
+  });
+
+  describe("Copilot setup workflow", () => {
+    it("runs manually and when its own workflow file changes", () => {
+      expect(readCopilotSetupWorkflow().on).toEqual({
+        workflow_dispatch: {},
+        push: { paths: [".github/workflows/copilot-setup-steps.yml"] },
+        pull_request: { paths: [".github/workflows/copilot-setup-steps.yml"] },
+      });
+    });
+
+    it("uses the required setup job with read-only permissions", () => {
+      const { jobs } = readCopilotSetupWorkflow();
+
+      expect(Object.keys(jobs)).toEqual(["copilot-setup-steps"]);
+      expect(jobs["copilot-setup-steps"]).toMatchObject({
+        "runs-on": "ubuntu-latest",
+        permissions: { contents: "read" },
+      });
+    });
+
+    it("uses SHA-pinned checkout, disables persisted credentials, and runs shared setup", () => {
+      const job = readCopilotSetupWorkflow().jobs["copilot-setup-steps"];
+      if (job === undefined) {
+        throw new TypeError("The Copilot setup workflow must contain its setup job.");
+      }
+
+      const checkout = job.steps.find(
+        (step) => step.uses?.startsWith("actions/checkout@") === true,
+      );
+      expect(checkout?.uses).toMatch(pinnedAction);
+      expect(checkout?.uses).toBe(jobSteps("static")[0]?.uses);
+      expect(checkout?.with?.["persist-credentials"]).toBe(false);
+      expect(
+        job.steps
+          .map((step) => step.uses)
+          .filter((uses): uses is string => uses !== undefined && !uses.startsWith("./"))
+          .filter((uses) => !pinnedAction.test(uses)),
+      ).toEqual([]);
+      expect(job.steps.some((step) => step.uses === "./.github/actions/node-setup")).toBe(true);
+      expect(
+        job.steps.some(
+          (step) => step.run?.includes("scripts/lint-extended.ts pull-images") === true,
+        ),
+      ).toBe(true);
+      expect(job.steps.some((step) => step.run?.includes("yarn build") === true)).toBe(true);
     });
   });
 
