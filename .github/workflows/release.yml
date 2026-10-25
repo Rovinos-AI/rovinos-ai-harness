@@ -104,6 +104,38 @@ jobs:
               echo "Packed manifest for $name contains an unresolved workspace dependency."
               exit 1
             fi
+            archive_contents="$(tar -tzf "$tarball")"
+            case "$package" in
+              sdk)
+                required_paths=(
+                  "package/dist/migrations/sqlite/"
+                  "package/dist/migrations/postgres/"
+                  "package/dist/migrations/vault/"
+                )
+                ;;
+              cli)
+                required_paths=(
+                  "package/dist/assets/approval.html"
+                  "package/dist/assets/runs-console.html"
+                  "package/dist/assets/web/index.html"
+                  "package/dist/migrations/sqlite/"
+                  "package/dist/migrations/postgres/"
+                  "package/dist/migrations/vault/"
+                )
+                ;;
+              store-sqlite)
+                required_paths=("package/dist/migrations/sqlite/")
+                ;;
+              store-postgres)
+                required_paths=("package/dist/migrations/postgres/")
+                ;;
+            esac
+            for path in "${required_paths[@]}"; do
+              if ! grep -F "$path" <<< "$archive_contents" >/dev/null; then
+                echo "Packed archive for $name is missing $path."
+                exit 1
+              fi
+            done
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published; skipping."
             else

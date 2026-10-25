@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseYaml } from "@harness/schemas";
+import { parseYaml } from "@rovinos/schemas";
 import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -97,11 +97,22 @@ describe("release workflow", () => {
     expect(imageBuild?.run).toContain("ghcr.io/$owner/harness-sandbox");
     expect(imageBuild?.run).not.toContain("sandbox-runner");
     expect(imageBuild?.run).not.toContain("sandbox-egress-proxy");
+    expect(imageBuild?.run).toContain('build_and_sign "ghcr.io/$owner/harness" Dockerfile');
+    expect(imageBuild?.run).toContain(
+      'build_and_sign "ghcr.io/$owner/harness-sandbox" Dockerfile.sandbox',
+    );
+    expect(imageBuild?.run).toContain('--file "$dockerfile"');
+    expect(imageBuild?.run).toMatch(/--metadata-file "\$metadata" \\\s+\./u);
     expect(publishScript).toContain('yarn pack --out "$tarball"');
     expect(publishScript).toContain('tar -xOf "$tarball" package/package.json');
     expect(publishScript).toContain("grep -F '\"workspace:' >/dev/null");
     expect(publishScript).toContain('npm view "$name@$version" version');
     expect(publishScript).toContain('npm publish "$tarball" --provenance --access public');
+    expect(publishScript).toContain('tar -tzf "$tarball"');
+    expect(publishScript).toContain("package/dist/assets/approval.html");
+    expect(publishScript).toContain("package/dist/migrations/sqlite/");
+    expect(publishScript).toContain("package/dist/migrations/postgres/");
+    expect(publishScript).toContain("package/dist/migrations/vault/");
     expect(imageBuildIndex).toBeGreaterThanOrEqual(0);
     expect(npmPublishIndex).toBeGreaterThan(imageBuildIndex);
     expect(latestIndex).toBeGreaterThan(npmPublishIndex);
@@ -129,5 +140,11 @@ describe("release workflow", () => {
     expect(source).not.toMatch(/NPM_TOKEN|secrets\./u);
     expect(remoteActions.length).toBeGreaterThan(0);
     expect(remoteActions.filter((uses) => !pinnedAction.test(uses))).toEqual([]);
+  });
+
+  it("builds the Docker image from the bundled CLI distribution directory", () => {
+    const dockerfile = readFileSync(resolve(root, "Dockerfile"), "utf8");
+
+    expect(dockerfile).toContain("cp -a packages/cli/dist /out/");
   });
 });

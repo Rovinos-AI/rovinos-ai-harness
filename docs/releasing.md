@@ -43,6 +43,10 @@ generates package changelogs when maintainers apply a release plan with `yarn ch
 Pull requests that change package files outside Markdown documentation must include a Changeset.
 The CI release dry run checks all four package archives and validates package version consistency.
 The integration job builds the harness and sandbox images without pushing them.
+Release packing confirms that the SDK and CLI include their generated migration trees, that the CLI
+includes approval and web assets, and that each store adapter includes its own migrations. The
+container build uses the repository root as its context and copies `packages/cli/dist` into the
+runtime image.
 
 To publish, create and push a `vX.Y.Z` tag for the matching package versions, with no unapplied
 Changesets. The tag-triggered workflow runs the full CI workflow on the tagged tree, then verifies
