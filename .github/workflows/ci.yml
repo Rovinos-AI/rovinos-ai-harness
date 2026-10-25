@@ -16,6 +16,11 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
+  workflow_call:
+    outputs:
+      gates:
+        description: Result of the required gates job.
+        value: ${{ jobs.gates.outputs.result }}
 
 permissions:
   contents: read
@@ -26,7 +31,9 @@ concurrency:
 
 jobs:
   static:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -35,6 +42,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/node-setup
+      - name: Check Changesets status
+        run: |
+          set -euo pipefail
+          package_changes="$(git diff --name-only origin/main...HEAD -- packages | grep -Ev '\.md$' || true)"
+          if [ -n "$package_changes" ] && ! find .changeset -maxdepth 1 -type f -name '*.md' ! -name README.md -print -quit | grep -q .; then
+            echo "Package changes require a Changeset."
+            exit 1
+          fi
+          yarn changeset status --since=origin/main
       - name: Check telemetry schemas and random strings
         run: yarn lint:telemetry
       - name: Check telemetry attribute catalog
@@ -54,6 +70,13 @@ jobs:
         run: yarn typecheck
       - name: Build packages for policy fixture commands
         run: yarn build
+      - name: Release path dry run
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/verify-release.ts --dry-run
+          for package in sdk cli store-sqlite store-postgres; do
+            (cd "packages/$package" && yarn pack --dry-run)
+          done
       - name: Validate Compose security profiles
         run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/compose/validate.ts
       - name: Test policy examples
@@ -178,6 +201,8 @@ jobs:
     needs: integration
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      result: ${{ steps.report-gates-result.outputs.result }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -209,3 +234,9 @@ jobs:
           name: canary-reports
           path: reports/canary-junit.xml
           if-no-files-found: ignore
+      - name: Report gates result
+        if: always()
+        id: report-gates-result
+        env:
+          GATES_RESULT: ${{ job.status }}
+        run: echo "result=$GATES_RESULT" >> "$GITHUB_OUTPUT"

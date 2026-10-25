@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [["@rovinos/sdk", "@rovinos/cli", "@rovinos/store-sqlite", "@rovinos/store-postgres"]],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@rovinos/app-telemetry",
+    "@rovinos/approval-app",
+    "@rovinos/config",
+    "@rovinos/context",
+    "@rovinos/control-plane",
+    "@rovinos/core",
+    "@rovinos/crypto",
+    "@rovinos/eval",
+    "@rovinos/host",
+    "@rovinos/mcp",
+    "@rovinos/models",
+    "@rovinos/pii",
+    "@rovinos/policy",
+    "@rovinos/replay",
+    "@rovinos/sandbox",
+    "@rovinos/schemas",
+    "@rovinos/store",
+    "@rovinos/telemetry",
+    "@rovinos/vault",
+    "@rovinos/eslint-plugin-harness"
+  ],
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  }
+}

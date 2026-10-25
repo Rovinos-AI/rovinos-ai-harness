@@ -63,9 +63,11 @@
     "check:spdx": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-spdx.ts",
     "check:dco": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-dco.ts",
     "check:licenses": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-licenses.ts",
+    "verify:release": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/verify-release.ts",
     "check:threat-cases": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-threat-cases.ts"
   },
   "devDependencies": {
+    "@changesets/cli": "2.29.7",
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/inspector": "2.11.0",

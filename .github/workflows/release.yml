@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  verify:
+    needs: ci
+    if: needs.ci.outputs.gates == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Verify release metadata
+        run: |
+          yarn build:schemas
+          yarn verify:release "$GITHUB_REF_NAME"
+      - name: Check release community files
+        run: |
+          RELEASE=1 node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/docs/check-community-files.ts
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Build packages
+        run: yarn build
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+      - name: Build, push, and sign GHCR images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --name release-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+          build_and_sign() {
+            image="$1"
+            dockerfile="$2"
+            metadata="$RUNNER_TEMP/${image##*/}-metadata.json"
+            docker buildx build \
+              --file "$dockerfile" \
+              --tag "$image:$tag" \
+              --sbom=true \
+              --provenance=true \
+              --push \
+              --metadata-file "$metadata" \
+              .
+            digest="$(jq -r '."containerimage.digest"' "$metadata")"
+            if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+              echo "Image build did not return a registry digest."
+              exit 1
+            fi
+            cosign sign --yes "$image@$digest"
+          }
+
+          build_and_sign "ghcr.io/$owner/harness" Dockerfile
+          build_and_sign "ghcr.io/$owner/harness-sandbox" Dockerfile.sandbox
+      - name: Pack and publish npm packages with provenance
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          for package in sdk cli store-sqlite store-postgres; do
+            name="@rovinos/$package"
+            tarball="$RUNNER_TEMP/$package.tgz"
+            (cd "packages/$package" && yarn pack --out "$tarball")
+            if tar -xOf "$tarball" package/package.json | grep -F '"workspace:' >/dev/null; then
+              echo "Packed manifest for $name contains an unresolved workspace dependency."
+              exit 1
+            fi
+            archive_contents="$(tar -tzf "$tarball")"
+            case "$package" in
+              sdk)
+                required_paths=(
+                  "package/dist/migrations/sqlite/"
+                  "package/dist/migrations/postgres/"
+                  "package/dist/migrations/vault/"
+                )
+                ;;
+              cli)
+                required_paths=(
+                  "package/dist/assets/approval.html"
+                  "package/dist/assets/runs-console.html"
+                  "package/dist/assets/web/index.html"
+                  "package/dist/migrations/sqlite/"
+                  "package/dist/migrations/postgres/"
+                  "package/dist/migrations/vault/"
+                )
+                ;;
+              store-sqlite)
+                required_paths=("package/dist/migrations/sqlite/")
+                ;;
+              store-postgres)
+                required_paths=("package/dist/migrations/postgres/")
+                ;;
+            esac
+            for path in "${required_paths[@]}"; do
+              if ! grep -F "$path" <<< "$archive_contents" >/dev/null; then
+                echo "Packed archive for $name is missing $path."
+                exit 1
+              fi
+            done
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published; skipping."
+            else
+              npm publish "$tarball" --provenance --access public
+            fi
+          done
+      - name: Move GHCR latest tags
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          for image in harness harness-sandbox; do
+            docker buildx imagetools create \
+              --tag "ghcr.io/$owner/$image:latest" \
+              "ghcr.io/$owner/$image:$tag"
+          done
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "GitHub Release $GITHUB_REF_NAME already exists; skipping."
+            exit 0
+          fi
+          notes="$RUNNER_TEMP/release-notes.md"
+          : > "$notes"
+          for package in sdk cli store-sqlite store-postgres; do
+            changelog="packages/$package/CHANGELOG.md"
+            if [ ! -f "$changelog" ]; then
+              echo "Missing Changesets changelog for @rovinos/$package."
+              exit 1
+            fi
+            printf '## @rovinos/%s\n\n' "$package" >> "$notes"
+            awk '/^## / { if (found) exit; found = 1 } found { print }' "$changelog" >> "$notes"
+            printf '\n' >> "$notes"
+          done
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$notes" \
+            infra/compose/docker-compose.yml \
+            infra/compose/docker-compose.prod-like.yml \
+            infra/compose/docker-compose.egress.yml
