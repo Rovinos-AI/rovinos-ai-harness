@@ -252,7 +252,7 @@ describe("GitHub workflows", () => {
     );
 
     expect(step?.run).toContain("git diff --name-only origin/main...HEAD -- packages");
-    expect(step?.run).toContain("yarn changeset status --since=origin/main");
+    expect(step?.run).toContain("yarn changeset status --since origin/main");
     expect(step?.run).toContain("Package changes require a Changeset.");
   });
 
