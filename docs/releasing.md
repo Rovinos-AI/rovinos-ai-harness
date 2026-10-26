@@ -35,7 +35,7 @@ in the following section.
 
 ## Versioning and GitHub releases
 
-Create a Changeset for user-visible changes to a published package with `yarn changeset`. The SDK,
+Create a Changeset for user-visible changes to a published package with `yarn changeset add`. The SDK,
 CLI, SQLite adapter, and Postgres adapter form one fixed Changesets group, so every published
 package uses the same version. All other workspace packages remain private and ignored. Changesets
 generates package changelogs when maintainers apply a release plan with `yarn changeset version`.
