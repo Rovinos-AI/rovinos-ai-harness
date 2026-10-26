@@ -25,9 +25,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@anthropic-ai/sdk@npm:0.135.0":
-  version: 0.135.0
-  resolution: "@anthropic-ai/sdk@npm:0.135.0"
+"@anthropic-ai/sdk@npm:1.1.0":
+  version: 1.1.0
+  resolution: "@anthropic-ai/sdk@npm:1.1.0"
   dependencies:
     "@opentelemetry/api": "npm:^1.4.1"
     json-schema-to-ts: "npm:^3.1.1"
@@ -39,7 +39,7 @@ __metadata:
       optional: true
   bin:
     anthropic-ai-sdk: bin/cli
-  checksum: 10c0/82def0d9e9eb69deb47bdbfcc5c57b31fa5ecf8ae36f1546fd3ade65836e18155b2f8b364153069d26d4e5aa04b91ff20239c807369922cda6df9f6e8eb48c6e
+  checksum: 10c0/150c6e19b5460b8a852fb6567f1ebd5c045112a20fd0462509b05ba60e4bab470cdac17cbb782d8fef889040654b1625a69fc84681823b95fab598d3d3fb7744
   languageName: node
   linkType: hard
 
@@ -2825,7 +2825,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/cli@workspace:packages/cli"
   dependencies:
-    "@anthropic-ai/sdk": "npm:0.135.0"
+    "@anthropic-ai/sdk": "npm:1.1.0"
     "@aws-sdk/client-bedrock-runtime": "npm:3.1152.0"
     "@azure/identity": "npm:4.14.0"
     "@azure/keyvault-secrets": "npm:4.11.2"
@@ -3023,7 +3023,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/models@workspace:packages/models"
   dependencies:
-    "@anthropic-ai/sdk": "npm:0.135.0"
+    "@anthropic-ai/sdk": "npm:1.1.0"
     "@aws-sdk/client-bedrock-runtime": "npm:3.1152.0"
     "@google/genai": "npm:2.30.0"
     "@opentelemetry/api": "npm:1.9.1"
@@ -3124,7 +3124,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/sdk@workspace:packages/sdk"
   dependencies:
-    "@anthropic-ai/sdk": "npm:0.135.0"
+    "@anthropic-ai/sdk": "npm:1.1.0"
     "@aws-sdk/client-bedrock-runtime": "npm:3.1152.0"
     "@azure/identity": "npm:4.14.0"
     "@azure/keyvault-secrets": "npm:4.11.2"

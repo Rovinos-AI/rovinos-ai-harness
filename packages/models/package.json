@@ -23,7 +23,7 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.135.0",
+    "@anthropic-ai/sdk": "1.1.0",
     "@aws-sdk/client-bedrock-runtime": "3.1152.0",
     "@google/genai": "2.30.0",
     "@rovinos/schemas": "workspace:^",
