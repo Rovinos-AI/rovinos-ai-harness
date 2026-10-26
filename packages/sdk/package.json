@@ -20,7 +20,7 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.135.0",
+    "@anthropic-ai/sdk": "1.1.0",
     "@aws-sdk/client-bedrock-runtime": "3.1152.0",
     "@azure/identity": "4.14.0",
     "@azure/keyvault-secrets": "4.11.2",
