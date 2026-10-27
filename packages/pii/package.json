@@ -18,7 +18,7 @@
     "@rovinos/schemas": "workspace:^",
     "@rovinos/telemetry": "workspace:^",
     "@rovinos/vault": "workspace:^",
-    "undici": "8.12.2",
+    "undici": "8.12.3",
     "zod": "4.6.7"
   },
   "devDependencies": {
