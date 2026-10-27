@@ -74,6 +74,6 @@
     "@rovinos/telemetry": "workspace:^",
     "@rovinos/vault": "workspace:^",
     "tsup": "9.0.0",
-    "vitest": "3.2.6"
+    "vitest": "4.1.11"
   }
 }

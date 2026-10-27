@@ -30,6 +30,6 @@
   "devDependencies": {
     "@rovinos/pii": "workspace:^",
     "@rovinos/vault": "workspace:^",
-    "vitest": "3.2.6"
+    "vitest": "4.1.11"
   }
 }
