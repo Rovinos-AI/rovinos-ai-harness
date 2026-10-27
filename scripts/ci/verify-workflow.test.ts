@@ -251,9 +251,9 @@ describe("GitHub workflows", () => {
       (candidate) => candidate.name === "Check Changesets status",
     );
 
-    expect(step?.run).toContain("git diff --name-only origin/main...HEAD -- packages");
-    expect(step?.run).toContain("yarn changeset status --since origin/main");
-    expect(step?.run).toContain("Package changes require a Changeset.");
+    expect(step?.run).toBe(
+      "yarn build:schemas\nnode --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/check-changeset-required.ts\n",
+    );
   });
 
   it("runs the release path in dry-run mode without publishing", () => {
