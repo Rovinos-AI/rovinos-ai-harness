@@ -21,6 +21,8 @@ const sizeBudgets = new Map([
   ["@rovinos/store-sqlite", 10_000_000],
   ["@rovinos/store-postgres", 10_000_000],
 ]);
+// npm rejects provenance unless repository.url matches the GitHub repository that ran the workflow.
+const repositoryUrl = "git+https://github.com/Rovinos-AI/rovinos-ai-harness.git";
 const adapterDrivers = new Map([
   ["@rovinos/store-sqlite", "better-sqlite3"],
   ["@rovinos/store-postgres", "pg"],
@@ -30,6 +32,7 @@ const packageManifestSchema = z.looseObject({
   name: z.string(),
   private: z.boolean().optional(),
   engines: z.looseObject({ node: z.string() }).optional(),
+  repository: z.looseObject({ url: z.string() }).optional(),
   dependencies: z.record(z.string(), z.string()).optional(),
   optionalDependencies: z.record(z.string(), z.string()).optional(),
   peerDependencies: z.record(z.string(), z.string()).optional(),
@@ -51,6 +54,9 @@ function inspectPackageManifest(manifest: PackageManifest): string[] {
   }
   if (manifest.engines?.node !== ">=26") {
     violations.push("publish_node_engine_invalid");
+  }
+  if (manifest.repository?.url !== repositoryUrl) {
+    violations.push("publish_repository_invalid");
   }
   const driver = adapterDrivers.get(manifest.name);
   if (

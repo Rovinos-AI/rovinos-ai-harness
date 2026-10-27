@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rovinos-AI/rovinos-ai-harness.git",
+    "directory": "packages/store-sqlite"
+  },
   "engines": {
     "node": ">=26"
   },

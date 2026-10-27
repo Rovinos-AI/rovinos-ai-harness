@@ -6,6 +6,7 @@ const publishableManifest = {
   name: "@rovinos/sdk",
   private: false,
   engines: { node: ">=26" },
+  repository: { url: "git+https://github.com/Rovinos-AI/rovinos-ai-harness.git" },
 };
 
 describe("publish surface checks", () => {
@@ -19,6 +20,14 @@ describe("publish surface checks", () => {
         [{ path: "package/dist/index.js", size: 32 }],
       ),
     ).toContain("publish_internal_dependency");
+  });
+
+  it("rejects a manifest without the GitHub repository URL that npm provenance requires", () => {
+    expect(
+      inspectPackedPackage({ name: "@rovinos/sdk", private: false, engines: { node: ">=26" } }, [
+        { path: "package/dist/index.js", size: 32 },
+      ]),
+    ).toContain("publish_repository_invalid");
   });
 
   it("rejects a test file in the packed file list", () => {
