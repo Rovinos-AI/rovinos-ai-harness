@@ -4,7 +4,7 @@
 
 Rovinos AI Harness is an open source, TypeScript, container-native agent harness. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary, and telemetry carries metadata only. License: [Apache-2.0](LICENSE).
 
-> **Status: pre-release, working toward v0.1.0.** The runtime, event log, PII vault, policy and approvals, sandbox, MCP client, MCP Apps host, and metadata-only telemetry run today and are tested in CI. Replay from a trace id is in progress for v0.1.0 ([milestone](https://github.com/Rovinos-AI/rovinos-ai-harness/milestone/1)). Packages are not published to npm yet, and APIs may change before v0.1.0.
+> **Status: v0.1.0.** This release includes durable, resumable event-sourced runs; PII tokenization at every trust boundary; metadata-only telemetry; policy-gated human approvals; container-based sandbox execution; MCP Apps and durable human input; multi-replica execution; and replay from a trace id. APIs may still change before 1.0. Packages are published as `@rovinos/*` on npm. See [guarantees and limits](docs/guarantees.md), [release changelogs](https://github.com/Rovinos-AI/rovinos-ai-harness/releases), and [release instructions for maintainers](docs/releasing.md).
 
 ## Try it in five minutes
 
@@ -22,6 +22,15 @@ stack and remove its volumes and generated `.env`. The
 [quickstart guide](docs/quickstart.md) also keeps the manual steps for users without Node.
 See the [replay-from-trace example](examples/replay/README.md) and its
 [terminal recording](examples/replay/demo.cast).
+
+## Install from npm
+
+The published packages require Node.js 26 or later. Install the SDK and CLI, plus either or both
+store adapters if you use them:
+
+```bash
+npm install @rovinos/sdk @rovinos/cli @rovinos/store-sqlite @rovinos/store-postgres
+```
 
 ## Contents
 
@@ -64,12 +73,12 @@ Parts marked *(in progress)* are specified, with tasks open, but are not on `mai
 | **The model never decides authority** | A deterministic policy engine evaluates every tool call on tokenized arguments: `allow`, `ask`, or `deny`, where the most restrictive decision wins. `ask` suspends the run durably until a human decides. |
 | **PII tokenization at every boundary** | Detected values become run-scoped tokens (`EMAIL_1` style placeholders) before they reach a model, a tool, the store, or a UI. Raw values exist only in an encrypted, separate vault and in memory at allowlisted tool arguments. |
 | **Metadata-only telemetry** | Spans and logs come only from a closed registry of typed attributes (ids, codes, enums, numbers, booleans). Three independent layers enforce it: an in-process allowlist, an exact-match leak sentinel, and an allowlisting OpenTelemetry Collector. |
-| **MCP-native human-in-the-loop** | Built on MCP 2026-07-28 and the TypeScript SDK v2. Every human-facing UI is an MCP App: approvals and the run console today; inputs, the run inspector, and reports *(in progress)* that runs in any MCP Apps host. The control plane is itself an MCP server, so any MCP client can act as a console. Elicitation and CLI fallbacks cover clients without UI support. |
+| **MCP-native human-in-the-loop** | Built on MCP 2026-07-28 and the TypeScript SDK v2. Every human-facing UI is an MCP App: approvals and the run console today. The input, run-inspector, and report views remain *(in progress)*; completed views run in any MCP Apps host. The control plane is itself an MCP server, so any MCP client can act as a console. Elicitation and CLI fallbacks cover clients without UI support. |
 | **Default-deny execution** | Agent commands run in a separate, non-root, read-only, capability-dropped sandbox container with no network. Egress goes only through an allowlisting proxy. The harness never touches `docker.sock`. |
-| **Human input through MCP elicitation** | MCP servers ask for input with Multi Round-Trip Requests (form or URL mode), and the agent can ask its own questions. Both suspend the run durably until a human answers, then the call continues *(in progress)*. Requests are validated, bounded, and recorded. Only humans answer: no model-visible path exists. |
-| **Runs as a service** | A semver-stable SDK, a durable run queue with interchangeable workers, live content-free run updates, quotas across runs, and a validated multi-replica topology on Postgres *(in progress)*. Schema versioning and upcasters keep old logs loadable across upgrades. |
+| **Human input through MCP elicitation** | MCP servers ask for input with Multi Round-Trip Requests (form or URL mode), and the agent can ask its own questions. Both suspend the run durably until a human answers, then the call continues. Requests are validated, bounded, and recorded. Only humans answer: no model-visible path exists. |
+| **Runs as a service** | A semver-stable SDK, a durable run queue with interchangeable workers, live content-free run updates, quotas across runs, and a validated multi-replica topology on Postgres. Schema versioning and upcasters keep old logs loadable across upgrades. |
 | **Strict by default** | Every data contract is one Zod schema with inferred types, and untrusted JSON and YAML enter only through typed parsers. Type-aware ESLint, Prettier, and linters for Markdown, YAML, shell, Dockerfiles, and spelling run with zero errors and zero warnings as part of every task's definition of done. |
-| **Reproducible and measurable** | Recorded runs replay offline from their trace id, with content-free behavioral diffs that gate CI *(in progress for v0.1.0)*. An eval runner provides graders, trajectory and privacy assertions, simulated humans, pass@k, and A/B statistics *(in progress)*. |
+| **Reproducible and measurable** | Recorded runs replay offline from their trace id, with content-free behavioral diffs that gate CI. An eval runner provides graders, trajectory and privacy assertions, simulated humans, pass@k, and A/B statistics *(in progress)*. |
 
 ---
 
