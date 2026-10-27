@@ -140,7 +140,7 @@ describe("LocalKeyProvider", () => {
           env: { NODE_ENV: "production" },
           onWarning: () => undefined,
         }),
-    ).toThrowError("key_config_required");
+    ).toThrow("key_config_required");
   });
 
   it("warns when creating a development ephemeral key and zeroes it on dispose", async () => {

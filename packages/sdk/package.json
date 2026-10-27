@@ -61,6 +61,6 @@
     "@types/pg": "8.23.1",
     "tsup": "9.0.0",
     "typescript": "5.9.3",
-    "vitest": "3.2.6"
+    "vitest": "4.1.12"
   }
 }

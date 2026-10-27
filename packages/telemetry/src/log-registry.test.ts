@@ -39,20 +39,20 @@ describe("log-record registry", () => {
 
   it("rejects invalid, unsafe, and duplicate definitions", () => {
     for (const name of ["not.harness.name", "Harness.invalid", "harness."]) {
-      expect(() => defineLogRecord(name, {})).toThrowError("log_name_invalid");
+      expect(() => defineLogRecord(name, {})).toThrow("log_name_invalid");
     }
     expect(() =>
       defineLogRecord("harness.test.invalid_attribute", { private: attr.code() }),
-    ).toThrowError("log_attr_name_invalid");
+    ).toThrow("log_attr_name_invalid");
     expect(() =>
       defineLogRecord("harness.test.unsafe", { "harness.test.text": attr.optional(attr.code()) }),
     ).not.toThrow();
     expect(() =>
       defineLogRecord("harness.test.raw", { "harness.test.text": attr.code().transform(String) }),
-    ).toThrowError("log_attr_unconstrained");
+    ).toThrow("log_attr_unconstrained");
 
     defineLogRecord("harness.test.duplicate", {});
-    expect(() => defineLogRecord("harness.test.duplicate", {})).toThrowError("log_duplicate");
+    expect(() => defineLogRecord("harness.test.duplicate", {})).toThrow("log_duplicate");
   });
 
   it("rejects malformed shapes and protects the test reset outside test mode", () => {
@@ -64,7 +64,7 @@ describe("log-record registry", () => {
         },
       },
     );
-    expect(() => defineLogRecord("harness.test.malformed", malformedShape)).toThrowError(
+    expect(() => defineLogRecord("harness.test.malformed", malformedShape)).toThrow(
       "log_attr_unconstrained",
     );
 
@@ -73,7 +73,7 @@ describe("log-record registry", () => {
     try {
       expect(() => {
         __resetLogRegistryForTests();
-      }).toThrowError("log_registry_reset_forbidden");
+      }).toThrow("log_registry_reset_forbidden");
     } finally {
       if (initialNodeEnv === undefined) {
         delete env.NODE_ENV;
