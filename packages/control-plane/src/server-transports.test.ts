@@ -181,8 +181,9 @@ const AUTHORIZATION = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${HTTP
 function httpOptions(
   options: ControlPlaneServerOptions = {},
   rateLimitPerMinute = 120,
+  includeSecretResolver = true,
 ): ControlPlaneServerOptions {
-  return {
+  const defaults: ControlPlaneServerOptions = {
     controlPlane: ControlPlaneConfigSchema.parse({
       auth: {
         tokens: [
@@ -195,7 +196,12 @@ function httpOptions(
       },
       rateLimitPerMinute,
     }),
-    secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) },
+    ...(includeSecretResolver
+      ? { secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) } }
+      : {}),
+  };
+  return {
+    ...defaults,
     ...options,
   };
 }
@@ -527,7 +533,7 @@ describe("control-plane transports", () => {
       startControlPlaneHttp(
         new InMemoryEventStore(),
         0,
-        httpOptions({ controlPlane, secretResolver: undefined }),
+        httpOptions({ controlPlane }, 120, false),
       ),
     ).rejects.toMatchObject({ code: "control_plane_secret_resolver_missing" });
     expect(mocks.createHttpsServer).not.toHaveBeenCalled();
