@@ -86,4 +86,37 @@ describe("UiSession", () => {
       session.end();
     }).not.toThrow();
   });
+
+  it("ends a session span when the provider returns an invalid child context", () => {
+    const parent = collector.provider.getTracer("host-test").startSpan("harness.tool_call");
+    const invalidSpanContext: SpanContext = {
+      traceId: "0".repeat(32),
+      spanId: "0".repeat(16),
+      traceFlags: 1,
+    };
+    const tracer = collector.provider.getTracer("@rovinos/telemetry");
+    const span = trace.wrapSpanContext(invalidSpanContext);
+    const endSpan = vi.spyOn(span, "end");
+    const startSpan = vi.spyOn(tracer, "startSpan").mockReturnValue(span);
+    const unavailable = vi.fn();
+
+    try {
+      const session = new UiSession(
+        { runId, toolCallSpanContext: parent.spanContext() },
+        "approval",
+        sessionId,
+        unavailable,
+      );
+
+      expect(endSpan).toHaveBeenCalledOnce();
+      expect(unavailable).toHaveBeenCalledOnce();
+      expect(session.traceparent).toBeUndefined();
+      expect(session.spanContext).toBeUndefined();
+      session.end();
+    } finally {
+      startSpan.mockRestore();
+      endSpan.mockRestore();
+      parent.end();
+    }
+  });
 });

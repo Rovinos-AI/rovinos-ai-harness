@@ -181,8 +181,9 @@ const AUTHORIZATION = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${HTTP
 function httpOptions(
   options: ControlPlaneServerOptions = {},
   rateLimitPerMinute = 120,
+  includeSecretResolver = true,
 ): ControlPlaneServerOptions {
-  return {
+  const defaults: ControlPlaneServerOptions = {
     controlPlane: ControlPlaneConfigSchema.parse({
       auth: {
         tokens: [
@@ -195,7 +196,12 @@ function httpOptions(
       },
       rateLimitPerMinute,
     }),
-    secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) },
+    ...(includeSecretResolver
+      ? { secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) } }
+      : {}),
+  };
+  return {
+    ...defaults,
     ...options,
   };
 }
@@ -293,6 +299,43 @@ describe("control-plane transports", () => {
     );
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(oversized.statusCode).toBe(413);
+    await handle.close();
+  });
+
+  it("rejects subscriptions outside the authenticated token run scope", async () => {
+    mocks.reset();
+    const controlPlane = ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.test",
+            secret: "env:CONTROL_PLANE_TEST_TOKEN",
+            scopes: ["admin"],
+            runIds: ["AAAAAAAAAAAAAAAAAAAAAAAAAA"],
+          },
+        ],
+      },
+    });
+    const handle = await startControlPlaneHttp(
+      new InMemoryEventStore(),
+      0,
+      httpOptions({ controlPlane }),
+    );
+    const body = Buffer.from(
+      JSON.stringify({
+        method: "subscriptions/listen",
+        params: {
+          notifications: { resourceSubscriptions: ["harness://runs/BBBBBBBBBBBBBBBBBBBBBBBBBB"] },
+        },
+      }),
+    );
+    const outgoing = response();
+
+    mocks.dispatch(request("/mcp", {}, "127.0.0.1", body), outgoing);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outgoing.statusCode).toBe(403);
+    expect(mocks.httpRequestHandler).not.toHaveBeenCalled();
     await handle.close();
   });
 
@@ -467,6 +510,29 @@ describe("control-plane transports", () => {
     expect(handle.endpoint).toBe("https://0.0.0.0:41234/mcp");
     expect(mocks.createHttpsServer).toHaveBeenCalledOnce();
     await handle.close();
+  });
+
+  it("rejects HTTPS startup without a secret resolver", async () => {
+    mocks.reset();
+    const controlPlane = ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.test",
+            secret: "env:CONTROL_PLANE_TEST_TOKEN",
+            scopes: ["admin"],
+          },
+        ],
+      },
+      listen: { host: "0.0.0.0", port: 3_000 },
+      tls: { certFile: "file:/cert", keyFile: "file:/key" },
+      allowedHosts: ["remote.example"],
+    });
+
+    await expect(
+      startControlPlaneHttp(new InMemoryEventStore(), 0, httpOptions({ controlPlane }, 120, false)),
+    ).rejects.toMatchObject({ code: "control_plane_secret_resolver_missing" });
+    expect(mocks.createHttpsServer).not.toHaveBeenCalled();
   });
 
   it("limits authenticated requests per token", async () => {

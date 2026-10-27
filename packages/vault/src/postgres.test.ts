@@ -589,6 +589,21 @@ it("covers empty lists and read failures", async () => {
   await unavailable.close();
 });
 
+it("fails closed when a run's stored scope key is missing", async () => {
+  const schema = nextSchema();
+  const vault = vaultFor(schema);
+  await vault.put(runId, "email", "alice@example.test");
+  fakePg.databases.get(schema)?.scopeKeys.delete(runId);
+
+  await expect(vault.listRawValues(runId)).rejects.toMatchObject({
+    code: "vault_decrypt_failed",
+  });
+  await expect(vault.listRawValueEntries(runId)).rejects.toMatchObject({
+    code: "vault_decrypt_failed",
+  });
+  await vault.close();
+});
+
 it("recovers concurrent inserts for scope keys and entries", async () => {
   const schema = nextSchema();
   const vault = vaultFor(schema);

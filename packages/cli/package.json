@@ -25,10 +25,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.1.0",
-    "@aws-sdk/client-bedrock-runtime": "3.1152.0",
+    "@aws-sdk/client-bedrock-runtime": "3.1156.0",
     "@azure/identity": "4.14.0",
     "@azure/keyvault-secrets": "4.11.2",
-    "@google/genai": "2.30.0",
+    "@google/genai": "2.31.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/core": "2.3.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",
@@ -46,12 +46,12 @@
     "ajv-formats": "3.0.1",
     "better-sqlite3": "13.0.3",
     "commander": "15.0.0",
-    "openai": "7.34.0",
+    "openai": "7.43.0",
     "parse5": "8.0.1",
     "pg": "8.23.1",
     "tar": "7.5.22",
-    "tldts": "7.4.18",
-    "undici": "8.12.2",
+    "tldts": "7.4.19",
+    "undici": "8.12.3",
     "yaml": "2.9.1",
     "zod": "4.6.7"
   },
@@ -74,6 +74,6 @@
     "@rovinos/telemetry": "workspace:^",
     "@rovinos/vault": "workspace:^",
     "tsup": "9.0.0",
-    "vitest": "3.2.6"
+    "vitest": "4.1.12"
   }
 }

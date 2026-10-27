@@ -179,6 +179,14 @@ unavailable, cannot be replayed from its trace id.
 - A human may retain or disclose information after an audited reveal.
 - A compromised host, operator account, or trusted dependency can use its
   granted authority.
+<!-- cspell:ignore msal -->
+- `@azure/msal-node` 6.x, a transitive dependency of `@azure/identity`, is
+  affected by [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5)
+  (authorization-code flow parameter disclosure). The harness uses
+  `@azure/identity` through `DefaultAzureCredential` for Azure Key Vault; this
+  use does not run that flow, and MCP OAuth login does not use MSAL. The latest
+  `@azure/identity` still requires `msal-node` 6.x; the upgrade is tracked in
+  [issue #614](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/614).
 
 ## Operator responsibilities
 

@@ -323,7 +323,7 @@ describe("control-plane network safeguards", () => {
       validateControlPlaneBinding(
         ControlPlaneConfigSchema.parse({ listen: { host: "0.0.0.0", port: 3000 } }),
       );
-    }).toThrowError("control_plane_remote_tls_required");
+    }).toThrow("control_plane_remote_tls_required");
     expect(() => {
       validateControlPlaneBinding(
         ControlPlaneConfigSchema.parse({
