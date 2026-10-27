@@ -100,8 +100,12 @@ describe("remote workspace client", () => {
           );
         });
       const pending = client(fetcher).restoreArchive(runId, Readable.from([]), 1024, 2048);
+      const outcome = pending.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
       await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
-      await expect(pending).rejects.toMatchObject({ code: "sandbox_timeout" });
+      expect(await outcome).toMatchObject({ code: "sandbox_timeout" });
     } finally {
       vi.useRealTimers();
     }

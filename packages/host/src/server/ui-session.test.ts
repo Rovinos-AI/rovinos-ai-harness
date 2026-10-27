@@ -94,7 +94,7 @@ describe("UiSession", () => {
       spanId: "0".repeat(16),
       traceFlags: 1,
     };
-    const tracer = collector.provider.getTracer("host-test");
+    const tracer = collector.provider.getTracer("@rovinos/telemetry");
     const span = trace.wrapSpanContext(invalidSpanContext);
     const endSpan = vi.spyOn(span, "end");
     const startSpan = vi.spyOn(tracer, "startSpan").mockReturnValue(span);
