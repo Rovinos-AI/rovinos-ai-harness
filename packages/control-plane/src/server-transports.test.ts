@@ -530,11 +530,7 @@ describe("control-plane transports", () => {
     });
 
     await expect(
-      startControlPlaneHttp(
-        new InMemoryEventStore(),
-        0,
-        httpOptions({ controlPlane }, 120, false),
-      ),
+      startControlPlaneHttp(new InMemoryEventStore(), 0, httpOptions({ controlPlane }, 120, false)),
     ).rejects.toMatchObject({ code: "control_plane_secret_resolver_missing" });
     expect(mocks.createHttpsServer).not.toHaveBeenCalled();
   });
