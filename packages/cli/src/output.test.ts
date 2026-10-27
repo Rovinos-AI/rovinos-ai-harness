@@ -52,10 +52,10 @@ describe("CLI output", () => {
     expect(stdout).toEqual(['{"ok":true}\n']);
     expect(() => {
       out.json(schema, { ok: true });
-    }).toThrowError("json_output_multiple");
+    }).toThrow("json_output_multiple");
     expect(() => {
       out.json(schema, { ok: "not a boolean" });
-    }).toThrowError("output_invalid");
+    }).toThrow("output_invalid");
   });
 
   it("rejects JSON mode when no document was written", () => {
@@ -65,7 +65,7 @@ describe("CLI output", () => {
 
     expect(() => {
       out.finalize();
-    }).toThrowError("output_invalid");
+    }).toThrow("output_invalid");
   });
 
   it("does not write JSON in human mode", () => {
@@ -85,7 +85,7 @@ describe("CLI output", () => {
     out.setJsonMode(true);
     expect(() => {
       out.json(schema, { status: "private detail" });
-    }).toThrowError("output_invalid");
+    }).toThrow("output_invalid");
     out.error("policy_denied", "approval_required");
     out.error("private error message");
     out.error("failure", "private hint");
@@ -99,7 +99,7 @@ describe("CLI output", () => {
     out.setJsonMode(true);
     expect(() => {
       out.json(z.undefined(), undefined);
-    }).toThrowError("output_invalid");
+    }).toThrow("output_invalid");
     expect(stdout).toEqual([]);
   });
 

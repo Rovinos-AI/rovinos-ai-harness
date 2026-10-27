@@ -449,7 +449,7 @@ describe("RunRecorder", () => {
         },
         () => recorder.record(runCreated()),
       ),
-    ).rejects.toThrowError("span_attr_invalid");
+    ).rejects.toThrow("span_attr_invalid");
   });
 
   it("exports only registered attributes and the recorded event sequence", async () => {

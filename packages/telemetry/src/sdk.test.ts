@@ -85,7 +85,7 @@ describe("createTelemetrySdk", () => {
           logExporter: new InMemoryLogRecordExporter(),
           telemetry: TelemetryConfigSchema.parse({ sentinel: { enabled: false } }),
         }),
-      ).toThrowError("telemetry_content_capture_enabled");
+      ).toThrow("telemetry_content_capture_enabled");
     },
   );
 });

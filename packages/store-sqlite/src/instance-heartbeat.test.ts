@@ -80,7 +80,7 @@ describe("openSqliteInstanceHeartbeat", () => {
 
     expect(heartbeat?.signal.aborted).toBe(true);
     expect(readInstances(databasePath)).toEqual([{ id: secondId, heartbeat: 100_000 }]);
-    expect(() => heartbeat?.heartbeat()).toThrowError(StoreUnavailableError);
+    expect(() => heartbeat?.heartbeat()).toThrow(StoreUnavailableError);
     await heartbeat?.close();
   });
 
@@ -126,6 +126,6 @@ describe("openSqliteInstanceHeartbeat", () => {
 
     await heartbeat?.close();
     await heartbeat?.close();
-    expect(() => heartbeat?.heartbeat()).toThrowError(StoreUnavailableError);
+    expect(() => heartbeat?.heartbeat()).toThrow(StoreUnavailableError);
   });
 });

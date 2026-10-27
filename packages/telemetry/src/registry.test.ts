@@ -177,17 +177,17 @@ describe("span registry", () => {
         {},
         { taskId: "not-a-task", packageName: "@rovinos/telemetry" },
       ),
-    ).toThrowError("span_owner_task_invalid");
+    ).toThrow("span_owner_task_invalid");
     expect(() => {
       Reflect.apply(defineSemconvSpan, undefined, ["mcp.server.call", {}, testOwnerTask]);
-    }).toThrowError("span_name_invalid");
+    }).toThrow("span_name_invalid");
     expect(() => {
       Reflect.apply(defineSemconvSpan, undefined, [
         "mcp.client.call",
         { "mcp.server.name": attr.code() },
         testOwnerTask,
       ]);
-    }).toThrowError("span_attr_name_invalid");
+    }).toThrow("span_attr_name_invalid");
 
     const definition = defineSemconvSpan(
       "mcp.client.call",
@@ -201,7 +201,7 @@ describe("span registry", () => {
   it("rejects an unconstrained attribute, including an optional wrapper", () => {
     expect(() =>
       defineSpan("harness.test.unsafe", { "harness.test.text": z.string() }, testOwnerTask),
-    ).toThrowError("span_attr_unconstrained");
+    ).toThrow("span_attr_unconstrained");
     expect(() =>
       defineSpan(
         "harness.test.optional_unsafe",
@@ -210,7 +210,7 @@ describe("span registry", () => {
         },
         testOwnerTask,
       ),
-    ).toThrowError("span_attr_unconstrained");
+    ).toThrow("span_attr_unconstrained");
   });
 
   it("validates one snapshot of accessor-based attribute shapes", () => {
@@ -233,21 +233,21 @@ describe("span registry", () => {
 
   it("rejects invalid, reserved, and duplicate names or attributes", () => {
     for (const name of ["mcp.call", "Harness.test", "harness.", "harness." + "a".repeat(57)]) {
-      expect(() => defineSpan(name, {}, testOwnerTask)).toThrowError("span_name_invalid");
+      expect(() => defineSpan(name, {}, testOwnerTask)).toThrow("span_name_invalid");
     }
 
     const maxLengthName = `harness.${"a".repeat(56)}`;
     expect(defineSpan(maxLengthName, {}, testOwnerTask).name).toBe(maxLengthName);
     expect(() =>
       defineSpan("harness.test.invalid_attribute", { private: attr.id() }, testOwnerTask),
-    ).toThrowError("span_attr_name_invalid");
+    ).toThrow("span_attr_name_invalid");
 
     expect(() =>
       defineSpan("harness.test.reserved", { "harness.error.code": attr.code() }, testOwnerTask),
-    ).toThrowError("span_attr_reserved");
+    ).toThrow("span_attr_reserved");
 
     defineTestSpan();
-    expect(() => defineTestSpan()).toThrowError("span_duplicate");
+    expect(() => defineTestSpan()).toThrow("span_duplicate");
   });
 
   it("rejects extra keys and invalid values before creating a span", () => {
@@ -258,7 +258,7 @@ describe("span registry", () => {
       "harness.test.mode": "fast",
     };
 
-    expect(() => invokeStart(definition, { ...attrs, private: "not-allowed" })).toThrowError(
+    expect(() => invokeStart(definition, { ...attrs, private: "not-allowed" })).toThrow(
       "span_attr_invalid",
     );
     const invalidValueError = requireRegistryError(
@@ -311,7 +311,7 @@ describe("span registry", () => {
       setActiveSpanAttribute("harness.test.attempts", 2);
       expect(() => {
         setActiveSpanAttribute("harness.test.attempts", "invalid");
-      }).toThrowError("span_attr_invalid");
+      }).toThrow("span_attr_invalid");
     });
     span.end();
 
@@ -348,7 +348,7 @@ describe("span registry", () => {
       },
     );
 
-    expect(() => invokeStart(definition, attrs)).toThrowError("span_attr_invalid");
+    expect(() => invokeStart(definition, attrs)).toThrow("span_attr_invalid");
     expect(exporter.getFinishedSpans()).toHaveLength(0);
   });
 
@@ -436,7 +436,7 @@ describe("span registry", () => {
     env.NODE_ENV = "production";
     expect(() => {
       __resetRegistryForTests();
-    }).toThrowError("span_registry_reset_forbidden");
+    }).toThrow("span_registry_reset_forbidden");
     if (initialNodeEnv === undefined) {
       delete env.NODE_ENV;
     } else {

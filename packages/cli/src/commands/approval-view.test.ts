@@ -58,12 +58,15 @@ const payload = {
     email: "Contact <EMAIL_1>",
     multiple: "<EMAIL_1> / <PHONE_2>",
     tooMany: Array.from({ length: 21 }, () => "<EMAIL_1>").join(" "),
+    items: ["<EMAIL_1>"],
+    "escaped/key": "<PHONE_2>",
+    editable: "original",
   },
   ruleId: "test.rule",
   reason: "needs_review",
   summary: "Review tool call",
   ui: { resourceUri: "ui://harness/approval/v1", fallbackText: "Review the request." },
-  editableFields: [],
+  editableFields: ["/editable"],
 };
 
 type ApprovalViewInput = Parameters<typeof createApprovalViewHost>[0];
@@ -387,6 +390,126 @@ describe("approval reference host", () => {
       }),
     ).rejects.toMatchObject({ code: "approval_resource_unavailable" });
     expect(hostMock.createReferenceHost).not.toHaveBeenCalled();
+    await fixture.store.close();
+  });
+
+  it("reports invalid edits and preserves only valid error codes from approval failures", async () => {
+    const fixture = await createFixture();
+    const call = (argumentsValue: Record<string, unknown>) =>
+      fixture.dependencies.onAppCall(
+        {
+          appId: Code.parse("harness.approval"),
+          sessionId: Id.parse("00000000000000000000000004"),
+          toolName: "harness.approvals.resolve",
+          arguments: argumentsValue,
+        },
+        appCallContext(fixture.runId),
+      );
+
+    expect(
+      (
+        await call({
+          approvalId: fixture.approvalId,
+          decision: "edit",
+          edits: [{ pointer: "/email", value: "updated" }],
+        })
+      ).structuredContent,
+    ).toMatchObject({ ok: false, code: "edit_not_allowed" });
+    fixture.resolveApproval.mockRejectedValueOnce({ code: "approval_not_found" });
+    expect(
+      (
+        await call({
+          approvalId: fixture.approvalId,
+          decision: "approve",
+        })
+      ).structuredContent,
+    ).toMatchObject({ ok: false, code: "approval_not_found" });
+    fixture.resolveApproval.mockRejectedValueOnce({ code: "not a code" });
+    expect(
+      (
+        await call({
+          approvalId: fixture.approvalId,
+          decision: "approve",
+        })
+      ).structuredContent,
+    ).toMatchObject({ ok: false, code: "approval_operation_failed" });
+    expect(
+      (
+        await call({
+          approvalId: fixture.approvalId,
+          decision: "edit",
+          edits: [{ pointer: "/editable", value: "updated" }],
+        })
+      ).structuredContent,
+    ).toEqual({ ok: true });
+    expect(fixture.resolveApproval).toHaveBeenLastCalledWith(
+      fixture.runId,
+      fixture.approvalId,
+      "edit",
+      expect.objectContaining({ edits: { ...payload.args, editable: "updated" } }),
+    );
+    await fixture.store.close();
+  });
+
+  it("resolves array and escaped object pointers while rejecting invalid selections", async () => {
+    const fixture = await createFixture({ allowReveal: true, isTTY: true });
+    let sessionIndex = 10;
+    const call = (pointer: string) => {
+      sessionIndex += 1;
+      return fixture.dependencies.onAppCall(
+        {
+          appId: Code.parse("harness.approval"),
+          sessionId: Id.parse(String(sessionIndex).padStart(26, "0")),
+          toolName: "harness.approvals.reveal",
+          arguments: { approvalId: fixture.approvalId, pointers: [pointer] },
+        },
+        appCallContext(fixture.runId),
+      );
+    };
+
+    fixture.resolveMany.mockResolvedValueOnce([undefined]);
+    expect((await call("/email")).content).toEqual([
+      { type: "text", text: "reveal_value_unavailable" },
+    ]);
+    expect((await call("/items/0")).structuredContent).toEqual({
+      values: [{ pointer: "/items/0", value: "alice@example.test" }],
+    });
+    expect((await call("/escaped~1key")).structuredContent).toEqual({
+      values: [{ pointer: "/escaped~1key", value: "555-0101" }],
+    });
+    expect((await call("/items/01")).content).toEqual([{ type: "text", text: "pointer_invalid" }]);
+    expect((await call("/items/999999999999999999999999")).content).toEqual([
+      { type: "text", text: "pointer_invalid" },
+    ]);
+    expect((await call("")).content).toEqual([{ type: "text", text: "pointer_invalid" }]);
+    await fixture.store.close();
+  });
+
+  it("rejects hosts for an empty run log or a different pending approval", async () => {
+    const fixture = await createFixture();
+    await expect(
+      createApprovalViewHost({
+        runtime: fixture.runtime,
+        context: fixture.context,
+        config: HarnessConfigSchema.parse({}),
+        runId: fixture.runId,
+        approvalId: Id.parse("00000000000000000000000005"),
+      }),
+    ).rejects.toMatchObject({ code: "approval_not_found" });
+    vi.spyOn(fixture.store, "read").mockImplementation(async function* () {
+      await Promise.resolve();
+      return;
+    });
+    await expect(
+      createApprovalViewHost({
+        runtime: fixture.runtime,
+        context: fixture.context,
+        config: HarnessConfigSchema.parse({}),
+        runId: fixture.runId,
+        approvalId: fixture.approvalId,
+      }),
+    ).rejects.toMatchObject({ code: "approval_not_found" });
+    await fixture.host.close();
     await fixture.store.close();
   });
 });

@@ -33,7 +33,7 @@
   },
   "peerDependencies": {
     "undici": "^8.11.2",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.12"
   },
   "peerDependenciesMeta": {
     "undici": {
@@ -48,6 +48,6 @@
     "ajv": "8.20.0",
     "google-auth-library": "10.9.1",
     "undici": "8.12.3",
-    "vitest": "3.2.6"
+    "vitest": "4.1.12"
   }
 }

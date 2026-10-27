@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
+import { MAX_HOST_REQUEST_BYTES } from "./http-utils.js";
 import { subscribeResourceUpdates } from "./resource-updates.js";
 import type { AppInstance, HostRequest, HostResponse } from "./types.js";
 
@@ -72,8 +73,51 @@ describe("host run resource updates endpoint", () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(response.response.end).toHaveBeenCalledOnce();
     expect(subscriptions.has(sessionId)).toBe(false);
+    response.close();
+    expect(response.response.end).toHaveBeenCalledOnce();
     notify?.();
     expect(response.response.write).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects oversized requests and subscription failures", async () => {
+    const oversizedResponse = makeResponse();
+    await subscribeResourceUpdates(
+      makeRequest("x".repeat(MAX_HOST_REQUEST_BYTES + 1)),
+      oversizedResponse.response,
+      { sessions: new Map(), resourceUpdateSubscriptions: new Map(), dependencies: {} },
+    );
+    expect(oversizedResponse.response.writeHead).toHaveBeenCalledWith(413, expect.any(Object));
+
+    const throwingResponse = makeResponse();
+    await subscribeResourceUpdates(
+      makeRequest(JSON.stringify({ resourceUri: "harness://runs", sessionId })),
+      throwingResponse.response,
+      {
+        sessions: new Map([[sessionId, instance]]),
+        resourceUpdateSubscriptions: new Map(),
+        dependencies: {
+          subscribeResourceUpdates: () => {
+            throw new Error("synthetic subscription failure");
+          },
+        },
+      },
+    );
+    expect(throwingResponse.response.writeHead).toHaveBeenCalledWith(503, expect.any(Object));
+
+    const missingUnsubscribeResponse = makeResponse();
+    await subscribeResourceUpdates(
+      makeRequest(JSON.stringify({ resourceUri: "harness://runs", sessionId })),
+      missingUnsubscribeResponse.response,
+      {
+        sessions: new Map([[sessionId, instance]]),
+        resourceUpdateSubscriptions: new Map(),
+        dependencies: { subscribeResourceUpdates: () => undefined },
+      },
+    );
+    expect(missingUnsubscribeResponse.response.writeHead).toHaveBeenCalledWith(
+      503,
+      expect.any(Object),
+    );
   });
 
   it("returns code-only failures for invalid requests and unavailable subscriptions", async () => {

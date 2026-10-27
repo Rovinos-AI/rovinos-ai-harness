@@ -113,7 +113,9 @@ export default defineConfig({
           name: "integration-compose",
           include: [...composeIntegrationSuites],
           // One worker for the whole project, so its files run one after another.
-          poolOptions: { forks: { singleFork: true }, threads: { singleThread: true } },
+          pool: "forks",
+          maxWorkers: 1,
+          fileParallelism: false,
           globalSetup: ["./scripts/compose/build-images.ts"],
         },
       },

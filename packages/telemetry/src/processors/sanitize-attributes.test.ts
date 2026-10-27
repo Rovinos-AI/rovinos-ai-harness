@@ -70,7 +70,7 @@ describe("sanitizeAttributes", () => {
     { definition: { shape: null }, attrs: {}, name: "malformed shape" },
     { definition: { shape: {} }, attrs: null, name: "malformed attributes" },
   ])("rejects $name", ({ definition, attrs }) => {
-    expect(() => sanitizeAttributes(definition, attrs)).toThrowError(
+    expect(() => sanitizeAttributes(definition, attrs)).toThrow(
       "Telemetry attributes are malformed.",
     );
   });
@@ -86,7 +86,7 @@ describe("sanitizeAttributes", () => {
       },
     };
 
-    expect(() => sanitizeAttributes(definition, { "harness.test.code": "value" })).toThrowError(
+    expect(() => sanitizeAttributes(definition, { "harness.test.code": "value" })).toThrow(
       "untrusted schema failure",
     );
   });

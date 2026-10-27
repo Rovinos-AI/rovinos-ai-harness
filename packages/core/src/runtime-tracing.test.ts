@@ -26,6 +26,7 @@ import { SqliteVault, VaultOperationError } from "@rovinos/vault";
 import { sentinelTripQueue } from "@rovinos/telemetry";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
+import { flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import { cancelRun } from "./cancel.js";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import { RUN_SPAN } from "./spans.js";
@@ -351,6 +352,24 @@ describe("runtime tracing fallback", () => {
     expect((await readRunEvents(store, runId)).at(-1)).toEqual(appendedTrip);
     await runtime.close();
     expect(flushCount).toBe(2);
+  });
+
+  it("drains and discards a trip when flushing fails and the run has no log", async () => {
+    const runId = Id.parse("10000000000000000000000001");
+    sentinelTripQueue.enqueue({ runId, entities: [{ type: "email", count: 1 }] });
+    const flushTelemetry = vi.fn(() => Promise.reject(new Error("synthetic flush failure")));
+
+    await expect(
+      flushAndDrainTrips({
+        store: new InMemoryEventStore(),
+        runId,
+        clock: new FakeClock(1_000),
+        flushTelemetry,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(flushTelemetry).toHaveBeenCalledOnce();
+    expect(sentinelTripQueue.hasForRun(runId)).toBe(false);
   });
 
   it("aborts an in-flight tool when another process records cancellation", async () => {

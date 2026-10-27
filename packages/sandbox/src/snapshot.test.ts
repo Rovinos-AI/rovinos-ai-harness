@@ -25,6 +25,7 @@ import {
   purgeWorkspaceSnapshots,
 } from "./snapshot.js";
 import { decryptWorkspaceArchive, encryptWorkspaceArchive } from "./snapshot-encryption.js";
+import { restoreWorkspaceArchive } from "./snapshot-restore.js";
 
 const runId = Id.parse("00000000000000000000000001");
 const snapshotId = Id.parse("00000000000000000000000002");
@@ -136,6 +137,35 @@ afterEach(async () => {
 });
 
 describe("WorkspaceSnapshotter", () => {
+  it("rejects interrupted restores with a non-directory backup or workspace", async () => {
+    const paths = await createRoots();
+    const oldRoot = join(paths.workspaceRoot, `${runId}.old`);
+    await writeFile(oldRoot, "not a directory");
+    await expect(
+      restoreWorkspaceArchive({
+        archive: Buffer.alloc(0),
+        workspaceRoot: paths.workspaceRoot,
+        runId,
+        temporaryId: snapshotId,
+        maxFileBytes: 1024,
+        maxSnapshotBytes: 1024,
+      }),
+    ).rejects.toBeInstanceOf(WorkspaceSnapshotError);
+
+    await rm(oldRoot);
+    await writeFile(join(paths.workspaceRoot, runId), "not a directory");
+    await expect(
+      restoreWorkspaceArchive({
+        archive: archiveOf(tarEntry("file", "0", Buffer.from("restored"))),
+        workspaceRoot: paths.workspaceRoot,
+        runId,
+        temporaryId: snapshotId,
+        maxFileBytes: 1024,
+        maxSnapshotBytes: 1024,
+      }),
+    ).rejects.toBeInstanceOf(WorkspaceSnapshotError);
+  });
+
   it("round-trips files and modes while excluding per-run scratch", async () => {
     const paths = await createRoots();
     const runRoot = join(paths.workspaceRoot, runId);
