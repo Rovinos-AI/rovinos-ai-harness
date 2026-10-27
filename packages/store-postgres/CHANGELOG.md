@@ -5,7 +5,7 @@
 ### Minor Changes
 
 - ce5f37d: # Cross-run quotas
-  
+
   Add cross-run quotas, persist quota role identity, and account for usage with model responses.
 
 ### Patch Changes
