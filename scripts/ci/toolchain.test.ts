@@ -141,12 +141,20 @@ it("satisfies workspace constraints and the dedupe check", () => {
 
 it("contains no legacy package-manager references outside historical notes", () => {
   const legacyManager = ["pn", "pm"].join("");
+  const changesetsSequencerPackage = ["@pn", "pm/deps.graph-sequencer"].join("");
   const historicalNotes = new Set<string>();
 
   for (const path of repositoryFiles(root)) {
-    if (historicalNotes.has(relative(root, path))) {
+    const repositoryPath = relative(root, path);
+    if (historicalNotes.has(repositoryPath)) {
       continue;
     }
-    expect(readFileSync(path, "utf8").includes(legacyManager)).toBe(false);
+    const contents = readFileSync(path, "utf8");
+    // Changesets 3 depends on this scoped package; it is not a package-manager reference.
+    const scannedContents =
+      repositoryPath === "yarn.lock"
+        ? contents.replaceAll(changesetsSequencerPackage, "")
+        : contents;
+    expect(scannedContents.includes(legacyManager)).toBe(false);
   }
 });

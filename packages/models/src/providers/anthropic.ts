@@ -324,6 +324,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     this.client = new Anthropic({
       apiKey: options.apiKey.reveal(),
       maxRetries: 0,
+      openTelemetry: false,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
     });

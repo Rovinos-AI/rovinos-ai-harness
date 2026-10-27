@@ -21,7 +21,7 @@
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/core": "2.3.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",
-    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/api": "1.9.1",
     "@rovinos/core": "workspace:^",
     "@rovinos/schemas": "workspace:^",
     "@rovinos/telemetry": "workspace:^",
