@@ -44,13 +44,8 @@ jobs:
       - uses: ./.github/actions/node-setup
       - name: Check Changesets status
         run: |
-          set -euo pipefail
-          package_changes="$(git diff --name-only origin/main...HEAD -- packages | grep -Ev '\.md$' || true)"
-          if [ -n "$package_changes" ] && ! find .changeset -maxdepth 1 -type f -name '*.md' ! -name README.md -print -quit | grep -q .; then
-            echo "Package changes require a Changeset."
-            exit 1
-          fi
-          yarn changeset status --since origin/main
+          yarn build:schemas
+          node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/check-changeset-required.ts
       - name: Check telemetry schemas and random strings
         run: yarn lint:telemetry
       - name: Check telemetry attribute catalog
