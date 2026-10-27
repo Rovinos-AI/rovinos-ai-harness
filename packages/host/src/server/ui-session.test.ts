@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { trace, type Span, type SpanContext } from "@opentelemetry/api";
+import { trace, type SpanContext } from "@opentelemetry/api";
 import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { UiSession } from "./ui-session.js";
@@ -94,12 +94,10 @@ describe("UiSession", () => {
       spanId: "0".repeat(16),
       traceFlags: 1,
     };
-    const span = {
-      end: vi.fn(),
-      spanContext: () => invalidSpanContext,
-    } as unknown as Span;
-    const originalGetTracer = trace.getTracer;
-    expect(Reflect.set(trace, "getTracer", () => ({ startSpan: () => span }))).toBe(true);
+    const tracer = collector.provider.getTracer("host-test");
+    const span = trace.wrapSpanContext(invalidSpanContext);
+    const endSpan = vi.spyOn(span, "end");
+    const startSpan = vi.spyOn(tracer, "startSpan").mockReturnValue(span);
     const unavailable = vi.fn();
 
     try {
@@ -110,13 +108,14 @@ describe("UiSession", () => {
         unavailable,
       );
 
-      expect(span.end).toHaveBeenCalledOnce();
+      expect(endSpan).toHaveBeenCalledOnce();
       expect(unavailable).toHaveBeenCalledOnce();
       expect(session.traceparent).toBeUndefined();
       expect(session.spanContext).toBeUndefined();
       session.end();
     } finally {
-      Reflect.set(trace, "getTracer", originalGetTracer);
+      startSpan.mockRestore();
+      endSpan.mockRestore();
       parent.end();
     }
   });

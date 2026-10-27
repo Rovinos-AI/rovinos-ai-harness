@@ -14,12 +14,13 @@ describe("runner process lock", () => {
       await firstGate;
       order.push("first-end");
     });
-    const second = withRunnerProcessLock(async () => {
+    const second = withRunnerProcessLock(() => {
       order.push("second");
-      throw new Error("synthetic operation failure");
+      return Promise.reject(new Error("synthetic operation failure"));
     });
-    const third = withRunnerProcessLock(async () => {
+    const third = withRunnerProcessLock(() => {
       order.push("third");
+      return Promise.resolve();
     });
 
     await Promise.resolve();
@@ -39,11 +40,11 @@ describe("runner process lock", () => {
     expect(groupId).toBeTypeOf("number");
     if (userId !== undefined) {
       systemRunnerCredentials.seteuid?.(userId);
-      expect(systemRunnerCredentials.geteuid()).toBe(userId);
     }
+    expect(systemRunnerCredentials.geteuid()).toBe(userId);
     if (groupId !== undefined) {
       systemRunnerCredentials.setegid?.(groupId);
-      expect(systemRunnerCredentials.getegid()).toBe(groupId);
     }
+    expect(systemRunnerCredentials.getegid()).toBe(groupId);
   });
 });

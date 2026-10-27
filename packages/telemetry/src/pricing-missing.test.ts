@@ -12,9 +12,9 @@ describe("pricing-missing diagnostic", () => {
     const enabled = vi.fn<Logger["enabled"]>(() => true);
     const logger = { emit, enabled } satisfies Logger;
 
-    expect(() =>
-      emitPricingMissing(Code.parse("test_provider"), Code.parse("test_model"), logger),
-    ).not.toThrow();
+    expect(() => {
+      emitPricingMissing(Code.parse("test_provider"), Code.parse("test_model"), logger);
+    }).not.toThrow();
     expect(emit).toHaveBeenCalledOnce();
     expect(emit.mock.calls[0]?.[0]).toMatchObject({
       body: "pricing_missing",

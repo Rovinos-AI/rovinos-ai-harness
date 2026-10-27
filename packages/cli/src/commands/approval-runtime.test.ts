@@ -2,8 +2,9 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { HarnessConfigSchema } from "@rovinos/config";
-import type { Runtime } from "@rovinos/core";
+import { createRuntime as createCoreRuntime, type Runtime } from "@rovinos/core";
 import type { RunQueue } from "@rovinos/store";
+import { InMemoryEventStore } from "@rovinos/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { createOutput } from "../output.js";
@@ -11,22 +12,41 @@ import { withApprovalRuntime } from "./approval-runtime.js";
 
 const temporaryDirectories: string[] = [];
 
-function fakeRuntime() {
+async function createRuntimeFixture(): Promise<{ runtime: Runtime; close: Runtime["close"] }> {
+  const runtime = await createCoreRuntime(HarnessConfigSchema.parse({}), {
+    store: new InMemoryEventStore(),
+    transientVault: true,
+  });
+  const close = vi.spyOn(runtime, "close");
+  return { runtime, close };
+}
+
+function queue(close: RunQueue["close"]): RunQueue {
+  const unused = (): never => {
+    throw new Error("The queue method is not used by this test.");
+  };
   return {
-    close: vi.fn(() => Promise.resolve()),
-  } as unknown as Runtime;
+    enqueue: unused,
+    claim: unused,
+    heartbeat: unused,
+    complete: unused,
+    fail: unused,
+    release: unused,
+    getDeadLetter: unused,
+    close,
+  };
 }
 
 function context(
   config: ReturnType<typeof HarnessConfigSchema.parse>,
-  runtime: Runtime,
+  createRuntime: NonNullable<CliContext["createRuntime"]>,
   overrides: Partial<CliContext> = {},
 ): CliContext {
   return {
     loadConfig: () => Promise.resolve(config),
     clock: { now: () => 10 },
     out: createOutput({ stdout: vi.fn(), stderr: vi.fn() }),
-    createRuntime: () => runtime,
+    createRuntime,
     ...overrides,
   };
 }
@@ -42,48 +62,45 @@ afterEach(async () => {
 describe("approval command runtime ownership", () => {
   it("applies auto-resume overrides and closes both the runtime and opened queue", async () => {
     const configValue = HarnessConfigSchema.parse({ run: { autoResume: true } });
-    const runtime = fakeRuntime();
-    const closeQueue = vi.fn(() => Promise.resolve());
-    const queue = { close: closeQueue } as unknown as RunQueue;
-    const createRuntime = vi.fn((_config: typeof configValue) => runtime);
-    const commandContext = context(configValue, runtime, {
-      createRuntime,
-      openRunQueue: () => Promise.resolve(queue),
+    const { runtime, close } = await createRuntimeFixture();
+    const closeQueue = vi.fn<RunQueue["close"]>(() => Promise.resolve());
+    const runQueue = queue(closeQueue);
+    const createRuntime = vi.fn<NonNullable<CliContext["createRuntime"]>>(() => runtime);
+    const commandContext = context(configValue, createRuntime, {
+      openRunQueue: () => Promise.resolve(runQueue),
     });
 
     await expect(
       withApprovalRuntime(
         commandContext,
         undefined,
-        async (receivedRuntime, receivedConfig) => {
+        (receivedRuntime, receivedConfig) => {
           expect(receivedRuntime).toBe(runtime);
           expect(receivedConfig.run.autoResume).toBe(true);
-          return "complete";
+          return Promise.resolve("complete");
         },
         { disableAutoResume: true, useQueue: true },
       ),
     ).resolves.toBe("complete");
 
-    expect(createRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({ run: expect.objectContaining({ autoResume: false }) }),
-      expect.objectContaining({ queue }),
-    );
-    expect(runtime.close).toHaveBeenCalledOnce();
+    const runtimeArguments = createRuntime.mock.calls[0];
+    expect(runtimeArguments?.[0].run.autoResume).toBe(false);
+    expect(runtimeArguments?.[1]?.queue).toBe(runQueue);
+    expect(close).toHaveBeenCalledOnce();
     expect(closeQueue).toHaveBeenCalledOnce();
   });
 
   it("closes an acquired queue when runtime construction fails", async () => {
     const configValue = HarnessConfigSchema.parse({});
     const failure = new Error("synthetic runtime construction failure");
-    const closeQueue = vi.fn(() => Promise.resolve());
-    const queue = { close: closeQueue } as unknown as RunQueue;
-    const commandContext = context(configValue, fakeRuntime(), {
-      createRuntime: () => Promise.reject(failure),
-      openRunQueue: () => Promise.resolve(queue),
+    const closeQueue = vi.fn<RunQueue["close"]>(() => Promise.resolve());
+    const runQueue = queue(closeQueue);
+    const commandContext = context(configValue, () => Promise.reject(failure), {
+      openRunQueue: () => Promise.resolve(runQueue),
     });
 
     await expect(
-      withApprovalRuntime(commandContext, undefined, async () => undefined, { useQueue: true }),
+      withApprovalRuntime(commandContext, undefined, () => Promise.resolve(), { useQueue: true }),
     ).rejects.toBe(failure);
     expect(closeQueue).toHaveBeenCalledOnce();
   });
@@ -92,16 +109,16 @@ describe("approval command runtime ownership", () => {
     const directory = await mkdtemp(join(process.cwd(), ".tmp", "approval-runtime-"));
     temporaryDirectories.push(directory);
     const configValue = HarnessConfigSchema.parse({});
-    const runtime = fakeRuntime();
+    const { runtime, close } = await createRuntimeFixture();
 
     await expect(
       withApprovalRuntime(
-        context(configValue, runtime, { dataDir: directory }),
+        context(configValue, () => runtime, { dataDir: directory }),
         undefined,
-        async () => "queued",
+        () => Promise.resolve("queued"),
         { useQueue: true },
       ),
     ).resolves.toBe("queued");
-    expect(runtime.close).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
   });
 });

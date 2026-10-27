@@ -138,10 +138,14 @@ describe("workspace file helpers", () => {
       writeFileAt(file, Buffer.from("not published"), {
         mode: "create",
         signal: controller.signal,
-        onTemporaryFileCreated: () => controller.abort(),
+        onTemporaryFileCreated: () => {
+          controller.abort();
+        },
       }),
     ).rejects.toBeInstanceOf(WorkspaceFileError);
     expect(await readdir(root)).toEqual([]);
-    expect(() => assertActive(controller.signal)).toThrow(WorkspaceFileError);
+    expect(() => {
+      assertActive(controller.signal);
+    }).toThrow(WorkspaceFileError);
   });
 });

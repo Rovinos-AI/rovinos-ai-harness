@@ -53,8 +53,10 @@ describe("store content codec", () => {
         atSeq: 2,
       }),
     ).toThrow(InvalidEventError);
+    const malformedSnapshot = structuredClone(snapshot);
+    Object.defineProperty(malformedSnapshot, "context", { value: undefined });
     expect(() =>
-      validateSnapshotAppend(runId, events, 0, {} as typeof snapshot),
+      validateSnapshotAppend(runId, events, 0, malformedSnapshot),
     ).toThrow(InvalidEventError);
   });
 

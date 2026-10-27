@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
+import type { RunnerRequest } from "./request-handler.js";
 import { authorityFrom, validHost, validOrigin } from "./server-origin.js";
+
+function requestWithHeaders(headers: RunnerRequest["headers"]): RunnerRequest {
+  return Object.assign(Readable.from([]), { headers });
+}
 
 describe("runner request origin validation", () => {
   it("normalizes authorities and rejects userinfo, paths, and malformed values", () => {
@@ -30,8 +36,8 @@ describe("runner request origin validation", () => {
 
   it("validates the request Host against the approved authority set", () => {
     const allowed = new Set(["runner.example:8080"]);
-    expect(validHost({ headers: { host: "runner.example:8080" } }, allowed)).toBe(true);
-    expect(validHost({ headers: { host: "other.example" } }, allowed)).toBe(false);
-    expect(validHost({ headers: {} }, allowed)).toBe(false);
+    expect(validHost(requestWithHeaders({ host: "runner.example:8080" }), allowed)).toBe(true);
+    expect(validHost(requestWithHeaders({ host: "other.example" }), allowed)).toBe(false);
+    expect(validHost(requestWithHeaders({}), allowed)).toBe(false);
   });
 });

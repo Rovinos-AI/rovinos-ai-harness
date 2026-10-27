@@ -261,7 +261,7 @@ describe("createAppBridge", () => {
     bridgeMocks.connect.mockResolvedValue();
     bridgeMocks.addEventListener.mockReset().mockImplementation((event, callback) => {
       if (event === "sizechange") {
-        sizeChange = callback as typeof sizeChange;
+        sizeChange = callback;
       }
     });
     vi.stubGlobal("window", {

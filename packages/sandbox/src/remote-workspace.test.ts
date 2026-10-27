@@ -2,7 +2,6 @@
 import { Id } from "@rovinos/schemas";
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { RemoteSandboxError } from "./remote-errors.js";
 import { RemoteWorkspaceClient } from "./remote-workspace.js";
 
 const runId = Id.parse("00000000000000000000000001");
@@ -93,14 +92,13 @@ describe("remote workspace client", () => {
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener(
             "abort",
-            () => reject(new DOMException("synthetic timeout", "AbortError")),
+            () => { reject(new DOMException("synthetic timeout", "AbortError")); },
             { once: true },
           );
         });
       const pending = client(fetcher).restoreArchive(runId, Readable.from([]), 1024, 2048);
-      const outcome = expect(pending).rejects.toMatchObject({ code: "sandbox_timeout" });
       await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
-      await outcome;
+      await expect(pending).rejects.toMatchObject({ code: "sandbox_timeout" });
     } finally {
       vi.useRealTimers();
     }

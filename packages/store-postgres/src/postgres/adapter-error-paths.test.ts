@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@rovinos/schemas";
+import { Client, Pool } from "pg";
+import type {
+  EncodedSnapshot,
+  IdempotencyKeyTakeoverOptions,
+} from "@rovinos/store/adapter-internal";
 import {
   IdempotencyKeyHashSchema,
   InvalidEventError,
   StoreUnavailableError,
-  type IdempotencyKeyTakeoverOptions,
 } from "@rovinos/store/adapter-internal";
-import type { Pool, PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
 import {
@@ -16,17 +19,21 @@ import {
   type PostgresIdempotencyContext,
 } from "./idempotency.js";
 import { insertSnapshot } from "./snapshot.js";
-import type { EncodedSnapshot } from "@rovinos/store/adapter-internal";
 
 const runId = Id.parse("00000000000000000000000001");
 const approvalId = Id.parse("00000000000000000000000002");
 const keyHash = IdempotencyKeyHashSchema.parse("a".repeat(64));
-const failedPool = {
-  query: () => Promise.reject(new Error("synthetic database failure")),
-} as unknown as Pool;
+
+class TestPoolClient extends Client {
+  release(): void {
+    void this.end();
+  }
+}
 
 describe("Postgres auxiliary store error paths", () => {
   it("normalizes notification database failures across claim, mark, and release", async () => {
+    const failedPool = new Pool();
+    vi.spyOn(failedPool, "query").mockRejectedValue(new Error("synthetic database failure"));
     const notifications = new PostgresApprovalNotifications(failedPool, () => Promise.resolve());
     await expect(notifications.claim(approvalId, runId, 10, 5)).rejects.toBeInstanceOf(
       StoreUnavailableError,
@@ -40,6 +47,8 @@ describe("Postgres auxiliary store error paths", () => {
   });
 
   it("validates idempotency claim times and normalizes query or empty-result failures", async () => {
+    const failedPool = new Pool();
+    vi.spyOn(failedPool, "query").mockRejectedValue(new Error("synthetic database failure"));
     const context: PostgresIdempotencyContext = {
       pool: failedPool,
       initialize: () => Promise.resolve(),
@@ -53,10 +62,18 @@ describe("Postgres auxiliary store error paths", () => {
     );
     const emptyResultContext: PostgresIdempotencyContext = {
       ...context,
-      pool: {
-        query: () => Promise.resolve({ rows: [], rowCount: 0 }),
-      } as unknown as Pool,
+      pool: new Pool(),
     };
+    Object.defineProperty(emptyResultContext.pool, "query", {
+      value: () =>
+        Promise.resolve({
+          command: "SELECT",
+          rowCount: 0,
+          oid: 0,
+          fields: [],
+          rows: [],
+        }),
+    });
     await expect(
       claimPostgresIdempotencyKey(emptyResultContext, keyHash, runId, 10),
     ).rejects.toBeInstanceOf(StoreUnavailableError);
@@ -84,15 +101,18 @@ describe("Postgres auxiliary store error paths", () => {
       content_blob: "{}",
       key_id: null,
     };
-    const duplicateClient = {
-      query: () => Promise.reject({ code: "23505", table: "snapshots" }),
-    } as unknown as PoolClient;
+    const duplicateClient = new TestPoolClient();
+    vi.spyOn(duplicateClient, "query").mockRejectedValue(
+      Object.assign(new Error("synthetic duplicate snapshot"), {
+        code: "23505",
+        table: "snapshots",
+      }),
+    );
     await expect(insertSnapshot(duplicateClient, snapshot)).rejects.toBeInstanceOf(InvalidEventError);
 
     const failure = new Error("synthetic snapshot database failure");
-    const failingClient = {
-      query: vi.fn(() => Promise.reject(failure)),
-    } as unknown as PoolClient;
+    const failingClient = new TestPoolClient();
+    vi.spyOn(failingClient, "query").mockRejectedValue(failure);
     await expect(insertSnapshot(failingClient, snapshot)).rejects.toBe(failure);
   });
 });

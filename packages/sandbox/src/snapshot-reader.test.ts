@@ -33,9 +33,12 @@ describe("verified workspace snapshot reader", () => {
       digest: createHash("sha256").update(archive).digest("hex").slice(0, 16),
       maxSnapshotBytes: archive.byteLength,
     });
-    const chunks: Buffer[] = [];
+    const chunks: Uint8Array[] = [];
     for await (const chunk of verified.archive) {
-      chunks.push(Buffer.from(chunk));
+      if (!(chunk instanceof Uint8Array)) {
+        throw new TypeError("Expected archive chunk to be bytes");
+      }
+      chunks.push(chunk);
     }
 
     expect(Buffer.concat(chunks)).toEqual(archive);

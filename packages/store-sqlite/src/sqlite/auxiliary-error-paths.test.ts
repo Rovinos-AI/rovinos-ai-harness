@@ -72,7 +72,7 @@ describe("SQLite auxiliary store error paths", () => {
     await expect(
       findRunsByTrace(traceQuery, TraceId.parse("a".repeat(32))),
     ).rejects.toThrow();
-    await expect(findRunsByTrace(traceQuery, "bad" as TraceId)).rejects.toBeInstanceOf(
+    await expect(findRunsByTrace(traceQuery, "bad")).rejects.toBeInstanceOf(
       InvalidEventError,
     );
   });

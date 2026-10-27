@@ -10,7 +10,7 @@ import {
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { createEventBuilders } from "@rovinos/store/testing";
-import { InMemoryVault, type Token } from "@rovinos/vault";
+import { InMemoryVault } from "@rovinos/vault";
 import type { ProviderAdapter } from "@rovinos/models";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
@@ -33,8 +33,8 @@ function providerAdapter(received: ModelRequest[]): ProviderAdapter {
   return {
     provider: Code.parse("local"),
     kind: "openai",
-    complete: (request) => {
-      received.push(request);
+    complete: (modelRequest) => {
+      received.push(modelRequest);
       return Promise.resolve({
         parts: [{ type: "text", text: "completed" }],
         usage: { inputTokens: 1, outputTokens: 1 },
@@ -52,7 +52,7 @@ async function setup(options: {
 } = {}) {
   const store = options.store ?? new InMemoryEventStore();
   const scopes = options.scopes ?? new RunScopeRegistry();
-  const vault = new InMemoryVault();
+  const vault = Object.assign(new InMemoryVault(), { close: () => Promise.resolve() });
   const token = await vault.put(scopeId, Code.parse("email"), email);
   if (options.registeredScope !== undefined) {
     scopes.register(options.registeredScope.runId, options.registeredScope.scopeId);
@@ -146,7 +146,9 @@ describe("runtime model scope resolution", () => {
     const fixture = await setup({ store, scopes });
     const context = { runId: childRunId, signal: new AbortController().signal };
     const first = fixture.model.complete(request(fixture.token), context);
-    await vi.waitFor(() => expect(childReads).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      expect(childReads).toHaveBeenCalledOnce();
+    });
     const second = fixture.model.complete(request(fixture.token), context);
     await Promise.resolve();
     expect(childReads).toHaveBeenCalledOnce();

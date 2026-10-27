@@ -499,6 +499,7 @@ describe("approval reference host", () => {
       }),
     ).rejects.toMatchObject({ code: "approval_not_found" });
     vi.spyOn(fixture.store, "read").mockImplementation(async function* () {
+      await Promise.resolve();
       return;
     });
     await expect(

@@ -3,13 +3,14 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Id } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type * as WorkspaceModule from "./workspace.js";
 
 const workspaceMocks = vi.hoisted(() => ({
   ensureRunWorkspace: vi.fn(),
 }));
 
 vi.mock("./workspace.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./workspace.js")>();
+  const actual = await importOriginal<typeof WorkspaceModule>();
   return { ...actual, ensureRunWorkspace: workspaceMocks.ensureRunWorkspace };
 });
 
