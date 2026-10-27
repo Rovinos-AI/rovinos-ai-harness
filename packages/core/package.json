@@ -41,6 +41,6 @@
   "devDependencies": {
     "@modelcontextprotocol/server": "2.3.1",
     "fast-check": "4.10.2",
-    "vitest": "3.2.6"
+    "vitest": "4.1.12"
   }
 }
