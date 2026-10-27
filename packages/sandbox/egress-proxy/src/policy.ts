@@ -280,7 +280,7 @@ export async function resolveEgressHostname(hostname: string): Promise<readonly 
   if (isIP(hostname) !== 0) {
     return [hostname];
   }
-  const addresses = await lookup(hostname, { all: true, verbatim: true });
+  const addresses = await lookup(hostname, { all: true, order: "verbatim" });
   return addresses.map(({ address }) => address);
 }
 
