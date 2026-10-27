@@ -35,6 +35,11 @@ describe("workspace snapshot retention", () => {
     const outside = join(root, "outside");
     await mkdir(snapshotRoot);
     await mkdir(outside);
+    const linkedRoot = join(root, "linked-root");
+    await symlink(outside, linkedRoot);
+    await expect(purgeWorkspaceSnapshots(linkedRoot, runId)).rejects.toMatchObject({
+      code: "workspace_snapshot_invalid",
+    });
     await symlink(outside, join(snapshotRoot, runId));
     await expect(purgeWorkspaceSnapshots(snapshotRoot, runId)).rejects.toMatchObject({
       code: "workspace_snapshot_invalid",
@@ -53,10 +58,15 @@ describe("workspace snapshot retention", () => {
 
     const retention = new WorkspaceSnapshotRetention(root, 1, async () => runDirectory);
     const retainedRef = WorkspaceRef.parse(`ws:${firstSnapshotId}:0123456789abcdef`);
+    const linkedRef = WorkspaceRef.parse(`ws:${secondSnapshotId}:0123456789abcdef`);
     await retention.prune(runId, [retainedRef]);
     await expect(rm(removedPath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(writeFile(retainedPath, "retained")).resolves.toBeUndefined();
     await expect(retention.deleteSnapshot(runId, retainedRef)).resolves.toBeUndefined();
     await expect(retention.deleteSnapshot(runId, retainedRef)).resolves.toBeUndefined();
+    await symlink(root, removedPath);
+    await expect(retention.deleteSnapshot(runId, linkedRef)).rejects.toMatchObject({
+      code: "workspace_snapshot_invalid",
+    });
   });
 });

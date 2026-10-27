@@ -296,6 +296,43 @@ describe("control-plane transports", () => {
     await handle.close();
   });
 
+  it("rejects subscriptions outside the authenticated token run scope", async () => {
+    mocks.reset();
+    const controlPlane = ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.test",
+            secret: "env:CONTROL_PLANE_TEST_TOKEN",
+            scopes: ["admin"],
+            runIds: ["AAAAAAAAAAAAAAAAAAAAAAAAAA"],
+          },
+        ],
+      },
+    });
+    const handle = await startControlPlaneHttp(
+      new InMemoryEventStore(),
+      0,
+      httpOptions({ controlPlane }),
+    );
+    const body = Buffer.from(
+      JSON.stringify({
+        method: "subscriptions/listen",
+        params: {
+          notifications: { resourceSubscriptions: ["harness://runs/BBBBBBBBBBBBBBBBBBBBBBBBBB"] },
+        },
+      }),
+    );
+    const outgoing = response();
+
+    mocks.dispatch(request("/mcp", {}, "127.0.0.1", body), outgoing);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outgoing.statusCode).toBe(403);
+    expect(mocks.httpRequestHandler).not.toHaveBeenCalled();
+    await handle.close();
+  });
+
   it("audits rejected requests and rate-limits failed and authenticated requests", async () => {
     mocks.reset();
     const audits: { tokenId: string; tool: string; outcome: string }[] = [];
@@ -467,6 +504,33 @@ describe("control-plane transports", () => {
     expect(handle.endpoint).toBe("https://0.0.0.0:41234/mcp");
     expect(mocks.createHttpsServer).toHaveBeenCalledOnce();
     await handle.close();
+  });
+
+  it("rejects HTTPS startup without a secret resolver", async () => {
+    mocks.reset();
+    const controlPlane = ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.test",
+            secret: "env:CONTROL_PLANE_TEST_TOKEN",
+            scopes: ["admin"],
+          },
+        ],
+      },
+      listen: { host: "0.0.0.0", port: 3_000 },
+      tls: { certFile: "file:/cert", keyFile: "file:/key" },
+      allowedHosts: ["remote.example"],
+    });
+
+    await expect(
+      startControlPlaneHttp(
+        new InMemoryEventStore(),
+        0,
+        httpOptions({ controlPlane, secretResolver: undefined }),
+      ),
+    ).rejects.toMatchObject({ code: "control_plane_secret_resolver_missing" });
+    expect(mocks.createHttpsServer).not.toHaveBeenCalled();
   });
 
   it("limits authenticated requests per token", async () => {

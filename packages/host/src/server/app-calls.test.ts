@@ -235,6 +235,45 @@ describe("AppCallRouter", () => {
     ).rejects.toMatchObject({ code: "app_run_unavailable" });
   });
 
+  it("rejects malformed approval id lists and contains ownership and observer failures", async () => {
+    const malformedRouter = new AppCallRouter({ apps: new Map([[app.id, app]]) });
+    await expect(
+      malformedRouter.handle(
+        session,
+        request({
+          toolName: "approval.resolve",
+          arguments: { approvalIds: "invalid" },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "app_run_mismatch" });
+
+    const ownershipRouter = new AppCallRouter({
+      apps: new Map([[app.id, app]]),
+      isIdOwnedByRun: () => {
+        throw new Error("synthetic ownership failure");
+      },
+    });
+    await expect(
+      ownershipRouter.handle(
+        session,
+        request({ toolName: "approval.resolve", arguments: {}, approvalId }),
+      ),
+    ).rejects.toMatchObject({ code: "app_run_mismatch" });
+
+    const observerRouter = new AppCallRouter({
+      apps: new Map([[app.id, app]]),
+      onRejected: () => {
+        throw new Error("synthetic observer failure");
+      },
+    });
+    await expect(
+      observerRouter.handle(
+        session,
+        request({ toolName: "filesystem.write", arguments: {} }),
+      ),
+    ).rejects.toMatchObject({ code: "app_tool_not_allowed" });
+  });
+
   it("returns no tools when the app has no allowlist and filters discovery to allowed tools", async () => {
     const onAppToolsList = vi.fn(
       (_id: Code, _allowed: readonly Code[], _cursor?: string): Promise<ListToolsResult> =>

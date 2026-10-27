@@ -17,6 +17,10 @@ const bridgeMocks = vi.hoisted(() => ({
   notification: vi.fn<(notification: unknown) => Promise<void>>(),
   close: vi.fn<() => Promise<void>>(),
   handleDisplayMode: vi.fn<(params: { readonly mode: string }) => Promise<unknown>>(),
+  handleOpenLink: vi.fn<(params: { readonly url: string }) => Promise<unknown>>(),
+  handleMessage: vi.fn<(params: unknown) => Promise<unknown>>(),
+  handleUpdateModelContext: vi.fn<(params: unknown) => Promise<unknown>>(),
+  setHostContext: vi.fn<(context: unknown) => void>(),
 }));
 
 vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
@@ -48,6 +52,18 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
     getAppCapabilities = bridgeMocks.getAppCapabilities;
     set onrequestdisplaymode(handler: (params: { readonly mode: string }) => Promise<unknown>) {
       bridgeMocks.handleDisplayMode.mockImplementation(handler);
+    }
+    set onopenlink(handler: (params: { readonly url: string }) => Promise<unknown>) {
+      bridgeMocks.handleOpenLink.mockImplementation(handler);
+    }
+    set onmessage(handler: (params: unknown) => Promise<unknown>) {
+      bridgeMocks.handleMessage.mockImplementation(handler);
+    }
+    set onupdatemodelcontext(handler: (params: unknown) => Promise<unknown>) {
+      bridgeMocks.handleUpdateModelContext.mockImplementation(handler);
+    }
+    setHostContext(context: unknown) {
+      bridgeMocks.setHostContext(context);
     }
   },
 }));
@@ -238,5 +254,62 @@ describe("createAppBridge", () => {
       mode: "fullscreen",
     });
     expect(onRequestDisplayMode).not.toHaveBeenCalled();
+  });
+
+  it("routes app requests and host context changes through their handlers", async () => {
+    let sizeChange: ((params: { readonly width?: number; readonly height?: number }) => void) | undefined;
+    bridgeMocks.connect.mockResolvedValue();
+    bridgeMocks.addEventListener.mockReset().mockImplementation((event, callback) => {
+      if (event === "sizechange") {
+        sizeChange = callback as typeof sizeChange;
+      }
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      postMessage: vi.fn(),
+    });
+    const onOpenLink = vi.fn(() => Promise.resolve(true));
+    const onMessage = vi.fn(() => Promise.resolve(true));
+    const onUpdateModelContext = vi.fn(() => Promise.resolve(true));
+    const onSizeChange = vi.fn();
+    const bridge = createAppBridge(
+      { contentWindow: window },
+      () => Promise.resolve({ content: [] }),
+      undefined,
+      {
+        hostContext: {},
+        onOpenLink,
+        onMessage,
+        onUpdateModelContext,
+        onRequestDisplayMode: (mode) => Promise.resolve(mode),
+        getCurrentDisplayMode: () => "inline",
+        onSizeChange,
+      },
+    );
+    await bridge.connect();
+
+    await expect(bridgeMocks.handleOpenLink({ url: "https://example.test" })).resolves.toEqual({
+      isError: false,
+    });
+    await expect(bridgeMocks.handleMessage({ content: "synthetic" })).resolves.toEqual({
+      isError: false,
+    });
+    await expect(
+      bridgeMocks.handleUpdateModelContext({ content: "synthetic" }),
+    ).resolves.toEqual({});
+    onUpdateModelContext.mockResolvedValue(false);
+    await expect(
+      bridgeMocks.handleUpdateModelContext({ content: "rejected" }),
+    ).rejects.toThrow("app_request_rejected");
+
+    sizeChange?.({ width: 640, height: 480 });
+    bridge.setHostContext({ theme: "dark" });
+    expect(onOpenLink).toHaveBeenCalledOnce();
+    expect(onMessage).toHaveBeenCalledOnce();
+    expect(onUpdateModelContext).toHaveBeenCalledTimes(2);
+    expect(onSizeChange).toHaveBeenCalledWith({ width: 640, height: 480 });
+    expect(bridgeMocks.setHostContext).toHaveBeenCalledWith({ theme: "dark" });
+    await bridge.close();
   });
 });

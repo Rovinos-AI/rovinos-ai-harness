@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { link, lstat, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -20,7 +20,9 @@ import {
 const roots: string[] = [];
 
 async function createRoot(): Promise<string> {
-  const root = await mkdtemp(join(process.cwd(), ".tmp", "workspace-file-helpers-"));
+  const temporaryDirectory = join(process.cwd(), ".tmp");
+  await mkdir(temporaryDirectory, { recursive: true });
+  const root = await mkdtemp(join(temporaryDirectory, "workspace-file-helpers-"));
   roots.push(root);
   return root;
 }

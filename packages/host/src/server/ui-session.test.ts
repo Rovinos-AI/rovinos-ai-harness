@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { trace, type SpanContext } from "@opentelemetry/api";
+import { trace, type Span, type SpanContext } from "@opentelemetry/api";
 import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { UiSession } from "./ui-session.js";
@@ -85,5 +85,39 @@ describe("UiSession", () => {
     expect(() => {
       session.end();
     }).not.toThrow();
+  });
+
+  it("ends a session span when the provider returns an invalid child context", () => {
+    const parent = collector.provider.getTracer("host-test").startSpan("harness.tool_call");
+    const invalidSpanContext: SpanContext = {
+      traceId: "0".repeat(32),
+      spanId: "0".repeat(16),
+      traceFlags: 1,
+    };
+    const span = {
+      end: vi.fn(),
+      spanContext: () => invalidSpanContext,
+    } as unknown as Span;
+    const originalGetTracer = trace.getTracer;
+    expect(Reflect.set(trace, "getTracer", () => ({ startSpan: () => span }))).toBe(true);
+    const unavailable = vi.fn();
+
+    try {
+      const session = new UiSession(
+        { runId, toolCallSpanContext: parent.spanContext() },
+        "approval",
+        sessionId,
+        unavailable,
+      );
+
+      expect(span.end).toHaveBeenCalledOnce();
+      expect(unavailable).toHaveBeenCalledOnce();
+      expect(session.traceparent).toBeUndefined();
+      expect(session.spanContext).toBeUndefined();
+      session.end();
+    } finally {
+      Reflect.set(trace, "getTracer", originalGetTracer);
+      parent.end();
+    }
   });
 });

@@ -174,7 +174,12 @@ describe("SentinelGate", () => {
         ),
       ),
       runs,
-      { matcherForValues, tripQueue: makeTripQueue() },
+      {
+        matcherForValues,
+        tripQueue: makeTripQueue(),
+        maxPrepareMs: 10_000,
+        maxScanMs: 10_000,
+      },
     );
 
     await expect(gate.check({ text: secondRunValues.at(-1) ?? "" })).resolves.toEqual({

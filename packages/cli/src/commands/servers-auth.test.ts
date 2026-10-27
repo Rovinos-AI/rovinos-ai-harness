@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@rovinos/config";
 import { describe, expect, it, vi } from "vitest";
+import { ExitCode } from "../exit-codes.js";
+import { main } from "../main.js";
 import type { CliContext } from "../command.js";
 import { createOutput } from "../output.js";
 import { createLoginKeys } from "./servers-auth.js";
@@ -23,5 +25,19 @@ describe("server OAuth key setup", () => {
     expect(keys.currentKeyId()).toBe("test_key");
     expect(await keys.getKey("test_key")).toHaveLength(32);
     keys.dispose();
+  });
+
+  it("returns a stable failure for unknown login servers and invalid logout ids", async () => {
+    const config = HarnessConfigSchema.parse({ servers: [] });
+    const context: CliContext = {
+      loadConfig: () => Promise.resolve(config),
+      clock: { now: () => 1 },
+      out: createOutput({ stdout: vi.fn(), stderr: vi.fn() }),
+    };
+
+    await expect(main(["servers", "login", "missing"], context)).resolves.toBe(ExitCode.failure);
+    await expect(main(["servers", "logout", "invalid id"], context)).resolves.toBe(
+      ExitCode.failure,
+    );
   });
 });

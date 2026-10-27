@@ -9,7 +9,8 @@ describe("pricing-missing diagnostic", () => {
     const emit = vi.fn<Logger["emit"]>(() => {
       throw new Error("synthetic logger failure");
     });
-    const logger = { emit } satisfies Pick<Logger, "emit">;
+    const enabled = vi.fn<Logger["enabled"]>(() => true);
+    const logger = { emit, enabled } satisfies Logger;
 
     expect(() =>
       emitPricingMissing(Code.parse("test_provider"), Code.parse("test_model"), logger),
