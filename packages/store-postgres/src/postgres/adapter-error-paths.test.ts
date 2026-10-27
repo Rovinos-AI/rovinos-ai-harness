@@ -108,7 +108,9 @@ describe("Postgres auxiliary store error paths", () => {
         table: "snapshots",
       }),
     );
-    await expect(insertSnapshot(duplicateClient, snapshot)).rejects.toBeInstanceOf(InvalidEventError);
+    await expect(insertSnapshot(duplicateClient, snapshot)).rejects.toBeInstanceOf(
+      InvalidEventError,
+    );
 
     const failure = new Error("synthetic snapshot database failure");
     const failingClient = new TestPoolClient();

@@ -69,12 +69,8 @@ describe("SQLite auxiliary store error paths", () => {
     await expect(notifications.markSent(approvalId, runId, 10, 20)).rejects.toThrow();
     await expect(notifications.release(approvalId, runId, 10)).rejects.toThrow();
     await expect(confirmations.consume("state.test", 20, 10)).rejects.toThrow();
-    await expect(
-      findRunsByTrace(traceQuery, TraceId.parse("a".repeat(32))),
-    ).rejects.toThrow();
-    await expect(findRunsByTrace(traceQuery, "bad")).rejects.toBeInstanceOf(
-      InvalidEventError,
-    );
+    await expect(findRunsByTrace(traceQuery, TraceId.parse("a".repeat(32)))).rejects.toThrow();
+    await expect(findRunsByTrace(traceQuery, "bad")).rejects.toBeInstanceOf(InvalidEventError);
   });
 
   it("validates idempotency timestamps, handles ignored insertions, and maps closed database errors", async () => {

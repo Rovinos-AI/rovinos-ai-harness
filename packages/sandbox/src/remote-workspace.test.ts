@@ -63,8 +63,9 @@ describe("remote workspace client", () => {
       return new Response(null);
     };
 
-    await expect(client(fetcher).restoreArchive(runId, Readable.from(archive), 1024, 2048))
-      .resolves.toBeUndefined();
+    await expect(
+      client(fetcher).restoreArchive(runId, Readable.from(archive), 1024, 2048),
+    ).resolves.toBeUndefined();
     expect(returned).toHaveBeenCalledOnce();
   });
 
@@ -92,7 +93,9 @@ describe("remote workspace client", () => {
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener(
             "abort",
-            () => { reject(new DOMException("synthetic timeout", "AbortError")); },
+            () => {
+              reject(new DOMException("synthetic timeout", "AbortError"));
+            },
             { once: true },
           );
         });

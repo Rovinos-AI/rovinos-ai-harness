@@ -86,7 +86,10 @@ describe("workspace file helpers", () => {
       fileBytes: 3,
     });
     await expect(fileAt(join(root, "missing"))).resolves.toEqual({ exists: false });
-    await expect(fileAt(textPath)).resolves.toMatchObject({ exists: true, bytes: Buffer.from("éx") });
+    await expect(fileAt(textPath)).resolves.toMatchObject({
+      exists: true,
+      bytes: Buffer.from("éx"),
+    });
   });
 
   it("decodes bounded UTF-8 prefixes and rejects invalid text", () => {

@@ -137,7 +137,7 @@ it("maps missing and configured MCP secrets through the resolver boundary", asyn
   const captured: {
     resolveSecret?: (reference: SecretRef) => Promise<string>;
   } = {};
-  const getResolveSecret = (): (reference: SecretRef) => Promise<string> => {
+  const getResolveSecret = (): ((reference: SecretRef) => Promise<string>) => {
     const resolveSecret = captured.resolveSecret;
     if (resolveSecret === undefined) {
       throw new Error("The configured MCP secret resolver was not captured.");
@@ -150,8 +150,9 @@ it("maps missing and configured MCP secrets through the resolver boundary", asyn
   });
 
   try {
-    await expect(createConfiguredMcpToolPort(config, {}, keys, ".tmp/runtime-mcp-test")).rejects
-      .toMatchObject({ code: "mcp_connect_failed" });
+    await expect(
+      createConfiguredMcpToolPort(config, {}, keys, ".tmp/runtime-mcp-test"),
+    ).rejects.toMatchObject({ code: "mcp_connect_failed" });
     await expect(
       getResolveSecret()(SecretRefSchema.parse("env:TEST_SECRET")),
     ).rejects.toMatchObject({ code: "mcp_connect_failed" });
@@ -159,14 +160,16 @@ it("maps missing and configured MCP secrets through the resolver boundary", asyn
     await expect(
       createConfiguredMcpToolPort(
         config,
-        { secretResolver: { resolve: () => Promise.resolve({ reveal: () => "synthetic-secret" }) } },
+        {
+          secretResolver: { resolve: () => Promise.resolve({ reveal: () => "synthetic-secret" }) },
+        },
         keys,
         ".tmp/runtime-mcp-test",
       ),
     ).rejects.toMatchObject({ code: "mcp_connect_failed" });
-    await expect(
-      getResolveSecret()(SecretRefSchema.parse("env:TEST_SECRET")),
-    ).resolves.toBe("synthetic-secret");
+    await expect(getResolveSecret()(SecretRefSchema.parse("env:TEST_SECRET"))).resolves.toBe(
+      "synthetic-secret",
+    );
     expect(mcpMocks.create).toHaveBeenCalledTimes(2);
   } finally {
     keys.dispose();

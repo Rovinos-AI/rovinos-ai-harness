@@ -49,7 +49,10 @@ describe("workspace snapshot encryption", () => {
         runId,
         snapshotId,
         enabled: true,
-        provider: provider(() => "test_key", () => Promise.resolve(new Uint8Array(12))),
+        provider: provider(
+          () => "test_key",
+          () => Promise.resolve(new Uint8Array(12)),
+        ),
       }),
     ).rejects.toMatchObject({ code: "workspace_snapshot_invalid" });
   });
@@ -57,9 +60,9 @@ describe("workspace snapshot encryption", () => {
   it("rejects malformed encrypted envelopes and unavailable or incorrect keys", async () => {
     const header = Buffer.from("WSENC01", "ascii");
     const emptyKeyId = Buffer.concat([header, Buffer.from([0])]);
-    await expect(
-      decryptWorkspaceArchive(emptyKeyId, runId, snapshotId),
-    ).rejects.toMatchObject({ code: "workspace_snapshot_invalid" });
+    await expect(decryptWorkspaceArchive(emptyKeyId, runId, snapshotId)).rejects.toMatchObject({
+      code: "workspace_snapshot_invalid",
+    });
 
     const invalidKeyId = Buffer.concat([
       header,
@@ -76,15 +79,18 @@ describe("workspace snapshot encryption", () => {
       enabled: true,
       provider: provider(),
     });
-    await expect(
-      decryptWorkspaceArchive(encrypted, runId, snapshotId),
-    ).rejects.toMatchObject({ code: "workspace_snapshot_invalid" });
+    await expect(decryptWorkspaceArchive(encrypted, runId, snapshotId)).rejects.toMatchObject({
+      code: "workspace_snapshot_invalid",
+    });
     await expect(
       decryptWorkspaceArchive(
         encrypted,
         runId,
         snapshotId,
-        provider(() => "test_key", () => Promise.reject(new Error("synthetic key lookup failure"))),
+        provider(
+          () => "test_key",
+          () => Promise.reject(new Error("synthetic key lookup failure")),
+        ),
       ),
     ).rejects.toMatchObject({ code: "workspace_snapshot_invalid" });
   });

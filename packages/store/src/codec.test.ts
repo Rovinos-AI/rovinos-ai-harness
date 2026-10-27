@@ -32,7 +32,9 @@ describe("store content codec", () => {
     const snapshot = builders.snapshot(runId, snapshotId, 1);
     const events = [builders.runCreated(runId), builders.checkpointWritten(runId, snapshotId, 1)];
     expect(validateSnapshotAppend(runId, events, 0, snapshot)).toEqual(snapshot);
-    expect(() => validateSnapshotAppend(otherRunId, events, 0, snapshot)).toThrow(InvalidEventError);
+    expect(() => validateSnapshotAppend(otherRunId, events, 0, snapshot)).toThrow(
+      InvalidEventError,
+    );
     expect(() => validateSnapshotAppend(runId, [builders.runCreated(runId)], 0, snapshot)).toThrow(
       InvalidEventError,
     );
@@ -45,7 +47,12 @@ describe("store content codec", () => {
       ),
     ).toThrow(InvalidEventError);
     expect(() =>
-      validateSnapshotAppend(runId, [builders.checkpointWritten(runId, snapshotId, 2)], 0, snapshot),
+      validateSnapshotAppend(
+        runId,
+        [builders.checkpointWritten(runId, snapshotId, 2)],
+        0,
+        snapshot,
+      ),
     ).toThrow(InvalidEventError);
     expect(() =>
       validateSnapshotAppend(runId, [builders.checkpointWritten(runId, snapshotId, 1)], 0, {
@@ -55,9 +62,9 @@ describe("store content codec", () => {
     ).toThrow(InvalidEventError);
     const malformedSnapshot = structuredClone(snapshot);
     Object.defineProperty(malformedSnapshot, "context", { value: undefined });
-    expect(() =>
-      validateSnapshotAppend(runId, events, 0, malformedSnapshot),
-    ).toThrow(InvalidEventError);
+    expect(() => validateSnapshotAppend(runId, events, 0, malformedSnapshot)).toThrow(
+      InvalidEventError,
+    );
   });
 
   it("encodes and decodes snapshot content while mapping malformed rows to store errors", async () => {
@@ -101,9 +108,9 @@ describe("store content codec", () => {
     const codec = new JsonContentCodec();
     const context = { runId, seq: 0 };
     await expect(codec.decode(context, "{")).rejects.toBeInstanceOf(ContractError);
-    await expect(
-      codec.encode(context, { toJSON: () => undefined }),
-    ).rejects.toBeInstanceOf(ContractError);
+    await expect(codec.encode(context, { toJSON: () => undefined })).rejects.toBeInstanceOf(
+      ContractError,
+    );
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     await expect(codec.encode(context, circular)).rejects.toBeInstanceOf(ContractError);

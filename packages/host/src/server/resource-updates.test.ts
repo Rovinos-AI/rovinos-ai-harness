@@ -86,10 +86,7 @@ describe("host run resource updates endpoint", () => {
       oversizedResponse.response,
       { sessions: new Map(), resourceUpdateSubscriptions: new Map(), dependencies: {} },
     );
-    expect(oversizedResponse.response.writeHead).toHaveBeenCalledWith(
-      413,
-      expect.any(Object),
-    );
+    expect(oversizedResponse.response.writeHead).toHaveBeenCalledWith(413, expect.any(Object));
 
     const throwingResponse = makeResponse();
     await subscribeResourceUpdates(

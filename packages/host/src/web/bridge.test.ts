@@ -257,7 +257,8 @@ describe("createAppBridge", () => {
   });
 
   it("routes app requests and host context changes through their handlers", async () => {
-    let sizeChange: ((params: { readonly width?: number; readonly height?: number }) => void) | undefined;
+    let sizeChange:
+      ((params: { readonly width?: number; readonly height?: number }) => void) | undefined;
     bridgeMocks.connect.mockResolvedValue();
     bridgeMocks.addEventListener.mockReset().mockImplementation((event, callback) => {
       if (event === "sizechange") {
@@ -295,13 +296,13 @@ describe("createAppBridge", () => {
     await expect(bridgeMocks.handleMessage({ content: "synthetic" })).resolves.toEqual({
       isError: false,
     });
-    await expect(
-      bridgeMocks.handleUpdateModelContext({ content: "synthetic" }),
-    ).resolves.toEqual({});
+    await expect(bridgeMocks.handleUpdateModelContext({ content: "synthetic" })).resolves.toEqual(
+      {},
+    );
     onUpdateModelContext.mockResolvedValue(false);
-    await expect(
-      bridgeMocks.handleUpdateModelContext({ content: "rejected" }),
-    ).rejects.toThrow("app_request_rejected");
+    await expect(bridgeMocks.handleUpdateModelContext({ content: "rejected" })).rejects.toThrow(
+      "app_request_rejected",
+    );
 
     sizeChange?.({ width: 640, height: 480 });
     bridge.setHostContext({ theme: "dark" });

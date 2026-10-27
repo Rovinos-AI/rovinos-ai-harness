@@ -45,11 +45,13 @@ function providerAdapter(received: ModelRequest[]): ProviderAdapter {
   };
 }
 
-async function setup(options: {
-  readonly store?: InMemoryEventStore;
-  readonly scopes?: RunScopeRegistry;
-  readonly registeredScope?: { readonly runId: Id; readonly scopeId: Id };
-} = {}) {
+async function setup(
+  options: {
+    readonly store?: InMemoryEventStore;
+    readonly scopes?: RunScopeRegistry;
+    readonly registeredScope?: { readonly runId: Id; readonly scopeId: Id };
+  } = {},
+) {
   const store = options.store ?? new InMemoryEventStore();
   const scopes = options.scopes ?? new RunScopeRegistry();
   const vault = Object.assign(new InMemoryVault(), { close: () => Promise.resolve() });

@@ -52,7 +52,11 @@ describe("SQLite vault key derivation", () => {
       });
 
     await expect(
-      deriveVaultKeys(provider(() => Promise.resolve(masterKey)), "key_a", "vault_encrypt_failed"),
+      deriveVaultKeys(
+        provider(() => Promise.resolve(masterKey)),
+        "key_a",
+        "vault_encrypt_failed",
+      ),
     ).rejects.toMatchObject({ code: "vault_encrypt_failed" });
     expect(encryptionKey).toEqual(new Uint8Array(32));
     expect(masterKey).toEqual(new Uint8Array(32).fill(9));
@@ -61,9 +65,14 @@ describe("SQLite vault key derivation", () => {
   it("maps failures reading the current key id to the encryption error code", () => {
     expect(currentKeyId(provider(() => Promise.resolve(new Uint8Array(32))))).toBe("key_a");
     expect(() =>
-      currentKeyId(provider(() => Promise.resolve(new Uint8Array(32)), () => {
-        throw new Error("synthetic current-key failure");
-      })),
+      currentKeyId(
+        provider(
+          () => Promise.resolve(new Uint8Array(32)),
+          () => {
+            throw new Error("synthetic current-key failure");
+          },
+        ),
+      ),
     ).toThrow(expect.objectContaining({ code: "vault_encrypt_failed" }));
   });
 });

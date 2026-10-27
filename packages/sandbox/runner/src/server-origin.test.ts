@@ -11,7 +11,14 @@ function requestWithHeaders(headers: RunnerRequest["headers"]): RunnerRequest {
 describe("runner request origin validation", () => {
   it("normalizes authorities and rejects userinfo, paths, and malformed values", () => {
     expect(authorityFrom("RUNNER.EXAMPLE:8080")).toBe("runner.example:8080");
-    for (const value of [undefined, "", " runner.example", "user@runner.example", "runner.example/path", "[bad"]) {
+    for (const value of [
+      undefined,
+      "",
+      " runner.example",
+      "user@runner.example",
+      "runner.example/path",
+      "[bad",
+    ]) {
       expect(authorityFrom(value)).toBeUndefined();
     }
   });

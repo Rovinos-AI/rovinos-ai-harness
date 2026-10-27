@@ -477,9 +477,7 @@ describe("approval reference host", () => {
     expect((await call("/escaped~1key")).structuredContent).toEqual({
       values: [{ pointer: "/escaped~1key", value: "555-0101" }],
     });
-    expect((await call("/items/01")).content).toEqual([
-      { type: "text", text: "pointer_invalid" },
-    ]);
+    expect((await call("/items/01")).content).toEqual([{ type: "text", text: "pointer_invalid" }]);
     expect((await call("/items/999999999999999999999999")).content).toEqual([
       { type: "text", text: "pointer_invalid" },
     ]);

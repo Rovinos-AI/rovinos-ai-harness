@@ -267,10 +267,7 @@ describe("AppCallRouter", () => {
       },
     });
     await expect(
-      observerRouter.handle(
-        session,
-        request({ toolName: "filesystem.write", arguments: {} }),
-      ),
+      observerRouter.handle(session, request({ toolName: "filesystem.write", arguments: {} })),
     ).rejects.toMatchObject({ code: "app_tool_not_allowed" });
   });
 

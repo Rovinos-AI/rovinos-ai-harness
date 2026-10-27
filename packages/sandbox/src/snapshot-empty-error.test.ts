@@ -20,7 +20,9 @@ const scratchRoots: string[] = [];
 
 afterEach(async () => {
   workspaceMocks.ensureRunWorkspace.mockReset();
-  await Promise.all(scratchRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    scratchRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 describe("empty workspace archive cleanup", () => {
