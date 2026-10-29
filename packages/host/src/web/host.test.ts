@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallToolResultSchema } from "@modelcontextprotocol/core";
-import { parseJson } from "@rovinos/schemas";
+import { APP_TELEMETRY_TOOL_NAME, parseJson } from "@rovinos/schemas";
 import type { z } from "zod";
 import {
   APP_CSP,
@@ -672,7 +672,7 @@ describe("reference app page", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    expect(await bridgeMock.toolCall({ name: "harness.telemetry.emit" })).toEqual({
+    expect(await bridgeMock.toolCall({ name: APP_TELEMETRY_TOOL_NAME })).toEqual({
       content: [{ type: "text", text: "rate_limited" }],
       isError: true,
       structuredContent: { code: "rate_limited" },
