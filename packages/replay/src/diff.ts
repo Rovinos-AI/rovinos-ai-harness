@@ -437,8 +437,24 @@ export function diffRuns(
   eventsB: readonly Event[],
   options: DiffOptions = {},
 ): DiffResult {
-  const a = normalizeRun(eventsA);
-  const b = normalizeRun(eventsB);
+  return diffNormalizedRuns(normalizeRun(eventsA), normalizeRun(eventsB), options);
+}
+
+/**
+ * Compare already-normalized event signatures using the same noise-aware diff as {@link diffRuns}.
+ *
+ * @param eventsA - The expected normalized signature.
+ * @param eventsB - The actual normalized signature.
+ * @param options - Optional field and token comparison controls.
+ * @returns Metadata-only differences and aggregate counts.
+ */
+export function diffNormalizedRuns(
+  eventsA: readonly NormalizedEvent[],
+  eventsB: readonly NormalizedEvent[],
+  options: DiffOptions = {},
+): DiffResult {
+  const a = eventsA;
+  const b = eventsB;
   const context: DiffContext = {
     options,
     ignoredFields: new Set((options.ignoreFields ?? []).map(String)),
