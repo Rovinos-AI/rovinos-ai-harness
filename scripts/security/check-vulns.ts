@@ -65,6 +65,26 @@ const osvOutputSchema = z.object({
   ),
 });
 
+const vulnerabilityCheckErrorCodeSchema = z.enum([
+  "audit_report_invalid",
+  "osv_report_invalid",
+  "positive_control_undetected",
+  "vulnerability_check_failed",
+]);
+
+type VulnerabilityCheckErrorCode = z.infer<typeof vulnerabilityCheckErrorCodeSchema>;
+
+/** A closed, safe-to-log failure code for the vulnerability check. */
+export class VulnerabilityCheckError extends Error {
+  readonly code: VulnerabilityCheckErrorCode;
+
+  constructor(code: VulnerabilityCheckErrorCode) {
+    super(code);
+    this.name = "VulnerabilityCheckError";
+    this.code = vulnerabilityCheckErrorCodeSchema.parse(code);
+  }
+}
+
 type OsvVulnerability = z.infer<typeof osvVulnerabilitySchema>;
 type YarnAuditAdvisory = NonNullable<z.infer<typeof yarnAuditRecordSchema>["children"]>;
 
@@ -149,43 +169,51 @@ function parseYarnAuditRecord(line: string): Finding[] {
 
 /** Parses the NDJSON output emitted by the pinned Yarn 4 audit command. */
 export function parseYarnAuditOutput(output: string): Finding[] {
-  return output
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
-    .flatMap(parseYarnAuditRecord);
+  try {
+    return output
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .flatMap(parseYarnAuditRecord);
+  } catch {
+    throw new VulnerabilityCheckError("audit_report_invalid");
+  }
 }
 
 /** Parses JSON output from OSV-Scanner v2. */
 export function parseOsvScannerOutput(output: string): Finding[] {
-  const report = parseJson(osvOutputSchema, output);
-  const findings: Finding[] = [];
-  for (const result of report.results) {
-    for (const entry of result.packages) {
-      for (const vulnerability of entry.vulnerabilities ?? []) {
-        const databaseSeverity =
-          typeof vulnerability.database_specific?.severity === "string"
-            ? vulnerability.database_specific.severity
-            : undefined;
-        const normalizedDatabaseSeverity = normalizeSeverity(databaseSeverity);
-        const severity =
-          normalizedDatabaseSeverity === "unknown"
-            ? (normalizeCvss(vulnerability.severity ?? []) ?? "unknown")
-            : normalizedDatabaseSeverity;
-        const fixedIn = fixedVersion(vulnerability.affected);
-        findings.push(
-          FindingSchema.parse({
-            id: vulnerability.id,
-            aliases: (vulnerability.aliases ?? []).filter((alias) => alias !== vulnerability.id),
-            package: entry.package.name,
-            version: entry.package.version,
-            severity,
-            ...(fixedIn === undefined ? {} : { fixedIn }),
-          }),
-        );
+  try {
+    const report = parseJson(osvOutputSchema, output);
+    const findings: Finding[] = [];
+    for (const result of report.results) {
+      for (const entry of result.packages) {
+        for (const vulnerability of entry.vulnerabilities ?? []) {
+          const databaseSeverity =
+            typeof vulnerability.database_specific?.severity === "string"
+              ? vulnerability.database_specific.severity
+              : undefined;
+          const normalizedDatabaseSeverity = normalizeSeverity(databaseSeverity);
+          const severity =
+            normalizedDatabaseSeverity === "unknown"
+              ? (normalizeCvss(vulnerability.severity ?? []) ?? "unknown")
+              : normalizedDatabaseSeverity;
+          const fixedIn = fixedVersion(vulnerability.affected);
+          findings.push(
+            FindingSchema.parse({
+              id: vulnerability.id,
+              aliases: (vulnerability.aliases ?? []).filter((alias) => alias !== vulnerability.id),
+              package: entry.package.name,
+              version: entry.package.version,
+              severity,
+              ...(fixedIn === undefined ? {} : { fixedIn }),
+            }),
+          );
+        }
       }
     }
+    return findings;
+  } catch {
+    throw new VulnerabilityCheckError("osv_report_invalid");
   }
-  return findings;
 }
 
 function samePackageVersion(left: Finding, right: Finding): boolean {
@@ -208,14 +236,18 @@ function runTool(
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.error !== undefined) {
-    throw new Error("vulnerability scanner execution failed");
+    throw new VulnerabilityCheckError("vulnerability_check_failed");
   }
   return { stdout: result.stdout, status: result.status };
 }
 
 function readPolicy(): VulnerabilityPolicy {
-  const path = fileURLToPath(new URL("../../config/vuln-policy.json", import.meta.url));
-  return parseJson(VulnerabilityPolicySchema, readFileSync(path, "utf8"));
+  try {
+    const path = fileURLToPath(new URL("../../config/vuln-policy.json", import.meta.url));
+    return parseJson(VulnerabilityPolicySchema, readFileSync(path, "utf8"));
+  } catch {
+    throw new VulnerabilityCheckError("vulnerability_check_failed");
+  }
 }
 
 /**
@@ -272,7 +304,8 @@ export function evaluateVulnerabilityReport(input: {
   });
 }
 
-function evaluatePositiveControl(findings: readonly Finding[], now: number): void {
+/** Requires the positive-control finding to be present and blocked by the vulnerability policy. */
+export function evaluatePositiveControl(findings: readonly Finding[], now: number): void {
   const aliases = new Set(["CVE-2021-23337", "GHSA-35jh-r3h4-6jhm"]);
   const finding = findings.find(
     (candidate) =>
@@ -281,12 +314,22 @@ function evaluatePositiveControl(findings: readonly Finding[], now: number): voi
       [candidate.id, ...candidate.aliases].some((id) => aliases.has(id)),
   );
   if (finding === undefined) {
-    throw new Error("vulnerability positive control was not detected");
+    throw new VulnerabilityCheckError("positive_control_undetected");
   }
   const policy = VulnerabilityPolicySchema.parse({ exceptions: [] });
   if (evaluateFindings([finding], policy, now).failures.length === 0) {
-    throw new Error("vulnerability positive control did not fail policy");
+    throw new VulnerabilityCheckError("positive_control_undetected");
   }
+}
+
+/** Builds OSV-Scanner arguments with the lockfile parser named independently of the fixture basename. */
+export function positiveControlArgs(fixturePath: string): string[] {
+  return ["scan", `--lockfile=yarn.lock:${fixturePath}`, "--format=json", "--verbosity=error"];
+}
+
+/** Returns a safe, closed failure code without exposing error text. */
+export function vulnerabilityCheckErrorCode(error: unknown): VulnerabilityCheckErrorCode {
+  return error instanceof VulnerabilityCheckError ? error.code : "vulnerability_check_failed";
 }
 
 function formatSummary(report: z.infer<typeof VulnerabilityReportSchema>): string {
@@ -321,7 +364,7 @@ function runScan(policy: VulnerabilityPolicy, now: number): void {
     (productionAudit.status !== 0 && productionAudit.stdout.trim().length === 0) ||
     (allAudit.status !== 0 && allAudit.stdout.trim().length === 0)
   ) {
-    throw new Error("Yarn audit failed without a valid report");
+    throw new VulnerabilityCheckError("audit_report_invalid");
   }
 
   const productionFindings = parseYarnAuditOutput(productionAudit.stdout);
@@ -334,7 +377,7 @@ function runScan(policy: VulnerabilityPolicy, now: number): void {
   ]);
   const osvFindings = parseOsvScannerOutput(osvResult.stdout);
   if (osvResult.status !== 0 && osvFindings.length === 0) {
-    throw new Error("OSV-Scanner failed without a valid report");
+    throw new VulnerabilityCheckError("osv_report_invalid");
   }
 
   const report = evaluateVulnerabilityReport({
@@ -359,20 +402,15 @@ function runPositiveControl(policy: VulnerabilityPolicy, now: number): void {
   const fixture = fileURLToPath(
     new URL("../../security/fixtures/vulnerable-yarn.lock", import.meta.url),
   );
-  const result = runTool("osv-scanner", [
-    "scan",
-    `--lockfile=${fixture}`,
-    "--format=json",
-    "--verbosity=error",
-  ]);
+  const result = runTool("osv-scanner", positiveControlArgs(fixture));
   const findings = parseOsvScannerOutput(result.stdout);
   if (result.status !== 0 && findings.length === 0) {
-    throw new Error("OSV-Scanner positive control failed without a valid report");
+    throw new VulnerabilityCheckError("osv_report_invalid");
   }
   evaluatePositiveControl(findings, now);
   const report = evaluateFindings(findings, policy, now);
   if (report.failures.length === 0) {
-    throw new Error("configured policy unexpectedly accepted the vulnerability positive control");
+    throw new VulnerabilityCheckError("positive_control_undetected");
   }
   process.stdout.write("Vulnerability positive control detected and blocked.\n");
 }
@@ -381,7 +419,7 @@ function main(): void {
   try {
     const mode = process.argv[2];
     if (mode !== "--scan" && mode !== "--positive-control") {
-      throw new Error("pass --scan or --positive-control to run this networked check");
+      throw new VulnerabilityCheckError("vulnerability_check_failed");
     }
     const policy = readPolicy();
     const now = Date.now();
@@ -390,8 +428,8 @@ function main(): void {
     } else {
       runPositiveControl(policy, now);
     }
-  } catch {
-    process.stderr.write("Dependency vulnerability check failed closed.\n");
+  } catch (error) {
+    process.stderr.write(`${vulnerabilityCheckErrorCode(error)}\n`);
     process.exitCode = 1;
   }
 }

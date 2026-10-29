@@ -7,9 +7,12 @@ import {
   VulnerabilityPolicySchema,
 } from "./vuln-policy.ts";
 import {
+  evaluatePositiveControl,
   evaluateVulnerabilityReport,
   parseOsvScannerOutput,
   parseYarnAuditOutput,
+  positiveControlArgs,
+  vulnerabilityCheckErrorCode,
 } from "./check-vulns.ts";
 
 const now = Date.parse("2026-10-29T00:00:00.000Z");
@@ -253,6 +256,32 @@ describe("scanner output parsing", () => {
   });
 
   it("fails closed on malformed scanner JSON", () => {
-    expect(() => parseOsvScannerOutput("{")).toThrow();
+    expect(() => parseOsvScannerOutput("{")).toThrow(
+      expect.objectContaining({ code: "osv_report_invalid" }),
+    );
+  });
+
+  it("reports invalid Yarn audit output with a closed code", () => {
+    expect(() => parseYarnAuditOutput("{")).toThrow(
+      expect.objectContaining({ code: "audit_report_invalid" }),
+    );
+  });
+
+  it("reports an undetected positive-control advisory with a closed code", () => {
+    expect(() => {
+      evaluatePositiveControl([], now);
+    }).toThrow(expect.objectContaining({ code: "positive_control_undetected" }));
+  });
+
+  it("uses the safe fallback code without exposing unexpected error text", () => {
+    expect(vulnerabilityCheckErrorCode(new Error("sensitive diagnostic text"))).toBe(
+      "vulnerability_check_failed",
+    );
+  });
+
+  it("selects the Yarn lockfile parser explicitly for the vulnerable fixture", () => {
+    expect(positiveControlArgs("security/fixtures/vulnerable-yarn.lock")).toContain(
+      "--lockfile=yarn.lock:security/fixtures/vulnerable-yarn.lock",
+    );
   });
 });
