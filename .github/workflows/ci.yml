@@ -126,6 +126,25 @@ jobs:
           name: gitleaks-pull-request-report
           path: reports/security/gitleaks-report.json
           if-no-files-found: ignore
+      - name: Install pinned OSV-Scanner
+        run: |
+          set -euo pipefail
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.3.3
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Dependency vulnerability gate
+        run: |
+          mkdir -p reports
+          node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/security/check-vulns.ts --scan > reports/vulnerability-report.json
+      - name: Verify vulnerable lockfile positive control
+        if: always()
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/security/check-vulns.ts --positive-control
+      - name: Upload dependency vulnerability report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dependency-vulnerability-report
+          path: reports/vulnerability-report.json
+          if-no-files-found: ignore
 
   unit:
     needs: static
