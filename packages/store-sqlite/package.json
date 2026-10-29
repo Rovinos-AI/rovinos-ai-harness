@@ -21,6 +21,12 @@
       "default": "./dist/index.js"
     }
   },
+  "typedocOptions": {
+    "entryPoints": ["src/index.ts"],
+    "intentionallyNotExported": [
+      "src/migrate-file.ts:migrationOptionsSchema"
+    ]
+  },
   "scripts": {
     "build": "tsup"
   },

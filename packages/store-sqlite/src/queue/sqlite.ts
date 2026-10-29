@@ -179,7 +179,7 @@ export class SqliteRunQueue implements RunQueue {
     return z.number().int().nonnegative().parse(this.clock.now());
   }
 
-  /** {@inheritDoc RunQueue.enqueue} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.enqueue} */
   enqueue(input: Parameters<RunQueue["enqueue"]>[0]): Promise<RunQueueJob> {
     return sqliteOperation(() => {
       const job = parseQueueInput(EnqueueRunJobSchema, input);
@@ -219,7 +219,7 @@ export class SqliteRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.claim} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.claim} */
   claim(workerId: string, limit: number, leaseMs: number): Promise<RunQueueJob[]> {
     return sqliteOperation(() => {
       const worker = parseQueueInput(WorkerIdSchema, workerId);
@@ -251,7 +251,7 @@ export class SqliteRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.heartbeat} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.heartbeat} */
   heartbeat(jobId: string, workerId: string, leaseMs: number): Promise<boolean> {
     return sqliteOperation(() => {
       const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
@@ -274,7 +274,7 @@ export class SqliteRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.complete} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.complete} */
   complete(jobId: string, workerId: string): Promise<boolean> {
     return sqliteOperation(() => {
       const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
@@ -314,7 +314,7 @@ export class SqliteRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.fail} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.fail} */
   fail(
     jobId: string,
     workerId: string,
@@ -370,7 +370,7 @@ export class SqliteRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.release} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.release} */
   release(jobId: string, workerId: string): Promise<boolean> {
     return sqliteOperation(() => {
       const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
@@ -391,7 +391,7 @@ export class SqliteRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.getDeadLetter} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.getDeadLetter} */
   getDeadLetter(jobId: string): Promise<RunQueueDeadLetter | undefined> {
     return sqliteOperation(() => {
       const id = parseQueueInput(QueueJobIdSchema, jobId);
@@ -412,7 +412,7 @@ export class SqliteRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.close} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.close} */
   close(): Promise<void> {
     return sqliteOperation(() => {
       this.db.close();

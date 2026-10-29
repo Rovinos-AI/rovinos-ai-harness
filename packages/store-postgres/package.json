@@ -21,6 +21,13 @@
       "default": "./dist/index.js"
     }
   },
+  "typedocOptions": {
+    "entryPoints": ["src/index.ts"],
+    "intentionallyNotExported": [
+      "src/postgres/adapter.ts:optionsSchema",
+      "src/migrate-file.ts:migrationOptionsSchema"
+    ]
+  },
   "scripts": {
     "build": "tsup"
   },

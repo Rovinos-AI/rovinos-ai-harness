@@ -24,6 +24,12 @@
       "default": "./dist/adapter-internal.js"
     }
   },
+  "typedocOptions": {
+    "entryPoints": ["src/types.ts", "src/rotate.ts", "src/queue/types.ts"],
+    "intentionallyNotExported": [
+      "src/rotate.ts:rotationCursorSchema"
+    ]
+  },
   "scripts": {
     "build": "tsc -b tsconfig.build.json"
   },
