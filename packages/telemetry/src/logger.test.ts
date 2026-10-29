@@ -4,12 +4,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { Writable } from "node:stream";
 import { z } from "zod";
 import type { Code as CodeType } from "@rovinos/schemas";
-import {
-  createLogger,
-  NoopLogger,
-  type Logger,
-  type LogFields,
-} from "./logger.js";
+import { createLogger, NoopLogger, type Logger, type LogFields } from "./logger.js";
 import { __getLoggerDroppedFieldsForTests } from "./testing.js";
 
 const LogValueSchema = z.union([Id, Code, z.number().int(), z.boolean()]);
@@ -20,9 +15,7 @@ const LogLineSchema = z
   })
   .loose();
 
-expectTypeOf<Parameters<Logger["info"]>>().toEqualTypeOf<
-  [event: CodeType, fields?: LogFields]
->();
+expectTypeOf<Parameters<Logger["info"]>>().toEqualTypeOf<[event: CodeType, fields?: LogFields]>();
 
 function createCapture(): { readonly destination: Writable; readonly lines: string[] } {
   const lines: string[] = [];
