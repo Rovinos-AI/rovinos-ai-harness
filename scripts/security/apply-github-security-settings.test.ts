@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -50,8 +53,40 @@ describe("apply-github-security-settings.sh", () => {
         endpoint: "repos/{owner}/{repo}/automated-security-fixes",
         payload: null,
       },
-      { method: "PUT", endpoint: "repos/{owner}/{repo}/vulnerability-reporting", payload: null },
+      {
+        method: "PUT",
+        endpoint: "repos/{owner}/{repo}/private-vulnerability-reporting",
+        payload: null,
+      },
     ]);
+  });
+
+  it("applies all four settings through the correct GitHub endpoints", () => {
+    const directory = mkdtempSync(join(tmpdir(), "github-security-settings-"));
+    const calls = join(directory, "calls");
+    try {
+      writeFileSync(
+        join(directory, "gh"),
+        '#!/usr/bin/env bash\n# SPDX-License-Identifier: Apache-2.0\nprintf \'%s\\n\' "$*" >> "$GH_CALLS"\n',
+        { mode: 0o755 },
+      );
+      const result = spawnSync("bash", [script, "--apply"], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${directory}:${process.env.PATH ?? ""}`, GH_CALLS: calls },
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toBe("");
+      expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual([
+        "api -X PATCH repos/{owner}/{repo} --input -",
+        "api -X PUT repos/{owner}/{repo}/vulnerability-alerts",
+        "api -X PUT repos/{owner}/{repo}/automated-security-fixes",
+        "api -X PUT repos/{owner}/{repo}/private-vulnerability-reporting",
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("requires an explicit mode and rejects unknown arguments", () => {
