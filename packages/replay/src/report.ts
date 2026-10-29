@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, HarnessError, Id, RunStatus } from "@rovinos/schemas";
 import { z } from "zod";
+import { hasReplayDifferences } from "./diff-classification.js";
 import { diffNormalizedRuns, normalizeRun } from "./diff.js";
 import type { DiffResult } from "./diff.js";
 import type { ReplayOutcome } from "./replay.js";
@@ -362,7 +363,7 @@ export function replayReportExitCode(report: ReplayReport, strict = false): 0 | 
   if (validated.status === "error" || validated.divergence !== undefined) {
     return 8;
   }
-  if (validated.summary.behavioral > 0 || (strict && validated.summary.noise > 0)) {
+  if (hasReplayDifferences(validated.summary, strict)) {
     return 1;
   }
   return 0;

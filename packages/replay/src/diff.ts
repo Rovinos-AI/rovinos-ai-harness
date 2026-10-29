@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, type Event, type Code as EventCode } from "@rovinos/schemas";
 import { toSafeEvent } from "@rovinos/telemetry";
+import { diffFieldCodeName, isNoiseDiffField, rootDiffField } from "./diff-classification.js";
 
 interface NormalizedObject {
   readonly [key: string]: NormalizedValue;
@@ -150,27 +151,10 @@ export function normalizeRun(events: readonly Event[]): NormalizedEvent[] {
 type Scalar = string | number | boolean;
 type FlattenedEvent = Map<string, Scalar>;
 
-function rootField(field: string): string {
-  return field.split(".", 1)[0] ?? field;
-}
-
-function codeFieldName(field: string): string {
-  return field.replaceAll(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
-}
-
 function isIgnoredField(field: string, context: DiffContext): boolean {
   return (
-    context.ignoredFields.has(codeFieldName(field)) ||
-    context.ignoredFields.has(codeFieldName(rootField(field)))
-  );
-}
-
-function isNoiseField(field: string, options: DiffOptions): boolean {
-  const name = rootField(field);
-  return (
-    name === "latencyMs" ||
-    name === "waitMs" ||
-    (options.ignoreMetrics === true && (name === "costMicros" || name === "repairAttempts"))
+    context.ignoredFields.has(diffFieldCodeName(field)) ||
+    context.ignoredFields.has(diffFieldCodeName(rootDiffField(field)))
   );
 }
 
@@ -230,7 +214,9 @@ function sortedEntries(values: FlattenedEvent): [string, Scalar][] {
 }
 
 function signature(values: FlattenedEvent, options: DiffOptions): string {
-  return JSON.stringify(sortedEntries(values).filter(([field]) => !isNoiseField(field, options)));
+  return JSON.stringify(
+    sortedEntries(values).filter(([field]) => !isNoiseDiffField(field, options)),
+  );
 }
 
 function signatures(events: readonly NormalizedEvent[], context: DiffContext): string[] {
@@ -272,7 +258,7 @@ function lcsMatches(a: readonly string[], b: readonly string[]): [number, number
 }
 
 function fieldCode(field: string): EventCode {
-  return Code.parse(codeFieldName(field).slice(0, 64));
+  return Code.parse(diffFieldCodeName(field).slice(0, 64));
 }
 
 function changedFields(
@@ -296,7 +282,7 @@ function changedFields(
       a: valueA ?? ABSENT,
       b: valueB ?? ABSENT,
     };
-    (isNoiseField(field, context.options) ? noise : behavioral).push(diffField);
+    (isNoiseDiffField(field, context.options) ? noise : behavioral).push(diffField);
   }
   return { behavioral, noise };
 }
