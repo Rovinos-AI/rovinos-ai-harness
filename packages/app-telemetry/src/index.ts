@@ -19,6 +19,7 @@ export type {
   AppTraceContext,
   SpanAttrs,
 } from "./types.js";
+export { APP_TELEMETRY_TOOL_NAME } from "./types.js";
 
 const maxDurationMs = 3_600_000;
 

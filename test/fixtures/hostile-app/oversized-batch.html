@@ -4,7 +4,7 @@
   <body>
     <script>
       window.hostileAttack = async ({ call, emit }) => {
-        await call("harness.telemetry.emit", {
+        await call("__APP_TELEMETRY_TOOL_NAME__", {
           spans: [
             {
               name: "ui.error",

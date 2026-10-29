@@ -1,0 +1,7 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "intentionallyNotExported": [
+    "src/postgres/adapter.ts:optionsSchema",
+    "src/migrate-file.ts:migrationOptionsSchema"
+  ]
+}

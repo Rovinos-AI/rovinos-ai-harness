@@ -32,3 +32,13 @@ export {
   type ReplayOutcome,
   type ReplayRunOptions,
 } from "./replay.js";
+export {
+  diffRuns,
+  normalizeRun,
+  type DiffEntry,
+  type DiffField,
+  type DiffOptions,
+  type DiffResult,
+  type DiffSummary,
+  type NormalizedEvent,
+} from "./diff.js";

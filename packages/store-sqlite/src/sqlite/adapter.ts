@@ -188,14 +188,14 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     );
   }
 
-  /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
+  /** {@inheritDoc @rovinos/store!rotate.StoreKeyRotation.reencryptBatch} */
   reencryptBatch: StoreKeyRotation["reencryptBatch"] = (input) =>
     reencryptSqliteBatch(this.db, this.codec, input);
 
   /** Count event and snapshot rows that still use each key. */
   countRowsByKey: StoreKeyRotation["countRowsByKey"] = () => countSqliteRowsByKey(this.db);
 
-  /** {@inheritDoc EventStore.append} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.append} */
   async append(
     runId: Id,
     events: readonly NewEvent[],
@@ -211,7 +211,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.appendWithSnapshot} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.appendWithSnapshot} */
   async appendWithSnapshot(
     ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
@@ -230,7 +230,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.appendWithUsage} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.appendWithUsage} */
   async appendWithUsage(
     ...args: Parameters<EventStore["appendWithUsage"]>
   ): Promise<{ nextSeq: number }> {
@@ -245,7 +245,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.readUsageLedger} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.readUsageLedger} */
   readUsageLedger(
     quotaId: Code,
     period: UsageLedgerPeriod,
@@ -260,17 +260,17 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.claimRunExecution} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.claimRunExecution} */
   claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
     return claimSqliteExecutionLease({ db: this.db, runId, owner, now, leaseMs });
   }
 
-  /** {@inheritDoc EventStore.renewRunExecution} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.renewRunExecution} */
   renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
     return renewSqliteExecutionLease({ db: this.db, runId, owner, now, leaseMs });
   }
 
-  /** {@inheritDoc EventStore.releaseRunExecution} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.releaseRunExecution} */
   releaseRunExecution(runId: Id, owner: Id): Promise<void> {
     return releaseSqliteExecutionLease({ db: this.db, runId, owner });
   }
@@ -306,7 +306,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.read} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.read} */
   async *read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<StoredEvent> {
     const fromSeq = range?.fromSeq ?? 0;
     const toSeq = range?.toSeq ?? null;
@@ -331,7 +331,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     return waitForChangeWithPolling(this.changeEmitter, runId, signal, this.pollIntervalMs);
   }
 
-  /** {@inheritDoc EventStore.watch} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.watch} */
   watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<StoredEvent> {
     return watchEvents(this, runId, options, {
       subscribe: (watchedRunId, signal) => this.waitForChange(watchedRunId, signal),
@@ -348,7 +348,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.watchRuns} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.watchRuns} */
   watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
     return watchRunSummaries(
       this,
@@ -358,7 +358,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     );
   }
 
-  /** {@inheritDoc EventStore.head} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.head} */
   head(runId: Id): Promise<number> {
     try {
       const row = this.getHead.get(runId);
@@ -368,12 +368,12 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.claimIdempotencyKey} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.claimIdempotencyKey} */
   claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
     return claimSqliteIdempotencyKey(this.db, keyHash, runId, createdAt);
   }
 
-  /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.takeoverIdempotencyKey} */
   takeoverIdempotencyKey(
     keyHash: IdempotencyKeyHash,
     options: IdempotencyKeyTakeoverOptions,
@@ -381,12 +381,12 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     return takeoverSqliteIdempotencyKey(this.db, keyHash, options);
   }
 
-  /** {@inheritDoc EventStore.releaseIdempotencyKey} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.releaseIdempotencyKey} */
   releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
     return releaseSqliteIdempotencyKey(this.db, keyHash, runId);
   }
 
-  /** {@inheritDoc EventStore.deleteRun} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.deleteRun} */
   deleteRun(runId: Id): Promise<number> {
     try {
       return Promise.resolve(deleteRunTransaction(this.db, runId));
@@ -395,7 +395,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.latestSnapshot} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.latestSnapshot} */
   async latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
     try {
       const row = this.latestSnapshotQuery.get(runId);
@@ -405,7 +405,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.retainedSnapshots} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.retainedSnapshots} */
   async retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new TypeError("Snapshot limit must be a positive integer");
@@ -419,19 +419,19 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.listRuns} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     return listSqliteRuns(this.listRunsQuery, opts);
   }
 
-  /** {@inheritDoc EventStore.findRunsByTrace} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.findRunsByTrace} */
   findRunsByTrace: EventStore["findRunsByTrace"] = (traceId) =>
     findRunsByTrace(this.findRunsByTraceQuery, traceId);
 
-  /** {@inheritDoc EventStore.fetchOutbox} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.fetchOutbox} */
   fetchOutbox: EventStore["fetchOutbox"] = (sinkId, limit) => this.outbox.fetch(sinkId, limit);
 
-  /** {@inheritDoc EventStore.ackOutbox} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.ackOutbox} */
   ackOutbox: EventStore["ackOutbox"] = (sinkId, cursor) => this.outbox.ack(sinkId, cursor);
 
   claimApprovalNotification: EventStore["claimApprovalNotification"] = (...args) =>
@@ -443,7 +443,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   consumeConfirmationState: EventStore["consumeConfirmationState"] = (...args) =>
     this.confirmationStates.consume(...args);
 
-  /** {@inheritDoc EventStore.close} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.close} */
   close(): Promise<void> {
     try {
       this.db.close();

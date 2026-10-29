@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+rules:
+  - id: harness.request-json-requires-schema
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Parse request text with parseJson(schema, text) or validate decoded data with a Zod schema.
+    paths:
+      include:
+        - /packages/control-plane/**
+        - /packages/sandbox/runner/**
+      exclude:
+        - "**/*.test.*"
+        - "**/*.int.test.*"
+        - "**/*.canary.test.*"
+        - "**/*.replay.test.*"
+    patterns:
+      - pattern-either:
+          - pattern: JSON.parse(await $REQUEST.text())
+          - pattern: JSON.parse($REQUEST.body)
+      - pattern-not-inside: $SCHEMA.parse(JSON.parse(...))
+      - pattern-not-inside: $SCHEMA.safeParse(JSON.parse(...))

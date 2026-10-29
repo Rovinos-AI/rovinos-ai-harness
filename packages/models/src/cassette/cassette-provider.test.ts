@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelRequest } from "@rovinos/schemas";
+import type { ModelRequest, Part } from "@rovinos/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  runProviderContract,
+  type ProviderContractAdapterOptions,
+  type ProviderContractFixture,
+} from "../contract.js";
 import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
 import { assembleDeltas } from "../types.js";
 import { ProviderError } from "../errors.js";
 import {
   CassetteAutoDisabledError,
+  CassetteMissError,
   CassetteInnerRequiredError,
   CassettePrivacyRequiredError,
   CassetteProvider,
   type CassetteEntry,
-  type CassetteMissError,
   type CassetteStore,
 } from "./cassette-provider.js";
 import { requestHash } from "./hash.js";
@@ -36,11 +41,18 @@ const privacyOptions = {
   detectRealData: () => Promise.resolve(false),
 };
 
-function memoryStore(): CassetteStore & { readonly entries: Map<string, CassetteEntry> } {
+function memoryStore(
+  getDelayMs = 0,
+): CassetteStore & { readonly entries: Map<string, CassetteEntry> } {
   const entries = new Map<string, CassetteEntry>();
   return {
     entries,
-    get: (hash) => Promise.resolve(entries.get(hash)?.response),
+    async get(hash) {
+      if (getDelayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, getDelayMs));
+      }
+      return entries.get(hash)?.response;
+    },
     set: (entry) => {
       entries.set(entry.hash, entry);
       return Promise.resolve();
@@ -51,6 +63,121 @@ function memoryStore(): CassetteStore & { readonly entries: Map<string, Cassette
 function innerAdapter(complete: ProviderAdapter["complete"]): ProviderAdapter {
   return { provider: "openai", kind: "openai", complete };
 }
+
+function contractFixture(
+  scenario: ProviderContractFixture["scenario"],
+  status: number,
+): ProviderContractFixture {
+  const parts: Part[] =
+    scenario === "tool_call"
+      ? [
+          {
+            type: "tool_call",
+            callId: request.requestId,
+            toolId: "lookup",
+            args: { key: "value" },
+          },
+        ]
+      : [{ type: "text", text: "answer" }];
+  let expected: ProviderContractFixture["expected"];
+  switch (scenario) {
+    case "error_429":
+      expected = { retryAfterMs: 2_000, status };
+      break;
+    case "error_500":
+    case "error_401":
+      expected = { status };
+      break;
+    case "abort_signal":
+      expected = undefined;
+      break;
+    case "text_only":
+    case "tool_call":
+    case "usage_mapping":
+      expected = {
+        parts,
+        usage: { inputTokens: 2, outputTokens: 3 },
+        finishReason: "stop",
+      };
+      break;
+  }
+  return {
+    scenario,
+    request: {
+      ...request,
+      model: { provider: "cassette", model: scenario },
+    },
+    httpResponse: {
+      status,
+      ...(scenario === "error_429" ? { headers: { "retry-after": "2" } } : {}),
+      body: { fixture: scenario },
+    },
+    ...(expected === undefined ? {} : { expected }),
+  };
+}
+
+const contractFixtures = [
+  contractFixture("text_only", 200),
+  contractFixture("tool_call", 200),
+  contractFixture("usage_mapping", 200),
+  contractFixture("error_429", 429),
+  contractFixture("error_500", 500),
+  contractFixture("error_401", 401),
+  contractFixture("abort_signal", 200),
+];
+const replayContractFixtures = contractFixtures.filter(
+  ({ scenario }) =>
+    scenario === "text_only" ||
+    scenario === "tool_call" ||
+    scenario === "usage_mapping" ||
+    scenario === "abort_signal",
+);
+
+function contractResult(fixture: ProviderContractFixture): ProviderResult {
+  return {
+    parts: fixture.expected?.parts ?? ([{ type: "text", text: "answer" }] satisfies Part[]),
+    usage: fixture.expected?.usage ?? { inputTokens: 2, outputTokens: 3 },
+    finishReason: fixture.expected?.finishReason ?? "stop",
+    latencyMs: 1,
+  };
+}
+
+function contractFixtureProvider(
+  options: ProviderContractAdapterOptions,
+  fixture: ProviderContractFixture,
+): ProviderAdapter {
+  return {
+    provider: "fixture",
+    kind: "openai",
+    async complete(requestToComplete, providerContext) {
+      const response = await options.fetch(`${options.baseUrl}/complete`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestToComplete),
+        signal: providerContext.signal,
+      });
+      await response.arrayBuffer();
+      if (response.status === 429) {
+        throw new ProviderError("provider_rate_limited", {
+          retryAfterMs: 2_000,
+          status: response.status,
+        });
+      }
+      if (response.status >= 500) {
+        throw new ProviderError("provider_unavailable", { status: response.status });
+      }
+      if (response.status === 401) {
+        throw new ProviderError("provider_auth", { status: response.status });
+      }
+      return contractResult(fixture);
+    },
+  };
+}
+
+const contractPrivacyOptions = {
+  sanitize: (response: ProviderResult) => Promise.resolve(response),
+  detectRealData: () => Promise.resolve(false),
+};
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -155,6 +282,24 @@ describe("CassetteProvider", () => {
       code: "cassette_miss",
       hash: requestHash(request),
     } satisfies Partial<CassetteMissError>);
+  });
+
+  it("reports a typed cassette miss when a request differs from the recorded request", async () => {
+    const store = memoryStore();
+    await store.set({ hash: requestHash(request), response: result });
+    const replay = new CassetteProvider("replay", store);
+    const mismatchedRequest = {
+      ...request,
+      model: { ...request.model, model: "different-model" },
+    };
+
+    await expect(replay.complete(mismatchedRequest, context)).rejects.toBeInstanceOf(
+      CassetteMissError,
+    );
+    await expect(replay.complete(mismatchedRequest, context)).rejects.toMatchObject({
+      code: "cassette_miss",
+      hash: requestHash(mismatchedRequest),
+    });
   });
 
   it("auto mode replays a hit and records a miss", async () => {
@@ -283,3 +428,30 @@ describe("CassetteProvider", () => {
     expect(JSON.stringify(recorded)).toBe(JSON.stringify(replayed));
   });
 });
+
+runProviderContract(
+  "CassetteProvider record contract",
+  (options, fixture) =>
+    new CassetteProvider(
+      "record",
+      memoryStore(),
+      contractFixtureProvider(options, fixture),
+      contractPrivacyOptions,
+    ),
+  contractFixtures,
+);
+
+runProviderContract(
+  "CassetteProvider replay contract",
+  (_options, fixture) => {
+    const store = memoryStore(fixture.scenario === "abort_signal" ? 200 : 0);
+    const hash = requestHash(fixture.request);
+    store.entries.set(hash, { hash, response: contractResult(fixture) });
+    return new CassetteProvider("replay", store);
+  },
+  replayContractFixtures,
+  {
+    httpBacked: false,
+    scenarios: ["text_only", "tool_call", "usage_mapping", "abort_signal"],
+  },
+);
