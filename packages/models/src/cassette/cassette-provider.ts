@@ -81,6 +81,32 @@ function resultDeltas(result: ProviderResult): ProviderDelta[] {
   return deltas;
 }
 
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw new ProviderError("provider_timeout");
+  }
+}
+
+function awaitWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  throwIfAborted(signal);
+  let cleanup: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new ProviderError("provider_timeout"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    cleanup = (): void => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    if (signal.aborted) {
+      onAbort();
+    }
+  });
+  return Promise.race([operation, aborted]).finally(() => {
+    cleanup?.();
+  });
+}
+
 async function* withActivityHeartbeat<T>(
   operation: Promise<T>,
   idleTimeoutMs: number | undefined,
@@ -245,9 +271,10 @@ export class CassetteProvider implements ProviderAdapter {
 
   /** {@inheritDoc ProviderAdapter.complete} */
   async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
+    throwIfAborted(context.signal);
     const hash = requestHash(request);
     if (this.mode !== "record") {
-      const response = await this.store.get(hash, request);
+      const response = await awaitWithAbort(this.store.get(hash, request), context.signal);
       if (response !== undefined) {
         return response;
       }
@@ -267,9 +294,10 @@ export class CassetteProvider implements ProviderAdapter {
 
   /** @inheritdoc */
   async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
+    throwIfAborted(context.signal);
     const hash = requestHash(request);
     if (this.mode !== "record") {
-      const response = await this.store.get(hash, request);
+      const response = await awaitWithAbort(this.store.get(hash, request), context.signal);
       if (response !== undefined) {
         yield* resultDeltas(response);
         return;

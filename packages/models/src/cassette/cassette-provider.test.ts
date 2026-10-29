@@ -41,11 +41,18 @@ const privacyOptions = {
   detectRealData: () => Promise.resolve(false),
 };
 
-function memoryStore(): CassetteStore & { readonly entries: Map<string, CassetteEntry> } {
+function memoryStore(
+  getDelayMs = 0,
+): CassetteStore & { readonly entries: Map<string, CassetteEntry> } {
   const entries = new Map<string, CassetteEntry>();
   return {
     entries,
-    get: (hash) => Promise.resolve(entries.get(hash)?.response),
+    async get(hash) {
+      if (getDelayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, getDelayMs));
+      }
+      return entries.get(hash)?.response;
+    },
     set: (entry) => {
       entries.set(entry.hash, entry);
       return Promise.resolve();
@@ -118,6 +125,13 @@ const contractFixtures = [
   contractFixture("error_401", 401),
   contractFixture("abort_signal", 200),
 ];
+const replayContractFixtures = contractFixtures.filter(
+  ({ scenario }) =>
+    scenario === "text_only" ||
+    scenario === "tool_call" ||
+    scenario === "usage_mapping" ||
+    scenario === "abort_signal",
+);
 
 function contractResult(fixture: ProviderContractFixture): ProviderResult {
   return {
@@ -429,20 +443,15 @@ runProviderContract(
 
 runProviderContract(
   "CassetteProvider replay contract",
-  (options, fixture) => {
-    const store = memoryStore();
+  (_options, fixture) => {
+    const store = memoryStore(fixture.scenario === "abort_signal" ? 200 : 0);
     const hash = requestHash(fixture.request);
     store.entries.set(hash, { hash, response: contractResult(fixture) });
-    const replay = new CassetteProvider("replay", store);
-    const fixtureProvider = contractFixtureProvider(options, fixture);
-    return {
-      provider: replay.provider,
-      kind: replay.kind,
-      async complete(requestToComplete, contractContext) {
-        await fixtureProvider.complete(requestToComplete, contractContext);
-        return replay.complete(requestToComplete, contractContext);
-      },
-    };
+    return new CassetteProvider("replay", store);
   },
-  contractFixtures,
+  replayContractFixtures,
+  {
+    httpBacked: false,
+    scenarios: ["text_only", "tool_call", "usage_mapping", "abort_signal"],
+  },
 );
