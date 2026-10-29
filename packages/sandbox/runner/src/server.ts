@@ -437,6 +437,7 @@ export function startRunnerServer(): Server {
 }
 
 function runnerTokenFromEnvironment(): string | undefined {
+  // nosemgrep: harness.secret-env-outside-resolver -- Runner bootstrap reads the injected token before deleting it from the environment.
   const token = process.env.SANDBOX_RUNNER_TOKEN;
   const tokenFile = process.env.SANDBOX_RUNNER_TOKEN_FILE;
   if (token !== undefined && tokenFile !== undefined) {

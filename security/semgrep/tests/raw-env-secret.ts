@@ -11,6 +11,6 @@ delete process.env.HARNESS_API_KEY;
 process.env.ACCESS_TOKEN = replacementToken;
 
 function runnerTokenFromEnvironment(): string | undefined {
-  // ok: harness.secret-env-outside-resolver
+  // ruleid: harness.secret-env-outside-resolver
   return process.env.SANDBOX_RUNNER_TOKEN;
 }
