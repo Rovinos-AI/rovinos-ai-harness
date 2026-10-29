@@ -69,28 +69,28 @@ describe("secret-scan.sh", () => {
   });
 
   it("does not allow a fake marker embedded after a key-shaped value", () => {
-    const key = ["AKIA", "QWERTY9876543210", "-test_", "marker9876543210"].join("");
-    const repository = createRepository("secret.txt", key);
+    const syntheticValue = ["AKIA", "QWERTY9876543210", "-test_", "marker9876543210"].join("");
+    const repository = createRepository("secret.txt", syntheticValue);
     const result = spawnSync("bash", [scanScript, "--source", repository], {
       encoding: "utf8",
     });
 
     expect(result.status).not.toBe(0);
-    expect(`${result.stdout}${result.stderr}`).not.toContain(key);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(syntheticValue);
     expect(
       readFileSync(join(repository, "reports/security/gitleaks-report.json"), "utf8"),
-    ).not.toContain(key);
+    ).not.toContain(syntheticValue);
   });
 
   it("allows a synthetic value that starts with FAKE_", () => {
-    const key = ["FAKE_", "AKIA", "QWERTY9876543210"].join("");
-    const repository = createRepository("synthetic.txt", key);
+    const syntheticValue = ["FAKE_", "AKIA", "QWERTY9876543210"].join("");
+    const repository = createRepository("synthetic.txt", syntheticValue);
     const result = spawnSync("bash", [scanScript, "--source", repository], {
       encoding: "utf8",
     });
 
     expect(result.status).toBe(0);
-    expect(`${result.stdout}${result.stderr}`).not.toContain(key);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(syntheticValue);
   });
 
   it("comments every narrow allowlist entry", () => {
