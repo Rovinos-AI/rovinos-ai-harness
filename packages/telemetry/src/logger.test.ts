@@ -62,6 +62,17 @@ describe("sanctioned logger", () => {
     expect(__getLoggerDroppedFieldsForTests(logger)).toBe(2);
   });
 
+  it("drops API-key-like and Luhn-valid event codes", () => {
+    const capture = createCapture();
+    const logger = createLogger({ level: "debug", destination: capture.destination });
+
+    logger.info("key_live_0123456789abcdef01234567");
+    logger.info("4532015112830366");
+
+    expect(capture.lines).toEqual([]);
+    expect(__getLoggerDroppedFieldsForTests(logger)).toBe(2);
+  });
+
   it("filters records below the configured level", () => {
     const capture = createCapture();
     const logger = createLogger({ level: "warn", destination: capture.destination });
@@ -95,7 +106,11 @@ describe("sanctioned logger", () => {
     const logger = new NoopLogger();
 
     expect(() => {
-      logger.child({ scope: "test" }).info("ignored_event");
+      logger.debug("ignored_event");
+      logger.info("ignored_event");
+      logger.warn("ignored_event");
+      logger.error("ignored_event");
     }).not.toThrow();
+    expect(logger.child({ scope: "test" })).toBe(logger);
   });
 });
