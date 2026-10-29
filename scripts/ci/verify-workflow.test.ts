@@ -197,6 +197,25 @@ describe("GitHub workflows", () => {
     expect(shouldRun("pull_request", false)).toBe(true);
   });
 
+  it("runs and uploads the OSV vulnerable-lockfile positive control in static", () => {
+    const steps = jobSteps("static");
+    const installScanner = steps.find((step) => step.name === "Install pinned OSV-Scanner");
+    const positiveControl = steps.find(
+      (step) => step.name === "Verify vulnerable lockfile positive control",
+    );
+    const upload = steps.find((step) => step.name === "Upload dependency vulnerability report");
+
+    expect(installScanner?.run).toContain("osv-scanner@v2.3.3");
+    expect(positiveControl?.if).toBe("always()");
+    expect(positiveControl?.run).toContain("scripts/security/check-vulns.ts --positive-control");
+    expect(upload?.if).toBe("always()");
+    const scannerIndex = steps.findIndex((step) => step.name === "Install pinned OSV-Scanner");
+    const positiveControlIndex = steps.findIndex(
+      (step) => step.name === "Verify vulnerable lockfile positive control",
+    );
+    expect(positiveControlIndex).toBeGreaterThan(scannerIndex);
+  });
+
   it("runs the dependency vulnerability gate nightly on main and uploads its report", () => {
     const workflow = readNightlyVulnerabilityWorkflow();
     const job = workflow.jobs["dependency-vulnerabilities"];

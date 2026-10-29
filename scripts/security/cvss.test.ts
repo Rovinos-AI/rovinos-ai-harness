@@ -14,6 +14,17 @@ describe("CVSS normalization", () => {
     ).toBe("critical");
   });
 
+  it("maps CVSS v3.0 base vectors to high severity", () => {
+    expect(
+      normalizeCvss([
+        {
+          type: "CVSS_V3",
+          score: "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+        },
+      ]),
+    ).toBe("high");
+  });
+
   it("maps the maximum CVSS v2 score to high, not critical", () => {
     expect(
       normalizeCvss([
@@ -36,6 +47,14 @@ describe("CVSS normalization", () => {
 
   it("fails closed for unsupported vectors and normalizes scanner labels", () => {
     expect(normalizeCvss([{ type: "CVSS_V4", score: "CVSS:4.0/unsupported" }])).toBeUndefined();
+    expect(
+      normalizeCvss([
+        {
+          type: "CVSS_V3",
+          score: "CVSS:3.1/AV:Z/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        },
+      ]),
+    ).toBeUndefined();
     expect(normalizeSeverity("MEDIUM")).toBe("moderate");
     expect(normalizeSeverity("unrecognized")).toBe("unknown");
   });
