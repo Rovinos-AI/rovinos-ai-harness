@@ -72,7 +72,7 @@ type NormalizedValue =
 const normalizedValue: z.ZodType<NormalizedValue> = z.lazy(() =>
   z.union([
     normalizedString,
-    z.number().finite(),
+    z.number(),
     z.boolean(),
     z.array(normalizedValue),
     z.record(z.string(), normalizedValue).superRefine((record, context) => {
@@ -99,7 +99,7 @@ export const NormalizedEventSchema = z
     }
   });
 
-const ScalarSchema = z.union([normalizedString, z.number().finite(), z.boolean()]);
+const ScalarSchema = z.union([normalizedString, z.number(), z.boolean()]);
 
 const DiffFieldSchema = z
   .object({
@@ -204,11 +204,18 @@ function sortedJsonValue(value: unknown): unknown {
   if (typeof value !== "object" || value === null) {
     return value;
   }
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([keyA], [keyB]) => (keyA < keyB ? -1 : keyA > keyB ? 1 : 0))
-      .map(([key, entry]) => [key, sortedJsonValue(entry)]),
-  );
+  const entries = Object.entries(value).sort(([keyA], [keyB]) => compareKeys(keyA, keyB));
+  return Object.fromEntries(entries.map(([key, entry]) => [key, sortedJsonValue(entry)]));
+}
+
+function compareKeys(keyA: string, keyB: string): number {
+  if (keyA < keyB) {
+    return -1;
+  }
+  if (keyA > keyB) {
+    return 1;
+  }
+  return 0;
 }
 
 function stableJson(value: unknown): string {
@@ -240,24 +247,26 @@ export function renderReplayReportText(report: ReplayReport): string {
   const { summary } = validated;
   const lines = [
     `Replay ${validated.originalRunId} -> ${validated.replayRunId}`,
-    `status: ${validated.status}; configDrift: ${validated.configDrift}; policyDrift: ${validated.policyDrift}; approximate: ${validated.approximate}`,
-    `diff: ${summary.added} added, ${summary.removed} removed, ${summary.changed} changed (${summary.behavioral} behavioral, ${summary.noise} noise)`,
+    `status: ${validated.status}; configDrift: ${String(validated.configDrift)}; policyDrift: ${String(validated.policyDrift)}; approximate: ${String(validated.approximate)}`,
+    `diff: ${String(summary.added)} added, ${String(summary.removed)} removed, ${String(summary.changed)} changed (${String(summary.behavioral)} behavioral, ${String(summary.noise)} noise)`,
   ];
   if (validated.goldenMatch !== undefined) {
-    lines.push(`goldenMatch: ${validated.goldenMatch}`);
+    lines.push(`goldenMatch: ${String(validated.goldenMatch)}`);
   }
   if (validated.divergence !== undefined) {
-    lines.push(`divergence: ${validated.divergence.code} at seq ${validated.divergence.seq}`);
+    lines.push(
+      `divergence: ${validated.divergence.code} at seq ${String(validated.divergence.seq)}`,
+    );
   }
   for (const entry of validated.entries.slice(0, 50)) {
-    lines.push(`${entry.kind} ${entry.eventKind} at ${entry.index} (${entry.class})`);
+    lines.push(`${entry.kind} ${entry.eventKind} at ${String(entry.index)} (${entry.class})`);
     for (const field of entry.fields ?? []) {
       lines.push(`  ${field.field}: ${String(field.a)} -> ${String(field.b)}`);
     }
   }
   const omitted = validated.entries.length - 50;
   if (omitted > 0) {
-    lines.push(`${omitted} additional entries omitted`);
+    lines.push(`${String(omitted)} additional entries omitted`);
   }
   return `${lines.join("\n")}\n`;
 }

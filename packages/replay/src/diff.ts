@@ -440,27 +440,20 @@ export function diffRuns(
   return diffNormalizedRuns(normalizeRun(eventsA), normalizeRun(eventsB), options);
 }
 
-/**
- * Compare already-normalized event signatures using the same noise-aware diff as {@link diffRuns}.
- *
- * @param eventsA - The expected normalized signature.
- * @param eventsB - The actual normalized signature.
- * @param options - Optional field and token comparison controls.
- * @returns Metadata-only differences and aggregate counts.
- */
+/** Compare normalized signatures with noise-aware alignment. */
 export function diffNormalizedRuns(
   eventsA: readonly NormalizedEvent[],
   eventsB: readonly NormalizedEvent[],
   options: DiffOptions = {},
 ): DiffResult {
-  const a = eventsA;
-  const b = eventsB;
   const context: DiffContext = {
     options,
     ignoredFields: new Set((options.ignoreFields ?? []).map(String)),
   };
-  const approximate = a.length > MAX_LCS_EVENTS || b.length > MAX_LCS_EVENTS;
-  const entries = approximate ? positionalDiff(a, b, context) : alignedDiff(a, b, context);
+  const approximate = eventsA.length > MAX_LCS_EVENTS || eventsB.length > MAX_LCS_EVENTS;
+  const entries = approximate
+    ? positionalDiff(eventsA, eventsB, context)
+    : alignedDiff(eventsA, eventsB, context);
   const summary: DiffSummary = {
     added: entries.filter(({ kind }) => kind === "added").length,
     removed: entries.filter(({ kind }) => kind === "removed").length,

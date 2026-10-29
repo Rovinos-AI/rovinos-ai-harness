@@ -136,22 +136,22 @@ describe("replay reports and golden signatures", () => {
   });
 
   it("permits explicit safe baseline updates and refuses divergence or CI updates", () => {
-    expect(() =>
-      assertBaselineUpdateAllowed({ inCi: false, forceInCi: false }),
-    ).not.toThrow();
-    expect(() =>
+    expect(() => {
+      assertBaselineUpdateAllowed({ inCi: false, forceInCi: false });
+    }).not.toThrow();
+    expect(() => {
       assertBaselineUpdateAllowed({
         divergence: { seq: 3, code: "replay_divergence" },
         inCi: false,
         forceInCi: false,
-      }),
-    ).toThrow();
-    expect(() =>
-      assertBaselineUpdateAllowed({ inCi: true, forceInCi: false }),
-    ).toThrow();
-    expect(() =>
-      assertBaselineUpdateAllowed({ inCi: true, forceInCi: true }),
-    ).not.toThrow();
+      });
+    }).toThrow();
+    expect(() => {
+      assertBaselineUpdateAllowed({ inCi: true, forceInCi: false });
+    }).toThrow();
+    expect(() => {
+      assertBaselineUpdateAllowed({ inCi: true, forceInCi: true });
+    }).not.toThrow();
     expect(renderGoldenSignatureJson(createGoldenSignature(events()))).toContain(
       '"containsRealData": false',
     );

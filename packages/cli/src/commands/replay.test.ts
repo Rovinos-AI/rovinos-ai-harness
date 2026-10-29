@@ -141,10 +141,18 @@ async function createHarness(logs: ReadonlyMap<Id, readonly NewEvent[]>) {
 }
 
 function restoreEnvironment(name: "CI" | "GITHUB_ACTIONS", value: string | undefined): void {
+  if (name === "CI") {
+    if (value === undefined) {
+      delete process.env.CI;
+    } else {
+      process.env.CI = value;
+    }
+    return;
+  }
   if (value === undefined) {
-    delete process.env[name];
+    delete process.env.GITHUB_ACTIONS;
   } else {
-    process.env[name] = value;
+    process.env.GITHUB_ACTIONS = value;
   }
 }
 

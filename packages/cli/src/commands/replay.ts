@@ -17,10 +17,31 @@ import {
   replayRun,
   resolveRun,
 } from "@rovinos/replay";
-import type { GoldenSignature, ReplayReport } from "@rovinos/replay";
+import type { DiffResult, GoldenSignature, ReplayReport, ReplayOutcome } from "@rovinos/replay";
 import { HarnessError, parseJson } from "@rovinos/schemas";
-import type { CommandModule } from "../command.js";
-import { createCommandRuntime } from "../command.js";
+import type { HarnessConfig } from "@rovinos/config";
+import type { Command } from "commander";
+import { createCommandRuntime, type CliContext, type CommandModule } from "../command.js";
+
+interface ReplayOptions {
+  readonly run?: string;
+  readonly trace?: string;
+  readonly strict?: boolean;
+  readonly golden?: string;
+  readonly updateBaseline?: boolean;
+  readonly forceInCi?: boolean;
+  readonly report?: string;
+}
+
+interface ReplayExecution {
+  readonly report: ReplayReport;
+  readonly updated: boolean;
+}
+
+interface ReplayComparison {
+  readonly diff: DiffResult;
+  readonly goldenMatch?: boolean;
+}
 
 class ReplayExitError extends HarnessError {
   override readonly code: string;
@@ -73,11 +94,138 @@ function isCi(): boolean {
   );
 }
 
-function reportExitCode(report: ReplayReport, strict: boolean, updated: boolean): 0 | 1 | 8 {
-  if (updated && report.divergence === undefined) {
-    return 0;
+function validateOptions(options: ReplayOptions): void {
+  if ((options.run === undefined) === (options.trace === undefined)) {
+    throw new ReplayInputError();
   }
-  return replayReportExitCode(report, strict);
+  if (options.updateBaseline === true && options.golden === undefined) {
+    throw new ReplayInputError();
+  }
+  if (options.forceInCi === true && options.updateBaseline !== true) {
+    throw new ReplayInputError();
+  }
+}
+
+function comparisonFor(
+  rootEvents: Parameters<typeof diffRuns>[0],
+  outcome: ReplayOutcome,
+  options: ReplayOptions,
+  golden: GoldenSignature | undefined,
+): ReplayComparison {
+  if (options.golden === undefined) {
+    return { diff: diffRuns(rootEvents, outcome.events) };
+  }
+  const baseline =
+    golden ??
+    GoldenSignatureSchema.parse({
+      schemaVersion: 1,
+      containsRealData: false,
+      signature: [],
+    });
+  const comparison = compareGoldenSignature(outcome.events, baseline);
+  return {
+    diff: comparison.diff,
+    ...(golden === undefined ? {} : { goldenMatch: comparison.match }),
+  };
+}
+
+async function updateBaseline(
+  options: ReplayOptions,
+  outcome: ReplayOutcome,
+): Promise<boolean> {
+  if (
+    options.updateBaseline !== true ||
+    outcome.divergence !== undefined ||
+    outcome.status === "error"
+  ) {
+    return false;
+  }
+  assertBaselineUpdateAllowed({
+    inCi: isCi(),
+    forceInCi: options.forceInCi === true,
+  });
+  if (options.golden === undefined) {
+    throw new ReplayInputError();
+  }
+  const nextGolden = createGoldenSignature(outcome.events);
+  await writeFile(resolve(options.golden), renderGoldenSignatureJson(nextGolden), {
+    encoding: "utf8",
+  });
+  return true;
+}
+
+async function executeReplay(
+  options: ReplayOptions,
+  context: CliContext,
+): Promise<ReplayExecution> {
+  const previousGolden =
+    options.golden === undefined
+      ? undefined
+      : await readGolden(options.golden, options.updateBaseline === true);
+  const config: HarnessConfig = await context.loadConfig();
+  const runtime = await createCommandRuntime(context, config);
+  try {
+    const resolved = await resolveRun({
+      store: runtime.store,
+      ...(options.run === undefined ? {} : { runId: options.run }),
+      ...(options.trace === undefined ? {} : { traceId: options.trace }),
+    });
+    const root = resolved.runs.find(({ runId }) => runId === resolved.rootRunId);
+    if (root === undefined) {
+      throw new ReplayMissingRootError();
+    }
+    const outcome = await replayRun(resolved, { config: { run: config.run } });
+    const comparison = comparisonFor(root.events, outcome, options, previousGolden);
+    const updated = await updateBaseline(options, outcome);
+    const goldenMatch = updated ? true : comparison.goldenMatch;
+    return {
+      report: createReplayReport({
+        originalRunId: resolved.rootRunId,
+        outcome,
+        diff: comparison.diff,
+        ...(goldenMatch === undefined ? {} : { goldenMatch }),
+      }),
+      updated,
+    };
+  } finally {
+    await runtime.close();
+  }
+}
+
+async function writeReportFile(path: string | undefined, report: ReplayReport): Promise<void> {
+  if (path !== undefined) {
+    await writeFile(resolve(path), renderReplayReportJson(report), { encoding: "utf8" });
+  }
+}
+
+function emitReport(program: Command, context: CliContext, report: ReplayReport): void {
+  if (program.optsWithGlobals<{ json?: boolean }>().json === true) {
+    context.out.json(ReplayReportSchema, report);
+  } else {
+    context.out.print(renderReplayReportText(report));
+  }
+}
+
+async function runReplayCommand(
+  program: Command,
+  context: CliContext,
+  options: ReplayOptions,
+): Promise<void> {
+  validateOptions(options);
+  const execution = await executeReplay(options, context);
+  await writeReportFile(options.report, execution.report);
+  emitReport(program, context, execution.report);
+
+  const exitCode =
+    execution.updated && execution.report.divergence === undefined
+      ? 0
+      : replayReportExitCode(execution.report, options.strict === true);
+  if (exitCode === 1) {
+    throw new ReplayExitError("replay_behavior_difference");
+  }
+  if (exitCode === 8) {
+    throw new ReplayExitError("replay_failed");
+  }
 }
 
 /** Registers the `harness replay` reproduction and reporting command. */
@@ -95,110 +243,6 @@ export const replayCommand: CommandModule = {
       .option("--update-baseline", "explicitly update the golden baseline")
       .option("--force-in-ci", "allow an explicit baseline update in CI")
       .option("--report <path>", "write the JSON replay report")
-      .action(
-        async (options: {
-          readonly run?: string;
-          readonly trace?: string;
-          readonly strict?: boolean;
-          readonly golden?: string;
-          readonly updateBaseline?: boolean;
-          readonly forceInCi?: boolean;
-          readonly report?: string;
-        }) => {
-          if ((options.run === undefined) === (options.trace === undefined)) {
-            throw new ReplayInputError();
-          }
-          if (options.updateBaseline === true && options.golden === undefined) {
-            throw new ReplayInputError();
-          }
-          if (options.forceInCi === true && options.updateBaseline !== true) {
-            throw new ReplayInputError();
-          }
-
-          const previousGolden =
-            options.golden === undefined
-              ? undefined
-              : await readGolden(options.golden, options.updateBaseline === true);
-          const goldenPath = options.golden;
-          const config = await context.loadConfig();
-          const runtime = await createCommandRuntime(context, config);
-          let report: ReplayReport;
-          let updated = false;
-          try {
-            const resolved = await resolveRun({
-              store: runtime.store,
-              ...(options.run === undefined ? {} : { runId: options.run }),
-              ...(options.trace === undefined ? {} : { traceId: options.trace }),
-            });
-            const root = resolved.runs.find(({ runId }) => runId === resolved.rootRunId);
-            if (root === undefined) {
-              throw new ReplayMissingRootError();
-            }
-            const outcome = await replayRun(resolved, { config: { run: config.run } });
-            const comparison =
-              previousGolden === undefined
-                ? undefined
-                : compareGoldenSignature(outcome.events, previousGolden);
-            const diff =
-              options.golden === undefined
-                ? diffRuns(root.events, outcome.events)
-                : (comparison?.diff ??
-                  compareGoldenSignature(outcome.events, {
-                    schemaVersion: 1,
-                    containsRealData: false,
-                    signature: [],
-                  }).diff);
-            let goldenMatch = comparison?.match;
-
-            if (
-              options.updateBaseline === true &&
-              outcome.divergence === undefined &&
-              outcome.status !== "error"
-            ) {
-              assertBaselineUpdateAllowed({
-                inCi: isCi(),
-                forceInCi: options.forceInCi === true,
-              });
-              const nextGolden = createGoldenSignature(outcome.events);
-              if (goldenPath === undefined) {
-                throw new ReplayInputError();
-              }
-              await writeFile(resolve(goldenPath), renderGoldenSignatureJson(nextGolden), {
-                encoding: "utf8",
-              });
-              goldenMatch = true;
-              updated = true;
-            }
-
-            report = createReplayReport({
-              originalRunId: resolved.rootRunId,
-              outcome,
-              diff,
-              ...(goldenMatch === undefined ? {} : { goldenMatch }),
-            });
-          } finally {
-            await runtime.close();
-          }
-
-          if (options.report !== undefined) {
-            await writeFile(resolve(options.report), renderReplayReportJson(report), {
-              encoding: "utf8",
-            });
-          }
-          if (program.optsWithGlobals<{ json?: boolean }>().json === true) {
-            context.out.json(ReplayReportSchema, report);
-          } else {
-            context.out.print(renderReplayReportText(report));
-          }
-
-          const exitCode = reportExitCode(report, options.strict === true, updated);
-          if (exitCode === 1) {
-            throw new ReplayExitError("replay_behavior_difference");
-          }
-          if (exitCode === 8) {
-            throw new ReplayExitError("replay_failed");
-          }
-        },
-      );
+      .action((options: ReplayOptions) => runReplayCommand(program, context, options));
   },
 };
