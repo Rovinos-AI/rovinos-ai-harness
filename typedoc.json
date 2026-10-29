@@ -1,0 +1,20 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "packages/cli",
+    "packages/sdk",
+    "packages/store",
+    "packages/store-postgres",
+    "packages/store-sqlite"
+  ],
+  "entryPointStrategy": "packages",
+  "packageOptions": {
+    "entryPoints": ["src/index.ts"]
+  },
+  "plugin": ["typedoc-plugin-markdown"],
+  "readme": "none",
+  "out": "docs/api",
+  "json": "docs/api/typedoc.json",
+  "excludeInternal": true,
+  "treatWarningsAsErrors": true
+}

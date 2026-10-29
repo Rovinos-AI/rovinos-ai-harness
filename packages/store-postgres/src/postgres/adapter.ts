@@ -160,7 +160,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     await initializePostgresStore(this.pool, this.codec, this.clock, this.skipMigrations);
   }
 
-  /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
+  /** {@inheritDoc @rovinos/store!rotate.StoreKeyRotation.reencryptBatch} */
   reencryptBatch(input: ReencryptBatchInput): ReturnType<StoreKeyRotation["reencryptBatch"]> {
     this.assertWritable();
     return reencryptPostgresBatch(this.pool, this.codec, () => this.ensureInitialized(), input);
@@ -171,7 +171,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return countPostgresRowsByKey(this.pool, () => this.ensureInitialized());
   }
 
-  /** {@inheritDoc EventStore.append} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.append} */
   async append(
     runId: Id,
     events: readonly NewEvent[],
@@ -181,7 +181,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return this.writer.append(runId, events, expectedSeq, leaseOwner);
   }
 
-  /** {@inheritDoc EventStore.appendWithSnapshot} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.appendWithSnapshot} */
   async appendWithSnapshot(
     ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
@@ -189,14 +189,14 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return this.writer.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner);
   }
 
-  /** {@inheritDoc EventStore.appendWithUsage} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.appendWithUsage} */
   async appendWithUsage(
     ...args: Parameters<EventStore["appendWithUsage"]>
   ): Promise<{ nextSeq: number }> {
     return this.writer.appendWithUsage(...args);
   }
 
-  /** {@inheritDoc EventStore.readUsageLedger} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.readUsageLedger} */
   async readUsageLedger(
     quotaId: Parameters<EventStore["readUsageLedger"]>[0],
     period: Parameters<EventStore["readUsageLedger"]>[1],
@@ -212,7 +212,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.claimRunExecution} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.claimRunExecution} */
   async claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
     this.assertWritable();
     await this.ensureInitialized();
@@ -223,7 +223,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return result.rows.length === 1;
   }
 
-  /** {@inheritDoc EventStore.renewRunExecution} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.renewRunExecution} */
   async renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
     this.assertWritable();
     await this.ensureInitialized();
@@ -234,7 +234,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return result.rows.length === 1;
   }
 
-  /** {@inheritDoc EventStore.releaseRunExecution} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.releaseRunExecution} */
   async releaseRunExecution(runId: Id, owner: Id): Promise<void> {
     this.assertWritable();
     await this.ensureInitialized();
@@ -244,7 +244,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     ]);
   }
 
-  /** {@inheritDoc EventStore.read} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.read} */
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {
     return readEvents(
       { pool: this.pool, codec: this.codec, ensureInitialized: () => this.ensureInitialized() },
@@ -253,7 +253,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     );
   }
 
-  /** {@inheritDoc EventStore.watch} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.watch} */
   watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<Event> {
     return watchEvents(this, runId, options, {
       subscribe: (watchedRunId, signal) => this.subscriptions.subscribe(watchedRunId, signal),
@@ -262,7 +262,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.watchRuns} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.watchRuns} */
   watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
     return watchPostgresRuns({
       store: this,
@@ -273,7 +273,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
-  /** {@inheritDoc EventStore.head} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.head} */
   async head(runId: Id): Promise<number> {
     try {
       await this.ensureInitialized();
@@ -288,7 +288,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.deleteRun} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.deleteRun} */
   async deleteRun(runId: Id): Promise<number> {
     this.assertWritable();
     try {
@@ -304,7 +304,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.claimIdempotencyKey} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.claimIdempotencyKey} */
   async claimIdempotencyKey(
     keyHash: IdempotencyKeyHash,
     runId: Id,
@@ -313,7 +313,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return claimPostgresIdempotencyKey(this.idempotencyContext, keyHash, runId, createdAt);
   }
 
-  /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.takeoverIdempotencyKey} */
   takeoverIdempotencyKey(
     keyHash: IdempotencyKeyHash,
     options: IdempotencyKeyTakeoverOptions,
@@ -322,12 +322,12 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return takeoverPostgresIdempotencyKey(this.idempotencyContext, keyHash, options);
   }
 
-  /** {@inheritDoc EventStore.releaseIdempotencyKey} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.releaseIdempotencyKey} */
   releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
     return releasePostgresIdempotencyKey(this.idempotencyContext, keyHash, runId);
   }
 
-  /** {@inheritDoc EventStore.latestSnapshot} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.latestSnapshot} */
   async latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
     try {
       await this.ensureInitialized();
@@ -342,7 +342,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.retainedSnapshots} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.retainedSnapshots} */
   async retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new TypeError("Snapshot limit must be a positive integer");
@@ -359,17 +359,17 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.listRuns} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     return listPostgresRuns(this.pool, () => this.ensureInitialized(), opts);
   }
 
-  /** {@inheritDoc EventStore.findRunsByTrace} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.findRunsByTrace} */
   findRunsByTrace(traceId: TraceId): Promise<Id[]> {
     return findPostgresRunsByTrace(this.pool, () => this.ensureInitialized(), traceId);
   }
 
-  /** {@inheritDoc EventStore.fetchOutbox} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.fetchOutbox} */
   async fetchOutbox(sinkId: SinkId, limit: number): Promise<{ events: Event[]; cursor: number }> {
     const parsedSinkId = Code.safeParse(sinkId);
     if (!parsedSinkId.success) {
@@ -408,7 +408,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
-  /** {@inheritDoc EventStore.ackOutbox} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.ackOutbox} */
   async ackOutbox(sinkId: SinkId, cursor: number): Promise<void> {
     const parsedSinkId = Code.safeParse(sinkId);
     if (!parsedSinkId.success) {
@@ -450,7 +450,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return this.approvalNotifications.release(...args);
   }
 
-  /** {@inheritDoc EventStore.consumeConfirmationState} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.consumeConfirmationState} */
   consumeConfirmationState(
     ...args: Parameters<EventStore["consumeConfirmationState"]>
   ): ReturnType<EventStore["consumeConfirmationState"]> {
@@ -458,7 +458,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     return this.confirmationStates.consume(...args);
   }
 
-  /** {@inheritDoc EventStore.close} */
+  /** {@inheritDoc @rovinos/store!types.EventStore.close} */
   async close(): Promise<void> {
     try {
       await this.subscriptions.close();

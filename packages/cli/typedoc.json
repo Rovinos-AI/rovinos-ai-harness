@@ -1,0 +1,11 @@
+{
+  "entryPoints": ["src/programmatic.ts"],
+  "intentionallyNotExported": [
+    "src/command.ts:Clock",
+    "src/command.ts:CommandModule",
+    "src/command.ts:CliVaultResolver",
+    "src/command.ts:Interactive",
+    "src/output.ts:Output",
+    "src/output.ts:OutputWriters"
+  ]
+}

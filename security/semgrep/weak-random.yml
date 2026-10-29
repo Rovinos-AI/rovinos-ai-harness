@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+rules:
+  - id: harness.no-random-identifiers
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Use an injected IdGenerator or cryptographic randomness for ids, tokens, and keys.
+    paths:
+      include:
+        - /packages/vault/**
+        - /packages/crypto/**
+        - /packages/policy/**
+        - /packages/control-plane/**
+      exclude:
+        - "**/*.test.*"
+        - "**/*.int.test.*"
+        - "**/*.canary.test.*"
+        - "**/*.replay.test.*"
+    patterns:
+      - pattern-either:
+          - pattern: const $NAME = Math.random()
+          - pattern: let $NAME = Math.random()
+          - pattern: $NAME = Math.random()
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(id|token|key).*

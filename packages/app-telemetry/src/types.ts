@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AppSpan } from "@rovinos/schemas";
 
+/** Mirrors `APP_TELEMETRY_TOOL_NAME` from `@rovinos/schemas`; do not import it here because the shim must remain dependency-free at runtime and under 4 KB gzipped. */
+export const APP_TELEMETRY_TOOL_NAME = "harness.telemetry.emit";
+
 /** Closed set of span names accepted by the host. */
 export type AppSpanName = AppSpan["name"];
 
@@ -33,7 +36,7 @@ export type SpanAttrs<Name extends AppSpanName> = keyof SchemaSpanAttrs<Name> ex
 /** Minimal host bridge shape needed to emit app telemetry. */
 export interface AppTelemetryBridge {
   callTool(
-    name: "harness.telemetry.emit",
+    name: typeof APP_TELEMETRY_TOOL_NAME,
     args: { readonly spans: readonly AppSpan[] },
   ): Promise<unknown>;
 }
