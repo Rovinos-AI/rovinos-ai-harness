@@ -1,0 +1,21 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "intentionallyNotExported": [
+    "src/types.ts:AnswerInputOptionsSchema",
+    "src/types.ts:ApprovalDecisionSchema",
+    "src/types.ts:CancelRunResultSchema",
+    "src/types.ts:ContinueRunOptionsSchema",
+    "src/types.ts:CreateHarnessOptionsSchema",
+    "src/types.ts:GetRunContentOptionsSchema",
+    "src/types.ts:HarnessOverridesSchema",
+    "src/types.ts:ListRunsFilterSchema",
+    "src/types.ts:ResolveApprovalOptionsSchema",
+    "src/types.ts:RunContentSchema",
+    "src/types.ts:RunPageSchema",
+    "src/types.ts:RunStartResultSchema",
+    "src/types.ts:RunSummarySchema",
+    "src/types.ts:RunViewSchema",
+    "src/types.ts:StartRunOptionsSchema",
+    "src/types.ts:WatchOptionsSchema"
+  ]
+}
