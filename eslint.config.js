@@ -99,6 +99,8 @@ const configuration = [
       "**/node_modules/**",
       "docs/api/**",
       "**/*.generated.*",
+      // These fixtures intentionally violate security rules to prove Semgrep catches them.
+      "security/semgrep/tests/**",
       // Scratch space (for example the quickstart doc-test repository copy); never lint it.
       ".tmp/**",
     ],

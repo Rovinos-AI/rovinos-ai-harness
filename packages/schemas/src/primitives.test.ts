@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { JsonValue } from "./json.js";
 import {
+  APP_TELEMETRY_TOOL_NAME,
   Code,
   Id,
   Pseudonym,
@@ -13,6 +14,10 @@ import {
 } from "./primitives.js";
 
 describe("primitive schemas", () => {
+  it("exports the shared app telemetry tool name", () => {
+    expect(APP_TELEMETRY_TOOL_NAME).toBe(["harness", "telemetry", "emit"].join("."));
+  });
+
   it.each([
     [Id, "00000000000000000000000000", "0000000000000000000000000I"],
     [Code, "policy.v1", "UPPERCASE"],

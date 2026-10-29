@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { APP_TELEMETRY_TOOL_NAME } from "@rovinos/schemas/browser";
 import type { AppSpan } from "@rovinos/schemas";
 import { createAppTelemetry } from "./index.js";
 import { createAppTelemetryTransport } from "./transport.js";
@@ -54,7 +55,7 @@ describe("app telemetry transport", () => {
     expect(telemetry.traceContext.traceId).toBeUndefined();
     await waitForActive(telemetry);
 
-    expect(callTool).toHaveBeenCalledWith("harness.telemetry.emit", { spans: [] });
+    expect(callTool).toHaveBeenCalledWith(APP_TELEMETRY_TOOL_NAME, { spans: [] });
     expect(telemetry.traceContext.traceId).toBe(traceId);
     expect(Object.isFrozen(telemetry.traceContext)).toBe(true);
     telemetry.record("ui.render", {});

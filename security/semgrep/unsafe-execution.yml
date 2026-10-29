@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+rules:
+  - id: harness.no-shell-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Avoid shell execution; pass an argv array to spawn/execFile instead.
+    paths:
+      exclude:
+        - "**/*.test.*"
+        - "**/*.int.test.*"
+        - "**/*.canary.test.*"
+        - "**/*.replay.test.*"
+    pattern-either:
+      - pattern: import { ..., exec, ... } from "node:child_process"
+      - pattern: import { ..., execSync, ... } from "node:child_process"
+      - pattern: import { ..., exec as $EXEC, ... } from "node:child_process"
+      - pattern: import { ..., execSync as $EXEC, ... } from "node:child_process"
+      - pattern: import { ..., exec, ... } from "child_process"
+      - pattern: import { ..., execSync, ... } from "child_process"
+      - pattern: import { ..., exec as $EXEC, ... } from "child_process"
+      - pattern: import { ..., execSync as $EXEC, ... } from "child_process"
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+      - pattern: childProcess.exec(...)
+      - pattern: childProcess.execSync(...)
+      - pattern: require("node:child_process").exec(...)
+      - pattern: require("node:child_process").execSync(...)
+      - pattern: "spawn(..., { ..., shell: true, ... })"
+      - pattern: "spawnSync(..., { ..., shell: true, ... })"
+      - pattern: "$CHILD_PROCESS.spawn(..., { ..., shell: true, ... })"
+      - pattern: "$CHILD_PROCESS.spawnSync(..., { ..., shell: true, ... })"
+  - id: harness.no-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Avoid dynamic code evaluation; use a typed parser or explicit dispatch instead.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)

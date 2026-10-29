@@ -13,6 +13,9 @@ export const Code = z.string().regex(/^[a-z0-9_.-]{1,64}$/u);
 /** Inferred code type. */
 export type Code = z.infer<typeof Code>;
 
+/** Shared name of the host-local app telemetry tool. */
+export const APP_TELEMETRY_TOOL_NAME = Code.parse("harness.telemetry.emit");
+
 /** Validates a lowercase base32 pseudonym produced by the vault helper. */
 export const Pseudonym = z.string().regex(/^p_[a-z2-7]{26}$/u);
 

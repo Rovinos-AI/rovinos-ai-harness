@@ -97,6 +97,17 @@ jobs:
         run: yarn check:spdx
       - name: Check dependency licenses
         run: yarn check:licenses
+      - name: Check Semgrep suppression reasons
+        run: yarn check:nosemgrep
+      - name: Semgrep static analysis
+        run: scripts/security/semgrep.sh
+      - name: Upload Semgrep report
+        if: success() || failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: semgrep-report
+          path: reports/semgrep.json
+          if-no-files-found: ignore
       - name: Check sandbox threat test coverage
         run: yarn check:threat-cases
       - name: Check DCO sign-offs

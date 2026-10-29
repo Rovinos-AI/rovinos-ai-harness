@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as Apps from "@modelcontextprotocol/ext-apps";
+import { APP_TELEMETRY_TOOL_NAME } from "@rovinos/schemas";
 import type * as AppTelemetry from "@rovinos/app-telemetry";
 import type { AppSpanName, CreateAppTelemetryOptions } from "@rovinos/app-telemetry";
 import type * as ApprovalActionsModule from "./actions.js";
@@ -214,7 +215,7 @@ describe("approval app SDK bootstrap", () => {
       expect(
         bridge.call.mock.calls.some(
           ([request]) =>
-            request.name === "harness.telemetry.emit" &&
+            request.name === APP_TELEMETRY_TOOL_NAME &&
             request.arguments !== undefined &&
             "spans" in request.arguments &&
             Array.isArray(request.arguments.spans) &&
@@ -226,7 +227,7 @@ describe("approval app SDK bootstrap", () => {
       bridge.connect.mock.invocationCallOrder[0] ?? 0,
     );
     const calls = JSON.stringify(bridge.call.mock.calls);
-    expect(calls).toContain("harness.telemetry.emit");
+    expect(calls).toContain(APP_TELEMETRY_TOOL_NAME);
     expect(calls).toContain("payload_invalid");
     expect(calls).not.toContain("SYNTHETIC");
     expect(calls).not.toContain("harness.approvals");
@@ -491,7 +492,7 @@ describe("approval app SDK bootstrap", () => {
     expect(telemetry.instances[0]?.active).toBe(false);
     expect(telemetry.hooks[0]?.reportErrors).toEqual([["bridge_unavailable"]]);
     expect(
-      bridge.call.mock.calls.every(([request]) => request.name === "harness.telemetry.emit"),
+      bridge.call.mock.calls.every(([request]) => request.name === APP_TELEMETRY_TOOL_NAME),
     ).toBe(true);
   });
 
@@ -560,7 +561,7 @@ describe("approval app SDK bootstrap", () => {
     resolveConnection?.();
     await vi.waitFor(() => {
       expect(bridge.call).toHaveBeenCalledWith({
-        name: "harness.telemetry.emit",
+        name: APP_TELEMETRY_TOOL_NAME,
         arguments: { spans: [] },
       });
     });

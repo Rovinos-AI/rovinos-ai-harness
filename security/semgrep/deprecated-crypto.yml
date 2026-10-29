@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+rules:
+  - id: harness.deprecated-cipher-api
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Use createCipheriv/createDecipheriv with a fresh IV and an authenticated mode.
+    pattern-either:
+      - pattern: createCipher(...)
+      - pattern: createDecipher(...)
+      - pattern: $CRYPTO.createCipher(...)
+      - pattern: $CRYPTO.createDecipher(...)
+  - id: harness.no-ecb-mode
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Avoid ECB mode; use an authenticated mode such as AES-GCM with a unique nonce.
+    pattern-regex: (?i)["'][a-z0-9-]+-ecb["']

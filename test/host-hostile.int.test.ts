@@ -4,7 +4,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { metrics, type SpanContext } from "@opentelemetry/api";
-import { Id, parseJson, type VaultValueEntry } from "@rovinos/schemas";
+import { APP_TELEMETRY_TOOL_NAME, Id, parseJson, type VaultValueEntry } from "@rovinos/schemas";
 import { type VaultRunReader } from "@rovinos/telemetry";
 import { createTestMetricCollector } from "@rovinos/telemetry/testing";
 import { createReferenceHost, type ReferenceHost } from "@rovinos/host";
@@ -108,7 +108,7 @@ const bootstrap = `
     }, "*");
   });
   const emit = (spans, extra = {}) =>
-    call("harness.telemetry.emit", { ...extra, spans });
+    call("${APP_TELEMETRY_TOOL_NAME}", { ...extra, spans });
   window.addEventListener("message", (event) => {
     const message = event.data;
     if (message?.id === 1 && message.result !== undefined) {
@@ -245,7 +245,10 @@ async function runFixture(
 
   try {
     const fixturePath = new URL(`./fixtures/hostile-app/${filename}`, import.meta.url);
-    const fixture = await readFile(fixturePath, "utf8");
+    const fixture = (await readFile(fixturePath, "utf8")).replaceAll(
+      "__APP_TELEMETRY_TOOL_NAME__",
+      APP_TELEMETRY_TOOL_NAME,
+    );
     const html = fixture.replace("</body>", `<script>${bootstrap}</script></body>`);
     if (html === fixture) {
       throw new Error("The hostile app fixture has no closing body element.");

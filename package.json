@@ -64,10 +64,12 @@
     "check:spdx": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-spdx.ts",
     "check:dco": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-dco.ts",
     "check:licenses": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-licenses.ts",
+    "check:nosemgrep": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/security/check-nosemgrep.ts",
     "verify:release": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/verify-release.ts",
     "check:threat-cases": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-threat-cases.ts"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "1.1.0",
     "@changesets/cli": "3.0.3",
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
     "@modelcontextprotocol/client": "2.3.1",
@@ -116,6 +118,7 @@
     "eslint-plugin-unicorn": "78.0.0",
     "eslint-plugin-yml": "3.9.0",
     "markdownlint-cli2": "0.24.0",
+    "openai": "7.43.0",
     "playwright": "1.64.1",
     "prettier": "3.9.10",
     "spdx-expression-parse": "5.0.0",
