@@ -1,0 +1,4 @@
+{
+  "entryPoints": ["src/types.ts", "src/rotate.ts", "src/queue/types.ts"],
+  "intentionallyNotExported": ["src/rotate.ts:rotationCursorSchema"]
+}

@@ -13,14 +13,15 @@ export const TypeDocReflectionSchema = z
     children: z.array(z.unknown()).optional(),
     comment: z
       .object({
-        summary: z.array(z.object({ text: z.string() }).passthrough()).optional(),
-        blockTags: z.array(z.object({ tag: z.string() }).passthrough()).optional(),
+        summary: z.array(z.object({ text: z.string() }).loose()).optional(),
+        blockTags: z.array(z.object({ tag: z.string() }).loose()).optional(),
       })
-      .passthrough()
+      .loose()
       .optional(),
   })
-  .passthrough();
+  .loose();
 
+/** TypeDoc reflection fields consumed by the coverage calculator. */
 export type TypeDocReflection = z.infer<typeof TypeDocReflectionSchema>;
 
 /** Counts documented public declarations and returns the names that lack descriptions. */
@@ -56,20 +57,24 @@ export function calculateApiCoverage(
       ({ tag }) => tag.replace(/^@/u, "").toLowerCase() === "internal",
     );
 
-    if (!isInternal && reflection.kind !== undefined && documentedKinds.has(reflection.kind)) {
+    if (
+      isInternal !== true &&
+      reflection.kind !== undefined &&
+      documentedKinds.has(reflection.kind)
+    ) {
       total += 1;
       const description = reflection.comment?.summary
         ?.map(({ text }) => text)
         .join("")
         .trim();
-      if (description) {
+      if (description !== undefined && description.length > 0) {
         documented += 1;
       } else {
         undocumented.push(path.join("."));
       }
     }
 
-    if (!isInternal) {
+    if (isInternal !== true) {
       for (const child of reflection.children ?? []) {
         visit(TypeDocReflectionSchema.parse(child), path);
       }
@@ -109,7 +114,7 @@ export function checkApiCoverage(jsonPath: string): ApiCoverage {
     "@rovinos/store-sqlite",
   ]);
   process.stdout.write(
-    `API documentation coverage: ${coverage.documented}/${coverage.total} (${coverage.percent.toFixed(2)}%)\n`,
+    `API documentation coverage: ${String(coverage.documented)}/${String(coverage.total)} (${coverage.percent.toFixed(2)}%)\n`,
   );
   if (coverage.undocumented.length > 0) {
     process.stderr.write(`Undocumented exports:\n${coverage.undocumented.join("\n")}\n`);
