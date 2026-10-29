@@ -96,6 +96,17 @@ jobs:
         run: yarn check:dco
         env:
           TARGET_BRANCH: ${{ github.base_ref }}
+      - name: Secret scan positive controls
+        run: yarn test:unit scripts/security
+      - name: Scan pull request diff for secrets
+        run: scripts/security/secret-scan.sh
+      - name: Upload redacted secret scan report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gitleaks-pull-request-report
+          path: reports/security/gitleaks-report.json
+          if-no-files-found: ignore
 
   unit:
     needs: static

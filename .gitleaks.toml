@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Only fixtures, examples, reserved example domains, and explicit fake values are excluded."
+paths = [
+  # Test fixtures contain synthetic values used to verify scanner controls.
+  '''(^|/)__fixtures__/''',
+  # Runnable examples intentionally include non-production sample values.
+  '''^examples/''',
+]
+regexes = [
+  # example.test is reserved for documentation and cannot identify a real service.
+  '''(?i)(^|[/@.])example\.test([^a-z0-9.-]|$)''',
+  # FAKE_ and test_ prefixes mark intentionally synthetic values.
+  '''(?i)(^|[^A-Za-z0-9])(FAKE_|test_)''',
+  # akv:// values identify Key Vault secrets without containing their values.
+  '''(?i)^akv://[^\s]+$''',
+]
+
+[[rules]]
+id = "harness-master-key"
+description = "Detects a base64-encoded 32-byte harness master key assignment."
+regex = '''HARNESS_MASTER_KEY[ \t]*[:=][ \t]*["']?([A-Za-z0-9+/]{43}={0,1})'''
+secretGroup = 1
+keywords = ["HARNESS_MASTER_KEY"]
+
+[[rules]]
+id = "datadog-api-key"
+description = "Detects a Datadog API key assignment."
+regex = '''(?i)(DD_API_KEY|DATADOG_API_KEY)[ \t]*[:=][ \t]*["']?([a-f0-9]{32})'''
+secretGroup = 2
+keywords = ["DD_API_KEY", "DATADOG_API_KEY"]
