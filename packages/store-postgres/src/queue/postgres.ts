@@ -123,7 +123,7 @@ export class PostgresRunQueue implements RunQueue {
     }
   }
 
-  /** {@inheritDoc RunQueue.enqueue} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.enqueue} */
   async enqueue(input: Parameters<RunQueue["enqueue"]>[0]): Promise<RunQueueJob> {
     const job = parseQueueInput(EnqueueRunJobSchema, input);
     const idempotencyKey = hashIdempotencyKey(job.idempotencyKey) ?? null;
@@ -172,7 +172,7 @@ export class PostgresRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.claim} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.claim} */
   async claim(workerId: string, limit: number, leaseMs: number): Promise<RunQueueJob[]> {
     const worker = parseQueueInput(WorkerIdSchema, workerId);
     const count = parseQueueInput(limitSchema, limit);
@@ -236,7 +236,7 @@ export class PostgresRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.heartbeat} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.heartbeat} */
   async heartbeat(jobId: string, workerId: string, leaseMs: number): Promise<boolean> {
     const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
       jobId,
@@ -266,7 +266,7 @@ export class PostgresRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.complete} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.complete} */
   async complete(jobId: string, workerId: string): Promise<boolean> {
     const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
       jobId,
@@ -301,7 +301,7 @@ export class PostgresRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.fail} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.fail} */
   async fail(
     jobId: string,
     workerId: string,
@@ -355,7 +355,7 @@ export class PostgresRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.release} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.release} */
   async release(jobId: string, workerId: string): Promise<boolean> {
     const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
       jobId,
@@ -383,7 +383,7 @@ export class PostgresRunQueue implements RunQueue {
     });
   }
 
-  /** {@inheritDoc RunQueue.getDeadLetter} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.getDeadLetter} */
   async getDeadLetter(jobId: string): Promise<RunQueueDeadLetter | undefined> {
     const id = parseQueueInput(QueueJobIdSchema, jobId);
     await this.ensureInitialized();
@@ -399,7 +399,7 @@ export class PostgresRunQueue implements RunQueue {
     }
   }
 
-  /** {@inheritDoc RunQueue.close} */
+  /** {@inheritDoc @rovinos/store!queue/types.RunQueue.close} */
   async close(): Promise<void> {
     await this.pool.end();
   }

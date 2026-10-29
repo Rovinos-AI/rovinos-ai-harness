@@ -214,7 +214,7 @@ export interface EventStore {
    * @param runId Run identifier to append to.
    * @param events Events without their store-assigned sequence numbers.
    * @param expectedSeq Next sequence number the caller expects.
-   * @param usageUpdates Quota usage increments committed with the events.
+   * @param options Quota usage increments committed with the events.
    * @returns The next free sequence number after the append.
    */
   appendWithUsage(
@@ -320,7 +320,7 @@ export interface EventStore {
   /**
    * Advance a sink's outbox cursor monotonically.
    * @param sinkId Sink identifier.
-   * @param cursor Cursor returned by {@link EventStore.fetchOutbox}.
+   * @param cursor Cursor returned by a prior fetchOutbox call.
    */
   ackOutbox(sinkId: Code, cursor: number): Promise<void>;
 

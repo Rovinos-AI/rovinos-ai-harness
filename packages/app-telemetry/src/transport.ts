@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AppSpan } from "@rovinos/schemas";
-import type { AppTelemetryBridge, AppTelemetryStats, AppTraceContext } from "./types.js";
+import {
+  APP_TELEMETRY_TOOL_NAME,
+  type AppTelemetryBridge,
+  type AppTelemetryStats,
+  type AppTraceContext,
+} from "./types.js";
 
 const activationTimeoutMs = 2_000;
 const flushIntervalMs = 2_000;
@@ -186,7 +191,7 @@ class BrowserAppTelemetryTransport implements AppTelemetryTransport {
       }
       const activation = await Promise.race([
         this.#bridge
-          .callTool("harness.telemetry.emit", { spans: [] })
+          .callTool(APP_TELEMETRY_TOOL_NAME, { spans: [] })
           .then((value) => ({ completed: true as const, value })),
         new Promise<{ readonly completed: false }>((resolve) => {
           timeout = setTimeout(() => {
@@ -307,7 +312,7 @@ class BrowserAppTelemetryTransport implements AppTelemetryTransport {
 
   async #sendBatch(batch: AppSpan[]): Promise<boolean> {
     try {
-      const result = await this.#bridge?.callTool("harness.telemetry.emit", { spans: batch });
+      const result = await this.#bridge?.callTool(APP_TELEMETRY_TOOL_NAME, { spans: batch });
       if (isErrorResult(result)) {
         this.#restoreBatch(batch);
         this.#scheduleRetry();
