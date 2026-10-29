@@ -5,6 +5,7 @@ export {
   runProviderContract,
   type ProviderContractAdapterOptions,
   type ProviderContractFixture,
+  type ProviderContractOptions,
   type ProviderContractScenario,
 } from "../contract.js";
 export { FakeProvider, FakeProviderScriptExhaustedError } from "./fake-provider.js";
