@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { VulnerabilitySeveritySchema, type VulnerabilitySeverity } from "./vuln-policy.ts";
 
-type CvssV3BaseMetrics = {
+interface CvssV3BaseMetrics {
   scope: "U" | "C";
   attackVector: number;
   attackComplexity: number;
@@ -10,7 +10,7 @@ type CvssV3BaseMetrics = {
   confidentiality: number;
   integrity: number;
   availability: number;
-};
+}
 
 function vectorMetrics(
   parts: readonly string[],
@@ -96,11 +96,8 @@ function cvssV3Score(vector: string): number | undefined {
     return undefined;
   }
   const impactSubScore =
-    1 -
-    (1 - metrics.confidentiality) *
-      (1 - metrics.integrity) *
-      (1 - metrics.availability);
-  let impact =
+    1 - (1 - metrics.confidentiality) * (1 - metrics.integrity) * (1 - metrics.availability);
+  const impact =
     metrics.scope === "U"
       ? 6.42 * impactSubScore
       : 7.52 * (impactSubScore - 0.029) - 3.25 * (impactSubScore - 0.02) ** 15;
@@ -145,8 +142,7 @@ function cvssV2Score(vector: string): number | undefined {
   ) {
     return undefined;
   }
-  const impact =
-    10.41 * (1 - (1 - confidentiality) * (1 - integrity) * (1 - availability));
+  const impact = 10.41 * (1 - (1 - confidentiality) * (1 - integrity) * (1 - availability));
   if (impact === 0) {
     return 0;
   }
