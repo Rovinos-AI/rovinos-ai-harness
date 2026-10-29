@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+rules:
+  - id: harness.no-insecure-http
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Use HTTPS for server requests; only loopback HTTP endpoints are allowed.
+    paths:
+      include:
+        - /packages/**
+      exclude:
+        - /packages/sandbox/egress-proxy/src/probe-script.ts
+        - "**/*.test.*"
+        - "**/*.int.test.*"
+        - "**/*.canary.test.*"
+        - "**/*.replay.test.*"
+    pattern-regex: '(?<![\w])["\x27\x60]http://(?!(?:localhost|127\.0\.0\.1|\[::1\])(?::|/|["\x27\x60]))(?![^"\x27\x60\r\n]*\$\{)[^"\x27\x60\r\n]+["\x27\x60]'
