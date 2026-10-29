@@ -779,7 +779,7 @@ Reports hold scores, counts, codes, and costs only, never transcripts. Trajector
 - **One config file**: `harness.config.yaml`, found via `--config`, then `HARNESS_CONFIG`, then the working directory. It is composed from fragments owned by each package, strictly validated, and deep-frozen. `HARNESS__RUN__BUDGETS__MAXSTEPS=50`-style env vars override values. Validation errors list paths and expected types, never the submitted values.
 - **Secrets are references only**: `env:NAME`, `file:/path`, `akv:<vault>/<secret>[#version]`. A literal value in a secret-looking key fails validation. Resolved values are `Secret` objects that print `[REDACTED]` through `toString`, `toJSON`, and `inspect`.
 - **Encryption keys** are 32-byte keys from a `KeyProvider` (local secret refs or Azure Key Vault), versioned, rotatable online, and retired only when unused. Production refuses to start without configured keys.
-- **Logging** goes through a sanctioned logger whose API takes an event code plus typed fields and has no free-text message parameter. `console.*` is banned by lint.
+- **Logging** goes through a sanctioned logger whose API takes an event code plus typed fields and has no free-text message parameter. Fields contain only IDs, codes, integers, or booleans; human-readable messages belong in CLI output, not logs. `console.*` is banned by lint.
 
 ---
 
