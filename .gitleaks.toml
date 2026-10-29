@@ -14,8 +14,8 @@ paths = [
 regexes = [
   # example.test is reserved for documentation and cannot identify a real service.
   '''(?i)(^|[/@.])example\.test([^a-z0-9.-]|$)''',
-  # FAKE_ and test_ prefixes mark intentionally synthetic values.
-  '''(?i)(^|[^A-Za-z0-9])(FAKE_|test_)''',
+  # Only case-sensitive FAKE_ and test_ prefixes mark intentionally synthetic values.
+  '''^(FAKE_|test_)''',
   # akv:// values identify Key Vault secrets without containing their values.
   '''(?i)^akv://[^\s]+$''',
 ]

@@ -10,7 +10,7 @@ const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const scanScript = join(root, "scripts/security/secret-scan.sh");
 const temporaryDirectories: string[] = [];
 
-function createRepository(filePath: string): string {
+function createRepository(filePath: string, key = ["AKIA", "QWERTY9876543210"].join("")): string {
   const directory = mkdtempSync(join(tmpdir(), "gitleaks-control-"));
   temporaryDirectories.push(directory);
   const git = (args: string[]) => {
@@ -31,7 +31,7 @@ function createRepository(filePath: string): string {
 
   const file = join(directory, filePath);
   mkdirSync(join(file, ".."), { recursive: true });
-  writeFileSync(file, `synthetic AWS access key: ${["AKIA", "QWERTY9876543210"].join("")}\n`);
+  writeFileSync(file, `synthetic AWS access key: ${key}\n`);
   git(["add", filePath]);
   git(["commit", "-m", "add scanner control"]);
   return directory;
@@ -68,6 +68,30 @@ describe("secret-scan.sh", () => {
     expect(`${result.stdout}${result.stderr}`).not.toContain(["AKIA", "QWERTY9876543210"].join(""));
   });
 
+  it("does not allow a fake marker embedded after a key-shaped value", () => {
+    const key = "AKIAQWERTY9876543210-test_marker9876543210";
+    const repository = createRepository("secret.txt", key);
+    const result = spawnSync("bash", [scanScript, "--source", repository], {
+      encoding: "utf8",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(key);
+    expect(
+      readFileSync(join(repository, "reports/security/gitleaks-report.json"), "utf8"),
+    ).not.toContain(key);
+  });
+
+  it("allows a synthetic value that starts with FAKE_", () => {
+    const repository = createRepository("synthetic.txt", "FAKE_AKIAQWERTY9876543210");
+    const result = spawnSync("bash", [scanScript, "--source", repository], {
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(0);
+    expect(`${result.stdout}${result.stderr}`).not.toContain("FAKE_AKIAQWERTY9876543210");
+  });
+
   it("comments every narrow allowlist entry", () => {
     const config = readFileSync(join(root, ".gitleaks.toml"), "utf8");
     const allowlist = config.split("[allowlist]")[1]?.split("[[rules]]")[0] ?? "";
@@ -82,7 +106,7 @@ describe("secret-scan.sh", () => {
     expect(allowlist).toContain("(^|/)__fixtures__/");
     expect(allowlist).toContain("^examples/");
     expect(allowlist).toContain("example\\.test");
-    expect(allowlist).toContain("FAKE_|test_");
+    expect(allowlist).toContain("^(FAKE_|test_)");
     expect(allowlist).toContain("^akv://");
   });
 });
