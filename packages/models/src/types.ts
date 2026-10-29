@@ -219,7 +219,9 @@ export function assembleDeltas(deltas: readonly ProviderDelta[]): ProviderResult
 export interface ProviderAdapter {
   readonly provider: Code;
   /** Built-in provider kind used for capability and schema-rule lookup. */
-  readonly kind: "anthropic" | "bedrock" | "openai" | "vertex" | "cassette";
+  readonly kind: "anthropic" | "bedrock" | "openai" | "openai_compatible" | "vertex" | "cassette";
+  /** Trust assigned to the provider, when supplied by its configuration. */
+  readonly trust?: "hosted" | "local";
   /** Default maximum response-token count used when the request does not specify one. */
   readonly maxOutputTokens?: number;
   readonly capabilities?: Partial<Capabilities>;
