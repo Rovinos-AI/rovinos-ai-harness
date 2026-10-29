@@ -304,6 +304,21 @@ describe("GitHub workflows", () => {
     expect(steps[0]?.with?.["fetch-depth"]).toBe(0);
   });
 
+  it("runs Semgrep and uploads its report in the static job", () => {
+    const steps = jobSteps("static");
+    const upload = steps.find((step) => step.name === "Upload Semgrep report");
+
+    expect(stepRunning(steps, "yarn check:nosemgrep")).toBeDefined();
+    expect(stepRunning(steps, "scripts/security/semgrep.sh")).toBeDefined();
+    expect(upload?.if).toBe("success() || failure()");
+    expect(upload?.uses).toBe("actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9");
+    expect(upload?.with).toEqual({
+      name: "semgrep-report",
+      path: "reports/semgrep.json",
+      "if-no-files-found": "ignore",
+    });
+  });
+
   it("requires a Changeset for non-documentation package changes", () => {
     const step = jobSteps("static").find(
       (candidate) => candidate.name === "Check Changesets status",

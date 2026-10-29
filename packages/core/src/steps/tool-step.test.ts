@@ -13,6 +13,7 @@ import {
   type TracerProvider,
 } from "@opentelemetry/api";
 import {
+  APP_TELEMETRY_TOOL_NAME,
   Code,
   FakeClock,
   SequentialIdGenerator,
@@ -531,7 +532,7 @@ describe("tool-step resume handling", () => {
   it("hides the host-local telemetry tool from the model and rejects forged calls", async () => {
     const { recorder } = createRecorder();
     const history = await createRun(recorder, []);
-    const telemetryToolId = Code.parse("harness.telemetry.emit");
+    const telemetryToolId = APP_TELEMETRY_TOOL_NAME;
     const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
     const tool: ToolPort = {
       getToolSpecs: () => [

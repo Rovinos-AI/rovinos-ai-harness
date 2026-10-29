@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+rules:
+  - id: harness.no-unsafe-html
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Use textContent and DOM node construction instead of HTML injection sinks.
+    pattern-either:
+      - pattern: $ELEMENT.innerHTML = ...
+      - pattern: $ELEMENT.outerHTML = ...
+      - pattern: $ELEMENT.insertAdjacentHTML(...)
+      - pattern: document.write(...)
+      - pattern: document.writeln(...)

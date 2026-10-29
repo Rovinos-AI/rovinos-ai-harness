@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { APP_TELEMETRY_TOOL_NAME } from "@rovinos/schemas/browser";
 import { createAppTelemetry } from "./index.js";
 import {
   isManifestSpanName,
@@ -75,8 +76,8 @@ describe("createAppTelemetry", () => {
     telemetry.record("ui.interaction", { kind: "click", count: 2 }, 7.2);
     await telemetry.flush();
 
-    expect(callTool).toHaveBeenNthCalledWith(1, "harness.telemetry.emit", { spans: [] });
-    expect(callTool).toHaveBeenNthCalledWith(2, "harness.telemetry.emit", {
+    expect(callTool).toHaveBeenNthCalledWith(1, APP_TELEMETRY_TOOL_NAME, { spans: [] });
+    expect(callTool).toHaveBeenNthCalledWith(2, APP_TELEMETRY_TOOL_NAME, {
       spans: [
         { name: "ui.render", startOffsetMs: 20, durationMs: 14 },
         {
@@ -135,7 +136,7 @@ describe("createAppTelemetry", () => {
       secondResolved = true;
     });
 
-    expect(callTool).toHaveBeenNthCalledWith(2, "harness.telemetry.emit", {
+    expect(callTool).toHaveBeenNthCalledWith(2, APP_TELEMETRY_TOOL_NAME, {
       spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }],
     });
     expect(firstResolved).toBe(false);
@@ -146,7 +147,7 @@ describe("createAppTelemetry", () => {
     await vi.waitFor(() => {
       expect(callTool).toHaveBeenCalledTimes(3);
     });
-    expect(callTool).toHaveBeenNthCalledWith(3, "harness.telemetry.emit", {
+    expect(callTool).toHaveBeenNthCalledWith(3, APP_TELEMETRY_TOOL_NAME, {
       spans: [{ name: "ui.error", code: "during_send", startOffsetMs: 0, durationMs: 0 }],
     });
     expect(secondResolved).toBe(false);
@@ -173,7 +174,7 @@ describe("createAppTelemetry", () => {
     await expect(telemetry.flush()).resolves.toBeUndefined();
 
     expect(callTool).toHaveBeenCalledTimes(1);
-    expect(callTool).toHaveBeenCalledWith("harness.telemetry.emit", { spans: [] });
+    expect(callTool).toHaveBeenCalledWith(APP_TELEMETRY_TOOL_NAME, { spans: [] });
     await telemetry.dispose();
   });
 
@@ -220,7 +221,7 @@ describe("createAppTelemetry", () => {
     });
 
     expect(callTool).toHaveBeenCalledTimes(3);
-    expect(callTool).toHaveBeenLastCalledWith("harness.telemetry.emit", {
+    expect(callTool).toHaveBeenLastCalledWith(APP_TELEMETRY_TOOL_NAME, {
       spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }],
     });
     await telemetry.dispose();

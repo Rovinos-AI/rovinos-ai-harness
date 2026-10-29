@@ -70,6 +70,7 @@ export {
   type EventFieldClass,
 } from "./classification.js";
 export {
+  APP_TELEMETRY_TOOL_NAME,
   Code,
   Id,
   Pseudonym,

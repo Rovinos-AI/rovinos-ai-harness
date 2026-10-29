@@ -140,6 +140,7 @@ function collectorReachableCheck(endpoint: string | undefined): DoctorCheck {
         ) {
           return { status: "fail", code: "collector_unreachable" };
         }
+        // nosemgrep: harness.no-insecure-http -- Internal Compose collector health listener is HTTP-only.
         healthUrl = new URL("http://otel-collector:13133/");
         healthUrl.hostname = otlpUrl.hostname;
       } catch {
