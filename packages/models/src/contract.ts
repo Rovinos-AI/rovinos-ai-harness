@@ -73,6 +73,14 @@ export type ProviderContractAdapterFactory = (
   fixture: ProviderContractFixture,
 ) => ProviderAdapter;
 
+/** Options for adapting the provider contract suite to non-HTTP adapters. */
+export interface ProviderContractOptions {
+  /** Whether scenarios are driven by HTTP fixtures and expected to issue a fetch. */
+  readonly httpBacked?: boolean;
+  /** Scenarios required and registered by this contract suite. */
+  readonly scenarios?: readonly ProviderContractScenario[];
+}
+
 const ERROR_EXPECTATIONS: Partial<
   Record<ProviderContractScenario, { readonly code: string; readonly retryable: boolean }>
 > = {
@@ -86,17 +94,26 @@ interface ContractHttpContext {
   readonly baseUrl: string;
 }
 
-function parseContractFixtures(fixtures: readonly ProviderContractFixture[]) {
+function parseContractFixtures(
+  fixtures: readonly ProviderContractFixture[],
+  requiredScenarios: readonly ProviderContractScenario[],
+) {
   const parsedFixtures = z.array(ProviderContractFixtureSchema).parse(fixtures);
   const scenarios = new Set(parsedFixtures.map((fixture) => fixture.scenario));
   if (scenarios.size !== parsedFixtures.length) {
     throw new Error("Provider contract fixtures must not contain duplicate scenarios.");
   }
-  const missingScenarios = ProviderContractScenarioSchema.options.filter(
-    (scenario) => !scenarios.has(scenario),
-  );
+  const missingScenarios = requiredScenarios.filter((scenario) => !scenarios.has(scenario));
   if (missingScenarios.length > 0) {
     throw new Error(`Provider contract fixtures are missing: ${missingScenarios.join(", ")}.`);
+  }
+  const unexpectedScenarios = parsedFixtures
+    .map((fixture) => fixture.scenario)
+    .filter((scenario) => !requiredScenarios.includes(scenario));
+  if (unexpectedScenarios.length > 0) {
+    throw new Error(
+      `Provider contract fixtures contain unexpected scenarios: ${unexpectedScenarios.join(", ")}.`,
+    );
   }
   return parsedFixtures;
 }
@@ -121,13 +138,13 @@ function createContractAdapter(
 }
 
 /**
- * Yields one event-loop turn before aborting so SDK adapters can dispatch fetch
- * from their startup microtasks; the assertion then exercises in-flight cancellation.
+ * Yields one event-loop turn before aborting to exercise cancellation during
+ * asynchronous adapter work.
  */
 export async function assertAbortCompletion(
   completion: Promise<unknown>,
   controller: AbortController,
-  didFetch: () => boolean,
+  didFetch?: () => boolean,
 ): Promise<void> {
   // SDK-backed adapters may dispatch fetch in a microtask after complete() is called.
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -137,7 +154,9 @@ export async function assertAbortCompletion(
     () => undefined,
     (caught: unknown) => caught,
   );
-  expect(didFetch()).toBe(true);
+  if (didFetch !== undefined) {
+    expect(didFetch()).toBe(true);
+  }
   expect(
     (error instanceof Error && error.name === "AbortError") ||
       (error instanceof ProviderError && error.code === "provider_timeout"),
@@ -190,9 +209,10 @@ async function assertProviderCompletion(
 async function closeContractDispatcher(
   dispatcher: MockAgent,
   scenario: ProviderContractScenario,
+  httpBacked: boolean,
 ): Promise<void> {
   try {
-    if (scenario !== "abort_signal") {
+    if (httpBacked && scenario !== "abort_signal") {
       dispatcher.assertNoPendingInterceptors();
     }
   } finally {
@@ -203,20 +223,24 @@ async function closeContractDispatcher(
 async function runProviderScenario(
   makeAdapter: ProviderContractAdapterFactory,
   fixture: ProviderContractFixture,
+  httpBacked: boolean,
 ): Promise<void> {
   const dispatcher = new MockAgent();
   dispatcher.disableNetConnect();
   const baseUrl = "https://provider.test";
-  const headers = {
-    "content-type": "application/json",
-    ...fixture.httpResponse.headers,
-  };
-  const reply = dispatcher
-    .get(baseUrl)
-    .intercept({ path: /.*/, method: "POST" })
-    .reply(fixture.httpResponse.status, JSON.stringify(fixture.httpResponse.body), { headers });
+  const reply = httpBacked
+    ? dispatcher
+        .get(baseUrl)
+        .intercept({ path: /.*/, method: "POST" })
+        .reply(fixture.httpResponse.status, JSON.stringify(fixture.httpResponse.body), {
+          headers: {
+            "content-type": "application/json",
+            ...fixture.httpResponse.headers,
+          },
+        })
+    : undefined;
   if (fixture.scenario === "abort_signal") {
-    reply.delay(100);
+    reply?.delay(100);
   }
   let fetchCalled = false;
   const adapter = createContractAdapter(makeAdapter, fixture, { dispatcher, baseUrl }, () => {
@@ -232,14 +256,18 @@ async function runProviderScenario(
   try {
     const completion = adapter.complete(fixture.request, context);
     if (fixture.scenario === "abort_signal") {
-      await assertAbortCompletion(completion, controller, () => fetchCalled);
+      await assertAbortCompletion(
+        completion,
+        controller,
+        httpBacked ? () => fetchCalled : undefined,
+      );
     } else if (ERROR_EXPECTATIONS[fixture.scenario] !== undefined) {
       await assertProviderFailure(completion, fixture);
     } else {
       await assertProviderCompletion(completion, fixture);
     }
   } finally {
-    await closeContractDispatcher(dispatcher, fixture.scenario);
+    await closeContractDispatcher(dispatcher, fixture.scenario, httpBacked);
   }
 }
 
@@ -248,7 +276,8 @@ async function runProviderScenario(
  *
  * @param name - Provider name used as the Vitest suite label.
  * @param makeAdapter - Factory that creates an adapter with injected mock HTTP.
- * @param fixtures - Scenario fixtures, each with a normalized request and HTTP response.
+ * @param fixtures - Scenario fixtures pairing normalized requests and responses.
+ * @param options - Configure HTTP backing and the scenarios applicable to the adapter.
  *
  * Abort scenarios must reject with an `AbortError` or a `ProviderError` whose
  * code is `provider_timeout`, and must settle before the delayed response.
@@ -259,11 +288,14 @@ export function runProviderContract(
   name: string,
   makeAdapter: ProviderContractAdapterFactory,
   fixtures: readonly ProviderContractFixture[],
+  options: ProviderContractOptions = {},
 ): void {
-  const parsedFixtures = parseContractFixtures(fixtures);
+  const scenarios = options.scenarios ?? ProviderContractScenarioSchema.options;
+  const parsedFixtures = parseContractFixtures(fixtures, scenarios);
+  const httpBacked = options.httpBacked ?? true;
   describe(name, () => {
     for (const fixture of parsedFixtures) {
-      it(fixture.scenario, async () => runProviderScenario(makeAdapter, fixture));
+      it(fixture.scenario, async () => runProviderScenario(makeAdapter, fixture, httpBacked));
     }
   });
 }

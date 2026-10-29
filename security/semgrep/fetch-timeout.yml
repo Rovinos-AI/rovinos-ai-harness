@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+rules:
+  - id: harness.fetch-requires-signal
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Pass an AbortSignal in fetch options so server requests have a bounded lifetime.
+    paths:
+      include:
+        - /packages/**
+      exclude:
+        - "**/*.test.*"
+        - "**/*.int.test.*"
+        - "**/*.canary.test.*"
+        - "**/*.replay.test.*"
+    patterns:
+      - pattern-either:
+          - pattern: fetch($URL)
+          - pattern: fetch($URL, { ... })
+      - pattern-not: "fetch(..., { ..., signal: $SIGNAL, ... })"
+      - pattern-not: "fetch(..., { signal, ... })"
+      - pattern-not-regex: '\bsignal\b'
