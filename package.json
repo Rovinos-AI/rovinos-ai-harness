@@ -67,8 +67,6 @@
     "check:threat-cases": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-threat-cases.ts"
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "4.0.88",
-    "@ai-sdk/openai": "4.0.102",
     "@anthropic-ai/sdk": "1.1.0",
     "@changesets/cli": "3.0.3",
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
@@ -104,7 +102,6 @@
     "@types/spdx-expression-parse": "4.0.0",
     "@vitest/coverage-v8": "4.1.12",
     "@vitest/eslint-plugin": "1.6.28",
-    "ai": "7.0.153",
     "better-sqlite3": "13.0.3",
     "commander": "15.0.0",
     "cspell": "10.4.0",

@@ -2,8 +2,6 @@
 import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 
-/** Adapter implementation being evaluated. */
-export type Approach = "thin" | "ai-sdk";
 /** Provider used by one scenario. */
 export type Provider = "anthropic" | "openai";
 /** Request/response shape exercised by the spike. */
@@ -68,49 +66,6 @@ export const StoredOpenAIAssistantSchema = z.looseObject({
   content: z.string().nullable(),
   tool_calls: z.array(OpenAIToolCallSchema),
 });
-
-export const OpenAIResponseSchema = z.looseObject({
-  choices: z.array(z.looseObject({ message: StoredOpenAIAssistantSchema })),
-});
-
-const AiAssistantMessageSchema = z.object({
-  role: z.literal("assistant"),
-  content: z.array(
-    z.discriminatedUnion("type", [
-      z.object({
-        type: z.literal("reasoning"),
-        text: z.string(),
-        providerOptions: z
-          .object({ anthropic: z.object({ signature: z.string() }) })
-          .optional(),
-      }),
-      z.object({
-        type: z.literal("tool-call"),
-        toolCallId: z.string(),
-        toolName: z.string(),
-        input: JsonValueSchema,
-      }),
-      z.object({ type: z.literal("text"), text: z.string() }),
-    ]),
-  ),
-});
-
-const AiToolMessageSchema = z.object({
-  role: z.literal("tool"),
-  content: z.array(
-    z.object({
-      type: z.literal("tool-result"),
-      toolCallId: z.string(),
-      toolName: z.string(),
-      output: z.object({ type: z.literal("text"), value: z.string() }),
-    }),
-  ),
-});
-
-export const AiStoredMessageSchema = z.discriminatedUnion("role", [
-  AiAssistantMessageSchema,
-  AiToolMessageSchema,
-]);
 
 export const AnthropicRequestSchema = z.looseObject({
   messages: z.array(
@@ -313,9 +268,4 @@ export function responseFixtures(provider: Provider, scenario: Scenario): JsonRe
     return [openaiToolResponse];
   }
   return [openaiMultiTurnResponse, openaiFollowUpResponse];
-}
-
-/** Returns the raw tool-use response used for multi-turn comparisons. */
-export function rawMultiTurnResponse(provider: Provider): JsonRecord {
-  return provider === "anthropic" ? anthropicMultiTurnResponse : openaiMultiTurnResponse;
 }

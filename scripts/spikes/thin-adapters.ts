@@ -178,10 +178,7 @@ async function thinOpenAIMultiTurn(
   if (firstMessage === undefined) {
     return { passed: false, rawBlobRoundTrip: false };
   }
-  const assistantMessage = parseJson(
-    StoredOpenAIAssistantSchema,
-    JSON.stringify(firstMessage),
-  );
+  const assistantMessage = parseJson(StoredOpenAIAssistantSchema, JSON.stringify(firstMessage));
   const toolCall = assistantMessage.tool_calls[0];
   if (toolCall === undefined) {
     return { passed: false, rawBlobRoundTrip: false };

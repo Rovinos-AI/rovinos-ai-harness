@@ -30,11 +30,13 @@ valid JSON string. This failed the required byte-for-byte blob round trip. Since
 prioritizes fidelity, this outweighs the AI SDK's unified API and the successful Anthropic
 reasoning-block round trip.
 
-All five packages used by the spike declare Apache-2.0 licenses. The versions are exact-pinned:
+All five packages used by the spike declare Apache-2.0 licenses. The versions used for the
+comparison were exact-pinned:
 `ai@7.0.153`, `@ai-sdk/anthropic@4.0.88`, `@ai-sdk/openai@4.0.102`,
-`@anthropic-ai/sdk@1.1.0`, and `openai@7.43.0`. The first three are root development
-dependencies for the spike only; the official SDKs are also the versions already used by
-`@rovinos/models`.
+`@anthropic-ai/sdk@1.1.0`, and `openai@7.43.0`. The AI SDK packages were comparison-only
+dependencies and are not retained. The official SDKs remain dependencies of `@rovinos/models` and
+are also pinned as root development dependencies at those exact same versions because the
+repository's extraneous-dependency lint rule requires direct declarations for the spike imports.
 
 ### Scenario evidence
 
@@ -74,8 +76,11 @@ preserve the original HTTP response's whitespace.
 
 - Provider adapters use the official SDKs and keep provider request/response mapping in the
   adapters. SDK retries remain disabled; retries and policy stay in the gateway.
-- The AI SDK remains a root development dependency only so maintainers can rerun the comparison.
-  The spike is outside all published workspaces and its fetch implementation returns local
+- The retained spike exercises only the chosen thin adapters. The AI SDK results below are
+  recorded evidence, not a permanent dependency or a scenario rerun by the retained script.
+- The root development pins for `@anthropic-ai/sdk` and `openai` match `@rovinos/models`; removing
+  them made `yarn lint` fail on the retained spike's direct imports.
+- The spike is outside all published workspaces and its fetch implementation returns local
   fixtures.
 - Task guidance in 14.4, 14.5, and 14.6 already assumes thin adapters and needs no change:
   - **14.4 Anthropic adapter:** unchanged; retain raw content blocks and tool-use IDs.
@@ -89,5 +94,19 @@ None. Tasks 14.4–14.6 were reviewed and remain consistent with this decision.
 ## Validation
 
 `node --experimental-strip-types --disable-warning=ExperimentalWarning
-scripts/spikes/model-adapter-roundtrip.ts` prints the scenario table. Its mocked fetch handlers
-prevent external network calls and use synthetic request and response data.
+scripts/spikes/model-adapter-roundtrip.ts` prints the thin-adapter scenario table. Its mocked fetch
+handlers prevent external network calls and use synthetic request and response data.
+
+### Reproducing the comparison
+
+The comparison implementation is recorded in commit
+[`2969ecd5925350f985a60b34c585e84433ddad2e`](https://github.com/Rovinos-AI/rovinos-ai-harness/commit/2969ecd5925350f985a60b34c585e84433ddad2e),
+which contains `scripts/spikes/ai-sdk.ts`. From the repository root at that commit, install the
+comparison dependencies with:
+
+```sh
+yarn add -D ai@7.0.153 @ai-sdk/anthropic@4.0.88 @ai-sdk/openai@4.0.102 @anthropic-ai/sdk@1.1.0 openai@7.43.0
+```
+
+The official SDKs are already dependencies of `@rovinos/models`; the root pins above are required
+for the spike's direct imports to pass lint.
