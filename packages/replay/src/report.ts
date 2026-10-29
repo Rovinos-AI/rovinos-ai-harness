@@ -54,14 +54,16 @@ const normalizedFields = new Set([
   "replayOf",
 ]);
 
-const normalizedString = z.string().refine(
-  (value) =>
-    Code.safeParse(value).success ||
-    /^(?:call|approval|request|checkpoint|childRun|run)#\d+$/u.test(value) ||
-    /^p_[a-z2-7]{26}$/u.test(value) ||
-    /^[a-f0-9]{64}$/u.test(value),
-  { error: "invalid_meta_value" },
-);
+const normalizedString = z
+  .string()
+  .refine(
+    (value) =>
+      Code.safeParse(value).success ||
+      /^(?:call|approval|request|checkpoint|childRun|run)#\d+$/u.test(value) ||
+      /^p_[a-z2-7]{26}$/u.test(value) ||
+      /^[a-f0-9]{64}$/u.test(value),
+    { error: "invalid_meta_value" },
+  );
 
 type NormalizedValue =
   | string
@@ -278,9 +280,7 @@ export function renderReplayReportText(report: ReplayReport): string {
  * @param events - Validated source events.
  * @returns A schema-validated synthetic-data signature file.
  */
-export function createGoldenSignature(
-  events: Parameters<typeof normalizeRun>[0],
-): GoldenSignature {
+export function createGoldenSignature(events: Parameters<typeof normalizeRun>[0]): GoldenSignature {
   return GoldenSignatureSchema.parse({
     schemaVersion: 1,
     containsRealData: false,

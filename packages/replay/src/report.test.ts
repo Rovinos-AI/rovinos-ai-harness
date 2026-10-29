@@ -54,7 +54,10 @@ function events(configHash = "a".repeat(64)) {
 
 function reportFor(
   diff = diffRuns(events(), events()),
-  options: { status?: "completed" | "error"; divergence?: { seq: number; code: "replay_divergence" | "replay_missing_result" } } = {},
+  options: {
+    status?: "completed" | "error";
+    divergence?: { seq: number; code: "replay_divergence" | "replay_missing_result" };
+  } = {},
 ) {
   const outcome = ReplayOutcomeSchema.parse({
     replayRunId,

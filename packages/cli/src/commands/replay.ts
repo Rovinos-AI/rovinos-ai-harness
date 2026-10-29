@@ -61,15 +61,13 @@ class ReplayMissingRootError extends HarnessError {
 }
 
 function isMissingFile(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
-async function readGolden(path: string, allowMissing: boolean): Promise<GoldenSignature | undefined> {
+async function readGolden(
+  path: string,
+  allowMissing: boolean,
+): Promise<GoldenSignature | undefined> {
   let contents: string;
   try {
     contents = await readFile(resolve(path), { encoding: "utf8" });
@@ -129,10 +127,7 @@ function comparisonFor(
   };
 }
 
-async function updateBaseline(
-  options: ReplayOptions,
-  outcome: ReplayOutcome,
-): Promise<boolean> {
+async function updateBaseline(options: ReplayOptions, outcome: ReplayOutcome): Promise<boolean> {
   if (
     options.updateBaseline !== true ||
     outcome.divergence !== undefined ||

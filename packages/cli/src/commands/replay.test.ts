@@ -5,7 +5,15 @@ import { join } from "node:path";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { NaiveContext, createRuntime, type ModelCompletion } from "@rovinos/core";
 import { FakeModelPort, FakeToolPort } from "@rovinos/core/testing";
-import { Event as EventSchema, FakeClock, Id, SequentialIdGenerator, type Event, type NewEvent, parseJson } from "@rovinos/schemas";
+import {
+  Event as EventSchema,
+  FakeClock,
+  Id,
+  SequentialIdGenerator,
+  type Event,
+  type NewEvent,
+  parseJson,
+} from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import {
   createGoldenSignature,
@@ -160,9 +168,9 @@ describe("replay command", () => {
   it("replays a run and prints no event content", async () => {
     const harness = await createHarness(new Map([[rootRunId, await recordedEvents(rootRunId)]]));
 
-    await expect(main(["replay", "--run", rootRunId], harness.context, [replayCommand])).resolves.toBe(
-      ExitCode.failure,
-    );
+    await expect(
+      main(["replay", "--run", rootRunId], harness.context, [replayCommand]),
+    ).resolves.toBe(ExitCode.failure);
     expect(harness.stdout.join("")).toContain(rootRunId);
     expect(harness.stdout.join("")).not.toContain(contentCanary);
     expect(harness.stdout.join("")).toContain("status: completed");
@@ -193,11 +201,7 @@ describe("replay command", () => {
     const harness = await createHarness(new Map([[rootRunId, [createdEvent(rootRunId)]]]));
 
     await expect(
-      main(
-        ["replay", "--run", rootRunId, "--update-baseline"],
-        harness.context,
-        [replayCommand],
-      ),
+      main(["replay", "--run", rootRunId, "--update-baseline"], harness.context, [replayCommand]),
     ).resolves.toBe(ExitCode.usage);
     expect(harness.stderr).toEqual(["replay_input_invalid\n"]);
     expect(harness.close).not.toHaveBeenCalled();
@@ -207,11 +211,9 @@ describe("replay command", () => {
     const harness = await createHarness(new Map([[rootRunId, [createdEvent(rootRunId)]]]));
 
     await expect(
-      main(
-        ["replay", "--run", rootRunId, "--golden", "missing-baseline.json"],
-        harness.context,
-        [replayCommand],
-      ),
+      main(["replay", "--run", rootRunId, "--golden", "missing-baseline.json"], harness.context, [
+        replayCommand,
+      ]),
     ).resolves.toBe(ExitCode.usage);
     expect(harness.stderr).toEqual(["replay_input_invalid\n"]);
   });
@@ -242,11 +244,9 @@ describe("replay command", () => {
     try {
       const matchingHarness = await createHarness(new Map([[rootRunId, events]]));
       await expect(
-        main(
-          ["replay", "--run", rootRunId, "--golden", baselinePath],
-          matchingHarness.context,
-          [replayCommand],
-        ),
+        main(["replay", "--run", rootRunId, "--golden", baselinePath], matchingHarness.context, [
+          replayCommand,
+        ]),
       ).resolves.toBe(ExitCode.ok);
       expect(matchingHarness.stdout.join("")).toContain("goldenMatch: true");
 
@@ -280,16 +280,14 @@ describe("replay command", () => {
     const harness = await createHarness(new Map([[rootRunId, await recordedEvents(rootRunId)]]));
 
     try {
-      await main(
-        ["replay", "--run", rootRunId, "--report", reportPath],
-        harness.context,
-        [replayCommand],
-      );
+      await main(["replay", "--run", rootRunId, "--report", reportPath], harness.context, [
+        replayCommand,
+      ]);
       const report = parseJson(ReplayReportSchema, await readFile(reportPath, "utf8"));
 
       expect(report.originalRunId).toBe(rootRunId);
       expect(harness.stdout.join("")).not.toContain(contentCanary);
-      expect((await readFile(reportPath, "utf8"))).not.toContain(contentCanary);
+      expect(await readFile(reportPath, "utf8")).not.toContain(contentCanary);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -397,11 +395,7 @@ describe("replay command", () => {
 
     await expect(main(["replay"], harness.context, [replayCommand])).resolves.toBe(ExitCode.usage);
     await expect(
-      main(
-        ["replay", "--run", rootRunId, "--trace", traceId],
-        harness.context,
-        [replayCommand],
-      ),
+      main(["replay", "--run", rootRunId, "--trace", traceId], harness.context, [replayCommand]),
     ).resolves.toBe(ExitCode.usage);
     expect(harness.stderr).toEqual(["replay_input_invalid\n", "replay_input_invalid\n"]);
     expect(harness.close).not.toHaveBeenCalled();
