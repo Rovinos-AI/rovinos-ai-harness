@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code as CodeSchema, Id as IdSchema } from "@rovinos/schemas";
 import type { Code } from "@rovinos/schemas";
+import type {} from "./pino-thread-stream-compat.js";
 import pino, { type Logger as PinoLogger } from "pino";
 import { z } from "zod";
 import type { Writable } from "node:stream";
