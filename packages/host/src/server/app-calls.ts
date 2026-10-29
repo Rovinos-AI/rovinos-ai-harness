@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id, JsonValue, type HostConfig } from "@rovinos/schemas";
+import {
+  APP_TELEMETRY_TOOL_NAME,
+  Code,
+  HarnessError,
+  Id,
+  JsonValue,
+  type HostConfig,
+} from "@rovinos/schemas";
 import { countHostAppRejected, type HostAppRejectedReason } from "@rovinos/telemetry";
 import type { CallToolResult, ListToolsResult, Tool } from "@modelcontextprotocol/client";
 import { ToolSchema } from "@modelcontextprotocol/core";
@@ -15,8 +22,7 @@ import { z } from "zod";
 import { AppSpanBatchSchema } from "./app-telemetry.js";
 import type { AppCall, AppInstance } from "./types.js";
 
-/** Name of the host-local telemetry tool exposed to MCP Apps. */
-export const APP_TELEMETRY_TOOL_NAME = "harness.telemetry.emit";
+export { APP_TELEMETRY_TOOL_NAME };
 
 /** Arguments accepted by the host-local telemetry tool before span validation. */
 export const AppTelemetryEmitArgsSchema = AppSpanBatchSchema;

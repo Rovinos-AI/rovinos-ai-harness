@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  APP_TELEMETRY_TOOL_NAME,
   Code,
   JsonValue as JsonValueSchema,
   ModelRequestSchema,
@@ -66,7 +67,7 @@ export function modelToolOptions(
     messages,
     ...(tools === undefined
       ? {}
-      : { tools: tools.filter(({ toolId }) => toolId !== "harness.telemetry.emit") }),
+      : { tools: tools.filter(({ toolId }) => toolId !== APP_TELEMETRY_TOOL_NAME) }),
   };
 }
 

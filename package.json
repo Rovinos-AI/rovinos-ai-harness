@@ -63,6 +63,7 @@
     "check:spdx": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-spdx.ts",
     "check:dco": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-dco.ts",
     "check:licenses": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-licenses.ts",
+    "check:nosemgrep": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/security/check-nosemgrep.ts",
     "verify:release": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/verify-release.ts",
     "check:threat-cases": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-threat-cases.ts"
   },

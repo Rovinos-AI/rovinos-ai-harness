@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Browser entry excludes the Node-oriented external JSON Schema compiler.
+export { APP_TELEMETRY_TOOL_NAME } from "./primitives.js";
 export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
 export {
   ApprovalAppGetRequestSchema,
