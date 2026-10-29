@@ -69,7 +69,7 @@ describe("secret-scan.sh", () => {
   });
 
   it("does not allow a fake marker embedded after a key-shaped value", () => {
-    const key = "AKIAQWERTY9876543210-test_marker9876543210";
+    const key = ["AKIA", "QWERTY9876543210", "-test_", "marker9876543210"].join("");
     const repository = createRepository("secret.txt", key);
     const result = spawnSync("bash", [scanScript, "--source", repository], {
       encoding: "utf8",
@@ -83,13 +83,14 @@ describe("secret-scan.sh", () => {
   });
 
   it("allows a synthetic value that starts with FAKE_", () => {
-    const repository = createRepository("synthetic.txt", "FAKE_AKIAQWERTY9876543210");
+    const key = ["FAKE_", "AKIA", "QWERTY9876543210"].join("");
+    const repository = createRepository("synthetic.txt", key);
     const result = spawnSync("bash", [scanScript, "--source", repository], {
       encoding: "utf8",
     });
 
     expect(result.status).toBe(0);
-    expect(`${result.stdout}${result.stderr}`).not.toContain("FAKE_AKIAQWERTY9876543210");
+    expect(`${result.stdout}${result.stderr}`).not.toContain(key);
   });
 
   it("comments every narrow allowlist entry", () => {
