@@ -5,9 +5,13 @@ import pino, { type Logger as PinoLogger } from "pino";
 import { z } from "zod";
 import type { Writable } from "node:stream";
 
-const LogValueSchema = z.union([IdSchema, CodeSchema, z.number().int(), z.boolean()]);
-const LogFieldsSchema = z.record(CodeSchema, LogValueSchema);
+const SafeCodeSchema = CodeSchema.refine(
+  (value) => !API_KEY_CODE_PATTERN.test(value) && !isLuhnCardNumber(value),
+);
+const LogValueSchema = z.union([IdSchema, SafeCodeSchema, z.number().int(), z.boolean()]);
+const LogFieldsSchema = z.record(SafeCodeSchema, LogValueSchema);
 const UnknownFieldsSchema = z.record(z.string(), z.unknown());
+const API_KEY_CODE_PATTERN = /^[a-z][a-z0-9]{1,15}_(?:live|test)_[a-f0-9]{24,}$/u;
 
 /** A safe scalar accepted as a structured log value. */
 export type LogValue = Code | number | boolean;
@@ -48,6 +52,26 @@ class LoggerState {
 }
 
 const stateByLogger = new WeakMap<Logger, LoggerState>();
+
+function isLuhnCardNumber(value: string): boolean {
+  if (!/^\d{13,19}$/u.test(value)) {
+    return false;
+  }
+  let sum = 0;
+  let double = false;
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    let digit = Number(value.charAt(index));
+    if (double) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+    sum += digit;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
 
 /**
  * Returns how many unsafe values have been discarded by a logger, for tests.
@@ -92,7 +116,7 @@ function writeLog(
   event: Code,
   fields: LogFields | undefined,
 ): void {
-  const parsedEvent = CodeSchema.safeParse(event);
+  const parsedEvent = SafeCodeSchema.safeParse(event);
   if (!parsedEvent.success) {
     context.state.incrementDroppedFields();
     return;
