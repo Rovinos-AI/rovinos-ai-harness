@@ -61,6 +61,13 @@ function readWorkflow(): z.infer<typeof workflowSchema> {
   return parseYaml(workflowSchema, readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8"));
 }
 
+function readNightlyVulnerabilityWorkflow(): z.infer<typeof workflowSchema> {
+  return parseYaml(
+    workflowSchema,
+    readFileSync(resolve(root, ".github/workflows/vulnerability-nightly.yml"), "utf8"),
+  );
+}
+
 function readSetupAction(): z.infer<typeof actionSchema> {
   return parseYaml(
     actionSchema,
@@ -190,6 +197,37 @@ describe("GitHub workflows", () => {
     expect(shouldRun("pull_request", false)).toBe(true);
   });
 
+  it("runs the dependency vulnerability gate nightly on main and uploads its report", () => {
+    const workflow = readNightlyVulnerabilityWorkflow();
+    const job = workflow.jobs["dependency-vulnerabilities"];
+
+    expect(workflow.on.schedule).toEqual([{ cron: "17 4 * * *" }]);
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(job?.if).toBe("github.ref == 'refs/heads/main'");
+    expect(job?.steps.some((step) => step.uses === "./.github/actions/node-setup")).toBe(true);
+    expect(
+      job?.steps.some(
+        (step) =>
+          step.run?.includes("github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.3.3") === true,
+      ),
+    ).toBe(true);
+    expect(
+      job?.steps.some(
+        (step) => step.run?.includes("scripts/security/check-vulns.ts --scan") === true,
+      ),
+    ).toBe(true);
+    expect(job?.steps.some((step) => step.name === "Upload dependency vulnerability report")).toBe(
+      true,
+    );
+    expect(
+      job?.steps.some(
+        (step) =>
+          step.uses?.startsWith("actions/checkout@") === true &&
+          step.with?.["persist-credentials"] === false,
+      ),
+    ).toBe(true);
+  });
+
   it("exposes the gates job result to reusable workflow callers", () => {
     const workflow = readWorkflow();
     const workflowCall = workflowCallSchema.parse(workflow.on.workflow_call);
@@ -207,6 +245,7 @@ describe("GitHub workflows", () => {
   it("pins every action to a full commit SHA", () => {
     const steps = [
       ...Object.values(readWorkflow().jobs).flatMap((job) => job.steps),
+      ...Object.values(readNightlyVulnerabilityWorkflow().jobs).flatMap((job) => job.steps),
       ...readSetupAction().runs.steps,
     ];
     const remote = steps
