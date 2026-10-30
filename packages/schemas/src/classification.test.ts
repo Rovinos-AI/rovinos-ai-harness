@@ -82,6 +82,28 @@ describe("EVENT_FIELD_CLASS", () => {
     expect(() => joinEvent({ ...parts.meta, seq: -1 }, parts.content)).toThrow();
   });
 
+  it("upcasts old event parts after reassembly", () => {
+    const event = joinEvent(
+      {
+        runId: "00000000000000000000000001",
+        seq: 4,
+        ts: 10,
+        type: "approval_resolved",
+        v: 1,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId: "00000000000000000000000001",
+        approvalId: "00000000000000000000000002",
+        decision: "approve",
+        approverId: "cli.synthetic",
+        waitMs: 1,
+      },
+      {},
+    );
+
+    expect(event).toMatchObject({ v: 2, decidedBy: "human" });
+  });
+
   it("enforces the field classification when joining stored event parts", () => {
     const runCreated = eventSamples.find(({ type }) => type === "run_created");
     const modelRequest = eventSamples.find(({ type }) => type === "model_request");

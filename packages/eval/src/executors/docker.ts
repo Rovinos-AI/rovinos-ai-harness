@@ -3,15 +3,21 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { createRuntime, foldRunState } from "@rovinos/core";
-import { HarnessError } from "@rovinos/schemas";
-import type { RunStatus } from "@rovinos/schemas";
+import { HarnessError, type RunStatus } from "@rovinos/schemas";
 import { runDockerProcess } from "@rovinos/sandbox";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";
-import { evalSuiteCode, TrialResultSchema, type TrialResult, type TrialSpec } from "../trial.js";
+import {
+  evalSuiteCode,
+  TrialResultSchema,
+  type ApprovalCounts,
+  type TrialResult,
+  type TrialSpec,
+} from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
-import { setTrialProcessOutput } from "../execution-capture.js";
+import { appendTrialProcessOutput } from "../execution-capture.js";
+import { runDockerHuman } from "./docker-human.js";
 
 const DockerMemorySchema = z
   .string()
@@ -189,6 +195,203 @@ async function readRunResult(
   }
 }
 
+function dockerBaseArgs(
+  options: z.output<typeof DockerOptionsSchema>,
+  name: string,
+  workDir: string,
+  trial: TrialSpec,
+  exportTelemetry: boolean | undefined,
+): string[] {
+  return [
+    "run",
+    "--rm",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges:true",
+    "--read-only",
+    "--tmpfs",
+    `/tmp:size=${options.tmpfsSize},noexec,nosuid,nodev`,
+    "--user",
+    options.user,
+    "--memory",
+    options.memory,
+    "--cpus",
+    String(options.cpus),
+    "--pids-limit",
+    String(options.pidsLimit),
+    "--name",
+    name,
+    "--network",
+    options.network,
+    "--mount",
+    `type=bind,source=${resolvePath(workDir)},target=/harness`,
+    "--workdir",
+    "/harness",
+    "--env",
+    "HARNESS_DATA_DIR=/harness/data",
+    "--env",
+    "HARNESS_EVAL_KEY",
+    "--env",
+    `HARNESS_EVAL_METADATA=${evalMetadataForTrial(trial)}`,
+    ...telemetryEnvironmentArgs(exportTelemetry),
+    options.image,
+  ];
+}
+
+interface DockerInvocation {
+  readonly options: z.output<typeof DockerOptionsSchema>;
+  readonly prepared: PreparedTrial;
+  readonly name: string;
+  readonly args: readonly string[];
+  readonly input: string;
+}
+
+async function runDocker(invocation: DockerInvocation): Promise<DockerProcessResult> {
+  try {
+    const outcome = await runDockerProcess({
+      dockerPath: invocation.options.dockerPath,
+      args: invocation.args,
+      input: invocation.input,
+      timeoutMs: invocation.options.timeoutMs,
+      containerName: invocation.name,
+      env: { ...process.env, HARNESS_EVAL_KEY: invocation.prepared.key },
+    });
+    appendTrialProcessOutput(
+      invocation.prepared.dbPath,
+      outcome.stdout ?? "",
+      outcome.stderr ?? "",
+    );
+    return outcome;
+  } catch {
+    throw new DockerExecutorError("docker_process_failed");
+  }
+}
+
+function finishDockerResult(
+  result: TrialResult,
+  durationMs: number,
+  values: {
+    readonly exitCode: number;
+    readonly approvals: ApprovalCounts;
+    readonly unsafeAutoApprove: boolean;
+    readonly maxResumesExceeded?: boolean;
+    readonly timedOut?: boolean;
+  },
+): TrialResult {
+  if (values.timedOut === true) {
+    return TrialResultSchema.parse({
+      ...result,
+      status: "error",
+      exitCode: 124,
+      errorCode: "trial_timeout",
+      approvals: values.approvals,
+      unsafeAutoApprove: values.unsafeAutoApprove,
+      durationMs,
+    });
+  }
+  if (values.maxResumesExceeded === true) {
+    return TrialResultSchema.parse({
+      ...result,
+      status: "error",
+      exitCode: 1,
+      errorCode: "human_max_resumes_exceeded",
+      approvals: values.approvals,
+      unsafeAutoApprove: values.unsafeAutoApprove,
+      durationMs,
+    });
+  }
+  return TrialResultSchema.parse({
+    ...result,
+    exitCode: values.exitCode,
+    ...(result.status === "error" ? { errorCode: "docker_exit_nonzero" } : {}),
+    approvals: values.approvals,
+    unsafeAutoApprove: values.unsafeAutoApprove,
+    durationMs,
+  });
+}
+
+async function completeDockerTrial(options: {
+  readonly trial: TrialSpec;
+  readonly prepared: PreparedTrial;
+  readonly dockerOptions: z.output<typeof DockerOptionsSchema>;
+  readonly dockerArgs: readonly string[];
+  readonly containerName: string;
+  readonly outcome: DockerProcessResult;
+  readonly startedAt: number;
+  readonly clock: { now(): number };
+  readonly dependencies: TrialExecutionDependencies;
+}): Promise<TrialResult> {
+  let result = await readRunResult(
+    options.prepared,
+    Math.max(0, Math.floor(options.clock.now() - options.startedAt)),
+    options.dependencies,
+  );
+  const unsafeAutoApprove = options.trial.task.human?.unsafeAutoApprove === true;
+  if (options.outcome.timedOut) {
+    return TrialResultSchema.parse({
+      ...result,
+      status: "error",
+      exitCode: options.outcome.exitCode ?? 124,
+      errorCode: "trial_timeout",
+      unsafeAutoApprove,
+    });
+  }
+  const runId = result.runId;
+  if (
+    options.trial.task.human === undefined ||
+    runId === undefined ||
+    result.status !== "suspended"
+  ) {
+    return TrialResultSchema.parse({
+      ...result,
+      exitCode: options.outcome.exitCode ?? 1,
+      ...(result.status === "error" ? { errorCode: "docker_exit_nonzero" } : {}),
+      unsafeAutoApprove,
+    });
+  }
+  const human = await runDockerHuman({
+    script: options.trial.task.human,
+    prepared: options.prepared,
+    dependencies: options.dependencies,
+    runId,
+    initialStatus: result.status,
+    initialExitCode: options.outcome.exitCode ?? 1,
+    resumeProcess: () =>
+      runDocker({
+        options: options.dockerOptions,
+        prepared: options.prepared,
+        name: options.containerName,
+        args: [
+          ...options.dockerArgs,
+          "node",
+          "dist/bin.js",
+          "--config",
+          "/harness/harness.config.json",
+          "resume",
+          runId,
+        ],
+        input: "",
+      }),
+  });
+  result = await readRunResult(
+    options.prepared,
+    Math.max(0, Math.floor(options.clock.now() - options.startedAt)),
+    options.dependencies,
+  );
+  return finishDockerResult(
+    result,
+    Math.max(0, Math.floor(options.clock.now() - options.startedAt)),
+    {
+      exitCode: human.processExitCode,
+      approvals: human.approvals,
+      unsafeAutoApprove: human.unsafeAutoApprove,
+      maxResumesExceeded: human.maxResumesExceeded,
+      timedOut: human.processTimedOut,
+    },
+  );
+}
+
 /**
  * Executes trials in the configured harness image with network disabled by default.
  *
@@ -213,40 +416,15 @@ export class DockerExecutor implements TrialExecutor {
     }
     const prepared = await prepareTrial(trial, this.dependencies);
     const name = codeFromTrial(trial);
-    const args = [
-      "run",
-      "--rm",
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges:true",
-      "--read-only",
-      "--tmpfs",
-      `/tmp:size=${this.options.tmpfsSize},noexec,nosuid,nodev`,
-      "--user",
-      this.options.user,
-      "--memory",
-      this.options.memory,
-      "--cpus",
-      String(this.options.cpus),
-      "--pids-limit",
-      String(this.options.pidsLimit),
-      "--name",
+    const dockerArgs = dockerBaseArgs(
+      this.options,
       name,
-      "--network",
-      this.options.network,
-      "--mount",
-      `type=bind,source=${resolvePath(trial.workDir)},target=/harness`,
-      "--workdir",
-      "/harness",
-      "--env",
-      "HARNESS_DATA_DIR=/harness/data",
-      "--env",
-      "HARNESS_EVAL_KEY",
-      "--env",
-      `HARNESS_EVAL_METADATA=${evalMetadataForTrial(trial)}`,
-      ...telemetryEnvironmentArgs(this.dependencies.exportTelemetry),
-      this.options.image,
+      trial.workDir,
+      trial,
+      this.dependencies.exportTelemetry,
+    );
+    const args = [
+      ...dockerArgs,
       "node",
       "dist/bin.js",
       "--config",
@@ -255,34 +433,23 @@ export class DockerExecutor implements TrialExecutor {
       "--input",
       "-",
     ];
-    let outcome: DockerProcessResult;
-    try {
-      outcome = await runDockerProcess({
-        dockerPath: this.options.dockerPath,
-        args,
-        input: inputForTrial(trial),
-        timeoutMs: this.options.timeoutMs,
-        containerName: name,
-        env: { ...process.env, HARNESS_EVAL_KEY: prepared.key },
-      });
-    } catch {
-      throw new DockerExecutorError("docker_process_failed");
-    }
-    setTrialProcessOutput(prepared.dbPath, outcome.stdout ?? "", outcome.stderr ?? "");
-    const durationMs = Math.max(0, Math.floor(clock.now() - startedAt));
-    const storedResult = await readRunResult(prepared, durationMs, this.dependencies);
-    if (outcome.timedOut) {
-      return TrialResultSchema.parse({
-        ...storedResult,
-        status: "error",
-        exitCode: outcome.exitCode ?? 124,
-        errorCode: "trial_timeout",
-      });
-    }
-    return TrialResultSchema.parse({
-      ...storedResult,
-      exitCode: outcome.exitCode ?? 1,
-      ...(storedResult.status === "error" ? { errorCode: "docker_exit_nonzero" } : {}),
+    const outcome = await runDocker({
+      options: this.options,
+      prepared,
+      name,
+      args,
+      input: inputForTrial(trial),
+    });
+    return completeDockerTrial({
+      trial,
+      prepared,
+      dockerOptions: this.options,
+      dockerArgs,
+      containerName: name,
+      outcome,
+      startedAt,
+      clock,
+      dependencies: this.dependencies,
     });
   }
 }

@@ -7,6 +7,7 @@ import { logs } from "@opentelemetry/api-logs";
 import { createCanaries } from "../canary.js";
 import { configureEvalTelemetry } from "../execution-capture.js";
 import { defineSuite } from "../load.js";
+import { completedTrialResult } from "../../test-utils/trial-result.js";
 import type { GradeContext } from "./types.js";
 import { createNoCanaryLeakGrader } from "./no-canary-leak.js";
 
@@ -40,11 +41,10 @@ async function trial(fixtureContainsCanary = false): Promise<{
     fixtureDir,
     context: {
       result: {
-        status: "completed",
-        dbPath: join(dataDir, "harness.db"),
-        workspaceDir,
-        durationMs: 0,
-        usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+        ...completedTrialResult({
+          dbPath: join(dataDir, "harness.db"),
+          workspaceDir,
+        }),
       },
     },
   };

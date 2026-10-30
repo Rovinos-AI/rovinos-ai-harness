@@ -2,8 +2,8 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeClock, parseJson, SequentialIdGenerator } from "@rovinos/schemas";
-import type { ModelPort } from "@rovinos/core";
+import { FakeClock, Id, parseJson, SequentialIdGenerator } from "@rovinos/schemas";
+import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
 import { createRuntime } from "@rovinos/core";
 import type * as SandboxModule from "@rovinos/sandbox";
 import type { DockerProcessOptions, DockerProcessResult } from "@rovinos/sandbox";
@@ -12,6 +12,7 @@ import { defineSuite } from "../load.js";
 import { TrialConfigSchema } from "../executor.js";
 import { evalSuiteCode } from "../trial.js";
 import type { TrialSpec } from "../trial.js";
+import { createNoCanaryLeakGrader } from "../graders/no-canary-leak.js";
 import { trialLogSinks } from "../execution-capture.js";
 
 const mocks = vi.hoisted(() => ({ runDockerProcess: vi.fn() }));
@@ -31,10 +32,18 @@ async function createDirectory(): Promise<string> {
   return path;
 }
 
-function makeTrial(workDir: string): TrialSpec {
+function makeTrial(workDir: string, human?: unknown): TrialSpec {
   const suite = defineSuite({
     schemaVersion: 1,
-    tasks: [{ id: "docker_task", input: { goal: "A synthetic goal." }, graders: [], tags: [] }],
+    tasks: [
+      {
+        id: "docker_task",
+        input: { goal: "A synthetic goal." },
+        ...(human === undefined ? {} : { human }),
+        graders: [],
+        tags: [],
+      },
+    ],
   });
   const task = suite.tasks[0];
   if (task === undefined) {
@@ -70,7 +79,65 @@ function model(): ModelPort {
   };
 }
 
-async function createRun(workDir: string, key: string, run: boolean): Promise<void> {
+interface ApprovalScenario {
+  readonly model: ModelPort;
+  readonly tool: ToolPort;
+  readonly policy: PolicyPort;
+}
+
+function approvalScenario(): ApprovalScenario {
+  let modelCalls = 0;
+  return {
+    model: {
+      complete: () => {
+        const call = modelCalls === 0;
+        modelCalls += 1;
+        return Promise.resolve({
+          provider: "synthetic",
+          model: "synthetic",
+          parts: call
+            ? [
+                {
+                  type: "tool_call" as const,
+                  callId: Id.parse("00000000000000000000000001"),
+                  toolId: "fake.echo",
+                  args: { value: "synthetic" },
+                },
+              ]
+            : [{ type: "text" as const, text: "done" }],
+          providerBlobs: null,
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: call ? "tool_calls" : "stop",
+          latencyMs: 0,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+        });
+      },
+    },
+    tool: {
+      prepare: (call) => Promise.resolve(call),
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    },
+    policy: {
+      version: "synthetic",
+      decide: () => ({
+        decision: "ask",
+        ruleId: "eval_approval",
+        reason: "synthetic_approval",
+        editable: [],
+      }),
+    },
+  };
+}
+
+async function createRun(
+  workDir: string,
+  key: string,
+  run: boolean,
+  scenario?: ApprovalScenario,
+): Promise<void> {
   const config = parseJson(
     TrialConfigSchema,
     await readFile(join(workDir, "harness.config.json"), "utf8"),
@@ -91,13 +158,20 @@ async function createRun(workDir: string, key: string, run: boolean): Promise<vo
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000),
       ids: new SequentialIdGenerator(),
-      model: model(),
+      model: scenario?.model ?? model(),
+      ...(scenario === undefined ? {} : { tool: scenario.tool, policy: scenario.policy }),
       secretResolver: { resolve: () => Promise.resolve({ reveal: () => key }) },
     },
   );
   try {
     if (run) {
       await runtime.run({ goal: "A synthetic goal." });
+    } else {
+      const summary = (await runtime.store.listRuns({ limit: 1 })).runs[0];
+      if (summary === undefined) {
+        throw new Error("synthetic_run_missing");
+      }
+      await runtime.resume(summary.runId);
     }
   } finally {
     await runtime.close();
@@ -206,6 +280,133 @@ describe("DockerExecutor", () => {
     expect(args).toContain("--env");
     expect(args).toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
     expect(JSON.stringify(args)).not.toContain("collector.synthetic");
+  });
+
+  it("resolves and resumes approvals through the simulated human", async () => {
+    const root = await createDirectory();
+    const workDir = join(root, "trial");
+    const scenario = approvalScenario();
+    const invocations: DockerProcessOptions[] = [];
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      invocations.push(options);
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      await createRun(workDir, key, !options.args.includes("resume"), scenario);
+      return {
+        exitCode: options.args.includes("resume") ? 0 : 1,
+        timedOut: false,
+      } satisfies DockerProcessResult;
+    });
+
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, {
+        rules: [],
+        default: "approve",
+        unsafeAutoApprove: true,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      approvals: { approved: 1, denied: 0, edited: 0 },
+      unsafeAutoApprove: true,
+    });
+    expect(invocations).toHaveLength(2);
+    expect(invocations[1]?.args).toContain("resume");
+    expect(invocations[1]?.args.at(-1)).toBe(result.runId);
+    expect(invocations[1]?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+    expect(invocations[1]?.args).toContain(
+      `HARNESS_EVAL_METADATA=${JSON.stringify({
+        suite: evalSuiteCode(makeTrial(workDir, {
+          rules: [],
+          default: "approve",
+          unsafeAutoApprove: true,
+        }).suite),
+        task: "docker_task",
+        trial: 0,
+      })}`,
+    );
+  });
+
+  it("does not pass telemetry export settings to a resume process by default", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const scenario = approvalScenario();
+    const invocations: DockerProcessOptions[] = [];
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.synthetic:4318");
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      invocations.push(options);
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      await createRun(workDir, key, !options.args.includes("resume"), scenario);
+      return { exitCode: 0, timedOut: false } satisfies DockerProcessResult;
+    });
+
+    await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, { rules: [], default: "approve", unsafeAutoApprove: true }),
+    );
+
+    expect(invocations).toHaveLength(2);
+    expect(invocations[1]?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+    expect(JSON.stringify(invocations[1]?.args)).not.toContain("collector.synthetic");
+  });
+
+  it("includes resumed Docker output in the no-canary leak scan", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const scenario = approvalScenario();
+    const canary = "synthetic-resume-output@example.test";
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      const isResume = options.args.includes("resume");
+      await createRun(workDir, key, !isResume, scenario);
+      return {
+        exitCode: 0,
+        timedOut: false,
+        stdout: isResume ? canary : "",
+        stderr: "",
+      } satisfies DockerProcessResult;
+    });
+
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, { rules: [], default: "approve", unsafeAutoApprove: true }),
+    );
+    const grade = await createNoCanaryLeakGrader({ canaries: [canary] }).grade({ result });
+
+    expect(trialLogSinks(result.dbPath)).toContainEqual({ name: "stdout", content: canary });
+    expect(grade.codes).toContain("canary_in_logs");
+  });
+
+  it("reports a timeout if the Docker resume process times out", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const scenario = approvalScenario();
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      if (options.args.includes("resume")) {
+        return { exitCode: null, timedOut: true } satisfies DockerProcessResult;
+      }
+      await createRun(workDir, key, true, scenario);
+      return { exitCode: 1, timedOut: false } satisfies DockerProcessResult;
+    });
+
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, { rules: [], default: "deny", maxResumes: 1 }),
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      errorCode: "trial_timeout",
+      exitCode: 124,
+      approvals: { denied: 1 },
+    });
   });
 
   it("returns a safe error when Docker exits without creating a run", async () => {

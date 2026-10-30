@@ -1,0 +1,78 @@
+{
+  "run_created": {
+    "v": 1,
+    "hash": "923c54cc1e1ebc89b85349c09aebfc2bf4615dde680db5af6cac51a5a96c88e1"
+  },
+  "run_input": {
+    "v": 1,
+    "hash": "400790306c6565dd2ad6914582aa702b651d08778bc95ce81c91e2cd32ee6016"
+  },
+  "run_status_changed": {
+    "v": 1,
+    "hash": "7b9ebe815591cec2c0bb221bb10a4e1e33f61a0a7bd0e219a79372841c88c2de"
+  },
+  "model_request": {
+    "v": 2,
+    "hash": "c6785091806ae0411483223dd0374aff73001e83d3c9a4857f64cbc2dc8efb94"
+  },
+  "model_response": {
+    "v": 1,
+    "hash": "f2cc9dd3814a3e40e60e224d9a5ca9d5f1b6dc9c69eb7e9f1860d7f3c1184c4e"
+  },
+  "tool_intent": {
+    "v": 1,
+    "hash": "d352291d098d93d436b644eb00e465399940e93239ac9f8cd3589ce9adbdd1e8"
+  },
+  "tool_execution_started": {
+    "v": 1,
+    "hash": "56737a1f38d86b1fe5f19d4087cdf46e0b7077ad9be762c61feded61094f7f01"
+  },
+  "tool_result": {
+    "v": 1,
+    "hash": "5fcc686f4e961130d0dd87515e99f47362a30ec9a65727f8d1c1b6841c544a09"
+  },
+  "approval_requested": {
+    "v": 1,
+    "hash": "ed0ade6d5e6b4d2000a86ce4e4fa5c60a84cd192b0555b6423738e0c806bb1e4"
+  },
+  "approval_resolved": {
+    "v": 2,
+    "hash": "11efc3899059b3259c5712330af357af8df4c632a9a836597843369bf6eb218b"
+  },
+  "input_requested": {
+    "v": 1,
+    "hash": "e75d98d7f9a767c2cceeb2ae59c1093b6afe9b9094fd29a742e11665976d396e"
+  },
+  "input_resolved": {
+    "v": 1,
+    "hash": "328b6e56531df3be6874fb98feaa7eaffc9b782cd0cc1f3dcdf261c538510173"
+  },
+  "app_content": {
+    "v": 1,
+    "hash": "e6d21f4cdd6aa520ae863c9f85b5072ab1cd04b04c4cfdbfe8afd33bf860b1e1"
+  },
+  "checkpoint_written": {
+    "v": 1,
+    "hash": "f0cefb32012052e6022351db18bf089d535d789a9ae6de6103cea6b1876d5efd"
+  },
+  "context_compacted": {
+    "v": 1,
+    "hash": "af0e9c3cd89e21f646add5910be94813480c2c1ba8520611bf6d9f9e29065a62"
+  },
+  "pii_action": {
+    "v": 1,
+    "hash": "5f6b228b6a636a09b3111c469c3886368d8c66e175632e9b67b3327a03d14a96"
+  },
+  "budget_exceeded": {
+    "v": 1,
+    "hash": "4c969de3f925ad9dc097f920fd04fa6c551610762ff45d1ecb9e25c70d391221"
+  },
+  "subagent_spawned": {
+    "v": 1,
+    "hash": "8d38af22e98b52394b51951eee593e4a3cd0672124fab2536636fdc13e4e2454"
+  },
+  "subagent_completed": {
+    "v": 1,
+    "hash": "2ebf7314da3b3c7c4daef018b3e195d2769f81ef318ed97d3333fd04e79d858b"
+  }
+}

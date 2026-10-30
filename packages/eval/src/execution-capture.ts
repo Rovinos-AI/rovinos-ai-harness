@@ -154,6 +154,18 @@ export function setTrialProcessOutput(dbPath: string, stdout: string, stderr: st
   ]);
 }
 
+/** Append process output from an additional Docker invocation for the same trial. */
+export function appendTrialProcessOutput(dbPath: string, stdout: string, stderr: string): void {
+  const previous = logsByDbPath.get(dbPath) ?? [
+    { name: "stdout", content: "" },
+    { name: "stderr", content: "" },
+  ];
+  logsByDbPath.set(dbPath, [
+    { name: "stdout", content: `${previous[0]?.content ?? ""}${stdout}` },
+    { name: "stderr", content: `${previous[1]?.content ?? ""}${stderr}` },
+  ]);
+}
+
 /** Return captured output sinks for a trial without exposing them in result serialization. */
 export function trialLogSinks(dbPath: string): readonly CanarySink[] {
   return logsByDbPath.get(dbPath) ?? [];

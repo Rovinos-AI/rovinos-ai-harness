@@ -100,6 +100,104 @@ function fixture(includeResult = true) {
   return { resolved, intent };
 }
 
+function editedFixture(editedArgs: JsonValue) {
+  const approvalId = Id.parse("00000000000000000000000004");
+  const editedIntent = EventSchema.parse({
+    runId,
+    seq: 1,
+    ts: 2,
+    v: 1,
+    traceId,
+    spanId,
+    segmentId,
+    type: "tool_intent",
+    callId,
+    toolId: "test.lookup",
+    idempotent: false,
+    policyDecision: "ask",
+    argsHash: argsHash(args),
+    args,
+  });
+  const events: Event[] = [
+    EventSchema.parse({
+      runId,
+      seq: 0,
+      ts: 1,
+      v: 1,
+      traceId,
+      spanId,
+      segmentId,
+      type: "run_created",
+      configHash: "c".repeat(64),
+      policyVersion: "test",
+    }),
+    editedIntent,
+    EventSchema.parse({
+      runId,
+      seq: 2,
+      ts: 3,
+      v: 1,
+      traceId,
+      spanId,
+      segmentId,
+      type: "approval_requested",
+      approvalId,
+      callId,
+      payload: {
+        payloadVersion: 1,
+        kind: "tool_call",
+        callId,
+        toolId: "test.lookup",
+        args,
+        ruleId: "test.ask",
+        reason: "approval_required",
+        summary: "Synthetic approval",
+        ui: {
+          resourceUri: "ui://harness/approval/v1",
+          fallbackText: "Synthetic approval",
+        },
+        editableFields: ["/query"],
+      },
+    }),
+    EventSchema.parse({
+      runId,
+      seq: 3,
+      ts: 4,
+      v: 1,
+      traceId,
+      spanId,
+      segmentId,
+      type: "approval_resolved",
+      approvalId,
+      decision: "edit",
+      decidedBy: "human",
+      approverId: "cli.synthetic",
+      waitMs: 1,
+      edits: editedArgs,
+    }),
+    EventSchema.parse({
+      runId,
+      seq: 4,
+      ts: 5,
+      v: 1,
+      traceId,
+      spanId,
+      segmentId,
+      type: "tool_result",
+      callId,
+      toolId: "test.lookup",
+      outcome: "ok",
+      latencyMs: 1,
+      executedArgsHash: argsHash(editedArgs),
+      result: { found: true },
+    }),
+  ];
+  return ResolvedRunSchema.parse({
+    rootRunId: runId,
+    runs: [{ runId, role: "root", events }],
+  });
+}
+
 describe("ReplayToolPort", () => {
   it("returns recorded metadata and result without executing a registered tool", async () => {
     const { resolved } = fixture();
@@ -150,6 +248,25 @@ describe("ReplayToolPort", () => {
     });
     expect("expectedHash" in error).toBe(false);
     expect("actualHash" in error).toBe(false);
+  });
+
+  it("serves the recorded result for arguments edited by the recorded approval", async () => {
+    const editedArgs: JsonValue = { query: "approved" };
+    const port = new ReplayToolPort(editedFixture(editedArgs));
+    const context = { runId, signal: new AbortController().signal };
+
+    expect(port.describe(Code.parse("test.lookup"), editedArgs)).toMatchObject({
+      idempotent: false,
+    });
+    await expect(
+      port.execute({ callId, toolId: Code.parse("test.lookup"), args: editedArgs }, context),
+    ).resolves.toEqual({ outcome: "ok", result: { found: true } });
+    await expect(
+      port.execute(
+        { callId, toolId: Code.parse("test.lookup"), args: { query: "unrecorded" } },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "replay_divergence" });
   });
 
   it("reports an interrupted intent without a result", async () => {

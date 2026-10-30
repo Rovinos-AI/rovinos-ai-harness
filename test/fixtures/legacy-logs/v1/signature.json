@@ -1,0 +1,157 @@
+{
+  "containsRealData": false,
+  "schemaVersion": 1,
+  "signature": [
+    {
+      "configHash": "9ee17d441e9fcbe02bb831d9a091dfa94bb1c2bd21c2c81528dba16957676255",
+      "kind": "run_created"
+    },
+    {
+      "kind": "run_input"
+    },
+    {
+      "from": "pending",
+      "kind": "run_status",
+      "reason": "start",
+      "to": "running"
+    },
+    {
+      "kind": "model_request"
+    },
+    {
+      "finishReason": "tool_calls",
+      "inputTokens": 1,
+      "kind": "model_call",
+      "latencyMs": 1,
+      "model": "script",
+      "outputTokens": 1,
+      "provider": "synthetic",
+      "repairAttempts": 0,
+      "schemaValid": true
+    },
+    {
+      "kind": "policy_decision",
+      "policyDecision": "allow",
+      "ruleId": "synthetic.allow",
+      "toolId": "synthetic.idempotent"
+    },
+    {
+      "kind": "tool_call",
+      "latencyMs": 0,
+      "outcome": "ok",
+      "toolId": "synthetic.idempotent"
+    },
+    {
+      "kind": "model_request"
+    },
+    {
+      "finishReason": "tool_calls",
+      "inputTokens": 1,
+      "kind": "model_call",
+      "latencyMs": 1,
+      "model": "script",
+      "outputTokens": 1,
+      "provider": "synthetic",
+      "repairAttempts": 0,
+      "schemaValid": true
+    },
+    {
+      "kind": "policy_decision",
+      "policyDecision": "ask",
+      "ruleId": "synthetic.ask",
+      "toolId": "synthetic.editable"
+    },
+    {
+      "kind": "approval_requested"
+    },
+    {
+      "from": "running",
+      "kind": "run_status",
+      "reason": "awaiting_approval",
+      "to": "suspended"
+    },
+    {
+      "atSeq": 12,
+      "hasWorkspaceRef": true,
+      "kind": "checkpoint"
+    },
+    {
+      "decidedBy": "human",
+      "decision": "edit",
+      "kind": "approval_wait",
+      "waitMs": 0
+    },
+    {
+      "from": "suspended",
+      "kind": "run_status",
+      "reason": "resumed",
+      "to": "running"
+    },
+    {
+      "errorCode": "approval_edit_requires_approval",
+      "kind": "tool_call",
+      "latencyMs": 0,
+      "outcome": "denied",
+      "toolId": "synthetic.editable"
+    },
+    {
+      "from": "running",
+      "kind": "run_status",
+      "reason": "interrupted",
+      "to": "suspended"
+    },
+    {
+      "from": "suspended",
+      "kind": "run_status",
+      "reason": "resumed",
+      "to": "running"
+    },
+    {
+      "kind": "model_request"
+    },
+    {
+      "finishReason": "tool_calls",
+      "inputTokens": 1,
+      "kind": "model_call",
+      "latencyMs": 1,
+      "model": "script",
+      "outputTokens": 1,
+      "provider": "synthetic",
+      "repairAttempts": 0,
+      "schemaValid": true
+    },
+    {
+      "kind": "policy_decision",
+      "policyDecision": "deny",
+      "ruleId": "synthetic.deny",
+      "toolId": "synthetic.denied"
+    },
+    {
+      "errorCode": "policy_denied",
+      "kind": "tool_call",
+      "latencyMs": 0,
+      "outcome": "denied",
+      "toolId": "synthetic.denied"
+    },
+    {
+      "kind": "model_request"
+    },
+    {
+      "finishReason": "stop",
+      "inputTokens": 1,
+      "kind": "model_call",
+      "latencyMs": 1,
+      "model": "script",
+      "outputTokens": 1,
+      "provider": "synthetic",
+      "repairAttempts": 0,
+      "schemaValid": true
+    },
+    {
+      "from": "running",
+      "kind": "run_status",
+      "reason": "final_answer",
+      "to": "completed"
+    }
+  ]
+}

@@ -3064,6 +3064,7 @@ __metadata:
   dependencies:
     "@anthropic-ai/sdk": "npm:1.1.0"
     "@aws-sdk/client-bedrock-runtime": "npm:3.1156.0"
+    "@azure/identity": "npm:4.14.0"
     "@google/genai": "npm:2.31.0"
     "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/schemas": "workspace:^"

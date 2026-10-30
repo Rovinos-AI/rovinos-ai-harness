@@ -20,6 +20,13 @@ schema export as `module-path#exportName`. Relative suite paths for fixture
 directories, policy files, expected files, and schema modules resolve against the
 suite file's directory.
 
+An `llm_judge` rubric is a YAML list of uniquely identified, positively weighted
+criteria, each with a description. The grader sends a bounded view derived from
+tokenized run events through the configured model gateway with a strict verdict
+schema; it stores only the weighted score, codes, vote counts, and judge usage.
+The optional `votes: 3` setting enables majority voting. Configure the grader with
+a gateway that uses the trial's cassette mode to record or replay judge calls.
+
 TypeScript suites are loaded with Node's built-in TypeScript type stripping,
 available in the pinned Node 26 runtime; the eval package does not need a separate
 `tsx` dependency. Type stripping only supports erasable TypeScript syntax, so

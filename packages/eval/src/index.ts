@@ -4,11 +4,16 @@ export {
   EvalSuiteSchema,
   EvalTaskSchema,
   GraderSpecSchema,
+  JudgeCriterionSchema,
+  JudgeRubricSchema,
+  LlmJudgeGraderSpecSchema,
   HumanScriptSchema,
   TrajectoryAssertionSchema,
   type EvalSuite,
   type EvalTask,
   type GraderSpec,
+  type JudgeCriterion,
+  type LlmJudgeGraderSpec,
   type HumanScript,
   type TrajectoryAssertion,
 } from "./schema.js";
@@ -28,7 +33,9 @@ export {
   TrialResultSchema,
   TrialSpecSchema,
   TrialUsageSchema,
+  ApprovalCountsSchema,
   type EvalVariant,
+  type ApprovalCounts,
   type TrialResult,
   type TrialSpec,
   evalSuiteCode,
@@ -44,6 +51,7 @@ export {
   type TrialExecutionDependencies,
 } from "./executor.js";
 export { InProcessExecutor, type InProcessExecutorOptions } from "./executors/inprocess.js";
+export { SimulatedHuman, SimulatedHumanError, type SimulatedHumanRunResult } from "./human.js";
 export {
   DockerExecutor,
   DockerExecutorError,
@@ -53,6 +61,10 @@ export {
 export {
   createFileDiffGrader,
   createNoCanaryLeakGrader,
+  buildJudgeView,
+  createLlmJudgeGrader,
+  createJudgeVerdictSchema,
+  JudgeViewSchema,
   createSchemaValidGrader,
   createTestCommandGrader,
   GradeResultSchema,
@@ -61,7 +73,17 @@ export {
   type GradeResult,
   type Grader,
   type NoCanaryLeakGraderOptions,
+  type JudgeView,
+  type LlmJudgeGraderOptions,
 } from "./graders/index.js";
+export {
+  evaluateTrajectory,
+  TrajectoryAssertionResultSchema,
+  TrajectoryContextSchema,
+  TrajectoryResultSchema,
+  type TrajectoryContext,
+  type TrajectoryResult,
+} from "./trajectory.js";
 export {
   EvalRunnerError,
   runEval,

@@ -451,6 +451,7 @@ describe("snapshot content encoding", () => {
     const snapshot = {
       snapshotId,
       runId,
+      v: 1,
       atSeq: 1,
       createdAt: 12,
       traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
@@ -719,6 +720,7 @@ describe("SqliteEventStore", () => {
     const snapshot = {
       snapshotId,
       runId,
+      v: 1,
       atSeq: 1,
       createdAt: 12,
       traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
@@ -853,6 +855,7 @@ describe("SqliteEventStore", () => {
     const snapshot = {
       snapshotId,
       runId,
+      v: 1,
       atSeq: 1,
       createdAt: 12,
       traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,

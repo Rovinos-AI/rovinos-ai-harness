@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
-import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
-import { evalSuiteCode, TrialResultSchema, type TrialResult, type TrialSpec } from "../trial.js";
+import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/core";
+import type { Id } from "@rovinos/schemas";
+import { TrialResultSchema } from "../trial.js";
+import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
+import { evalSuiteCode } from "../trial.js";
 import {
   captureProcessOutput,
   configureEvalTelemetry,
   setTrialProcessOutput,
 } from "../execution-capture.js";
+import { SimulatedHuman } from "../human.js";
+import { createProviderCaptureAdapter } from "../trajectory.js";
 
 /** Factories for isolated model, tool, and policy ports. */
 export interface InProcessExecutorOptions extends TrialExecutionDependencies {
@@ -28,6 +33,80 @@ function resultStatus(status: string): TrialResult["status"] {
     return status;
   }
   return "error";
+}
+
+type RuntimeRunResult = Awaited<ReturnType<Runtime["run"]>>;
+
+interface ExecutedTrialRun {
+  readonly run: RuntimeRunResult;
+  readonly runId?: Id;
+  readonly human?: SimulatedHuman;
+  readonly maxResumesExceeded: boolean;
+}
+
+async function executeTrialRun(runtime: Runtime, trial: TrialSpec): Promise<ExecutedTrialRun> {
+  const goal =
+    trial.task.input.metadata === undefined
+      ? { goal: trial.task.input.goal }
+      : { goal: trial.task.input.goal, metadata: trial.task.input.metadata };
+  const hasContextStrategy =
+    trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
+  let run = await runtime.run(goal, {
+    ...(hasContextStrategy ? { role: "eval" } : {}),
+    evalMetadata: {
+      suite: evalSuiteCode(trial.suite),
+      task: trial.task.id,
+      trial: trial.trialIndex,
+    },
+  });
+  const runId = run.events[0]?.runId;
+  const human =
+    trial.task.human === undefined ? undefined : new SimulatedHuman(trial.task.human, runtime);
+  if (human === undefined || runId === undefined) {
+    return {
+      run,
+      ...(runId === undefined ? {} : { runId }),
+      ...(human === undefined ? {} : { human }),
+      maxResumesExceeded: false,
+    };
+  }
+  const humanResult = await human.runUntilSettled(runId, run.status, async () => {
+    run = await runtime.resume(runId);
+    return run.status;
+  });
+  return {
+    run,
+    runId,
+    human,
+    maxResumesExceeded: humanResult.maxResumesExceeded,
+  };
+}
+
+function trialResult(
+  prepared: Awaited<ReturnType<typeof prepareTrial>>,
+  startedAt: number,
+  clock: Clock,
+  executed: ExecutedTrialRun,
+): TrialResult {
+  const { run, human, maxResumesExceeded } = executed;
+  let errorCode: string | undefined;
+  if (maxResumesExceeded) {
+    errorCode = "human_max_resumes_exceeded";
+  } else if (run.status === "pending" || run.status === "running") {
+    errorCode = "trial_unsettled";
+  }
+  return TrialResultSchema.parse({
+    status: maxResumesExceeded ? "error" : resultStatus(run.status),
+    ...(executed.runId === undefined ? {} : { runId: executed.runId }),
+    dbPath: prepared.dbPath,
+    workspaceDir: prepared.workspaceDir,
+    durationMs: Math.max(0, Math.floor(clock.now() - startedAt)),
+    usage: run.state.usage,
+    approvals: human?.counts ?? { approved: 0, denied: 0, edited: 0 },
+    unsafeAutoApprove: human?.unsafeAutoApprove ?? false,
+    exitCode: run.status === "completed" && !maxResumesExceeded ? 0 : 1,
+    ...(errorCode === undefined ? {} : { errorCode }),
+  });
 }
 
 /**
@@ -49,7 +128,7 @@ export class InProcessExecutor implements TrialExecutor {
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000 + trial.seed),
       ids: new SequentialIdGenerator(),
-      model: this.options.model(trial),
+      model: createProviderCaptureAdapter(this.options.model(trial), trial.task.canaries ?? []),
       ...(this.options.tool === undefined ? {} : { tool: this.options.tool(trial) }),
       ...(this.options.policy === undefined ? {} : { policy: this.options.policy(trial) }),
       secretResolver: {
@@ -64,43 +143,17 @@ export class InProcessExecutor implements TrialExecutor {
 
     let result: TrialResult;
     try {
-      const goal =
-        trial.task.input.metadata === undefined
-          ? { goal: trial.task.input.goal }
-          : { goal: trial.task.input.goal, metadata: trial.task.input.metadata };
-      const hasContextStrategy =
-        trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
       const captured = await captureProcessOutput(
         () => {
-          return runtime.run(goal, {
-            ...(hasContextStrategy ? { role: "eval" } : {}),
-            evalMetadata: {
-              suite: evalSuiteCode(trial.suite),
-              task: trial.task.id,
-              trial: trial.trialIndex,
-            },
-          });
+          return executeTrialRun(runtime, trial).then((executed) =>
+            trialResult(prepared, startedAt, clock, executed),
+          );
         },
         (stdout, stderr) => {
           setTrialProcessOutput(prepared.dbPath, stdout, stderr);
         },
       );
-      const run = captured.result;
-      const runId = run.events[0]?.runId;
-      const durationMs = Math.max(0, Math.floor(clock.now() - startedAt));
-      const trialResult: TrialResult = {
-        status: resultStatus(run.status),
-        ...(runId === undefined ? {} : { runId }),
-        dbPath: prepared.dbPath,
-        workspaceDir: prepared.workspaceDir,
-        durationMs,
-        usage: run.state.usage,
-        exitCode: run.status === "completed" ? 0 : 1,
-        ...(run.status === "pending" || run.status === "running"
-          ? { errorCode: "trial_unsettled" }
-          : {}),
-      };
-      result = TrialResultSchema.parse(trialResult);
+      result = captured.result;
     } finally {
       await runtime.close();
     }
