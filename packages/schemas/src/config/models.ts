@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Models retry configuration is owned by task 14.12.
 // Models provider and routing configuration is owned by tasks 14.13 and 14.19.
+// OpenAI-compatible provider quirks are owned by task 14.6.
 // Models pricing configuration is owned by task 14.14.
 import { z } from "zod";
 import { CapabilitiesSchema } from "../capabilities.js";
@@ -68,6 +69,14 @@ function validateBedrockProvider(
   }
 }
 
+/** Provider request-mapping quirks for OpenAI-compatible endpoints. */
+export const ModelProviderQuirksSchema = z
+  .object({
+    useMaxTokens: z.boolean().optional(),
+    supportsStrictSchema: z.boolean().optional(),
+  })
+  .strict();
+
 export const ModelProviderConfigSchema = z
   .object({
     id: Code,
@@ -80,6 +89,7 @@ export const ModelProviderConfigSchema = z
     requestsPerMinute: z.number().int().positive().optional(),
     streaming: z.boolean().default(true),
     capabilities: CapabilitiesSchema.partial().strict().optional(),
+    quirks: ModelProviderQuirksSchema.optional(),
     trust: z.enum(["hosted", "local"]).default("hosted"),
   })
   .strict()
@@ -194,3 +204,5 @@ export type ModelsConfig = z.infer<typeof ModelsConfigSchema>;
 export type ModelRoutingConfig = z.infer<typeof ModelRoutingConfigSchema>;
 /** Inferred provider adapter configuration. */
 export type ModelProviderConfig = z.infer<typeof ModelProviderConfigSchema>;
+/** Inferred request-mapping quirks for an OpenAI-compatible provider. */
+export type ModelProviderQuirks = z.infer<typeof ModelProviderQuirksSchema>;

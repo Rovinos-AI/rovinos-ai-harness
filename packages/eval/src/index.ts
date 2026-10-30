@@ -40,6 +40,15 @@ export {
   type DockerExecutorOptions,
 } from "./executors/docker.js";
 export {
+  createFileDiffGrader,
+  createSchemaValidGrader,
+  createTestCommandGrader,
+  GradeResultSchema,
+  type GradeContext,
+  type GradeResult,
+  type Grader,
+} from "./graders/index.js";
+export {
   EvalRunnerError,
   runEval,
   type EvalRunnerErrorCode,

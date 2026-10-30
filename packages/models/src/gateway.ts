@@ -204,7 +204,7 @@ export class ModelGateway {
           const sanitizedRequest = await prepareProviderRequest({
             request,
             provider: adapter.provider,
-            trust: this.dependencies.providerTrust?.[adapter.provider] ?? "hosted",
+            trust: this.dependencies.providerTrust?.[adapter.provider] ?? adapter.trust ?? "hosted",
             context,
             sanitizer: this.dependencies.requestSanitizer,
             signal,

@@ -257,4 +257,57 @@ describe("ModelsConfigSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("applies the HTTP trust rule to OpenAI-compatible provider URL combinations", () => {
+    const cases: readonly {
+      readonly baseUrl: string;
+      readonly trust?: "local";
+      readonly accepted: boolean;
+    }[] = [
+      { baseUrl: "http://localhost:11434", accepted: true },
+      { baseUrl: "http://127.0.0.1:11434", accepted: true },
+      { baseUrl: "http://[::1]:11434", accepted: true },
+      { baseUrl: "https://model.example.test/v1", accepted: true },
+      { baseUrl: "http://model.example.test/v1", accepted: false },
+      { baseUrl: "http://192.0.2.10:11434", accepted: false },
+      { baseUrl: "http://model.example.test/v1", trust: "local", accepted: true },
+    ];
+
+    for (const { baseUrl, trust, accepted } of cases) {
+      const result = ModelProviderConfigSchema.safeParse({
+        id: "local-model",
+        kind: "openai_compatible",
+        baseUrl,
+        ...(trust === undefined ? {} : { trust }),
+      });
+      expect(result.success, `${baseUrl} with trust ${trust ?? "default"}`).toBe(accepted);
+    }
+  });
+
+  it("validates and defaults compatible-endpoint request quirks", () => {
+    expect(
+      ModelProviderConfigSchema.parse({
+        id: "local-model",
+        kind: "openai_compatible",
+        baseUrl: "http://localhost:11434",
+        quirks: {},
+      }).quirks,
+    ).toEqual({});
+    expect(
+      ModelProviderConfigSchema.parse({
+        id: "local-model",
+        kind: "openai_compatible",
+        baseUrl: "http://localhost:11434",
+        quirks: { useMaxTokens: true, supportsStrictSchema: false },
+      }).quirks,
+    ).toEqual({ useMaxTokens: true, supportsStrictSchema: false });
+    expect(() =>
+      ModelProviderConfigSchema.parse({
+        id: "local-model",
+        kind: "openai_compatible",
+        baseUrl: "http://localhost:11434",
+        quirks: { unknown: true },
+      }),
+    ).toThrow();
+  });
 });

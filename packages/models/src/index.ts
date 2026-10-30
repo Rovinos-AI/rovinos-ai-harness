@@ -77,6 +77,10 @@ export {
   type ProviderResult,
 } from "./types.js";
 export { OpenAIAdapter, type OpenAIAdapterOptions, type OpenAISecret } from "./providers/openai.js";
+export {
+  OpenAICompatibleAdapter,
+  type OpenAICompatibleAdapterOptions,
+} from "./providers/openai-compatible.js";
 export { VertexAdapter, type VertexAdapterOptions } from "./providers/vertex.js";
 export {
   JsonSchemaError,
@@ -108,3 +112,4 @@ export {
   type ValueTransform,
   type ValueTransformResult,
 } from "./enforce/index.js";
+export { extractJson, type ExtractJsonResult } from "./enforce/extract-json.js";
