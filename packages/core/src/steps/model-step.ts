@@ -11,7 +11,10 @@ import {
   type ModelRequest,
   type ToolSpec,
 } from "@rovinos/schemas";
-import { requestHash } from "@rovinos/models";
+import {
+  modelRequestParametersHash,
+  storedModelRequestHash,
+} from "@rovinos/schemas/request-signature";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import type { EventPartial, RunRecorder } from "../recorder.js";
@@ -119,16 +122,18 @@ function requestParts(
     ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
     ...(role === undefined ? {} : { role }),
   });
+  const requestParametersHash = modelRequestParametersHash(modelRequest);
   return {
     modelRequest,
     requestPartial: {
       type: "model_request",
-      v: 1,
+      v: 2,
       requestId,
       provider: options.provider ?? "unknown",
       model: options.modelName ?? "unknown",
       messages: options.messages,
-      requestHash: requestHash(modelRequest),
+      requestHash: storedModelRequestHash(modelRequest.messages, requestParametersHash),
+      requestParametersHash,
       ...(role === undefined ? {} : { role }),
     },
   };

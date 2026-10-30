@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  modelRequestParametersHash,
+  storedModelRequestHash,
+} from "@rovinos/schemas/request-signature";
 import { Sha256Hex, type Code, type Event, type ModelRequest } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import type { ProviderContext } from "../types.js";
@@ -166,19 +170,32 @@ describe("EventLogCassetteStore", () => {
     ]);
   });
 
-  it("detects divergence in full request fields", async () => {
+  it.each([false, true])("detects divergence in full request fields (v2: %s)", async (v2) => {
     const events = [
       requestEvent(0, requestId, "hello", {
         role: "assistant",
       }),
       responseEvent(1, requestId, "first"),
     ] satisfies Event[];
-    const store = new EventLogCassetteStore(events);
+    const requestParametersHash = modelRequestParametersHash(request);
+    const store = new EventLogCassetteStore(
+      events.map((event) =>
+        v2 && event.type === "model_request"
+          ? {
+              ...event,
+              v: 2,
+              requestParametersHash,
+              requestHash: storedModelRequestHash(request.messages, requestParametersHash),
+            }
+          : event,
+      ),
+    );
     const variants: readonly ModelRequest[] = [
       { ...request, tools: [{ toolId: "lookup", description: "lookup", inputSchema: {} }] },
       { ...request, toolChoice: "none" },
       { ...request, maxOutputTokens: 10 },
       { ...request, temperature: 0.2 },
+      { ...request, stablePrefixMessages: 1 },
       {
         ...request,
         output: {

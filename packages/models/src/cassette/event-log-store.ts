@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  modelRequestParametersHash,
+  storedModelRequestHash,
+} from "@rovinos/schemas/request-signature";
 import { type Event, type ModelRequest, type Sha256Hex } from "@rovinos/schemas";
 import { ProviderResultSchema } from "../types.js";
 import {
@@ -13,6 +17,7 @@ import { requestHash } from "./hash.js";
 interface EventLogPair {
   readonly requestHash: Sha256Hex;
   readonly request: ModelRequest;
+  readonly tokenizedSignature: boolean;
   readonly response: ReturnType<typeof ProviderResultSchema.parse>;
 }
 
@@ -48,6 +53,9 @@ function collectPairs(events: readonly Event[]): EventLogPair[] {
     pairs.push({
       requestHash: recordedHash,
       request,
+      tokenizedSignature:
+        pending.event.requestParametersHash !== undefined &&
+        pending.event.requestParametersHash !== null,
       response: ProviderResultSchema.parse({
         parts: event.content,
         usage: {
@@ -95,7 +103,9 @@ export class EventLogCassetteStore implements CassetteStore {
       ...request,
       model: { ...request.model, provider: pair.request.model.provider },
     };
-    const incomingHash = requestHash(routedRequest);
+    const incomingHash = pair.tokenizedSignature
+      ? storedModelRequestHash(routedRequest.messages, modelRequestParametersHash(routedRequest))
+      : requestHash(routedRequest);
     if (pair.requestHash !== incomingHash) {
       return Promise.reject(new CassetteDivergenceError(pair.requestHash, incomingHash));
     }

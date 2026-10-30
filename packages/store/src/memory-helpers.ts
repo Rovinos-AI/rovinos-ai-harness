@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event, type Event as StoredEvent, type Id, type NewEvent } from "@rovinos/schemas";
+import {
+  ContractError,
+  upcastEvent,
+  type Event as StoredEvent,
+  type Id,
+  type NewEvent,
+} from "@rovinos/schemas";
 import type { EncodedSnapshot } from "./codec.js";
 import { InvalidEventError, StoreUnavailableError } from "./errors.js";
 import type { ListRunsOptions, RunSummary } from "./types.js";
@@ -108,16 +114,14 @@ export function validateEventBatch(
     if (event.runId !== runId) {
       throw new InvalidEventError([["runId"]]);
     }
-    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-    if (!result.success) {
-      const paths = result.error.issues.map(({ path }) =>
-        path.flatMap((part) =>
-          typeof part === "string" || typeof part === "number" ? [part] : [],
-        ),
-      );
-      throw new InvalidEventError(paths);
+    try {
+      return upcastEvent({ ...event, seq: expectedSeq + index });
+    } catch (error) {
+      if (error instanceof ContractError) {
+        throw new InvalidEventError(error.issues.map(({ path }) => [...path]));
+      }
+      throw new InvalidEventError([[]]);
     }
-    return result.data;
   });
   if (storedLength === 0 && validated[0]?.type !== "run_created") {
     throw new InvalidEventError([[0, "type"]]);

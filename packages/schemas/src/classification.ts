@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EventSchema, type Event, type EventType, type PayloadKeys } from "./events.js";
+import { type Event, type EventType, type PayloadKeys } from "./events.js";
+import { upcastEvent } from "./event-versions.js";
 import { ContractError } from "./parse.js";
 
 /** Whether an event field is safe metadata or encrypted content. */
@@ -29,6 +30,7 @@ export const EVENT_FIELD_CLASS = {
     model: "meta",
     role: "meta",
     requestHash: "meta",
+    requestParametersHash: "meta",
     schemaHash: "meta",
     messages: "content",
   },
@@ -221,14 +223,5 @@ export function joinEvent(meta: Record<string, unknown>, content: Record<string,
     throw new ContractError(issues);
   }
 
-  const result = EventSchema.safeParse({ ...content, ...meta });
-  if (!result.success) {
-    throw new ContractError(
-      result.error.issues.map(({ path, code }) => ({
-        path: path.map((segment) => (typeof segment === "symbol" ? String(segment) : segment)),
-        code,
-      })),
-    );
-  }
-  return result.data;
+  return upcastEvent({ ...content, ...meta });
 }

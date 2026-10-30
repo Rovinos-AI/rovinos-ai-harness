@@ -77,11 +77,20 @@ describe("store content codec", () => {
     };
 
     await expect(decodeSnapshot(codec, row)).resolves.toEqual(snapshot);
+    const legacyRow = { ...row, meta_json: JSON.stringify({ traceparent: snapshot.traceparent }) };
+    await expect(decodeSnapshot(codec, legacyRow)).resolves.toEqual(snapshot);
+    expect(legacyRow.meta_json).toBe(JSON.stringify({ traceparent: snapshot.traceparent }));
     await expect(decodeSnapshot(codec, { ...row, at_seq: "unsafe" })).rejects.toBeInstanceOf(
       StoreUnavailableError,
     );
     await expect(
       decodeSnapshot(codec, { ...row, meta_json: { unexpected: "metadata" } }),
+    ).rejects.toBeInstanceOf(StoreUnavailableError);
+    await expect(
+      decodeSnapshot(codec, {
+        ...row,
+        meta_json: JSON.stringify({ traceparent: snapshot.traceparent, runId: otherRunId }),
+      }),
     ).rejects.toBeInstanceOf(StoreUnavailableError);
 
     const decryptFailure: ContentCodec = {
