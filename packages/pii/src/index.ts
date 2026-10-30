@@ -4,8 +4,15 @@ export {
   PiiTokenUnresolvableError,
   type DetokenizeArgsResult,
 } from "./detokenize.js";
-export { evaluatePiiPolicy, explainPiiPolicy } from "./policy.js";
+export {
+  evaluatePiiPolicy,
+  explainPiiPolicy,
+  hasLocalModelAllowRule,
+  resolvePiiPolicyAction,
+} from "./policy.js";
 export type { PiiPolicyContext, PiiPolicyExplanation } from "./policy.js";
+export { PiiDestinationError, resolveDestination } from "./destination.js";
+export type { ProviderTrust, ResolveDestinationOptions } from "./destination.js";
 export * from "./detectors/index.js";
 export { Tokenizer, type PiiDetectorRegistry, type TokenizerDependencies } from "./tokenizer.js";
 export { PiiBlobContainsPiiError, PiiBlockedError, PiiTokenizerError } from "./errors.js";

@@ -96,6 +96,7 @@ export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./con
 export { isSecretKeyName } from "./secret-key-name.js";
 export {
   DestinationSchema,
+  PII_BUILTIN_ENTITIES,
   PiiActionSchema,
   PiiBoundarySchema,
   PiiEntitySchema,
@@ -282,6 +283,12 @@ export {
   type KeyRetireResult,
   type KeyRotationResult,
 } from "./cli/keys.js";
+export {
+  PiiExplainResultSchema,
+  PiiPolicyExplanationRowSchema,
+  type PiiExplainResult,
+  type PiiPolicyExplanationRow,
+} from "./cli/pii.js";
 export {
   ServersCheckResultSchema,
   ServersCheckServerResultSchema,

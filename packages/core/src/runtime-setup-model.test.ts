@@ -74,6 +74,7 @@ async function setup(
   const created = await createRuntimeModelAndStore({
     config: { run: RunConfigSchema.parse({}), models },
     piiConfig: PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],

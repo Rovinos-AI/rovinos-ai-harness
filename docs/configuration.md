@@ -62,11 +62,13 @@ never forwarded to a host other than the configured analyzer. `pii.failMode` def
 configured analyzer fails PII detection rather than passing its input through. Set it to
 `regex_only` to continue with synchronous detectors during an analyzer outage; this degraded
 operation increments `harness.pii.detector_degraded`. Presidio supplements the built-in detectors
-and does not guarantee that every sensitive value will be detected.
+and does not guarantee that every sensitive value will be detected. `pii.allowRawToLocalModels`
+defaults to `false`; local model-input `allow` rules are tokenized unless this is explicitly enabled.
 
 ```yaml
 pii:
   failMode: closed
+  allowRawToLocalModels: false
   presidio:
     baseUrl: http://presidio-analyzer:3000
     language: en
