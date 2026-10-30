@@ -743,7 +743,7 @@ describe("run", () => {
 });
 
 describe("replay", () => {
-  it("reports an unresolved approval as a missing result without printing event content", async () => {
+  it("reports the known model_request hash divergence on tokenized runs (#640) without printing event content", async () => {
     const current = fixture();
     const runId = current.runId;
     if (runId === undefined) {
@@ -756,7 +756,8 @@ describe("replay", () => {
     const report = jsonResult(ReplayReportSchema, result.stdout);
     expect(report.originalRunId).toBe(runId);
     expect(report.status).toBe("error");
-    expect(report.divergence?.code).toBe("replay_missing_result");
+    // #640 tracks the replay-safe signature; this becomes replay_missing_result when it lands.
+    expect(report.divergence).toEqual({ seq: 3, code: "replay_divergence" });
     expect(result.stdout.join("")).not.toContain(current.canary);
   });
 });
