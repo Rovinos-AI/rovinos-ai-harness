@@ -26,6 +26,7 @@ export const eventSamples = [
   {
     ...envelope,
     type: "model_request",
+    v: 2,
     requestId: id,
     provider: "test",
     model: "test",
@@ -72,6 +73,7 @@ export const eventSamples = [
   {
     ...envelope,
     type: "approval_resolved",
+    v: 2,
     approvalId: id,
     decision: "approve",
     decidedBy: "human",

@@ -55,6 +55,7 @@ function checkpointAppend() {
     snapshot: {
       snapshotId: checkpointId,
       runId,
+      v: 1,
       atSeq: 1,
       createdAt: 1,
       traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,

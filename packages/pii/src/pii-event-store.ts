@@ -14,6 +14,7 @@ import {
   type Code,
   type TraceId,
 } from "@rovinos/schemas";
+import { storedModelRequestHash } from "@rovinos/schemas/request-signature";
 import { PiiStorageFailedError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
 import { isMarked } from "./sanitization-markers.js";
@@ -367,6 +368,13 @@ export class PiiEventStore implements EventStoreLike {
           continue;
         }
         const event = joinEvent(meta, { ...content, ...sanitizedContent });
+        if (
+          event.type === "model_request" &&
+          event.requestParametersHash !== undefined &&
+          event.requestParametersHash !== null
+        ) {
+          event.requestHash = storedModelRequestHash(event.messages, event.requestParametersHash);
+        }
         const { seq, ...newEvent } = event;
         if (seq !== expectedSeq + index) {
           throw new PiiStorageFailedError();

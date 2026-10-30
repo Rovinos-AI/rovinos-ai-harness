@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  Event,
+  ContractError,
   Id,
   RunStatus,
   joinEvent,
   parseJson,
   splitEvent,
+  upcastEvent,
   type Event as StoredEvent,
   type NewEvent,
 } from "@rovinos/schemas";
@@ -132,16 +133,14 @@ export async function encodeEvents(
     if (event.runId !== runId) {
       throw new InvalidEventError([["runId"]]);
     }
-    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-    if (!result.success) {
-      const paths = result.error.issues.map(({ path }) =>
-        path.flatMap((part) =>
-          typeof part === "string" || typeof part === "number" ? [part] : [],
-        ),
-      );
-      throw new InvalidEventError(paths);
+    try {
+      validated.push(upcastEvent({ ...event, seq: expectedSeq + index }));
+    } catch (error) {
+      if (error instanceof ContractError) {
+        throw new InvalidEventError(error.issues.map(({ path }) => [...path]));
+      }
+      throw new InvalidEventError([[]]);
     }
-    validated.push(result.data);
   }
 
   return Promise.all(

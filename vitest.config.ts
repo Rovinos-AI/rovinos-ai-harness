@@ -35,6 +35,9 @@ export default defineConfig({
   resolve: {
     conditions: ["source", "module", "browser", "development|production"],
     alias: {
+      "@rovinos/schemas/request-signature": fileURLToPath(
+        new URL("./packages/schemas/src/request-signature.ts", import.meta.url),
+      ),
       "@rovinos/schemas/browser": fileURLToPath(
         new URL("./packages/schemas/src/browser.ts", import.meta.url),
       ),

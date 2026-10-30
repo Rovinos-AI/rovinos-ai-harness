@@ -46,6 +46,8 @@ jobs:
         run: |
           yarn build:schemas
           node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/check-changeset-required.ts
+      - name: Check event schema versions
+        run: yarn check:event-schema
       - name: Check telemetry schemas and random strings
         run: yarn lint:telemetry
       - name: Check telemetry attribute catalog

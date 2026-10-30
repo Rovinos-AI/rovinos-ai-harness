@@ -5,6 +5,7 @@ import { SnapshotSchema } from "./snapshot.js";
 const snapshot = {
   snapshotId: "00000000000000000000000001",
   runId: "00000000000000000000000002",
+  v: 1,
   atSeq: 3,
   createdAt: 10,
   traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
@@ -15,6 +16,9 @@ const snapshot = {
 describe("SnapshotSchema", () => {
   it("parses snapshots with and without a workspace reference", () => {
     expect(SnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    const legacy = { ...snapshot };
+    Reflect.deleteProperty(legacy, "v");
+    expect(SnapshotSchema.parse(legacy)).toMatchObject({ v: 1 });
     expect(
       SnapshotSchema.parse({ ...snapshot, workspaceRef: "workspace:synthetic" }),
     ).toMatchObject({ workspaceRef: "workspace:synthetic" });

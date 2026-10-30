@@ -215,7 +215,7 @@ interface EventStore {
 **Items it depends on:** 7.6, 7.7.
 **Implementation guidance:**
 
-1. `Snapshot = { snapshotId: Id, runId: Id, atSeq: int, createdAt: int, traceparent: Traceparent, context: JsonValue (content), plan: JsonValue (content), workspaceRef?: string }`. `context` and `plan` are content and go through the `ContentCodec` like event content.
+1. `Snapshot = { snapshotId: Id, runId: Id, v: int>=1, atSeq: int, createdAt: int, traceparent: Traceparent, context: JsonValue (content), plan: JsonValue (content), workspaceRef?: string }`. `context` and `plan` are content and go through the `ContentCodec` like event content. Task 7.13 adds snapshot versioning and read-only upcasting.
 2. `appendWithSnapshot(runId, events, expectedSeq, snapshot)` performs the event append and snapshot insert in one transaction. It requires the batch to contain exactly one `checkpoint_written` event whose `checkpointId === snapshot.snapshotId` and `atSeq === snapshot.atSeq`; otherwise `event_invalid`.
 3. `latestSnapshot(runId)` returns the snapshot with the highest `atSeq`, or `undefined`.
 4. Table `snapshots(snapshot_id PK, run_id, at_seq, created_at, meta_json, content_blob, key_id)` with index `(run_id, at_seq DESC)`. Keep the most recent `snapshotKeep` (default 5) per run, pruned inside the same transaction.

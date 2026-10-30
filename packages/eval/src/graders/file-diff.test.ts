@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GradeResultSchema } from "./types.js";
 import type { GradeContext } from "./types.js";
+import { completedTrialResult } from "../../test-utils/trial-result.js";
 import { createFileDiffGrader } from "./file-diff.js";
 
 const directories: string[] = [];
@@ -17,13 +18,10 @@ async function workspace(): Promise<string> {
 
 function context(workspaceDir: string): GradeContext {
   return {
-    result: {
-      status: "completed",
+    result: completedTrialResult({
       dbPath: join(workspaceDir, "run.db"),
       workspaceDir,
-      durationMs: 0,
-      usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
-    },
+    }),
   };
 }
 
