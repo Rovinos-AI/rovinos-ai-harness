@@ -48,6 +48,7 @@ export class ReplayToolPort implements ToolPort {
     {
       readonly intents: Map<Id, Extract<Event, { type: "tool_intent" }>>;
       readonly results: Map<Id, Extract<Event, { type: "tool_result" }>>;
+      readonly editedArgs: Map<Id, JsonValue>;
     }
   >();
 
@@ -69,14 +70,27 @@ export class ReplayToolPort implements ToolPort {
     for (const run of resolved.runs) {
       const intents = new Map<Id, Extract<Event, { type: "tool_intent" }>>();
       const results = new Map<Id, Extract<Event, { type: "tool_result" }>>();
+      const approvalCalls = new Map<Id, Id>();
+      const editedArgs = new Map<Id, JsonValue>();
       for (const event of run.events) {
         if (event.type === "tool_intent") {
           intents.set(event.callId, event);
         } else if (event.type === "tool_result") {
           results.set(event.callId, event);
+        } else if (event.type === "approval_requested") {
+          approvalCalls.set(event.approvalId, event.callId);
+        } else if (
+          event.type === "approval_resolved" &&
+          event.decision === "edit" &&
+          event.edits !== undefined
+        ) {
+          const callId = approvalCalls.get(event.approvalId);
+          if (callId !== undefined) {
+            editedArgs.set(callId, event.edits);
+          }
         }
       }
-      this.runs.set(run.runId, { intents, results });
+      this.runs.set(run.runId, { intents, results, editedArgs });
     }
   }
 
@@ -84,18 +98,25 @@ export class ReplayToolPort implements ToolPort {
   describe(toolId: Code, args?: JsonValue): ToolDescription | undefined {
     const requestedHash = args === undefined ? undefined : hashArgs(args);
     const intent = [...this.runs.values()]
-      .flatMap(({ intents }) => [...intents.values()])
+      .flatMap(({ intents, editedArgs }) =>
+        [...intents.values()].map((candidate) => ({
+          candidate,
+          editedArgs: editedArgs.get(candidate.callId),
+        })),
+      )
       .find(
-        (candidate) =>
+        ({ candidate, editedArgs }) =>
           candidate.toolId === toolId &&
-          (requestedHash === undefined || candidate.argsHash === requestedHash),
+          (requestedHash === undefined ||
+            candidate.argsHash === requestedHash ||
+            (editedArgs !== undefined && hashArgs(editedArgs) === requestedHash)),
       );
     if (intent === undefined) {
       return undefined;
     }
     const registered = this.registry?.describe(toolId, args);
     return {
-      idempotent: intent.idempotent,
+      idempotent: intent.candidate.idempotent,
       timeoutMs: registered?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       ...(registered?.longRunning === undefined ? {} : { longRunning: registered.longRunning }),
       ...(registered?.inputSchema === undefined ? {} : { inputSchema: registered.inputSchema }),
@@ -128,7 +149,11 @@ export class ReplayToolPort implements ToolPort {
     if (intent === undefined || result === undefined) {
       return Promise.reject(new ReplayMissingResultError(intent?.seq));
     }
-    if (hashArgs(call.args) !== intent.argsHash) {
+    const effectiveArgs = run?.editedArgs.get(call.callId);
+    if (
+      hashArgs(call.args) !== intent.argsHash &&
+      (effectiveArgs === undefined || hashArgs(call.args) !== hashArgs(effectiveArgs))
+    ) {
       return Promise.reject(new ReplayDivergenceError(intent.seq, "tool_args_hash_mismatch"));
     }
     const outcome = result.outcome === "ok" ? "ok" : "error";

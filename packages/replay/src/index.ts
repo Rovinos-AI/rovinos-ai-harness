@@ -34,6 +34,7 @@ export {
 } from "./replay.js";
 export {
   diffRuns,
+  diffNormalizedRuns,
   normalizeRun,
   type DiffEntry,
   type DiffField,
@@ -42,3 +43,22 @@ export {
   type DiffSummary,
   type NormalizedEvent,
 } from "./diff.js";
+export {
+  assertBaselineUpdateAllowed,
+  BaselineUpdateRefusedError,
+  compareGoldenSignature,
+  createGoldenSignature,
+  createReplayReport,
+  GoldenSignatureSchema,
+  NormalizedEventSchema,
+  renderGoldenSignatureJson,
+  renderReplayReportJson,
+  renderReplayReportText,
+  ReplayReportSchema,
+  replayReportExitCode,
+  type BaselineUpdateConditions,
+  type CreateReplayReportInput,
+  type GoldenComparison,
+  type GoldenSignature,
+  type ReplayReport,
+} from "./report.js";

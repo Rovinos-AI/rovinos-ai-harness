@@ -154,12 +154,34 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     anthropic: "anthropic";
+                    azure_openai: "azure_openai";
                     bedrock: "bedrock";
                     openai: "openai";
                     openai_compatible: "openai_compatible";
                 }>;
                 apiKey: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>;
                 baseUrl: z.ZodOptional<z.ZodURL>;
+                endpoint: z.ZodOptional<z.ZodURL>;
+                apiVersion: z.ZodOptional<z.ZodString>;
+                deployments: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                deploymentCapabilities: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+                    structuredOutput: z.ZodOptional<z.ZodEnum<{
+                        json_mode: "json_mode";
+                        native: "native";
+                        none: "none";
+                        tool: "tool";
+                    }>>;
+                    forcedToolChoice: z.ZodOptional<z.ZodBoolean>;
+                    parallelToolCalls: z.ZodOptional<z.ZodBoolean>;
+                    maxContextTokens: z.ZodOptional<z.ZodNumber>;
+                    opaqueRoundTrip: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$strict>>>;
+                auth: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                    kind: z.ZodLiteral<"api_key">;
+                    apiKey: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+                }, z.core.$strict>, z.ZodObject<{
+                    kind: z.ZodLiteral<"entra">;
+                }, z.core.$strict>], "kind">>;
                 region: z.ZodOptional<z.ZodString>;
                 modelIds: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
                 maxOutputTokens: z.ZodDefault<z.ZodNumber>;
