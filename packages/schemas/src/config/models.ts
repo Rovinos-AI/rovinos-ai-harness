@@ -77,12 +77,99 @@ export const ModelProviderQuirksSchema = z
   })
   .strict();
 
+function validAzureOpenAIEndpoint(value: string): boolean {
+  const endpoint = new URL(value);
+  return (
+    endpoint.protocol === "https:" &&
+    endpoint.username.length === 0 &&
+    endpoint.password.length === 0 &&
+    endpoint.search.length === 0 &&
+    endpoint.hash.length === 0
+  );
+}
+
+interface AzureOpenAIProviderFields {
+  readonly endpoint?: string | undefined;
+  readonly apiVersion?: string | undefined;
+  readonly deployments?: Readonly<Record<string, unknown>> | undefined;
+  readonly deploymentCapabilities?: unknown;
+  readonly auth?: unknown;
+  readonly apiKey?: string | undefined;
+  readonly baseUrl?: string | undefined;
+}
+
+function hasAzureOpenAIFields(provider: AzureOpenAIProviderFields): boolean {
+  return (
+    provider.endpoint !== undefined ||
+    provider.apiVersion !== undefined ||
+    provider.deployments !== undefined ||
+    provider.deploymentCapabilities !== undefined ||
+    provider.auth !== undefined
+  );
+}
+
+function validateAzureOpenAIProvider(
+  provider: AzureOpenAIProviderFields,
+  context: z.RefinementCtx,
+): void {
+  if (provider.endpoint === undefined || !validAzureOpenAIEndpoint(provider.endpoint)) {
+    context.addIssue({
+      code: "custom",
+      path: ["endpoint"],
+      message: "Azure OpenAI providers require an HTTPS endpoint.",
+      params: { errorCode: "provider_endpoint_https_required" },
+    });
+  }
+  if (provider.apiVersion === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["apiVersion"],
+      message: "Azure OpenAI providers require an API version.",
+      params: { errorCode: "provider_api_version_required" },
+    });
+  }
+  if (provider.deployments === undefined || Object.keys(provider.deployments).length === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["deployments"],
+      message: "Azure OpenAI providers require at least one deployment.",
+      params: { errorCode: "provider_deployments_required" },
+    });
+  }
+  if (provider.auth === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["auth"],
+      message: "Azure OpenAI providers require API-key or Entra authentication.",
+      params: { errorCode: "provider_auth_required" },
+    });
+  }
+  if (provider.apiKey !== undefined || provider.baseUrl !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["auth"],
+      message: "Azure OpenAI credentials use the auth field.",
+      params: { errorCode: "provider_azure_auth_field_invalid" },
+    });
+  }
+}
+
 export const ModelProviderConfigSchema = z
   .object({
     id: Code,
-    kind: z.enum(["anthropic", "bedrock", "openai", "openai_compatible"]),
+    kind: z.enum(["anthropic", "azure_openai", "bedrock", "openai", "openai_compatible"]),
     apiKey: SecretRefSchema.optional(),
     baseUrl: z.url().optional(),
+    endpoint: z.url().optional(),
+    apiVersion: z.string().min(1).optional(),
+    deployments: z.record(Code, z.string().min(1)).optional(),
+    deploymentCapabilities: z.record(Code, CapabilitiesSchema.partial().strict()).optional(),
+    auth: z
+      .discriminatedUnion("kind", [
+        z.object({ kind: z.literal("api_key"), apiKey: SecretRefSchema }).strict(),
+        z.object({ kind: z.literal("entra") }).strict(),
+      ])
+      .optional(),
     region: z.string().min(1).optional(),
     modelIds: z.record(Code, z.string().min(1)).optional(),
     maxOutputTokens: z.number().int().positive().default(4_096),
@@ -96,6 +183,16 @@ export const ModelProviderConfigSchema = z
   .superRefine((provider, context) => {
     if (provider.kind === "bedrock") {
       validateBedrockProvider(provider, context);
+    }
+    if (provider.kind === "azure_openai") {
+      validateAzureOpenAIProvider(provider, context);
+    } else if (hasAzureOpenAIFields(provider)) {
+      context.addIssue({
+        code: "custom",
+        path: ["kind"],
+        message: "Azure OpenAI fields are only valid for azure_openai providers.",
+        params: { errorCode: "provider_azure_fields_invalid" },
+      });
     }
     if (provider.kind === "openai_compatible" && provider.baseUrl === undefined) {
       context.addIssue({

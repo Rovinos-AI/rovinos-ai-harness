@@ -47,6 +47,7 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   run_already_terminal: ExitCode.failure,
   run_not_terminal: ExitCode.failure,
   replay_input_invalid: ExitCode.usage,
+  baseline_update_refused: ExitCode.usage,
   replay_option_unavailable: ExitCode.replayFailed,
   trace_ambiguous: ExitCode.replayFailed,
   replay_too_large: ExitCode.replayFailed,
@@ -66,6 +67,9 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   input_not_found: ExitCode.notFoundOrResolved,
   input_already_resolved: ExitCode.notFoundOrResolved,
   replay_failed: ExitCode.replayFailed,
+  replay_divergence: ExitCode.replayFailed,
+  replay_missing_result: ExitCode.replayFailed,
+  replay_behavior_difference: ExitCode.failure,
   quota_exceeded: ExitCode.quotaExceeded,
 });
 

@@ -8,12 +8,7 @@ import {
   type ModelRequest,
   type ModelProviderQuirks,
 } from "@rovinos/schemas";
-import OpenAI, {
-  APIConnectionError,
-  APIConnectionTimeoutError,
-  APIError,
-  APIUserAbortError,
-} from "openai";
+import OpenAI from "openai";
 import type {
   ChatCompletionChunk,
   ChatCompletionCreateParamsStreaming,
@@ -25,8 +20,7 @@ import {
   toChatRequest,
   type ChatCompletionLike,
 } from "./chat-completions-mapper.js";
-import { OpenAIErrorMetadataSchema, providerErrorType } from "./openai-error-utils.js";
-import { retryAfterMs } from "./retry-after.js";
+import { mapOpenAIError } from "./openai-error-utils.js";
 
 interface StreamToolCall {
   id: string;
@@ -196,9 +190,10 @@ export interface OpenAISecret {
 
 /** OpenAI adapter construction options. */
 export interface OpenAIAdapterOptions {
-  readonly apiKey: OpenAISecret;
+  readonly apiKey?: OpenAISecret;
+  readonly client?: OpenAI;
   readonly provider?: Code;
-  readonly kind?: "openai" | "openai_compatible";
+  readonly kind?: "azure_openai" | "openai" | "openai_compatible";
   readonly trust?: "hosted" | "local";
   readonly maxOutputTokens?: number;
   readonly fetch?: typeof fetch;
@@ -210,7 +205,7 @@ export interface OpenAIAdapterOptions {
 /** OpenAI Chat Completions provider adapter. */
 export class OpenAIAdapter implements ProviderAdapter {
   readonly provider: Code;
-  readonly kind: "openai" | "openai_compatible";
+  readonly kind: "azure_openai" | "openai" | "openai_compatible";
   readonly trust?: "hosted" | "local";
   readonly maxOutputTokens: number;
   readonly capabilities: Partial<Capabilities>;
@@ -230,13 +225,30 @@ export class OpenAIAdapter implements ProviderAdapter {
     }
     this.maxOutputTokens = options.maxOutputTokens ?? 4_096;
     this.quirks = options.quirks ?? {};
-    this.client = new OpenAI({
-      apiKey: options.apiKey.reveal(),
-      maxRetries: 0,
-      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-      ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
-    });
+    if (options.client !== undefined) {
+      this.client = options.client;
+    } else {
+      if (options.apiKey === undefined) {
+        throw new TypeError("An API key or configured OpenAI client is required.");
+      }
+      this.client = new OpenAI({
+        apiKey: options.apiKey.reveal(),
+        maxRetries: 0,
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
+      });
+    }
     this.capabilities = options.capabilities ?? {};
+  }
+
+  /** Returns capabilities selected for the logical model before provider mapping. */
+  protected capabilitiesFor(_model: string): Partial<Capabilities> {
+    return this.capabilities;
+  }
+
+  /** Applies provider-specific model mapping without changing capability lookup. */
+  protected requestForProvider(request: ModelRequest): ModelRequest {
+    return request;
   }
 
   /** {@inheritDoc ProviderAdapter.complete} */
@@ -244,12 +256,12 @@ export class OpenAIAdapter implements ProviderAdapter {
     const startedAt = context.clock.now();
     const capabilities = lookupCapabilities(
       { ...request.model, provider: this.kind },
-      this.capabilities,
+      this.capabilitiesFor(request.model.model),
     ).capabilities;
     try {
       const response = await this.client.chat.completions.create(
         toChatRequest(
-          request,
+          this.requestForProvider(request),
           {
             structuredOutput: capabilities.structuredOutput,
             parallelToolCalls: capabilities.parallelToolCalls,
@@ -274,11 +286,11 @@ export class OpenAIAdapter implements ProviderAdapter {
     const startedAt = context.clock.now();
     const capabilities = lookupCapabilities(
       { ...request.model, provider: this.kind },
-      this.capabilities,
+      this.capabilitiesFor(request.model.model),
     ).capabilities;
     const streamRequest: ChatCompletionCreateParamsStreaming = {
       ...toChatRequest(
-        request,
+        this.requestForProvider(request),
         {
           structuredOutput: capabilities.structuredOutput,
           parallelToolCalls: capabilities.parallelToolCalls,
@@ -338,83 +350,4 @@ export class OpenAIAdapter implements ProviderAdapter {
       throw mapOpenAIError(error, context.clock.now());
     }
   }
-}
-
-function mapProviderTypeError(
-  status: number | undefined,
-  headers: Headers | null | undefined,
-  nowMs: number,
-  providerType?: string,
-): ProviderError | undefined {
-  if (providerType === "rate_limit_error") {
-    const delay = retryAfterMs(headers?.get("retry-after"), nowMs);
-    return new ProviderError("provider_rate_limited", {
-      ...(status === undefined ? {} : { status }),
-      ...(delay === undefined ? {} : { retryAfterMs: delay }),
-    });
-  }
-  if (
-    (status === undefined || status === 200 || status >= 500) &&
-    (providerType === "overloaded_error" ||
-      providerType === "api_error" ||
-      providerType === "server_error")
-  ) {
-    return new ProviderError("provider_unavailable", {
-      ...(status === undefined ? {} : { status }),
-    });
-  }
-  return undefined;
-}
-
-function mapStatusError(
-  status: number | undefined,
-  headers: Headers | null | undefined,
-  nowMs: number,
-  providerType?: string,
-): ProviderError {
-  const typedError = mapProviderTypeError(status, headers, nowMs, providerType);
-  if (typedError !== undefined) {
-    return typedError;
-  }
-  switch (status) {
-    case 429: {
-      const delay = retryAfterMs(headers?.get("retry-after"), nowMs);
-      return new ProviderError("provider_rate_limited", {
-        status,
-        ...(delay === undefined ? {} : { retryAfterMs: delay }),
-      });
-    }
-    case 408:
-    case 504:
-      return new ProviderError("provider_timeout", { status });
-    case 401:
-    case 403:
-      return new ProviderError("provider_auth", { status });
-    case 400:
-      return new ProviderError("provider_bad_request", { status });
-    case undefined:
-      return new ProviderError("provider_unknown");
-    default:
-      if (status >= 500) {
-        return new ProviderError("provider_unavailable", { status });
-      }
-      return new ProviderError("provider_unknown", { status });
-  }
-}
-
-function mapOpenAIError(error: unknown, nowMs: number): unknown {
-  if (error instanceof APIUserAbortError || error instanceof APIConnectionTimeoutError) {
-    return new ProviderError("provider_timeout");
-  }
-  if (error instanceof APIConnectionError) {
-    return new ProviderError("provider_unavailable");
-  }
-  if (!(error instanceof APIError)) {
-    return error;
-  }
-
-  const metadata = OpenAIErrorMetadataSchema.safeParse(error);
-  return metadata.success
-    ? mapStatusError(metadata.data.status, metadata.data.headers, nowMs, providerErrorType(error))
-    : new ProviderError("provider_unknown");
 }

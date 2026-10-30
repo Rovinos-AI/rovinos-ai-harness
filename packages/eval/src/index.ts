@@ -60,6 +60,14 @@ export {
   type LlmJudgeGraderOptions,
 } from "./graders/index.js";
 export {
+  evaluateTrajectory,
+  TrajectoryAssertionResultSchema,
+  TrajectoryContextSchema,
+  TrajectoryResultSchema,
+  type TrajectoryContext,
+  type TrajectoryResult,
+} from "./trajectory.js";
+export {
   EvalRunnerError,
   runEval,
   type EvalRunnerErrorCode,
