@@ -13,7 +13,13 @@
         "object": "chat.completion",
         "created": 1,
         "model": "fixture-model",
-        "choices": [{ "index": 0, "message": { "role": "assistant", "content": "answer" }, "finish_reason": "stop" }],
+        "choices": [
+          {
+            "index": 0,
+            "message": { "role": "assistant", "content": "answer" },
+            "finish_reason": "stop"
+          }
+        ],
         "usage": { "prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5 }
       }
     },
@@ -114,7 +120,13 @@
         "object": "chat.completion",
         "created": 1,
         "model": "fixture-model",
-        "choices": [{ "index": 0, "message": { "role": "assistant", "content": "answer" }, "finish_reason": "stop" }],
+        "choices": [
+          {
+            "index": 0,
+            "message": { "role": "assistant", "content": "answer" },
+            "finish_reason": "stop"
+          }
+        ],
         "usage": {
           "prompt_tokens": 7,
           "completion_tokens": 11,
@@ -182,7 +194,13 @@
         "object": "chat.completion",
         "created": 1,
         "model": "fixture-model",
-        "choices": [{ "index": 0, "message": { "role": "assistant", "content": "answer" }, "finish_reason": "stop" }],
+        "choices": [
+          {
+            "index": 0,
+            "message": { "role": "assistant", "content": "answer" },
+            "finish_reason": "stop"
+          }
+        ],
         "usage": { "prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5 }
       }
     }

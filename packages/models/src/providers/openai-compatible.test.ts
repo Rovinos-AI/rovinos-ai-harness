@@ -30,9 +30,7 @@ function toUndiciRequestInit(init: RequestInit | undefined): UndiciRequestInit {
   };
 }
 
-async function toWebResponse(
-  response: Awaited<ReturnType<typeof undiciFetch>>,
-): Promise<Response> {
+async function toWebResponse(response: Awaited<ReturnType<typeof undiciFetch>>): Promise<Response> {
   const headers = new Headers();
   response.headers.forEach((value, name) => {
     headers.append(name, value);

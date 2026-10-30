@@ -29,15 +29,15 @@ describe("lookupCapabilities", () => {
   });
 
   it("uses conservative defaults for OpenAI-compatible endpoints and honors overrides", () => {
-    expect(lookupCapabilities({ provider: "openai_compatible", model: "local" }).capabilities).toEqual(
-      {
-        structuredOutput: "json_mode",
-        forcedToolChoice: false,
-        parallelToolCalls: false,
-        maxContextTokens: 0,
-        opaqueRoundTrip: false,
-      },
-    );
+    expect(
+      lookupCapabilities({ provider: "openai_compatible", model: "local" }).capabilities,
+    ).toEqual({
+      structuredOutput: "json_mode",
+      forcedToolChoice: false,
+      parallelToolCalls: false,
+      maxContextTokens: 0,
+      opaqueRoundTrip: false,
+    });
     expect(
       lookupCapabilities(
         { provider: "openai_compatible", model: "local" },

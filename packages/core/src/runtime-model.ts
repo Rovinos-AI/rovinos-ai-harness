@@ -18,9 +18,7 @@ import type { Clock } from "./recorder.js";
 import { parseRuntimeModelsConfig } from "./runtime-config.js";
 
 type RuntimeModelConfigErrorCode =
-  | "secret_resolver_unavailable"
-  | "model_provider_base_url_missing"
-  | "model_provider_key_missing";
+  "secret_resolver_unavailable" | "model_provider_base_url_missing" | "model_provider_key_missing";
 
 class RuntimeModelConfigError extends HarnessError {
   readonly code: RuntimeModelConfigErrorCode;

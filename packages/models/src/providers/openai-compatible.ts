@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  ModelProviderConfigSchema,
-  type ModelProviderQuirks,
-} from "@rovinos/schemas";
-import {
-  OpenAIAdapter,
-  type OpenAIAdapterOptions,
-  type OpenAISecret,
-} from "./openai.js";
+import { ModelProviderConfigSchema, type ModelProviderQuirks } from "@rovinos/schemas";
+import { OpenAIAdapter, type OpenAIAdapterOptions, type OpenAISecret } from "./openai.js";
 
 /** Construction options for an OpenAI-compatible endpoint. */
-export interface OpenAICompatibleAdapterOptions
-  extends Omit<OpenAIAdapterOptions, "apiKey" | "kind" | "trust"> {
+export interface OpenAICompatibleAdapterOptions extends Omit<
+  OpenAIAdapterOptions,
+  "apiKey" | "kind" | "trust"
+> {
   /** Optional API key for endpoints that require authentication. */
   readonly apiKey?: OpenAISecret;
   /** Configured provider trust level. */
