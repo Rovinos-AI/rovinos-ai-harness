@@ -47,13 +47,15 @@ function isRecorderFailure(error: unknown): boolean {
   );
 }
 
-function protectInputRequests(
-  validated: ReturnType<typeof validateInputRequiredResult>,
-  tokenizedContent: JsonValueType,
-  protectedKeys: readonly string[],
-  protectedRequestState: string | undefined,
-  policyDeclinedKeys: ReadonlySet<string>,
-): ProtectedInputRequests {
+function protectInputRequests(options: {
+  readonly validated: ReturnType<typeof validateInputRequiredResult>;
+  readonly tokenizedContent: JsonValueType;
+  readonly protectedKeys: readonly string[];
+  readonly protectedRequestState: string | undefined;
+  readonly policyDeclinedKeys: ReadonlySet<string>;
+}): ProtectedInputRequests {
+  const { validated, tokenizedContent, protectedKeys, protectedRequestState, policyDeclinedKeys } =
+    options;
   const tokenizedRequests = InputRequestContentSchema.parse(tokenizedContent);
   const rawKeysByProtectedKey = new Map(
     protectedKeys.map((protectedKey, index) => [
@@ -118,13 +120,13 @@ async function tokenizeInputRequests(options: {
       )
       .map(({ inputKey }) => inputKey),
   );
-  return protectInputRequests(
+  return protectInputRequests({
     validated,
     tokenizedContent,
     protectedKeys,
     protectedRequestState,
     policyDeclinedKeys,
-  );
+  });
 }
 
 function restoreInputResponses(
@@ -209,16 +211,20 @@ export async function handleInputRequiredCall(options: {
     return { kind: "failure", errorCode: outcome.errorCode };
   }
   for (const request of requests.tokenizedRequests) {
-    countMcpInputRequest(
-      requests.sensitiveKeys.has(request.inputKey)
-        ? "declined_sensitive"
-        : requests.policyDeclinedInputKeys.includes(request.inputKey)
-          ? "rejected"
-          : "asked",
-    );
+    countMcpInputRequest(inputRequestOutcome(request, requests));
   }
   if (outcome.kind === "suspend") {
     return { kind: "suspend" };
+  }
+
+  function inputRequestOutcome(
+    request: ProtectedInputRequests["tokenizedRequests"][number],
+    protectedRequests: ProtectedInputRequests,
+  ): "declined_sensitive" | "rejected" | "asked" {
+    if (protectedRequests.sensitiveKeys.has(request.inputKey)) {
+      return "declined_sensitive";
+    }
+    return protectedRequests.policyDeclinedInputKeys.includes(request.inputKey) ? "rejected" : "asked";
   }
   const inputResponses = restoreInputResponses(
     outcome.inputResponses,

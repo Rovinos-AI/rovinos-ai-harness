@@ -99,17 +99,7 @@ export async function runToolCall(
   const call = unregistered?.call ?? proposedCall;
   const safeBehavior =
     unregistered === undefined ? behavior : { ...behavior, prepared: unregistered.prepared };
-  const context = createToolExecutionContext(
-    {
-      ...options,
-      ...(options.inputChannels === undefined ? {} : { inputChannels: options.inputChannels }),
-      ...(options.tokenizer === undefined ? {} : { tokenizer: options.tokenizer }),
-      ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
-    },
-    events,
-    call.callId,
-    behavior.inputRetry,
-  );
+  const context = createToolExecutionContext(options, events, call.callId, behavior.inputRetry);
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, (span) =>
     runToolCallWithinSpan({
       options,

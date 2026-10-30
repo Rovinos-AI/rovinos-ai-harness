@@ -76,6 +76,29 @@ function hasUrlCredentials(value: string): boolean {
   return authority.includes("@");
 }
 
+function hostPolicy(
+  hostname: string,
+  options: ElicitationUrlOptions,
+): ElicitationUrlCheck | undefined {
+  const allowedHosts = normalizedAllowlist(options.urlAllowHosts ?? []);
+  const allowlisted = allowedHosts.has(hostname);
+  if (isIP(hostname) !== 0 && !allowlisted) {
+    return { accepted: false, reason: "ip_literal" };
+  }
+  if (options.urlAllowHosts !== undefined && !allowlisted) {
+    return { accepted: false, reason: "host_not_allowed" };
+  }
+  return undefined;
+}
+
+function isHttpsAllowed(url: URL, hostname: string, options: ElicitationUrlOptions): boolean {
+  return url.protocol === "https:" || (isLoopback(hostname) && options.requireHttps === false);
+}
+
+function suspiciousHost(hostname: string): boolean {
+  return hostname.includes("xn--") || isMixedScript(hostname);
+}
+
 /**
  * Checks an untrusted URL without performing network activity or opening it.
  *
@@ -106,19 +129,15 @@ export function checkElicitationUrl(
   if (hostname.length === 0) {
     return { accepted: false, reason: "invalid" };
   }
-  const allowedHosts = normalizedAllowlist(options.urlAllowHosts ?? []);
-  const allowlisted = allowedHosts.has(hostname);
-  if (isIP(hostname) !== 0 && !allowlisted) {
-    return { accepted: false, reason: "ip_literal" };
+  const hostRejection = hostPolicy(hostname, options);
+  if (hostRejection !== undefined) {
+    return hostRejection;
   }
-  if (options.urlAllowHosts !== undefined && !allowlisted) {
-    return { accepted: false, reason: "host_not_allowed" };
-  }
-  if (url.protocol !== "https:" && !(isLoopback(hostname) && options.requireHttps === false)) {
+  if (!isHttpsAllowed(url, hostname, options)) {
     return { accepted: false, reason: "https_required" };
   }
   return {
     accepted: true,
-    suspicious: hostname.includes("xn--") || isMixedScript(hostname),
+    suspicious: suspiciousHost(hostname),
   };
 }

@@ -38,22 +38,15 @@ describe("checkElicitationUrl", () => {
     });
   });
 
-  it.each(["http://localhost", "http://127.0.0.1"])(
-    "requires HTTPS by default for %s",
-    (url) => {
-      if (url.includes("127.0.0.1")) {
-        expect(checkElicitationUrl(url, { urlAllowHosts: ["127.0.0.1"] })).toEqual({
-          accepted: false,
-          reason: "https_required",
-        });
-      } else {
-        expect(checkElicitationUrl(url)).toEqual({
-          accepted: false,
-          reason: "https_required",
-        });
-      }
-    },
-  );
+  it.each([
+    ["http://localhost", undefined],
+    ["http://127.0.0.1", { urlAllowHosts: ["127.0.0.1"] }],
+  ] as const)("requires HTTPS by default for %s", (url, options) => {
+    expect(checkElicitationUrl(url, options)).toEqual({
+      accepted: false,
+      reason: "https_required",
+    });
+  });
 
   it("allows HTTP only for loopback when HTTPS is disabled", () => {
     expect(checkElicitationUrl("http://localhost:8080", { requireHttps: false })).toEqual({

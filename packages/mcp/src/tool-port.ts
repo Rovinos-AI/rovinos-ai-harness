@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  isInputRequiredResult,
   ProtocolError,
   type CallToolResult,
-  type ElicitResult,
-  type ElicitRequest,
 } from "@modelcontextprotocol/client";
-import { Code, compileJsonSchema, Id } from "@rovinos/schemas";
+import { Code, compileJsonSchema } from "@rovinos/schemas";
 import type { JsonValue as JsonValueType, ServerConfig } from "@rovinos/schemas";
 import * as telemetry from "@rovinos/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
@@ -16,14 +13,7 @@ import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { McpProtocolError } from "./errors.js";
 import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
 import type { ElicitationUrlOptions } from "./elicitation/url.js";
-import {
-  handleLegacyLiveElicitation,
-  legacyUrlInputRequiredResult,
-} from "./elicitation/legacy.js";
-import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
-import { checkElicitationUrl } from "./elicitation/url.js";
-import { validateInputRequiredResult } from "./elicitation/validate.js";
-import { handleInputRequiredCall } from "./input-required-call.js";
+import { callToolWithInputRounds } from "./tool-input-rounds.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
 import { normalizedResult } from "./tool-result.js";
@@ -156,164 +146,6 @@ function validToolArgs(inputSchema: JsonValueType, args: JsonValueType): boolean
   }
 }
 
-interface ToolRoundResult {
-  readonly kind: "result";
-  readonly result: CallToolResult;
-}
-
-interface McpObjectToolCall extends Omit<McpToolCall, "args"> {
-  readonly args: Record<string, unknown>;
-}
-
-type ToolRoundOutcome =
-  | ToolRoundResult
-  | { readonly kind: "failure"; readonly errorCode: string }
-  | { readonly kind: "suspend" };
-
-async function callToolWithInputRounds(options: {
-  readonly connection: McpConnection;
-  readonly route: ResolvedTool;
-  readonly call: McpObjectToolCall;
-  readonly signal: AbortSignal;
-  readonly elicitation?: ElicitationPort;
-  readonly inputRetry?: ElicitationRetry;
-  readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
-  readonly protectInputMetadata?: (value: string) => Promise<string>;
-  readonly urlOptions?: ElicitationUrlOptions;
-}): Promise<ToolRoundOutcome> {
-  const { connection, route, call, signal } = options;
-  const parsedCallId = Id.safeParse(call.callId);
-  const legacyElicitation = options.elicitation === undefined || !parsedCallId.success
-    ? undefined
-    : {
-        signal,
-        handle: async (
-          requestParams: ElicitRequest["params"],
-          elicitationId: string,
-          requestSignal: AbortSignal,
-        ): Promise<ElicitResult> => {
-          let requests: ReturnType<typeof validateInputRequiredResult>["inputRequests"];
-          try {
-            requests = validateInputRequiredResult(
-              {
-                resultType: "input_required",
-                inputRequests: {
-                  [elicitationId]: {
-                    method: "elicitation/create",
-                    params: requestParams,
-                  },
-                },
-              },
-              route.server,
-            ).inputRequests;
-          } catch {
-            return { action: "cancel", content: {} };
-          }
-          const request = requests[0];
-          if (request === undefined) {
-            return { action: "cancel", content: {} };
-          }
-          const legacyInput = {
-            callId: parsedCallId.data,
-            serverId: route.server.id,
-            elicitationId,
-            request: { ...request, inputKey: elicitationId },
-            timeoutMs: route.server.elicitation.legacyLiveTimeoutMs,
-            signal: requestSignal,
-          };
-          if (
-            (request.mode === "url" &&
-              !checkElicitationUrl(request.url ?? "", options.urlOptions).accepted) ||
-            requestsSensitiveFormField(request)
-          ) {
-            await options.elicitation?.recordLegacyPolicyDecline?.(legacyInput);
-            return { action: "decline", content: {} };
-          }
-          return handleLegacyLiveElicitation({
-            active: true,
-            request: legacyInput.request,
-            timeoutMs: route.server.elicitation.legacyLiveTimeoutMs,
-            signal: requestSignal,
-            handle: (validatedRequest, liveSignal) =>
-              options.elicitation?.handleLegacyLive?.({
-                ...legacyInput,
-                request: validatedRequest,
-                signal: liveSignal,
-              }) ?? Promise.resolve(undefined),
-            onTimeout: (validatedRequest) =>
-              options.elicitation?.recordLegacyTimeout?.({
-                ...legacyInput,
-                request: validatedRequest,
-              }) ?? Promise.resolve(),
-          });
-        },
-        onComplete: (elicitationId: string) => {
-          options.elicitation?.onLegacyComplete?.({
-            callId: parsedCallId.data,
-            serverId: route.server.id,
-            elicitationId,
-          });
-        },
-      };
-  let inputRetry = options.inputRetry;
-  let round = inputRetry?.round ?? 0;
-  let result: CallToolResult;
-  for (;;) {
-    if (
-      inputRetry?.source === "mcp_legacy" &&
-      Object.values(inputRetry.inputResponses).some((response) => response.action !== "accept")
-    ) {
-      return { kind: "failure", errorCode: "mcp_input_declined" };
-    }
-    let source: "mcp_mrtr" | "mcp_legacy" = "mcp_mrtr";
-    try {
-      result = await connection.callTool({
-        params: { name: route.nativeName, arguments: call.args },
-        inputSchema: route.inputSchema,
-        options: { signal },
-        toolDefinition: route.tool,
-        ...(inputRetry === undefined ? {} : { inputRetry }),
-        ...(legacyElicitation === undefined ? {} : { legacyElicitation }),
-      });
-    } catch (error) {
-      if (error instanceof McpProtocolError && error.protocolCode === -32042) {
-        const legacyResult = legacyUrlInputRequiredResult(error);
-        if (legacyResult === undefined) {
-          return { kind: "failure", errorCode: "mcp_input_request_invalid" };
-        }
-        source = "mcp_legacy";
-        result = legacyResult;
-      } else {
-        return { kind: "failure", errorCode: errorCode(error, signal) };
-      }
-    }
-    if (!isInputRequiredResult(result)) {
-      return { kind: "result", result };
-    }
-    const handled = await handleInputRequiredCall({
-      value: result,
-      route,
-      call,
-      signal,
-      round,
-      ...(source === "mcp_legacy" ? { source } : {}),
-      ...(options.elicitation === undefined ? {} : { elicitation: options.elicitation }),
-      ...(options.tokenizeHumanInput === undefined
-        ? {}
-        : { tokenizeHumanInput: options.tokenizeHumanInput }),
-      ...(options.protectInputMetadata === undefined
-        ? {}
-        : { protectInputMetadata: options.protectInputMetadata }),
-      ...(options.urlOptions === undefined ? {} : { urlOptions: options.urlOptions }),
-    });
-    if (handled.kind === "failure" || handled.kind === "suspend") {
-      return handled;
-    }
-    inputRetry = handled.inputRetry;
-    round = inputRetry.round;
-  }
-}
-
 function mapToolResult(
   result: CallToolResult,
   route: ResolvedTool,
@@ -352,6 +184,7 @@ async function executeRegisteredTool(options: {
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata?: (value: string) => Promise<string>;
   readonly urlOptions?: ElicitationUrlOptions;
+  readonly errorCode: (error: unknown, signal: AbortSignal) => string;
 }): Promise<McpToolExecutionResult> {
   const { route, call, signal } = options;
   if (signal.aborted) {
@@ -489,6 +322,7 @@ export class McpToolPort {
             ...(this.options.urlOptions === undefined
               ? {}
               : { urlOptions: this.options.urlOptions }),
+            errorCode,
           });
           setOutcome(span, outcome);
           return outcome;

@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Client, specTypeSchemas, type Transport } from "@modelcontextprotocol/client";
+import {
+  Client,
+  specTypeSchemas,
+  type CallToolRequest,
+  type CallToolRequestOptions,
+  type CallToolResult,
+  type Transport,
+} from "@modelcontextprotocol/client";
 import { compileJsonSchema, type ServerConfig } from "@rovinos/schemas";
-import type { McpConnectionDependencies } from "./connection-types.js";
+import type { ElicitationRetry } from "./elicitation/mrtr.js";
+import { McpConnectionError } from "./errors.js";
+import { invokeMcpTool } from "./mcp-call.js";
+import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
 import { withOAuthWarningsRedacted } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
 import {
@@ -14,6 +24,38 @@ import { createMcpTransport } from "./transports.js";
 export { OAUTH_CLIENT_CREDENTIALS_EXTENSION } from "./oauth/protected-resource.js";
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 export const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
+
+/** Reconnects with bounded backoff while preserving close and cancellation failures. */
+export async function reconnectWithBackoff(options: {
+  readonly isClosed: () => boolean;
+  readonly signal: AbortSignal | undefined;
+  readonly sleep: (milliseconds: number) => Promise<void>;
+  readonly connect: (signal: AbortSignal | undefined) => Promise<void>;
+}): Promise<void> {
+  const assertMayReconnect = (): void => {
+    if (options.isClosed()) {
+      throw new McpConnectionError("mcp_connection_lost");
+    }
+    if (options.signal?.aborted === true) {
+      throw new McpConnectionError("mcp_connect_timeout");
+    }
+  };
+  let lastError: unknown;
+  for (const delay of RECONNECT_BACKOFF_MS) {
+    assertMayReconnect();
+    await options.sleep(delay);
+    assertMayReconnect();
+    try {
+      await options.connect(options.signal);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof McpConnectionError
+    ? lastError
+    : new McpConnectionError("mcp_connect_failed");
+}
 
 /** A cached tool list together with its expiration time. */
 export interface CachedToolList {
@@ -66,6 +108,34 @@ export function runWithSafeAuthLogging<Result>(
   operation: () => Promise<Result>,
 ): Promise<Result> {
   return oauthConfigured ? withOAuthWarningsRedacted(operation) : operation();
+}
+
+/** Invokes a validated tool call with connection state and OAuth warning handling. */
+export function invokeConnectionTool(options: {
+  readonly config: ServerConfig;
+  readonly client: Client | undefined;
+  readonly state: McpConnectionState;
+  readonly params: CallToolRequest["params"];
+  readonly requestOptions?: CallToolRequestOptions;
+  readonly toolDefinition?: McpTool;
+  readonly inputRetry?: ElicitationRetry;
+}): Promise<CallToolResult> {
+  const client = options.client;
+  if (client === undefined || options.state !== "ready") {
+    throw new McpConnectionError("mcp_connection_lost");
+  }
+  return runWithSafeAuthLogging(
+    options.config.transport.kind === "http" && options.config.transport.auth !== undefined,
+    () =>
+      invokeMcpTool({
+        client,
+        server: options.config,
+        params: options.params,
+        ...(options.requestOptions === undefined ? {} : { requestOptions: options.requestOptions }),
+        ...(options.toolDefinition === undefined ? {} : { toolDefinition: options.toolDefinition }),
+        ...(options.inputRetry === undefined ? {} : { inputRetry: options.inputRetry }),
+      }),
+  );
 }
 
 /** Detects client-credentials extension support before initialize can trigger OAuth. */
@@ -160,16 +230,12 @@ export function createMcpClient(
   return new Client(
     { name: "rovinos-ai-harness", version: "0.0.0" },
     {
-      capabilities: oauthClientCredentials
-        ? {
-            extensions: { [OAUTH_CLIENT_CREDENTIALS_EXTENSION]: {} },
-            ...(elicitationCapability === undefined
-              ? {}
-              : { elicitation: elicitationCapability }),
-          }
-        : elicitationCapability === undefined
-          ? {}
-          : { elicitation: elicitationCapability },
+      capabilities: {
+        ...(oauthClientCredentials
+          ? { extensions: { [OAUTH_CLIENT_CREDENTIALS_EXTENSION]: {} } }
+          : {}),
+        ...(elicitationCapability === undefined ? {} : { elicitation: elicitationCapability }),
+      },
       versionNegotiation: protocolOptions(config.protocol),
       inputRequired: { autoFulfill: false },
       listChanged: {

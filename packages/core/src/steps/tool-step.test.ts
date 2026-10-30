@@ -1213,7 +1213,7 @@ describe("durable MCP input requests", () => {
     const channel: HumanInputChannel = {
       id: Code.parse("cli.test"),
       available: () => true,
-      present: async () => ({ action: "accept", principal: Code.parse("cli.test") }),
+      present: () => Promise.resolve({ action: "accept", principal: Code.parse("cli.test") }),
     };
     const events = await runLegacyLiveTool({ channels: [channel] });
 

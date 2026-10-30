@@ -73,7 +73,11 @@ function createAttemptElicitationPort(
       options.pendingElicitations.delete(pending);
     }
   };
-  const handleLegacyLive = elicitation.handleLegacyLive;
+  const handleLegacyLive =
+    elicitation.handleLegacyLive === undefined
+      ? undefined
+      : (input: Parameters<NonNullable<typeof elicitation.handleLegacyLive>>[0]) =>
+          elicitation.handleLegacyLive?.(input) ?? Promise.resolve(undefined);
   return {
     handleInputRequired: async (input) => {
       if (!options.isActive() || options.signal.aborted) {

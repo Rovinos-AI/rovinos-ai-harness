@@ -584,7 +584,7 @@ describe("McpToolPort", () => {
             kind: "retry" as const,
             inputResponses: {
               "server-key": {
-                action: input.policyDeclinedInputKeys?.includes("server-key")
+                action: input.policyDeclinedInputKeys?.includes("server-key") === true
                   ? ("decline" as const)
                   : action,
               },
@@ -633,7 +633,7 @@ describe("McpToolPort", () => {
       )
       .mockResolvedValueOnce({ content: [{ type: "text", text: "complete" }] });
     const handleInputRequired = vi.fn(
-      (input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
+      (_input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
         Promise.resolve({
           kind: "retry" as const,
           inputResponses: {

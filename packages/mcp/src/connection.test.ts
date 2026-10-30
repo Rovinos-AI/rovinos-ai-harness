@@ -36,6 +36,29 @@ const inputSchema = {
   additionalProperties: false,
 } satisfies Tool["inputSchema"];
 
+function legacyElicitInput(server: McpServer, params: {
+  readonly mode: "url";
+  readonly elicitationId: string;
+  readonly message: string;
+  readonly url: string;
+}): Promise<{ readonly action: string }> {
+  const method: unknown = Reflect.get(server, "elicitInput");
+  if (typeof method !== "function") {
+    return Promise.reject(new Error("Legacy elicitation is unavailable."));
+  }
+  return Promise.resolve(Reflect.apply(method, server, [params])).then((response: unknown) => {
+    if (
+      typeof response !== "object" ||
+      response === null ||
+      !("action" in response) ||
+      typeof response.action !== "string"
+    ) {
+      throw new Error("Legacy elicitation returned an invalid response.");
+    }
+    return { action: response.action };
+  });
+}
+
 describe("ClientCredentialsExtensionSupport", () => {
   it("retains an initialize capability after a cached negative metadata probe", async () => {
     const serverConfig = ServerConfigSchema.parse({
@@ -276,7 +299,7 @@ describe("McpConnection", () => {
     const peer = await createMemoryPeer({
       count: 1,
       onCall: async (_transport, _params, server) => {
-        const response = await server.server.elicitInput({
+        const response = await legacyElicitInput(server, {
           mode: "url",
           elicitationId: "live-url-id",
           message: "Confirm the action",
@@ -325,7 +348,7 @@ describe("McpConnection", () => {
       expect(answers).toEqual(["Confirm the action:live-url-id"]);
       expect(onComplete).toHaveBeenCalledWith("live-url-id");
       await expect(
-        peer.server.server.elicitInput({
+        legacyElicitInput(peer.server, {
           mode: "url",
           elicitationId: "outside-call",
           message: "Outside a tool call",
