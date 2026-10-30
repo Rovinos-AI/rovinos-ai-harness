@@ -13,7 +13,7 @@ import {
 import { formSchemaToZod } from "@rovinos/schemas";
 import { LeaseLostError, RunRecorder, type Clock } from "../recorder.js";
 import { assertApproverMayResolve } from "../approval-principals.js";
-import type { InputRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
+import { foldRunState, type InputRequestedEvent, type RunState, type ToolIntentEvent } from "../run-state.js";
 import { INPUT_WAIT_SPAN } from "../spans.js";
 import { ensureTracing } from "../runtime-tracing-init.js";
 import type { Tokenizer } from "@rovinos/pii";
@@ -111,13 +111,16 @@ interface PendingInputResolutionOptions {
   readonly runId: Id;
   readonly requestId: Id;
   readonly resolution:
-    InputResolution | { readonly action: "cancel"; readonly decidedBy: "expiry" };
+    | InputResolution
+    | { readonly action: "cancel"; readonly decidedBy: "expiry" | "timeout" }
+    | { readonly action: "decline"; readonly decidedBy: "policy" };
   readonly dependencies: InputResolutionDependencies;
 }
 
 interface RecordInputResolutionOptions {
   readonly store: EventStore;
   readonly runId: Id;
+  readonly recorder?: RunRecorder;
   readonly requestId: Id;
   readonly request: InputRequestedEvent;
   readonly response: InputResponse;
@@ -133,13 +136,15 @@ interface RecordInputResolutionOptions {
 async function recordInputResolution(
   options: RecordInputResolutionOptions,
 ): Promise<Extract<Event, { type: "input_resolved" }>> {
-  const recorder = new RunRecorder(
-    options.store,
-    options.runId,
-    options.lastEvent.segmentId,
-    options.state.nextSeq,
-    { now: () => options.resolvedAt },
-  );
+  const recorder =
+    options.recorder ??
+    new RunRecorder(
+      options.store,
+      options.runId,
+      options.lastEvent.segmentId,
+      options.state.nextSeq,
+      { now: () => options.resolvedAt },
+    );
   ensureTracing();
   const event = await recorder.withStepSpan(
     INPUT_WAIT_SPAN,
@@ -378,6 +383,68 @@ export function resolveInput(
         dependencies: resolution,
       }),
   });
+}
+
+/** Resolves a live request through the active recorder so its sequence remains contiguous. */
+export async function resolveActiveInput(
+  recorder: RunRecorder,
+  events: Event[],
+  history: readonly Event[],
+  runId: Id,
+  requestId: Id,
+  resolution:
+    | InputResolution
+    | { readonly action: "cancel"; readonly decidedBy: "timeout" }
+    | { readonly action: "decline"; readonly decidedBy: "policy" },
+  dependencies: InputResolutionDependencies = {},
+): Promise<Extract<Event, { type: "input_resolved" }>> {
+  const allEvents = [...history, ...events];
+  const state = foldRunState(allEvents);
+  const request = pendingRequest(state, requestId);
+  const lastEvent = allEvents.at(-1);
+  if (lastEvent === undefined) {
+    throw new InputNotFoundError();
+  }
+  const intent =
+    request.callId === undefined ? undefined : state.pendingToolCalls.get(request.callId);
+  const decidedBy = "decidedBy" in resolution ? resolution.decidedBy : "human";
+  const approverId = inputApprover(allEvents, intent, resolution);
+  const recordedRequest = requestForValidation(request);
+  const validationRequest = needsAnswerValidation(resolution)
+    ? await inputRequestForValidation(runId, recordedRequest, intent, dependencies.resolver)
+    : recordedRequest;
+  const response = responseForResolution(validationRequest, resolution);
+  let answer = response.answer;
+  if (answer !== undefined) {
+    const tokenizer = dependencies.tokenizer;
+    if (tokenizer === undefined) {
+      throw new InputTokenizerUnavailableError();
+    }
+    const tokenized = await tokenizer.tokenizeJson(runId, answer, {
+      boundary: "tool_input",
+      destination: inputDestination(request, state),
+      allowRaw: false,
+    });
+    answer = tokenized.value;
+  }
+  const resolvedAt = Math.max(0, Math.floor((dependencies.clock ?? systemClock).now()));
+  const event = await recordInputResolution({
+    store: recorder.eventStore,
+    runId,
+    recorder,
+    requestId,
+    request,
+    response,
+    decidedBy,
+    ...(approverId === undefined ? {} : { approverId }),
+    ...(answer === undefined ? {} : { answer }),
+    state,
+    lastEvent,
+    resolvedAt,
+    waitMs: Math.max(0, resolvedAt - request.ts),
+  });
+  events.push(event);
+  return event;
 }
 
 /**

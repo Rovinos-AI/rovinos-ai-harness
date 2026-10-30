@@ -156,6 +156,15 @@ export function startRun(
       policyVersion,
       quotaService,
       quotaIdentity,
+      ...(composition.overrides.inputChannels === undefined
+        ? {}
+        : { inputChannels: composition.overrides.inputChannels }),
+      ...(composition.pii === undefined
+        ? {}
+        : {
+            inputTokenizer: composition.pii.tokenizer,
+            inputResolver: composition.pii.resolver,
+          }),
       ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
       ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
     });

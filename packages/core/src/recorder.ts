@@ -125,6 +125,11 @@ export class RunRecorder {
     return this.nextSequence;
   }
 
+  /** Event store used by this recorder for in-process input presentation. */
+  get eventStore(): EventStore {
+    return this.store;
+  }
+
   /** Read the workspace references attached to the snapshots retained by the event store. */
   async retainedWorkspaceRefs(snapshotKeep: number): Promise<WorkspaceRef[]> {
     if (!Number.isSafeInteger(snapshotKeep) || snapshotKeep < 1) {

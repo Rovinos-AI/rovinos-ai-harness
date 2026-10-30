@@ -378,6 +378,15 @@ function createRuntimeResume(
               ? {}
               : { snapshotKeep: config.store.snapshotKeep }),
             resumePolicy: config.run.resume.onNonIdempotent,
+            ...(options.overrides.inputChannels === undefined
+              ? {}
+              : { inputChannels: options.overrides.inputChannels }),
+            ...(options.pii === undefined
+              ? {}
+              : {
+                  inputTokenizer: options.pii.tokenizer,
+                  inputResolver: options.pii.resolver,
+                }),
             ...(config.sandbox?.restoreOnResume === undefined
               ? {}
               : { restoreOnResume: config.sandbox.restoreOnResume }),

@@ -33,6 +33,9 @@ import type {
   ToolPort,
 } from "./ports.js";
 import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
+import type { Tokenizer } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
+import type { HumanInputChannel } from "./human-input/channels.js";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-output.js";
 import type { ValueTransform } from "@rovinos/models";
@@ -75,6 +78,9 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   /** Cross-run quota checks and transactional usage accounting. */
   readonly quotaService?: QuotaService;
   readonly quotaIdentity?: QuotaIdentity;
+  readonly inputChannels?: readonly HumanInputChannel[];
+  readonly inputTokenizer?: Pick<Tokenizer, "tokenizeJson">;
+  readonly inputResolver?: AuditingVaultResolver;
   /** Optional summarization compaction, checked before every model call. */
   readonly compaction?: CompactionRuntimeOptions;
   /** Parent context and link for a child run's root span. */
@@ -360,6 +366,9 @@ async function runToolCalls(
         preparedCalls: [prepared],
         signal: options.signal,
         depth: options.depth ?? 0,
+        ...(options.inputChannels === undefined ? {} : { inputChannels: options.inputChannels }),
+        ...(options.inputTokenizer === undefined ? {} : { tokenizer: options.inputTokenizer }),
+        ...(options.inputResolver === undefined ? {} : { resolver: options.inputResolver }),
       })),
     );
     await drainSentinelTrips(options.recorder, events);

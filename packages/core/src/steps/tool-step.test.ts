@@ -26,6 +26,8 @@ import { PolicyEngine } from "@rovinos/policy";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as telemetry from "@rovinos/telemetry";
+import { handleLegacyLiveElicitation } from "@rovinos/mcp";
+import type { HumanInputChannel } from "../human-input/channels.js";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
 import { applyResolvedApprovals } from "../approvals.js";
@@ -1147,6 +1149,107 @@ async function resolveEvent(
 }
 
 describe("durable MCP input requests", () => {
+  async function runLegacyLiveTool(options: {
+    readonly channels?: readonly HumanInputChannel[];
+    readonly callId?: string;
+    readonly timeoutMs?: number;
+  }): Promise<readonly Event[]> {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    const callId = callIds.idempotent;
+    const request = {
+      inputKey: "legacy-id",
+      mode: "url" as const,
+      message: "Continue on the server website",
+      url: "https://example.test/continue",
+    };
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              const legacyInput = {
+                callId: options.callId ?? callId,
+                serverId: Code.parse("mcp.test"),
+                elicitationId: request.inputKey,
+                request,
+                timeoutMs: options.timeoutMs ?? 20,
+                signal: runContext.signal,
+              };
+              const response = await handleLegacyLiveElicitation({
+                active: true,
+                request,
+                timeoutMs: legacyInput.timeoutMs,
+                signal: runContext.signal,
+                handle: (validatedRequest, signal) =>
+                  runContext.elicitation?.handleLegacyLive?.({
+                    ...legacyInput,
+                    request: validatedRequest,
+                    signal,
+                  }) ?? Promise.resolve(undefined),
+                onTimeout: (validatedRequest) =>
+                  runContext.elicitation?.recordLegacyTimeout?.({
+                    ...legacyInput,
+                    request: validatedRequest,
+                  }) ?? Promise.resolve(),
+              });
+              return { outcome: "ok", result: { action: response.action } };
+            },
+          },
+        ],
+      ]),
+    );
+    return toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      ...(options.channels === undefined ? {} : { inputChannels: options.channels }),
+      calls: [{ callId, toolId: "known_tool", args: {} }],
+    });
+  }
+
+  it("records and answers a legacy live request through the default input port", async () => {
+    const channel: HumanInputChannel = {
+      id: Code.parse("cli.test"),
+      available: () => true,
+      present: async () => ({ action: "accept", principal: Code.parse("cli.test") }),
+    };
+    const events = await runLegacyLiveTool({ channels: [channel] });
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "input_requested",
+      "input_resolved",
+      "tool_result",
+    ]);
+    expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+      action: "accept",
+      decidedBy: "human",
+      approverId: "cli.test",
+    });
+  });
+
+  it("records a legacy live timeout as a durable timeout resolution", async () => {
+    const events = await runLegacyLiveTool({ timeoutMs: 5 });
+
+    expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+      action: "cancel",
+      decidedBy: "timeout",
+    });
+  });
+
+  it("cancels a legacy live request that is not bound to the in-flight call", async () => {
+    const events = await runLegacyLiveTool({
+      callId: "66666666666666666666666666",
+    });
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "tool_result",
+    ]);
+  });
+
   it("suspends with a checkpoint and resumes from a separate recorder with stored answers", async () => {
     const { recorder, store } = createRecorder();
     const history = await createRun(recorder, []);

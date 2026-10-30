@@ -63,17 +63,22 @@ export async function handleLegacyLiveElicitation(
   const onAbort = (): void => {
     abort();
   };
+  const timeoutController = new AbortController();
+  const handleSignal = AbortSignal.any([options.signal, timeoutController.signal]);
   let abort: () => void = () => undefined;
   const aborted = new Promise<{ readonly kind: "aborted" }>((resolve) => {
     abort = () => resolve({ kind: "aborted" });
     options.signal.addEventListener("abort", onAbort, { once: true });
   });
   const timeout = new Promise<{ readonly kind: "timeout" }>((resolve) => {
-    timer = setTimeout(() => resolve({ kind: "timeout" }), options.timeoutMs);
+    timer = setTimeout(() => {
+      resolve({ kind: "timeout" });
+      timeoutController.abort();
+    }, options.timeoutMs);
   });
   try {
     const outcome = await Promise.race([
-      options.handle(parsed.data, options.signal).then((response) => ({
+      options.handle(parsed.data, handleSignal).then((response) => ({
         kind: "response" as const,
         response,
       })),

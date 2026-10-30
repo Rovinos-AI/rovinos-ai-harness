@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Event, Id, InputResponse } from "@rovinos/schemas";
-import type { ElicitationInputRequired, ElicitationPort, ElicitationRetry } from "@rovinos/mcp";
+import type {
+  ElicitationInputRequired,
+  ElicitationPort,
+  ElicitationRetry,
+  LegacyElicitationInput,
+} from "@rovinos/mcp";
+import type { Tokenizer } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
+import { HumanInputBroker } from "../human-input/broker.js";
+import type { HumanInputChannel } from "../human-input/channels.js";
+import { resolveActiveInput, type InputResolution } from "../human-input/resolve.js";
 import type { Checkpointer } from "../checkpoint.js";
 import {
   RunEventRecordingError,
@@ -69,6 +79,7 @@ function inputRequestPartials(
 
 /** Creates the per-call MCP input handler that records and checkpoints requests before exposure. */
 export function createMcpElicitationPort(options: {
+  readonly runId: Id;
   readonly callId: Id;
   readonly clock: Clock;
   readonly events: Event[];
@@ -76,7 +87,55 @@ export function createMcpElicitationPort(options: {
   readonly ids: IdGenerator;
   readonly recorder: RunRecorder;
   readonly checkpointer: Checkpointer | undefined;
+  readonly inputChannels?: readonly HumanInputChannel[];
+  readonly tokenizer?: Pick<Tokenizer, "tokenizeJson">;
+  readonly resolver?: AuditingVaultResolver;
 }): ElicitationPort {
+  const legacyRequestEvent = (input: LegacyElicitationInput, requestId: Id) => ({
+    type: "input_requested" as const,
+    v: 1 as const,
+    requestId,
+    source: "mcp_legacy" as const,
+    serverId: input.serverId,
+    callId: input.callId,
+    inputKey: input.elicitationId,
+    round: 0,
+    mode: input.request.mode,
+    message: input.request.message,
+    ...(input.request.requestedSchema === undefined
+      ? {}
+      : { schema: input.request.requestedSchema }),
+    ...(input.request.url === undefined ? {} : { url: input.request.url }),
+    expiresAt: Math.max(0, Math.floor(options.clock.now() + input.timeoutMs)),
+  });
+  const activeLegacyRequestId = (input: LegacyElicitationInput): Id | undefined => {
+    const state = foldRunState([...options.history, ...options.events]);
+    return Array.from(state.inputRequests.values()).find(
+      (request) =>
+        request.source === "mcp_legacy" &&
+        request.callId === input.callId &&
+        request.serverId === input.serverId &&
+        request.inputKey === input.elicitationId &&
+        state.pendingInputs.has(request.requestId),
+    )?.requestId;
+  };
+  const recordLegacyRequest = async (input: LegacyElicitationInput): Promise<Id | undefined> => {
+    const state = foldRunState([...options.history, ...options.events]);
+    if (
+      input.callId !== options.callId ||
+      input.signal.aborted ||
+      state.pendingToolCalls.get(input.callId) === undefined
+    ) {
+      return undefined;
+    }
+    const requestId = options.ids.next();
+    try {
+      options.events.push(await options.recorder.record(legacyRequestEvent(input, requestId)));
+    } catch (error) {
+      throw new RunEventRecordingError(error);
+    }
+    return requestId;
+  };
   return {
     handleInputRequired: async (input) => {
       if (inputSignalAborted(input.signal)) {
@@ -139,6 +198,99 @@ export function createMcpElicitationPort(options: {
         throw new RunEventRecordingError(error);
       }
       return { kind: "suspend" };
+    },
+    handleLegacyLive: async (input) => {
+      const requestId = await recordLegacyRequest(input);
+      if (requestId === undefined) {
+        return undefined;
+      }
+      const request = {
+        requestId,
+        source: "mcp_legacy" as const,
+        serverId: input.serverId,
+        callId: input.callId,
+        inputKey: input.elicitationId,
+        round: 0,
+        mode: input.request.mode,
+        message: input.request.message,
+        ...(input.request.requestedSchema === undefined
+          ? {}
+          : { schema: input.request.requestedSchema }),
+        ...(input.request.url === undefined ? {} : { url: input.request.url }),
+        expiresAt: Math.max(0, Math.floor(options.clock.now() + input.timeoutMs)),
+      };
+      const channels = options.inputChannels ?? [];
+      if (!channels.some((channel) => channel.available(request))) {
+        await new Promise<void>((resolve) => {
+          input.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return undefined;
+      }
+      const broker = new HumanInputBroker({
+        store: options.recorder.eventStore,
+        channels,
+        ...(options.tokenizer === undefined ? {} : { tokenizer: options.tokenizer }),
+        ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
+        clock: options.clock,
+      });
+      let resolution: InputResolution;
+      try {
+        resolution = await broker.collect(options.runId, requestId, input.signal);
+      } catch {
+        if (!input.signal.aborted) {
+          await new Promise<void>((resolve) => {
+            input.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        return undefined;
+      }
+      const event = await resolveActiveInput(
+        options.recorder,
+        options.events,
+        options.history,
+        options.runId,
+        requestId,
+        resolution,
+        {
+          ...(options.tokenizer === undefined ? {} : { tokenizer: options.tokenizer }),
+          ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
+          clock: options.clock,
+        },
+      );
+      return {
+        action: event.action,
+        ...(event.answer === undefined ? {} : { answer: event.answer }),
+      };
+    },
+    recordLegacyTimeout: async (input) => {
+      const requestId = activeLegacyRequestId(input);
+      if (requestId === undefined) {
+        return;
+      }
+      await resolveActiveInput(
+        options.recorder,
+        options.events,
+        options.history,
+        options.runId,
+        requestId,
+        { action: "cancel", decidedBy: "timeout" },
+        { clock: options.clock },
+      );
+    },
+    recordLegacyPolicyDecline: async (input) => {
+      const requestId = await recordLegacyRequest(input);
+      if (requestId === undefined) {
+        return;
+      }
+      await resolveActiveInput(
+        options.recorder,
+        options.events,
+        options.history,
+        options.runId,
+        requestId,
+        { action: "decline", decidedBy: "policy" },
+        { clock: options.clock },
+      );
     },
   };
 }

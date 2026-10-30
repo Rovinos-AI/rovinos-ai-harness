@@ -27,6 +27,9 @@ import type {
 } from "../ports.js";
 import { onShutdown } from "../shutdown.js";
 import { SummaryRecordingError } from "./prepare-tool.js";
+import type { HumanInputChannel } from "../human-input/channels.js";
+import type { Tokenizer } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
 
 /** Internal timeout marker; only the closed tool_timeout code is recorded. */
 export class ToolTimeoutError extends Error {}
@@ -40,6 +43,9 @@ export interface ToolStepExecutionOptions {
   readonly signal: AbortSignal;
   readonly depth?: number;
   readonly app?: Code;
+  readonly inputChannels?: readonly HumanInputChannel[];
+  readonly tokenizer?: Pick<Tokenizer, "tokenizeJson">;
+  readonly resolver?: AuditingVaultResolver;
 }
 
 function invalidElicitationOutcome(): ElicitationInputOutcome {
@@ -59,26 +65,58 @@ function createAttemptElicitationPort(
   elicitation: NonNullable<RunContext["elicitation"]>,
   options: AttemptContextOptions,
 ): NonNullable<RunContext["elicitation"]> {
+  const track = async <T>(pending: Promise<T>): Promise<T> => {
+    options.pendingElicitations.add(pending);
+    try {
+      return await pending;
+    } finally {
+      options.pendingElicitations.delete(pending);
+    }
+  };
+  const handleLegacyLive = elicitation.handleLegacyLive;
   return {
     handleInputRequired: async (input) => {
       if (!options.isActive() || options.signal.aborted) {
         return invalidElicitationOutcome();
       }
-      const pending = elicitation
-        .handleInputRequired({ ...input, signal: options.signal })
-        .then((outcome) => {
+      return track(
+        elicitation.handleInputRequired({ ...input, signal: options.signal }).then((outcome) => {
           if (outcome.kind === "suspend") {
             options.onInputSuspension();
           }
           return outcome;
-        });
-      options.pendingElicitations.add(pending);
-      try {
-        return await pending;
-      } finally {
-        options.pendingElicitations.delete(pending);
-      }
+        }),
+      );
     },
+    ...(handleLegacyLive === undefined
+      ? {}
+      : {
+          handleLegacyLive: (input) =>
+            !options.isActive() || options.signal.aborted
+              ? Promise.resolve(undefined)
+              : track(
+                  handleLegacyLive({
+                    ...input,
+                    signal: AbortSignal.any([input.signal, options.signal]),
+                  }),
+                ),
+        }),
+    ...(elicitation.recordLegacyTimeout === undefined
+      ? {}
+      : {
+          recordLegacyTimeout: (input) => elicitation.recordLegacyTimeout?.(input) ?? Promise.resolve(),
+        }),
+    ...(elicitation.recordLegacyPolicyDecline === undefined
+      ? {}
+      : {
+          recordLegacyPolicyDecline: (input) =>
+            !options.isActive()
+              ? Promise.resolve()
+              : (elicitation.recordLegacyPolicyDecline?.(input) ?? Promise.resolve()),
+        }),
+    ...(elicitation.onLegacyComplete === undefined
+      ? {}
+      : { onLegacyComplete: (input) => elicitation.onLegacyComplete?.(input) }),
   };
 }
 
