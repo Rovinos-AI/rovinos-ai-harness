@@ -64,6 +64,17 @@ export {
   RunStatus,
 } from "./events.js";
 export {
+  EVENT_SCHEMA_VERSIONS,
+  RawEventEnvelopeSchema,
+  SNAPSHOT_SCHEMA_VERSION,
+  SNAPSHOT_UPCASTERS,
+  UPCASTERS,
+  upcastEvent,
+  upcastSnapshot,
+  type EventUpcaster,
+  type EventUpcasterMap,
+} from "./event-versions.js";
+export {
   EVENT_FIELD_CLASS,
   joinEvent,
   splitEvent,

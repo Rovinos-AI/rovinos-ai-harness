@@ -72,6 +72,7 @@ export const eventSamples = [
   {
     ...envelope,
     type: "approval_resolved",
+    v: 2,
     approvalId: id,
     decision: "approve",
     decidedBy: "human",

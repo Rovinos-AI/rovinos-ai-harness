@@ -2,8 +2,8 @@
 import {
   ContractError,
   Id,
-  SnapshotSchema,
   parseJson,
+  upcastSnapshot,
   type NewEvent,
   type Snapshot,
 } from "@rovinos/schemas";
@@ -71,15 +71,7 @@ export interface ContentCodec {
   decode(ctx: ContentCodecContext, blob: string, keyId?: string): Promise<Record<string, unknown>>;
 }
 
-const snapshotMetaSchema = z
-  .object({
-    traceparent: SnapshotSchema.shape.traceparent,
-    workspaceRef: SnapshotSchema.shape.workspaceRef,
-  })
-  .strict();
-const snapshotContentSchema = z
-  .object({ context: SnapshotSchema.shape.context, plan: SnapshotSchema.shape.plan })
-  .strict();
+const snapshotMetaSchema = z.record(z.string(), z.json());
 
 /** Validate snapshot retention options and apply the default. */
 export function snapshotKeep(options: SnapshotStoreOptions = {}): number {
@@ -108,17 +100,22 @@ export function validateSnapshotAppend(
   expectedSeq: number,
   snapshot: Snapshot,
 ): Snapshot {
-  const parsedSnapshot = SnapshotSchema.safeParse(snapshot);
-  if (!parsedSnapshot.success) {
-    throw new InvalidEventError(
-      parsedSnapshot.error.issues.map(({ path }) =>
-        path.flatMap((part) =>
-          typeof part === "string" || typeof part === "number" ? [part] : [],
+  let parsedSnapshot: Snapshot;
+  try {
+    parsedSnapshot = upcastSnapshot(snapshot);
+  } catch (error) {
+    if (error instanceof ContractError) {
+      throw new InvalidEventError(
+        error.issues.map(({ path }) =>
+          path.filter(
+            (part): part is string | number => typeof part === "string" || typeof part === "number",
+          ),
         ),
-      ),
-    );
+      );
+    }
+    throw new InvalidEventError([[]]);
   }
-  if (parsedSnapshot.data.runId !== runId) {
+  if (parsedSnapshot.runId !== runId) {
     throw new InvalidEventError([["runId"]]);
   }
 
@@ -130,17 +127,17 @@ export function validateSnapshotAppend(
     throw new InvalidEventError([["checkpoint_written"]]);
   }
   const checkpoint = checkpoints[0];
-  if (checkpoint?.checkpointId !== parsedSnapshot.data.snapshotId) {
+  if (checkpoint?.checkpointId !== parsedSnapshot.snapshotId) {
     throw new InvalidEventError([["snapshotId"]]);
   }
-  if (checkpoint.atSeq !== parsedSnapshot.data.atSeq) {
+  if (checkpoint.atSeq !== parsedSnapshot.atSeq) {
     throw new InvalidEventError([["atSeq"]]);
   }
   const checkpointIndex = events.findIndex((event) => event.type === "checkpoint_written");
-  if (checkpointIndex < 0 || parsedSnapshot.data.atSeq > expectedSeq + checkpointIndex) {
+  if (checkpointIndex < 0 || parsedSnapshot.atSeq > expectedSeq + checkpointIndex) {
     throw new InvalidEventError([["atSeq"]]);
   }
-  return parsedSnapshot.data;
+  return parsedSnapshot;
 }
 
 /** Encode only snapshot content; identity, trace, and timestamps remain metadata. */
@@ -153,6 +150,7 @@ export async function encodeSnapshot(
     { context: snapshot.context, plan: snapshot.plan },
   );
   const meta = {
+    v: snapshot.v,
     traceparent: snapshot.traceparent,
     ...(snapshot.workspaceRef === undefined ? {} : { workspaceRef: snapshot.workspaceRef }),
   };
@@ -190,14 +188,15 @@ export async function decodeSnapshot(codec: ContentCodec, row: SnapshotRow): Pro
     if (!Number.isSafeInteger(atSeq) || !Number.isSafeInteger(createdAt)) {
       throw new StoreUnavailableError();
     }
-    const content = snapshotContentSchema.parse(
-      await codec.decode(
-        { runId: Id.parse(row.run_id), seq: atSeq, purpose: "snapshot" },
-        row.content_blob,
-        row.key_id ?? undefined,
-      ),
+    const content = await codec.decode(
+      { runId: Id.parse(row.run_id), seq: atSeq, purpose: "snapshot" },
+      row.content_blob,
+      row.key_id ?? undefined,
     );
-    return SnapshotSchema.parse({
+    if (Object.keys(meta).some((key) => Object.hasOwn(content, key))) {
+      throw new StoreUnavailableError();
+    }
+    return upcastSnapshot({
       snapshotId: row.snapshot_id,
       runId: row.run_id,
       atSeq,
