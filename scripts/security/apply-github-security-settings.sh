@@ -64,7 +64,7 @@ if [[ "$mode" == "--dry-run" ]]; then
     },
     {
       "method": "PUT",
-      "endpoint": "repos/{owner}/{repo}/vulnerability-reporting",
+      "endpoint": "repos/{owner}/{repo}/private-vulnerability-reporting",
       "payload": null
     }
   ]
@@ -81,4 +81,4 @@ fi
 gh api -X PATCH 'repos/{owner}/{repo}' --input - <<<"$security_payload" >/dev/null
 gh api -X PUT 'repos/{owner}/{repo}/vulnerability-alerts' >/dev/null
 gh api -X PUT 'repos/{owner}/{repo}/automated-security-fixes' >/dev/null
-gh api -X PUT 'repos/{owner}/{repo}/vulnerability-reporting' >/dev/null
+gh api -X PUT 'repos/{owner}/{repo}/private-vulnerability-reporting' >/dev/null

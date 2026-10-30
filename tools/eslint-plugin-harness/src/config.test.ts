@@ -245,6 +245,7 @@ describe("ESLint configuration", () => {
     ["node:child_process", "packages/schemas/src/lint-fixture.js"],
     ["node:child_process", "packages/schemas/src/index.test.ts"],
     ["yaml", "packages/schemas/src/index.test.ts"],
+    ["pino", "packages/schemas/src/index.ts"],
     ["fs", "packages/approval-app/src/lint-fixture.js"],
     ["node:fs", "packages/approval-app/src/lint-fixture.js"],
     ["node:fs", "packages/approval-app/src/lint-fixture.test.js"],

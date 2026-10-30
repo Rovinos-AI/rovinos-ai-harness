@@ -15,6 +15,8 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import type { Id, VaultValueEntry } from "@rovinos/schemas";
 import type { VaultRunReader } from "./sentinel/run-values.js";
 
+export { __getLoggerDroppedFieldsForTests } from "./logger.js";
+
 /** Creates a no-export tracer provider with deterministic identifiers for tests. */
 export function createTestTracerProvider(): BasicTracerProvider {
   return new BasicTracerProvider({
