@@ -95,7 +95,7 @@ describe("createNoCanaryLeakGrader", () => {
       ...current.context,
       telemetry: [{ name: "in-memory-span-exporter", content: `span ${canary}` }],
     };
-    const logs: GradeContext = {
+    const logContext: GradeContext = {
       ...current.context,
       logs: [{ name: "stderr", content: Buffer.from(`failure ${canary}`) }],
     };
@@ -104,7 +104,7 @@ describe("createNoCanaryLeakGrader", () => {
       pass: false,
       codes: ["canary_in_telemetry"],
     });
-    await expect(grader.grade(logs)).resolves.toMatchObject({
+    await expect(grader.grade(logContext)).resolves.toMatchObject({
       pass: false,
       codes: ["canary_in_logs"],
     });
@@ -181,10 +181,9 @@ describe("createNoCanaryLeakGrader", () => {
     await writeFile(join(current.root, "telemetry.json"), "clean collector output");
     const { setTrialProcessOutput } = await import("../execution-capture.js");
     setTrialProcessOutput(current.context.result.dbPath, "", `stderr ${canary}`);
-    await expect(grader.grade(current.context)).resolves.toMatchObject({
-      pass: false,
-      codes: expect.arrayContaining(["canary_in_logs"]),
-    });
+    const grade = await grader.grade(current.context);
+    expect(grade.pass).toBe(false);
+    expect(grade.codes.includes("canary_in_logs")).toBe(true);
   });
 
   it("reports canaries not present in the original fixture when found in the workspace", async () => {

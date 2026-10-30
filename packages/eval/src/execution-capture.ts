@@ -11,7 +11,12 @@ interface ProcessOutput {
   readonly stderr: string[];
 }
 
-const logsByDbPath = new Map<string, readonly CanarySink[]>();
+interface CapturedOutputSink {
+  readonly name: string;
+  readonly content: string;
+}
+
+const logsByDbPath = new Map<string, readonly CapturedOutputSink[]>();
 const spanCollector = createTestSpanCollector();
 const logRecords: { readonly name: string; readonly record: LogRecord }[] = [];
 const memoryLoggerProvider: LoggerProvider = {
@@ -57,7 +62,9 @@ function interceptOutput(stream: NodeJS.WriteStream, name: "stdout" | "stderr"):
       if (encoding === undefined) {
         return callback === undefined ? original(chunk) : original(chunk, callback);
       }
-      return callback === undefined ? original(chunk, encoding) : original(chunk, encoding, callback);
+      return callback === undefined
+        ? original(chunk, encoding)
+        : original(chunk, encoding, callback);
     },
   });
 }
@@ -118,7 +125,7 @@ export function evalTelemetrySinks(): CanarySink[] {
     name: `in-memory-span-${String(index)}`,
     content: serializedSpan(span),
   }));
-  const logs = logRecords.map(({ name, record }, index) => {
+  const capturedLogs = logRecords.map(({ name, record }, index) => {
     try {
       return {
         name: `in-memory-log-${String(index)}`,
@@ -143,7 +150,7 @@ export function evalTelemetrySinks(): CanarySink[] {
       return { name: `in-memory-log-invalid-${String(index)}`, content: "serialization_failed" };
     }
   });
-  return [...spans, ...logs];
+  return [...spans, ...capturedLogs];
 }
 
 /** Retain trial process output without adding raw content to persisted trial results. */
@@ -156,13 +163,16 @@ export function setTrialProcessOutput(dbPath: string, stdout: string, stderr: st
 
 /** Append process output from an additional Docker invocation for the same trial. */
 export function appendTrialProcessOutput(dbPath: string, stdout: string, stderr: string): void {
-  const previous = logsByDbPath.get(dbPath) ?? [
-    { name: "stdout", content: "" },
-    { name: "stderr", content: "" },
-  ];
+  const previous = logsByDbPath.get(dbPath);
   logsByDbPath.set(dbPath, [
-    { name: "stdout", content: `${previous[0]?.content ?? ""}${stdout}` },
-    { name: "stderr", content: `${previous[1]?.content ?? ""}${stderr}` },
+    {
+      name: "stdout",
+      content: [previous?.[0]?.content, stdout].filter((part) => part !== undefined).join("\n"),
+    },
+    {
+      name: "stderr",
+      content: [previous?.[1]?.content, stderr].filter((part) => part !== undefined).join("\n"),
+    },
   ]);
 }
 

@@ -121,12 +121,9 @@ export async function runDockerProcess(
   const result = await Promise.race([
     exited,
     new Promise<DockerProcessResult>((resolve) => {
-      timeout = setTimeout(
-        () => {
-          resolve({ exitCode: null, timedOut: true, ...getOutput() });
-        },
-        options.timeoutMs,
-      );
+      timeout = setTimeout(() => {
+        resolve({ exitCode: null, timedOut: true, ...getOutput() });
+      }, options.timeoutMs);
     }),
   ]).finally(() => {
     if (timeout !== undefined) {

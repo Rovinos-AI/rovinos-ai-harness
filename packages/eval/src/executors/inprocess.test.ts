@@ -12,6 +12,7 @@ import { InProcessExecutor } from "./inprocess.js";
 import type { TrialSpec } from "../trial.js";
 import { runEval } from "../runner.js";
 import {
+  appendTrialProcessOutput,
   configureEvalTelemetry,
   evalTelemetrySinks,
   trialLogSinks,
@@ -85,9 +86,9 @@ describe("InProcessExecutor", () => {
     });
     await executor.run(makeTrial(join(await createDirectory(), "trial")));
 
-    expect(evalTelemetrySinks().some(({ content }) => String(content).includes('"harness.run"'))).toBe(
-      true,
-    );
+    expect(
+      evalTelemetrySinks().some(({ content }) => String(content).includes('"harness.run"')),
+    ).toBe(true);
     expect(configureEvalTelemetry()).toBe("memory");
     expect(configureEvalTelemetry(true)).toBe("caller_managed");
   });
@@ -120,6 +121,18 @@ describe("InProcessExecutor", () => {
       name: "stderr",
       content: canary,
     });
+  });
+
+  it("accumulates stdout and stderr from each Docker resume process", () => {
+    const dbPath = "/synthetic/docker-resume-output.db";
+
+    appendTrialProcessOutput(dbPath, "initial stdout", "initial stderr");
+    appendTrialProcessOutput(dbPath, "resume stdout", "resume stderr");
+
+    expect(trialLogSinks(dbPath)).toEqual([
+      { name: "stdout", content: "initial stdout\nresume stdout" },
+      { name: "stderr", content: "initial stderr\nresume stderr" },
+    ]);
   });
 
   it("runs a fake model/tool scenario and persists an isolated run", async () => {

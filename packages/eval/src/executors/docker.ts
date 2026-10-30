@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
 import { createRuntime, foldRunState } from "@rovinos/core";
 import { HarnessError, type RunStatus } from "@rovinos/schemas";
 import { runDockerProcess } from "@rovinos/sandbox";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";
 import {
-  evalSuiteCode,
   TrialResultSchema,
   type ApprovalCounts,
   type TrialResult,
@@ -17,6 +15,7 @@ import {
 import { prepareTrial, systemClock } from "../executor.js";
 import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
 import { appendTrialProcessOutput } from "../execution-capture.js";
+import { dockerBaseArgs } from "./docker-args.js";
 import { runDockerHuman } from "./docker-human.js";
 
 const DockerMemorySchema = z
@@ -100,26 +99,6 @@ function inputForTrial(trial: TrialSpec): string {
   );
 }
 
-function evalMetadataForTrial(trial: TrialSpec): string {
-  return JSON.stringify({
-    suite: evalSuiteCode(trial.suite),
-    task: trial.task.id,
-    trial: trial.trialIndex,
-  });
-}
-
-function telemetryEnvironmentArgs(exportTelemetry: boolean | undefined): string[] {
-  if (exportTelemetry !== true) {
-    return [];
-  }
-  return [
-    "OTEL_EXPORTER_OTLP_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_PROTOCOL",
-  ].flatMap((name) => (process.env[name] === undefined ? [] : ["--env", name]));
-}
-
 function mapStatus(status: z.infer<typeof RunStatus>): TrialResult["status"] | undefined {
   if (
     status === "completed" ||
@@ -193,50 +172,6 @@ async function readRunResult(
   } finally {
     await runtime.close();
   }
-}
-
-function dockerBaseArgs(
-  options: z.output<typeof DockerOptionsSchema>,
-  name: string,
-  workDir: string,
-  trial: TrialSpec,
-  exportTelemetry: boolean | undefined,
-): string[] {
-  return [
-    "run",
-    "--rm",
-    "--cap-drop",
-    "ALL",
-    "--security-opt",
-    "no-new-privileges:true",
-    "--read-only",
-    "--tmpfs",
-    `/tmp:size=${options.tmpfsSize},noexec,nosuid,nodev`,
-    "--user",
-    options.user,
-    "--memory",
-    options.memory,
-    "--cpus",
-    String(options.cpus),
-    "--pids-limit",
-    String(options.pidsLimit),
-    "--name",
-    name,
-    "--network",
-    options.network,
-    "--mount",
-    `type=bind,source=${resolvePath(workDir)},target=/harness`,
-    "--workdir",
-    "/harness",
-    "--env",
-    "HARNESS_DATA_DIR=/harness/data",
-    "--env",
-    "HARNESS_EVAL_KEY",
-    "--env",
-    `HARNESS_EVAL_METADATA=${evalMetadataForTrial(trial)}`,
-    ...telemetryEnvironmentArgs(exportTelemetry),
-    options.image,
-  ];
 }
 
 interface DockerInvocation {
@@ -416,13 +351,7 @@ export class DockerExecutor implements TrialExecutor {
     }
     const prepared = await prepareTrial(trial, this.dependencies);
     const name = codeFromTrial(trial);
-    const dockerArgs = dockerBaseArgs(
-      this.options,
-      name,
-      trial.workDir,
-      trial,
-      this.dependencies.exportTelemetry,
-    );
+    const dockerArgs = dockerBaseArgs(this.options, trial, name, this.dependencies.exportTelemetry);
     const args = [
       ...dockerArgs,
       "node",

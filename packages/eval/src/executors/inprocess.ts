@@ -3,11 +3,10 @@ import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
 import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/core";
 import type { Id } from "@rovinos/schemas";
-import { TrialResultSchema } from "../trial.js";
+import { TrialResultSchema, evalSuiteCode } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
-import { evalSuiteCode } from "../trial.js";
 import {
   captureProcessOutput,
   configureEvalTelemetry,

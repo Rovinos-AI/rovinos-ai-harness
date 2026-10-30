@@ -272,10 +272,9 @@ describe("DockerExecutor", () => {
       return Promise.resolve({ exitCode: 0, timedOut: false, stdout: "", stderr: "" });
     });
 
-    await new DockerExecutor(
-      { image: "synthetic/harness" },
-      { exportTelemetry: true },
-    ).run(makeTrial(workDir));
+    await new DockerExecutor({ image: "synthetic/harness" }, { exportTelemetry: true }).run(
+      makeTrial(workDir),
+    );
 
     expect(args).toContain("--env");
     expect(args).toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
@@ -319,11 +318,13 @@ describe("DockerExecutor", () => {
     expect(invocations[1]?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
     expect(invocations[1]?.args).toContain(
       `HARNESS_EVAL_METADATA=${JSON.stringify({
-        suite: evalSuiteCode(makeTrial(workDir, {
-          rules: [],
-          default: "approve",
-          unsafeAutoApprove: true,
-        }).suite),
+        suite: evalSuiteCode(
+          makeTrial(workDir, {
+            rules: [],
+            default: "approve",
+            unsafeAutoApprove: true,
+          }).suite,
+        ),
         task: "docker_task",
         trial: 0,
       })}`,
@@ -411,7 +412,12 @@ describe("DockerExecutor", () => {
 
   it("returns a safe error when Docker exits without creating a run", async () => {
     const workDir = join(await createDirectory(), "trial");
-    mocks.runDockerProcess.mockResolvedValue({ exitCode: 17, timedOut: false, stdout: "", stderr: "" });
+    mocks.runDockerProcess.mockResolvedValue({
+      exitCode: 17,
+      timedOut: false,
+      stdout: "",
+      stderr: "",
+    });
 
     const result = await new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(workDir));
 
