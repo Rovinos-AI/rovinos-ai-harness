@@ -86,6 +86,12 @@ describe("store content codec", () => {
     await expect(
       decodeSnapshot(codec, { ...row, meta_json: { unexpected: "metadata" } }),
     ).rejects.toBeInstanceOf(StoreUnavailableError);
+    await expect(
+      decodeSnapshot(codec, {
+        ...row,
+        meta_json: JSON.stringify({ traceparent: snapshot.traceparent, runId: otherRunId }),
+      }),
+    ).rejects.toBeInstanceOf(StoreUnavailableError);
 
     const decryptFailure: ContentCodec = {
       encrypted: true,

@@ -2,6 +2,7 @@
 import {
   ContractError,
   Id,
+  SnapshotSchema,
   parseJson,
   upcastSnapshot,
   type NewEvent,
@@ -71,7 +72,13 @@ export interface ContentCodec {
   decode(ctx: ContentCodecContext, blob: string, keyId?: string): Promise<Record<string, unknown>>;
 }
 
-const snapshotMetaSchema = z.record(z.string(), z.json());
+const snapshotMetaSchema = z
+  .object({
+    v: SnapshotSchema.shape.v.optional(),
+    traceparent: SnapshotSchema.shape.traceparent,
+    workspaceRef: SnapshotSchema.shape.workspaceRef,
+  })
+  .strict();
 
 /** Validate snapshot retention options and apply the default. */
 export function snapshotKeep(options: SnapshotStoreOptions = {}): number {
@@ -197,12 +204,12 @@ export async function decodeSnapshot(codec: ContentCodec, row: SnapshotRow): Pro
       throw new StoreUnavailableError();
     }
     return upcastSnapshot({
+      ...meta,
+      ...content,
       snapshotId: row.snapshot_id,
       runId: row.run_id,
       atSeq,
       createdAt,
-      ...meta,
-      ...content,
     });
   } catch (error) {
     if (error instanceof ContentDecryptFailedError || error instanceof KeyNotFoundError) {
