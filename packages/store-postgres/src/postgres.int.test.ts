@@ -3,7 +3,7 @@ import { Pool, type Notification, type PoolClient } from "pg";
 import { randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { Code, Id, type KeyProvider, type NewEvent } from "@rovinos/schemas";
-import { afterAll, expect, it } from "vitest";
+import { afterAll, expect, it, vi } from "vitest";
 import { AesGcmContentCodec, JsonContentCodec, type ContentCodec } from "@rovinos/store";
 import { migrate } from "@rovinos/store/adapter-internal";
 import { PostgresEventStore } from "./postgres/adapter.js";
@@ -617,12 +617,18 @@ it("hides later committed outbox rows until earlier transactions finish", async 
 
     await client.query("COMMIT");
     transactionOpen = false;
-    const visible = await store.fetchOutbox(sinkId, 10);
-    expect(visible.events.map(({ runId, seq }) => [runId, seq])).toEqual([
-      [firstRunId, 0],
-      [secondRunId, 0],
-    ]);
-    expect(visible.cursor).toBeGreaterThan(0);
+    // Concurrent transactions in other schemas can hold back the database-wide outbox watermark.
+    await vi.waitFor(
+      async () => {
+        const visible = await store.fetchOutbox(sinkId, 10);
+        expect(visible.events.map(({ runId, seq }) => [runId, seq])).toEqual([
+          [firstRunId, 0],
+          [secondRunId, 0],
+        ]);
+        expect(visible.cursor).toBeGreaterThan(0);
+      },
+      { timeout: 3_000, interval: 25 },
+    );
   } finally {
     if (transactionOpen) {
       await client.query("ROLLBACK").catch(() => undefined);
