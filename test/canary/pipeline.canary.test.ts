@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { fileURLToPath } from "node:url";
+import { Writable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createLogger } from "@rovinos/telemetry";
+import { __getLoggerDroppedFieldsForTests } from "@rovinos/telemetry/testing";
 import { CanaryHarness } from "./harness.js";
 import { scanCommittedFixtures } from "./scanning.js";
 import { createCanaries } from "./canaries.js";
@@ -69,6 +72,25 @@ describe("canary release gate", () => {
 
   it("keeps canaries out of every captured sink across the scenario matrix", async () => {
     const current = currentHarness();
+    const logBytes: string[] = [];
+    const logger = createLogger({
+      level: "debug",
+      destination: new Writable({
+        write(chunk: Buffer | string, _encoding, callback) {
+          logBytes.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+          callback();
+        },
+      }),
+    });
+    for (const { value } of current.canaries.all) {
+      logger.info(value);
+      logger.info("canary_field", { canary_value: value });
+      logger.child({ canary_value: value }).info("canary_child");
+    }
+    const capturedLogBytes = logBytes.join("");
+    expect(current.canaries.strings.every((value) => !capturedLogBytes.includes(value))).toBe(true);
+    expect(__getLoggerDroppedFieldsForTests(logger)).toBe(current.canaries.all.length * 3);
+
     await current.runRuntimeScenario();
     await current.exerciseTelemetry();
     await current.exerciseKeysRotatedLog();
