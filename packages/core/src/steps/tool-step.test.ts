@@ -1344,6 +1344,7 @@ describe("durable MCP input requests", () => {
               const outcome = await runContext.elicitation?.handleInputRequired({
                 callId: callIds.idempotent,
                 serverId: "mcp_test",
+                source: "mcp_legacy",
                 round: 1,
                 maxPerRun: 3,
                 inputRequests: [
@@ -1373,8 +1374,9 @@ describe("durable MCP input requests", () => {
     expect(state.status).toBe("running");
     expect(state.pendingInputs.size).toBe(0);
     expect(Array.from(state.resolvedInputs.values())).toMatchObject([
-      { action: "decline", decidedBy: "policy" },
+      { source: "mcp_legacy", action: "decline", decidedBy: "policy" },
     ]);
+    expect(Array.from(state.inputRequests.values())).toMatchObject([{ source: "mcp_legacy" }]);
   });
 
   it("fails closed when an MCP server exceeds the per-run input limit", async () => {

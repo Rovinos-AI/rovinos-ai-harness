@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   CLIENT_CAPABILITIES_META_KEY,
+  UrlElicitationRequiredError,
   type CallToolRequest,
   type CallToolRequestOptions,
   type CallToolResult,
@@ -9,6 +10,7 @@ import {
 import { ServerConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { invokeMcpTool } from "./mcp-call.js";
+import { McpProtocolError } from "./errors.js";
 
 function serverConfig(input: { readonly enabled: boolean; readonly modes?: ("form" | "url")[] }) {
   return ServerConfigSchema.parse({
@@ -87,6 +89,29 @@ describe("invokeMcpTool elicitation metadata", () => {
     expect(calls[0]?._meta?.[CLIENT_CAPABILITIES_META_KEY]).toBeUndefined();
   });
 
+  it("retries legacy URL input without sending MRTR response metadata", async () => {
+    const calls: CallToolRequest["params"][] = [];
+    const client: Pick<Client, "callTool"> = {
+      callTool: (params) => {
+        calls.push(params);
+        return Promise.resolve({ content: [] } satisfies CallToolResult);
+      },
+    };
+    await invokeMcpTool({
+      client,
+      server: serverConfig({ enabled: true, modes: ["url"] }),
+      params: { name: "echo", arguments: {} },
+      inputRetry: {
+        round: 1,
+        source: "mcp_legacy",
+        requestState: "ignored-by-legacy",
+        inputResponses: { "legacy-input-id": { action: "accept" } },
+      },
+    });
+    expect(calls[0]).not.toHaveProperty("inputResponses");
+    expect(calls[0]).not.toHaveProperty("requestState");
+  });
+
   it("rejects an answer that cannot be represented by an MCP elicitation result", async () => {
     const client: Pick<Client, "callTool"> = {
       callTool: () => Promise.resolve({ content: [] }),
@@ -104,5 +129,28 @@ describe("invokeMcpTool elicitation metadata", () => {
         },
       }),
     ).rejects.toThrow("Resolved input does not match");
+  });
+
+  it("preserves only URL inputs from the SDK's legacy URL-required error", async () => {
+    const urlElicitations = [
+      {
+        mode: "url" as const,
+        elicitationId: "legacy-id",
+        message: "Continue in your browser",
+        url: "https://example.test/account",
+      },
+    ];
+    const client: Pick<Client, "callTool"> = {
+      callTool: () => Promise.reject(new UrlElicitationRequiredError(urlElicitations)),
+    };
+    await expect(
+      invokeMcpTool({
+        client,
+        server: serverConfig({ enabled: true, modes: ["url"] }),
+        params: { name: "echo", arguments: {} },
+      }),
+    ).rejects.toMatchObject(
+      new McpProtocolError(-32042, urlElicitations),
+    );
   });
 });

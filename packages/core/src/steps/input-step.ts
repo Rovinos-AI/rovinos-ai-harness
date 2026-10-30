@@ -36,7 +36,7 @@ function inputRequestPartials(
       type: "input_requested",
       v: 1,
       requestId,
-      source: "mcp_mrtr",
+      source: input.source ?? "mcp_mrtr",
       serverId: input.serverId,
       callId: input.callId,
       inputKey: request.inputKey,
@@ -55,7 +55,7 @@ function inputRequestPartials(
       type: "input_resolved",
       v: 1,
       requestId,
-      source: "mcp_mrtr",
+      source: input.source ?? "mcp_mrtr",
       mode: request.mode,
       round: input.round,
       action: "decline",
@@ -92,7 +92,9 @@ export function createMcpElicitationPort(options: {
         return { kind: "error", errorCode: "mcp_input_request_invalid" };
       }
       const requestedInRun = Array.from(state.inputRequests.values()).filter(
-        (request) => request.source === "mcp_mrtr" && request.serverId === input.serverId,
+        (request) =>
+          (request.source === "mcp_mrtr" || request.source === "mcp_legacy") &&
+          request.serverId === input.serverId,
       ).length;
       if (requestedInRun + input.inputRequests.length > input.maxPerRun) {
         return { kind: "error", errorCode: "mcp_input_rate_limited" };
@@ -174,6 +176,7 @@ export function inputRetryForCall(state: RunState, callId: Id): ElicitationRetry
   return {
     inputResponses,
     round: latestRound,
+    ...(latestRequests[0]?.source === "mcp_legacy" ? { source: "mcp_legacy" } : {}),
     ...(typeof requestState === "string" ? { requestState } : {}),
   };
 }

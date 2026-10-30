@@ -144,6 +144,7 @@ function restoreInputResponses(
 
 async function askForInput(options: {
   readonly elicitation: ElicitationPort;
+  readonly source: "mcp_mrtr" | "mcp_legacy";
   readonly callId: string;
   readonly route: ResolvedTool;
   readonly round: number;
@@ -153,6 +154,7 @@ async function askForInput(options: {
   return options.elicitation.handleInputRequired({
     callId: options.callId,
     serverId: options.route.server.id,
+    source: options.source,
     round: options.round,
     maxPerRun: options.route.server.elicitation.maxPerRun,
     inputRequests: options.requests.tokenizedRequests,
@@ -172,6 +174,7 @@ export async function handleInputRequiredCall(options: {
   readonly call: ToolCallIdentity;
   readonly signal: AbortSignal;
   readonly round: number;
+  readonly source?: "mcp_mrtr" | "mcp_legacy";
   readonly elicitation?: ElicitationPort;
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata?: (value: string) => Promise<string>;
@@ -186,6 +189,7 @@ export async function handleInputRequiredCall(options: {
   try {
     outcome = await askForInput({
       elicitation: prepared.elicitation,
+      source: options.source ?? "mcp_mrtr",
       callId: options.call.callId,
       route: options.route,
       round,
@@ -228,6 +232,7 @@ export async function handleInputRequiredCall(options: {
     inputRetry: {
       inputResponses,
       round,
+      ...(options.source === undefined ? {} : { source: options.source }),
       ...(validated.requestState === undefined ? {} : { requestState: validated.requestState }),
     },
   };

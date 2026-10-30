@@ -22,6 +22,7 @@ import { createTestContextManager, createTestSpanCollector } from "@rovinos/tele
 import { lookupSpanDefinition } from "@rovinos/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
+import { McpProtocolError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
@@ -613,6 +614,61 @@ describe("McpToolPort", () => {
       }
     },
   );
+
+  it("persists legacy URL-required errors and retries without MRTR response metadata", async () => {
+    const current = await fixture({
+      elicitation: { ...mrtrConfig, modes: ["url"] },
+    });
+    const callTool = vi
+      .spyOn(McpConnection.prototype, "callTool")
+      .mockRejectedValueOnce(
+        new McpProtocolError(-32042, [
+          {
+            mode: "url",
+            elicitationId: "legacy-input-id",
+            message: "Continue in your browser",
+            url: "https://example.test/account",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "complete" }] });
+    const handleInputRequired = vi.fn(
+      (input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
+        Promise.resolve({
+          kind: "retry" as const,
+          inputResponses: {
+            "legacy-input-id": { action: "accept" as const },
+          },
+        }),
+    );
+    try {
+      const result = await current.port.execute(
+        call,
+        context(new AbortController().signal, {
+          elicitation: { handleInputRequired },
+          tokenizeHumanInput: (value) => Promise.resolve(value),
+          protectInputMetadata: (value) => Promise.resolve(value),
+        }),
+      );
+      expect(result).toMatchObject({
+        outcome: "ok",
+        result: { content: [{ type: "text", text: "complete" }] },
+      });
+      expect(handleInputRequired).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "mcp_legacy",
+          inputRequests: [expect.objectContaining({ inputKey: "legacy-input-id" })],
+        }),
+      );
+      expect(callTool).toHaveBeenCalledTimes(2);
+      expect(callTool.mock.calls[1]?.[0].inputRetry).toMatchObject({
+        source: "mcp_legacy",
+      });
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
 
   it("retries an input-required call with the response and byte-identical request state", async () => {
     const requestState = "state-\u0000-\u{1f4a1}";

@@ -214,5 +214,22 @@ describe("planDanglingIntents", () => {
         toolPort,
       )[1],
     ).toEqual({ kind: "escalate", callId: callIds.non_idempotent_tool });
+
+    const legacyRequest = EventSchema.parse({ ...request, source: "mcp_legacy" });
+    const legacyResolution = EventSchema.parse({ ...resolution, source: "mcp_legacy" });
+    if (legacyRequest.type !== "input_requested" || legacyResolution.type !== "input_resolved") {
+      throw new Error("Expected legacy input lifecycle events.");
+    }
+    expect(
+      planDanglingIntents(
+        {
+          ...state,
+          inputRequests: new Map([[legacyRequest.requestId, legacyRequest]]),
+          resolvedInputs: new Map([[legacyResolution.requestId, legacyResolution]]),
+          toolExecutionAttempts: new Map([[callIds.non_idempotent_tool, 1]]),
+        },
+        toolPort,
+      )[1],
+    ).toEqual({ kind: "escalate", callId: callIds.non_idempotent_tool });
   });
 });

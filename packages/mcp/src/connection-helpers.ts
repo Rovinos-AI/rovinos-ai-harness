@@ -151,12 +151,25 @@ export function createMcpClient(
     config.transport.kind === "http" &&
     config.transport.auth?.grant === "client_credentials" &&
     clientCredentialsExtensionEnabled;
+  const elicitationCapability = config.elicitation.enabled
+    ? {
+        ...(config.elicitation.modes.includes("form") ? { form: {} } : {}),
+        ...(config.elicitation.modes.includes("url") ? { url: {} } : {}),
+      }
+    : undefined;
   return new Client(
     { name: "rovinos-ai-harness", version: "0.0.0" },
     {
       capabilities: oauthClientCredentials
-        ? { extensions: { [OAUTH_CLIENT_CREDENTIALS_EXTENSION]: {} } }
-        : {},
+        ? {
+            extensions: { [OAUTH_CLIENT_CREDENTIALS_EXTENSION]: {} },
+            ...(elicitationCapability === undefined
+              ? {}
+              : { elicitation: elicitationCapability }),
+          }
+        : elicitationCapability === undefined
+          ? {}
+          : { elicitation: elicitationCapability },
       versionNegotiation: protocolOptions(config.protocol),
       inputRequired: { autoFulfill: false },
       listChanged: {

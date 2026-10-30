@@ -67,6 +67,15 @@ function normalizedAllowlist(hosts: readonly string[]): ReadonlySet<string> {
   );
 }
 
+function hasUrlCredentials(value: string): boolean {
+  const authorityStart = value.indexOf("//");
+  if (authorityStart < 0) {
+    return false;
+  }
+  const authority = value.slice(authorityStart + 2).split(/[/?#]/u, 1)[0] ?? "";
+  return authority.includes("@");
+}
+
 /**
  * Checks an untrusted URL without performing network activity or opening it.
  *
@@ -90,7 +99,7 @@ export function checkElicitationUrl(
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     return { accepted: false, reason: "scheme" };
   }
-  if (url.username.length > 0 || url.password.length > 0) {
+  if (url.username.length > 0 || url.password.length > 0 || hasUrlCredentials(value)) {
     return { accepted: false, reason: "credentials" };
   }
   const hostname = normalizedHostname(url.hostname);

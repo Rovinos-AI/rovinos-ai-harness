@@ -10,11 +10,15 @@ describe("checkElicitationUrl", () => {
     },
   );
 
-  it("rejects URL usernames and passwords", () => {
+  it("rejects URL usernames and passwords, including empty userinfo", () => {
     const url = new URL("https://example.test/path");
     url.username = "user";
     url.password = "pass";
     expect(checkElicitationUrl(url.toString())).toEqual({
+      accepted: false,
+      reason: "credentials",
+    });
+    expect(checkElicitationUrl("https://@example.test/path")).toEqual({
       accepted: false,
       reason: "credentials",
     });

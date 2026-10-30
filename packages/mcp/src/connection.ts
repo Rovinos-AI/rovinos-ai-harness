@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import type {
-  Client,
-  CallToolRequest,
-  CallToolRequestOptions,
-  CallToolResult,
-  Transport,
+import {
+  specTypeSchemas,
+  type ElicitRequest,
+  type ElicitResult,
+  type Client,
+  type CallToolRequest,
+  type CallToolRequestOptions,
+  type CallToolResult,
+  type Transport,
 } from "@modelcontextprotocol/client";
 import type { ServerConfig } from "@rovinos/schemas";
 import {
@@ -16,6 +19,7 @@ import {
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
 import { invokeMcpTool } from "./mcp-call.js";
+import { LegacyElicitationCompletionTracker } from "./elicitation/legacy.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
@@ -43,6 +47,15 @@ interface ConnectionToolCall {
   readonly options?: CallToolRequestOptions;
   readonly toolDefinition?: McpTool;
   readonly inputRetry?: ElicitationRetry;
+  readonly legacyElicitation?: {
+    readonly signal: AbortSignal;
+    readonly handle: (
+      request: ElicitRequest["params"],
+      elicitationId: string,
+      signal: AbortSignal,
+    ) => Promise<ElicitResult>;
+    readonly onComplete: (elicitationId: string) => void;
+  };
 }
 
 /**
@@ -60,6 +73,13 @@ export class McpConnection {
   #protocolEra: "legacy" | "modern" | undefined;
   #cachedTools: CachedToolList | undefined;
   readonly #clientCredentialsExtension = new ClientCredentialsExtensionSupport();
+  #legacyCallTail: Promise<void> = Promise.resolve();
+  #legacyElicitationCallbacks: ConnectionToolCall["legacyElicitation"];
+  readonly #legacyCompletionTracker = new LegacyElicitationCompletionTracker();
+  readonly #legacyCompletionCallbacks = new Map<
+    string,
+    NonNullable<ConnectionToolCall["legacyElicitation"]>
+  >();
   #oauthProvider: McpOAuthProvider | undefined;
   #closed = false;
   #connectGeneration = 0;
@@ -172,6 +192,35 @@ export class McpConnection {
         },
       );
       client = activeClient;
+      if (this.#config.elicitation.enabled) {
+        activeClient.setRequestHandler("elicitation/create", (request, context) => {
+          const elicitationId =
+            "elicitationId" in request.params
+              ? request.params.elicitationId
+              : String(context.mcpReq.id);
+          const callbacks = this.#legacyElicitationCallbacks;
+          if (callbacks === undefined || callbacks.signal.aborted) {
+            return { action: "cancel", content: {} };
+          }
+          this.#trackCompletion(elicitationId, callbacks);
+          return callbacks.handle(request.params, elicitationId, callbacks.signal);
+        });
+        activeClient.setNotificationHandler(
+          "notifications/elicitation/complete",
+          { params: specTypeSchemas.ElicitationCompleteNotificationParams },
+          (params) => {
+            const { elicitationId } = params;
+            if (!this.#legacyCompletionTracker.complete(elicitationId)) {
+              return;
+            }
+            const callbacks =
+              this.#legacyCompletionCallbacks.get(elicitationId) ??
+              this.#legacyElicitationCallbacks;
+            this.#legacyCompletionCallbacks.delete(elicitationId);
+            callbacks?.onComplete(elicitationId);
+          },
+        );
+      }
       await runWithSafeAuthLogging(
         this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
         () =>
@@ -221,6 +270,8 @@ export class McpConnection {
     const previousClient = this.#client;
     this.#client = undefined;
     this.#currentTransport = undefined;
+    this.#legacyCompletionTracker.clear();
+    this.#legacyCompletionCallbacks.clear();
     await previousClient?.close().catch(() => undefined);
   }
 
@@ -323,6 +374,13 @@ export class McpConnection {
    * @returns The remote tool result.
    */
   async callTool(request: ConnectionToolCall): Promise<CallToolResult> {
+    if (this.#config.elicitation.enabled && this.#protocolEra !== "modern") {
+      return this.#serializeLegacyCall(() => this.#callTool(request));
+    }
+    return this.#callTool(request);
+  }
+
+  async #callTool(request: ConnectionToolCall): Promise<CallToolResult> {
     const { params, inputSchema, options, toolDefinition, inputRetry } = request;
     try {
       const validate = getOrCreateValidator(inputSchema);
@@ -332,6 +390,7 @@ export class McpConnection {
     }
 
     await this.#ensureReady(options?.signal);
+    this.#legacyElicitationCallbacks = request.legacyElicitation;
     try {
       return await this.#invoke(params, options, toolDefinition, inputRetry);
     } catch (error) {
@@ -340,6 +399,7 @@ export class McpConnection {
         throw new McpConnectionError("mcp_auth_required");
       }
       if (error instanceof McpProtocolError) {
+        this.#trackErrorElicitations(error, request.legacyElicitation);
         throw error;
       }
       const isLoss = isConnectionLossError(error) || this.#state === "unavailable";
@@ -357,11 +417,56 @@ export class McpConnection {
         return await this.#invoke(params, options, toolDefinition, inputRetry);
       } catch (retryError) {
         if (retryError instanceof McpProtocolError) {
+          this.#trackErrorElicitations(retryError, request.legacyElicitation);
           throw retryError;
         }
         throw new McpConnectionError("mcp_connection_lost");
       }
+    } finally {
+      this.#legacyElicitationCallbacks = undefined;
     }
+  }
+
+  #trackErrorElicitations(
+    error: McpProtocolError,
+    callbacks: ConnectionToolCall["legacyElicitation"],
+  ): void {
+    if (error.protocolCode !== -32042 || error.urlElicitations === undefined) {
+      return;
+    }
+    for (const { elicitationId } of error.urlElicitations) {
+      this.#trackCompletion(elicitationId, callbacks);
+    }
+  }
+
+  #trackCompletion(
+    elicitationId: string,
+    callbacks: ConnectionToolCall["legacyElicitation"],
+  ): void {
+    this.#legacyCompletionTracker.track(elicitationId);
+    if (callbacks === undefined) {
+      return;
+    }
+    if (
+      !this.#legacyCompletionCallbacks.has(elicitationId) &&
+      this.#legacyCompletionCallbacks.size >= 512
+    ) {
+      const oldest = this.#legacyCompletionCallbacks.keys().next().value;
+      if (oldest !== undefined) {
+        this.#legacyCompletionCallbacks.delete(oldest);
+      }
+    }
+    this.#legacyCompletionCallbacks.set(elicitationId, callbacks);
+  }
+
+  #serializeLegacyCall<Result>(operation: () => Promise<Result>): Promise<Result> {
+    const predecessor = this.#legacyCallTail;
+    let release = (): void => undefined;
+    const turn = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#legacyCallTail = predecessor.then(() => turn);
+    return predecessor.then(operation).finally(release);
   }
 
   #invoke(

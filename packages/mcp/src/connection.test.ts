@@ -9,7 +9,7 @@ import {
 } from "@modelcontextprotocol/client";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { ServerConfigSchema, type JsonValue } from "@rovinos/schemas";
+import { ServerConfigSchema, type JsonValue, type ServerConfig } from "@rovinos/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError, excludeHeaderDeclaringTools } from "./connection.js";
@@ -118,11 +118,13 @@ describe("ClientCredentialsExtensionSupport", () => {
 interface MemoryPeer {
   readonly client: InMemoryTransport;
   readonly serverTransport: InMemoryTransport;
+  readonly server: McpServer;
 }
 
 type MemoryCallHandler = (
   serverTransport: InMemoryTransport,
   params: CallToolRequest["params"],
+  server: McpServer,
 ) => Promise<CallToolResult> | CallToolResult;
 
 async function createMemoryPeer(
@@ -164,12 +166,12 @@ async function createMemoryPeer(
   });
   server.server.setRequestHandler("tools/call", (request) => {
     if (options.onCall !== undefined) {
-      return options.onCall(serverTransport, request.params);
+      return options.onCall(serverTransport, request.params, server);
     }
     return { content: [{ type: "text", text: "called" }] };
   });
   await server.connect(serverTransport);
-  return { client, serverTransport };
+  return { client, serverTransport, server };
 }
 
 function config(
@@ -179,6 +181,7 @@ function config(
     readonly connectMs?: number;
     readonly trust?: "internal" | "external";
     readonly propagateTrace?: boolean;
+    readonly elicitation?: ServerConfig["elicitation"];
   } = {},
 ) {
   return ServerConfigSchema.parse({
@@ -188,6 +191,7 @@ function config(
     trust: options.trust ?? "external",
     propagateTrace: options.propagateTrace ?? false,
     idempotentTools: options.idempotentTools,
+    elicitation: options.elicitation,
     timeouts: { connectMs: options.connectMs ?? 1_000, callMs: 1_000 },
   });
 }
@@ -268,6 +272,72 @@ function deferredTransport(transport: Transport) {
 }
 
 describe("McpConnection", () => {
+  it("handles legacy server-initiated elicitation only during the bound tool call", async () => {
+    const peer = await createMemoryPeer({
+      count: 1,
+      onCall: async (_transport, _params, server) => {
+        const response = await server.server.elicitInput({
+          mode: "url",
+          elicitationId: "live-url-id",
+          message: "Confirm the action",
+          url: "https://example.test/continue",
+        });
+        await server.server.notification({
+          method: "notifications/elicitation/complete",
+          params: { elicitationId: "live-url-id" },
+        });
+        return { content: [{ type: "text", text: response.action }] };
+      },
+    });
+    const connection = connectionFor(
+      config({
+        protocol: "2025-11-25",
+        elicitation: {
+          enabled: true,
+          modes: ["url"],
+          maxRounds: 2,
+          maxPerRun: 4,
+          maxRequestStateBytes: 128,
+          legacyLiveTimeoutMs: 100,
+        },
+      }),
+      () => Promise.resolve(peer.client),
+    );
+    const answers: string[] = [];
+    const onComplete = vi.fn();
+    try {
+      await connection.connect();
+      await connection.listTools();
+      const result = await connection.callTool({
+        params: { name: "tool-1", arguments: { value: "ok" } },
+        inputSchema,
+        options: { signal: new AbortController().signal },
+        legacyElicitation: {
+          signal: new AbortController().signal,
+          handle: (request, elicitationId) => {
+            answers.push(`${request.message}:${elicitationId}`);
+            return Promise.resolve({ action: "accept", content: {} });
+          },
+          onComplete,
+        },
+      });
+      expect(result.content).toEqual([{ type: "text", text: "accept" }]);
+      expect(answers).toEqual(["Confirm the action:live-url-id"]);
+      expect(onComplete).toHaveBeenCalledWith("live-url-id");
+      await expect(
+        peer.server.server.elicitInput({
+          mode: "url",
+          elicitationId: "outside-call",
+          message: "Outside a tool call",
+          url: "https://example.test/outside",
+        }),
+      ).resolves.toMatchObject({ action: "cancel" });
+      expect(answers).toHaveLength(1);
+    } finally {
+      await connection.close();
+      await peer.serverTransport.close();
+    }
+  });
   it.each([
     [new McpConnectionError("mcp_connection_lost"), true],
     [new McpConnectionError("mcp_connect_failed"), false],
@@ -280,6 +350,7 @@ describe("McpConnection", () => {
 
   it("exports the MCP connection, pool, and transport APIs from the package entry point", () => {
     expect(Object.keys(mcpPackage).sort()).toEqual([
+      "LegacyElicitationCompletionTracker",
       "McpAuthRequiredError",
       "McpConnection",
       "McpConnectionError",
@@ -299,6 +370,8 @@ describe("McpConnection", () => {
       "createMcpTransport",
       "createServersAuthorizedCheck",
       "createServersReachableChecks",
+      "handleLegacyLiveElicitation",
+      "legacyUrlInputRequiredResult",
       "normalizeToolId",
       "startMcpOAuthLogin",
       "withOAuthWarningsRedacted",

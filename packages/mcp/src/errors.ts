@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
+import {
+  SdkError,
+  SdkErrorCode,
+  type ElicitRequestURLParams,
+} from "@modelcontextprotocol/client";
 import { HarnessError } from "@rovinos/schemas";
 
 /** Safe protocol failure retaining only the numeric JSON-RPC code. */
 export class McpProtocolError extends HarnessError {
   override readonly code = "mcp_protocol_error";
 
-  /** Creates a protocol error without retaining the remote message or data. */
-  constructor(readonly protocolCode: number) {
+  /** Creates a protocol error, retaining only validated URL inputs for durable tokenization. */
+  constructor(
+    readonly protocolCode: number,
+    readonly urlElicitations?: readonly ElicitRequestURLParams[],
+  ) {
     super("mcp_protocol_error");
   }
 }
