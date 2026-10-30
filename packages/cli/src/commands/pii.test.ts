@@ -28,11 +28,11 @@ const config = HarnessConfigSchema.parse({
   },
 });
 
-function createContext() {
+function createContext(harnessConfig: typeof config = config) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const context: CliContext = {
-    loadConfig: () => Promise.resolve(config),
+    loadConfig: () => Promise.resolve(harnessConfig),
     out: createOutput({
       stdout: (text) => stdout.push(text),
       stderr: (text) => stderr.push(text),
@@ -77,6 +77,60 @@ describe("harness pii explain", () => {
     expect(fixture.stderr).toEqual([]);
   });
 
+  it("includes detokenization tools in the configured matrix destinations", async () => {
+    const harnessConfig = HarnessConfigSchema.parse({
+      pii: {
+        detokenize: [{ toolId: "files.read", args: ["/path"] }],
+      },
+    });
+    const fixture = createContext(harnessConfig);
+
+    const code = await main(["pii", "explain", "--matrix"], fixture.context, [piiCommand]);
+
+    expect(code).toBe(ExitCode.ok);
+    expect(fixture.stdout.join("")).toContain("tool_input\ttool:files.read");
+  });
+
+  it("resolves tool and non-tool destinations for their boundaries", async () => {
+    const toolFixture = createContext();
+    const toolCode = await main(
+      [
+        "pii",
+        "explain",
+        "--boundary",
+        "tool_input",
+        "--destination",
+        "tool:mail.send",
+        "--entity",
+        "email",
+      ],
+      toolFixture.context,
+      [piiCommand],
+    );
+
+    expect(toolCode).toBe(ExitCode.ok);
+    expect(toolFixture.stdout.join("")).toContain("tool_input\ttool:mail.send\temail\tredact\t1");
+
+    const storageFixture = createContext();
+    const storageCode = await main(
+      [
+        "pii",
+        "explain",
+        "--boundary",
+        "storage",
+        "--destination",
+        "tool:mail.send",
+        "--entity",
+        "email",
+      ],
+      storageFixture.context,
+      [piiCommand],
+    );
+
+    expect(storageCode).toBe(ExitCode.ok);
+    expect(storageFixture.stdout.join("")).toContain("storage\tany\temail");
+  });
+
   it("emits one schema-validated JSON document in JSON mode", async () => {
     const fixture = createContext();
 
@@ -97,5 +151,34 @@ describe("harness pii explain", () => {
 
     expect(code).toBe(ExitCode.usage);
     expect(fixture.stderr).toEqual(["usage\n"]);
+  });
+
+  it("rejects invalid destinations and schema values with the usage code", async () => {
+    const invalidDestinationFixture = createContext();
+    const invalidDestinationCode = await main(
+      [
+        "pii",
+        "explain",
+        "--boundary",
+        "model_input",
+        "--destination",
+        "tool:",
+        "--entity",
+        "email",
+      ],
+      invalidDestinationFixture.context,
+      [piiCommand],
+    );
+
+    expect(invalidDestinationCode).toBe(ExitCode.usage);
+
+    const invalidBoundaryFixture = createContext();
+    const invalidBoundaryCode = await main(
+      ["pii", "explain", "--boundary", "unknown", "--destination", "local", "--entity", "email"],
+      invalidBoundaryFixture.context,
+      [piiCommand],
+    );
+
+    expect(invalidBoundaryCode).toBe(ExitCode.usage);
   });
 });

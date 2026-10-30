@@ -63,7 +63,9 @@ configured analyzer fails PII detection rather than passing its input through. S
 `regex_only` to continue with synchronous detectors during an analyzer outage; this degraded
 operation increments `harness.pii.detector_degraded`. Presidio supplements the built-in detectors
 and does not guarantee that every sensitive value will be detected. `pii.allowRawToLocalModels`
-defaults to `false`; local model-input `allow` rules are tokenized unless this is explicitly enabled.
+defaults to `false`; after upgrading, existing local-model configurations receive tokens rather than
+raw values for model inputs covered by `allow` rules. Set this option to `true` to preserve the
+previous raw-value behavior.
 
 ```yaml
 pii:
