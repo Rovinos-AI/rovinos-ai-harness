@@ -84,6 +84,7 @@ import { createPolicyCheckedAppCallHandler } from "@rovinos/host";
 import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { ProviderError, type ProviderAdapter } from "@rovinos/models";
 import { FakeProvider } from "@rovinos/models/testing";
+import { ReplayReportSchema } from "@rovinos/replay";
 import { ApprovalNotificationSchema, buildApprovalPayload } from "@rovinos/policy";
 import {
   ApprovalListResultSchema,
@@ -742,7 +743,7 @@ describe("run", () => {
 });
 
 describe("replay", () => {
-  it("resolves the recorded run through the CLI without printing event content", async () => {
+  it("reports the known model_request hash divergence on tokenized runs (#640) without printing event content", async () => {
     const current = fixture();
     const runId = current.runId;
     if (runId === undefined) {
@@ -751,25 +752,12 @@ describe("replay", () => {
 
     const result = await invokeCli(["--json", "replay", "--run", runId]);
 
-    expect(result.code).toBe(ExitCode.ok);
-    const resolved = jsonResult(
-      z
-        .object({
-          rootRunId: Id,
-          runs: z
-            .object({
-              runId: Id,
-              role: z.enum(["root", "subagent"]),
-              parentRunId: Id.optional(),
-            })
-            .strict()
-            .array(),
-        })
-        .strict(),
-      result.stdout,
-    );
-    expect(resolved.rootRunId).toBe(runId);
-    expect(resolved.runs).toEqual([{ runId, role: "root" }]);
+    expect(result.code).toBe(ExitCode.replayFailed);
+    const report = jsonResult(ReplayReportSchema, result.stdout);
+    expect(report.originalRunId).toBe(runId);
+    expect(report.status).toBe("error");
+    // #640 tracks the replay-safe signature; this becomes replay_missing_result when it lands.
+    expect(report.divergence).toEqual({ seq: 3, code: "replay_divergence" });
     expect(result.stdout.join("")).not.toContain(current.canary);
   });
 });
