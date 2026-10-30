@@ -73,6 +73,7 @@ function snapshot(context = canary("context"), plan = canary("plan")): Snapshot 
   return {
     snapshotId,
     runId,
+    v: 1,
     atSeq: 1,
     createdAt: 10,
     traceparent: `00-${traceId}-${spanId}-01`,
@@ -513,6 +514,7 @@ describe("PiiEventStore", () => {
       {
         snapshotId,
         runId,
+        v: 1,
         atSeq: 2,
         createdAt: 10,
         traceparent: `00-${traceId}-${spanId}-01`,

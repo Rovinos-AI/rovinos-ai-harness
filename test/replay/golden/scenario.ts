@@ -347,6 +347,41 @@ export async function recordGoldenScenario(reverseToolCalls = false): Promise<Go
   };
 }
 
+/** Resumes a run from a validated, non-terminal prefix using synthetic fake ports. */
+export async function resumeLegacyRun(events: readonly Event[]): Promise<RunLoopResult> {
+  const prefix = events.slice(0, 3);
+  const first = prefix[0];
+  if (first?.type !== "run_created" || prefix.length !== 3) {
+    throw new Error("Expected a non-terminal legacy run prefix.");
+  }
+  const initialEvents = prefix.map(({ seq, ...event }, index) => {
+    if (seq !== index) {
+      throw new Error("Expected a contiguous legacy run prefix.");
+    }
+    return event;
+  });
+  const store = new InMemoryEventStore();
+  await store.append(first.runId, initialEvents, 0);
+  const dataDir = await mkdtemp(join(tmpdir(), "harness-legacy-resume-"));
+  const runtime = await createGoldenRuntime({
+    dataDir,
+    store,
+    clock: new FakeClock(1_000),
+    ids: new SequentialIdGenerator(),
+    model: new FakeModelPort([completion([{ type: "text", text: "synthetic resumed answer" }])]),
+    policy: createPolicy(),
+  });
+  try {
+    return await runtime.resume(first.runId);
+  } finally {
+    try {
+      await runtime.close();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  }
+}
+
 /** Provides isolated in-memory tracing for runtime and replay scenarios that write checkpoints. */
 export async function withGoldenTracing<T>(run: () => Promise<T>): Promise<T> {
   trace.disable();

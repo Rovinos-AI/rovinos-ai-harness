@@ -8,6 +8,7 @@ export const SnapshotSchema = z
   .object({
     snapshotId: Id,
     runId: Id,
+    v: z.number().int().positive().default(1),
     atSeq: z.number().int().nonnegative(),
     createdAt: z.number().int().nonnegative(),
     traceparent: Traceparent,

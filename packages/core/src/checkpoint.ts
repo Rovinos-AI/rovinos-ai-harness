@@ -2,6 +2,7 @@
 import { isSpanContextValid } from "@opentelemetry/api";
 import {
   HarnessError,
+  SNAPSHOT_SCHEMA_VERSION,
   Traceparent,
   type Code,
   type Event,
@@ -85,6 +86,7 @@ export class Checkpointer {
           const snapshot: Omit<Snapshot, "atSeq"> = {
             snapshotId,
             runId: this.options.runId,
+            v: SNAPSHOT_SCHEMA_VERSION,
             createdAt: this.options.clock.now(),
             traceparent,
             context: contextSnapshot,
