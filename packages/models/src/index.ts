@@ -81,6 +81,13 @@ export {
   OpenAICompatibleAdapter,
   type OpenAICompatibleAdapterOptions,
 } from "./providers/openai-compatible.js";
+export {
+  AzureOpenAIAdapter,
+  type AzureOpenAIAdapterOptions,
+  type AzureOpenAIAuth,
+  type AzureOpenAICredential,
+  type AzureOpenAIAccessToken,
+} from "./providers/azure-openai.js";
 export { VertexAdapter, type VertexAdapterOptions } from "./providers/vertex.js";
 export {
   JsonSchemaError,
