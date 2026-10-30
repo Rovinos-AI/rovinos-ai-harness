@@ -56,6 +56,13 @@ const providerDefaults: ReadonlyMap<string, Capabilities> = new Map([
     },
   ],
   [
+    "openai_compatible",
+    {
+      ...defaultCapabilities,
+      structuredOutput: "json_mode",
+    },
+  ],
+  [
     "vertex",
     {
       ...defaultCapabilities,

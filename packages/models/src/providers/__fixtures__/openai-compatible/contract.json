@@ -1,0 +1,208 @@
+[
+  {
+    "scenario": "text_only",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "local-endpoint", "model": "fixture-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "id": "fixture-completion",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "fixture-model",
+        "choices": [
+          {
+            "index": 0,
+            "message": { "role": "assistant", "content": "answer" },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": { "prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5 }
+      }
+    },
+    "expected": {
+      "parts": [
+        { "type": "text", "text": "answer" },
+        {
+          "type": "opaque",
+          "provider": "local-endpoint",
+          "blob": {
+            "message": { "role": "assistant", "content": "answer" },
+            "openaiCallIdByCallId": {}
+          }
+        }
+      ],
+      "usage": { "inputTokens": 2, "outputTokens": 3 },
+      "finishReason": "stop"
+    }
+  },
+  {
+    "scenario": "tool_call",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "local-endpoint", "model": "fixture-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "id": "fixture-completion",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "fixture-model",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_fixture",
+                  "type": "function",
+                  "function": { "name": "lookup", "arguments": "{\"query\":\"x\"}" }
+                }
+              ]
+            },
+            "finish_reason": "tool_calls"
+          }
+        ],
+        "usage": { "prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5 }
+      }
+    },
+    "expected": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "callId": "00000000000000000000000000",
+          "toolId": "lookup",
+          "args": { "query": "x" }
+        },
+        {
+          "type": "opaque",
+          "provider": "local-endpoint",
+          "blob": {
+            "message": {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_fixture",
+                  "type": "function",
+                  "function": { "name": "lookup", "arguments": "{\"query\":\"x\"}" }
+                }
+              ]
+            },
+            "openaiCallIdByCallId": {
+              "00000000000000000000000000": "call_fixture"
+            }
+          }
+        }
+      ],
+      "usage": { "inputTokens": 2, "outputTokens": 3 },
+      "finishReason": "tool_calls"
+    }
+  },
+  {
+    "scenario": "usage_mapping",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "local-endpoint", "model": "fixture-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "id": "fixture-completion",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "fixture-model",
+        "choices": [
+          {
+            "index": 0,
+            "message": { "role": "assistant", "content": "answer" },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 7,
+          "completion_tokens": 11,
+          "total_tokens": 18,
+          "prompt_tokens_details": { "cached_tokens": 1 }
+        }
+      }
+    },
+    "expected": {
+      "usage": { "inputTokens": 7, "outputTokens": 11, "cacheReadTokens": 1 },
+      "finishReason": "stop"
+    }
+  },
+  {
+    "scenario": "error_429",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "local-endpoint", "model": "fixture-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 429,
+      "headers": { "retry-after": "2" },
+      "body": { "error": { "message": "fixture rate limit", "type": "rate_limit_error" } }
+    },
+    "expected": { "status": 429, "retryAfterMs": 2000 }
+  },
+  {
+    "scenario": "error_500",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "local-endpoint", "model": "fixture-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 500,
+      "body": { "error": { "message": "fixture unavailable", "type": "server_error" } }
+    },
+    "expected": { "status": 500 }
+  },
+  {
+    "scenario": "error_401",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "local-endpoint", "model": "fixture-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 401,
+      "body": { "error": { "message": "fixture unauthorized", "type": "authentication_error" } }
+    },
+    "expected": { "status": 401 }
+  },
+  {
+    "scenario": "abort_signal",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "local-endpoint", "model": "fixture-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "id": "fixture-completion",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "fixture-model",
+        "choices": [
+          {
+            "index": 0,
+            "message": { "role": "assistant", "content": "answer" },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": { "prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5 }
+      }
+    }
+  }
+]

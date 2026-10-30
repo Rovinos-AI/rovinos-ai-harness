@@ -177,6 +177,10 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     maxContextTokens: z.ZodOptional<z.ZodNumber>;
                     opaqueRoundTrip: z.ZodOptional<z.ZodBoolean>;
                 }, z.core.$strict>>;
+                quirks: z.ZodOptional<z.ZodObject<{
+                    useMaxTokens: z.ZodOptional<z.ZodBoolean>;
+                    supportsStrictSchema: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$strict>>;
                 trust: z.ZodDefault<z.ZodEnum<{
                     hosted: "hosted";
                     local: "local";

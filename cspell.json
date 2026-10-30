@@ -39,7 +39,8 @@
     "tooluse",
     "transactionally",
     "unconfigured",
-    "unlisten"
+    "unlisten",
+    "vllm"
   ],
   "dictionaryDefinitions": [
     {

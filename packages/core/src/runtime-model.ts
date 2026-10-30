@@ -9,6 +9,7 @@ import {
   AnthropicAdapter,
   createRoutingModelGateway,
   OpenAIAdapter,
+  OpenAICompatibleAdapter,
   type RequestSanitizer,
   type ProviderAdapter,
 } from "@rovinos/models";
@@ -16,7 +17,8 @@ import type { ModelPort, IdGenerator } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import { parseRuntimeModelsConfig } from "./runtime-config.js";
 
-type RuntimeModelConfigErrorCode = "secret_resolver_unavailable" | "model_provider_key_missing";
+type RuntimeModelConfigErrorCode =
+  "secret_resolver_unavailable" | "model_provider_base_url_missing" | "model_provider_key_missing";
 
 class RuntimeModelConfigError extends HarnessError {
   readonly code: RuntimeModelConfigErrorCode;
@@ -85,6 +87,17 @@ async function configuredAdapter(
     ...(provider.baseUrl === undefined ? {} : { baseURL: provider.baseUrl }),
     ...(capabilities === undefined ? {} : { capabilities }),
   };
+  if (provider.kind === "openai_compatible") {
+    if (provider.baseUrl === undefined) {
+      throw new RuntimeModelConfigError("model_provider_base_url_missing");
+    }
+    return new OpenAICompatibleAdapter({
+      ...options,
+      baseURL: provider.baseUrl,
+      trust: provider.trust,
+      ...(provider.quirks === undefined ? {} : { quirks: provider.quirks }),
+    });
+  }
   return provider.kind === "anthropic" ? new AnthropicAdapter(options) : new OpenAIAdapter(options);
 }
 

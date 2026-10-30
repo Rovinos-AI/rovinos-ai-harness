@@ -6,6 +6,7 @@ import {
   JsonValue,
   type Id,
   type ModelRequest,
+  type ModelProviderQuirks,
 } from "@rovinos/schemas";
 import OpenAI, {
   APIConnectionError,
@@ -13,7 +14,6 @@ import OpenAI, {
   APIError,
   APIUserAbortError,
 } from "openai";
-import { z } from "zod";
 import type {
   ChatCompletionChunk,
   ChatCompletionCreateParamsStreaming,
@@ -25,12 +25,8 @@ import {
   toChatRequest,
   type ChatCompletionLike,
 } from "./chat-completions-mapper.js";
+import { OpenAIErrorMetadataSchema, providerErrorType } from "./openai-error-utils.js";
 import { retryAfterMs } from "./retry-after.js";
-
-const OpenAIErrorMetadataSchema = z.object({
-  status: z.number().optional(),
-  headers: z.instanceof(Headers).nullish(),
-});
 
 interface StreamToolCall {
   id: string;
@@ -51,23 +47,6 @@ interface OpenAIStreamState {
 }
 
 type OpenAIToolDelta = NonNullable<ChatCompletionChunk.Choice["delta"]["tool_calls"]>[number];
-
-const ProviderErrorFrameSchema = z.looseObject({
-  type: z.string().optional(),
-  code: z.string().optional(),
-  error: z.unknown().optional(),
-});
-
-function providerErrorType(error: unknown): string | undefined {
-  const parsed = ProviderErrorFrameSchema.safeParse(error);
-  if (!parsed.success) {
-    return undefined;
-  }
-  const nested = ProviderErrorFrameSchema.safeParse(parsed.data.error);
-  return nested.success
-    ? (nested.data.type ?? nested.data.code ?? parsed.data.type ?? parsed.data.code)
-    : (parsed.data.type ?? parsed.data.code);
-}
 
 function toolCallDelta(
   toolDelta: OpenAIToolDelta,
@@ -219,18 +198,23 @@ export interface OpenAISecret {
 export interface OpenAIAdapterOptions {
   readonly apiKey: OpenAISecret;
   readonly provider?: Code;
+  readonly kind?: "openai" | "openai_compatible";
+  readonly trust?: "hosted" | "local";
   readonly maxOutputTokens?: number;
   readonly fetch?: typeof fetch;
   readonly baseURL?: string;
   readonly capabilities?: Partial<Capabilities>;
+  readonly quirks?: ModelProviderQuirks;
 }
 
 /** OpenAI Chat Completions provider adapter. */
 export class OpenAIAdapter implements ProviderAdapter {
   readonly provider: Code;
-  readonly kind = "openai" as const;
+  readonly kind: "openai" | "openai_compatible";
+  readonly trust?: "hosted" | "local";
   readonly maxOutputTokens: number;
   readonly capabilities: Partial<Capabilities>;
+  private readonly quirks: ModelProviderQuirks | undefined;
   private readonly client: OpenAI;
 
   /**
@@ -240,7 +224,12 @@ export class OpenAIAdapter implements ProviderAdapter {
    */
   constructor(options: OpenAIAdapterOptions) {
     this.provider = options.provider ?? "openai";
+    this.kind = options.kind ?? "openai";
+    if (options.trust !== undefined) {
+      this.trust = options.trust;
+    }
     this.maxOutputTokens = options.maxOutputTokens ?? 4_096;
+    this.quirks = options.quirks ?? {};
     this.client = new OpenAI({
       apiKey: options.apiKey.reveal(),
       maxRetries: 0,
@@ -264,6 +253,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           {
             structuredOutput: capabilities.structuredOutput,
             parallelToolCalls: capabilities.parallelToolCalls,
+            ...(this.quirks ?? {}),
           },
           this.provider,
         ),
@@ -292,6 +282,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         {
           structuredOutput: capabilities.structuredOutput,
           parallelToolCalls: capabilities.parallelToolCalls,
+          ...(this.quirks ?? {}),
         },
         this.provider,
       ),
