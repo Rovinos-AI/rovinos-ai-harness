@@ -119,3 +119,4 @@ export {
   type ValueTransform,
   type ValueTransformResult,
 } from "./enforce/index.js";
+export { extractJson, type ExtractJsonResult } from "./enforce/extract-json.js";
