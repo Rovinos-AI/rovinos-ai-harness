@@ -54,8 +54,9 @@ describe("agent.ask_user tool", () => {
   });
 
   it("requires an answer for acceptance and excludes answers for decline or cancel", () => {
-    expect(AskUserOutputSchema.safeParse({ action: "accept", answer: { value: "yes" } }).success)
-      .toBe(true);
+    expect(
+      AskUserOutputSchema.safeParse({ action: "accept", answer: { value: "yes" } }).success,
+    ).toBe(true);
     expect(AskUserOutputSchema.safeParse({ action: "accept" }).success).toBe(false);
     expect(AskUserOutputSchema.safeParse({ action: "decline" }).success).toBe(true);
     expect(AskUserOutputSchema.safeParse({ action: "cancel" }).success).toBe(true);
@@ -67,7 +68,12 @@ describe("agent.ask_user tool", () => {
   it("advertises a non-idempotent built-in and forwards the validated question", async () => {
     const tool = new AskUserTool();
     const askUser = vi.fn(() =>
-      Promise.resolve({ outcome: "ok" as const, result: null, suspend: true, suspendReason: "awaiting_input" as const }),
+      Promise.resolve({
+        outcome: "ok" as const,
+        result: null,
+        suspend: true,
+        suspendReason: "awaiting_input" as const,
+      }),
     );
 
     expect(tool.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["agent.ask_user"]);

@@ -19,7 +19,9 @@ export function createRuntimeToolPort(
     readonly scopes: RunScopeRegistry;
   },
 ): ToolPort {
-  const toolWithAskUser = composeToolPorts(new AskUserTool(), options.tool);
+  const toolWithAskUser = composeToolPorts(new AskUserTool(), options.tool, {
+    preferAdditionalSpecs: true,
+  });
   const subagentTool = createSubagentTool({
     config: options.config,
     clock: options.clock,

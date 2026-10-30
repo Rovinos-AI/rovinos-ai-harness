@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  Code,
   FormSchema,
   JsonValue,
   ToolSpecSchema,
@@ -107,9 +106,7 @@ function resolveDanglingInput(
 export class AskUserTool implements ToolPort {
   /** Describes the built-in question tool. */
   describe(toolId: CodeType): ToolDescription | undefined {
-    return toolId === ASK_USER_TOOL_ID
-      ? { idempotent: false, timeoutMs: 30_000 }
-      : undefined;
+    return toolId === ASK_USER_TOOL_ID ? { idempotent: false, timeoutMs: 30_000 } : undefined;
   }
 
   /** Advertises the `agent.ask_user` input schema. */
@@ -123,12 +120,11 @@ export class AskUserTool implements ToolPort {
       return undefined;
     }
     return {
-      onDanglingIntent: async (call, state) => {
+      onDanglingIntent: (call, state) => {
         const result = resolveDanglingInput(call, state);
-        if (result === undefined) {
-          return { kind: "rerun" };
-        }
-        return { kind: "result", execution: result };
+        return Promise.resolve(
+          result === undefined ? { kind: "rerun" } : { kind: "result", execution: result },
+        );
       },
     };
   }

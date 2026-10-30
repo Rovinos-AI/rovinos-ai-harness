@@ -729,9 +729,7 @@ describe("runtime subagent spawning", () => {
         expect.objectContaining({ requestId: request.requestId, source: "agent" }),
       );
       expect(
-        parentEvents.some(
-          (event) => event.type === "tool_result" && event.callId === spawnCallId,
-        ),
+        parentEvents.some((event) => event.type === "tool_result" && event.callId === spawnCallId),
       ).toBe(false);
     } finally {
       await runtime.close();
