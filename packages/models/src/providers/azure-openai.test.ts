@@ -269,6 +269,74 @@ describe("Azure OpenAI adapter", () => {
     expect(authorizationHeaders).toEqual(["present", "present", "present"]);
   });
 
+  it("shares an in-flight Entra token acquisition between requests", async () => {
+    let acquisitions = 0;
+    let resolveToken: ((token: { token: string; expiresOnTimestamp: number }) => void) | undefined;
+    const token = new Promise<{ token: string; expiresOnTimestamp: number }>((resolve) => {
+      resolveToken = resolve;
+    });
+    const adapter = new AzureOpenAIAdapter({
+      endpoint: "https://resource.openai.azure.com",
+      apiVersion: "2024-10-21",
+      deployments: { "fixture-model": "deployment-name" },
+      auth: { kind: "entra" },
+      credential: {
+        getToken: () => {
+          acquisitions += 1;
+          return token;
+        },
+      },
+      fetch: () => Promise.resolve(jsonResponse(completion(textMessage))),
+    });
+
+    const first = adapter.complete(request, testContext());
+    const second = adapter.complete(request, testContext());
+    await vi.waitFor(() => {
+      expect(acquisitions).toBe(1);
+    });
+    if (resolveToken === undefined) {
+      throw new Error("Token acquisition did not start");
+    }
+    resolveToken({ token: "fixture-token", expiresOnTimestamp: Date.now() + 3_600_000 });
+    await Promise.all([first, second]);
+  });
+
+  it.each([
+    ["empty token", () => Promise.resolve(null)],
+    ["credential failure", () => Promise.reject(new Error("synthetic credential failure"))],
+  ])("maps Entra %s to a typed authentication error", async (_name, getToken) => {
+    const adapter = new AzureOpenAIAdapter({
+      endpoint: "https://resource.openai.azure.com",
+      apiVersion: "2024-10-21",
+      deployments: { "fixture-model": "deployment-name" },
+      auth: { kind: "entra" },
+      credential: { getToken },
+      fetch: () => Promise.resolve(jsonResponse(completion(textMessage))),
+    });
+
+    await expect(adapter.complete(request, testContext())).rejects.toMatchObject({
+      cause: { code: "provider_auth" },
+    });
+  });
+
+  it("uses the system clock when no Entra clock is injected", async () => {
+    const adapter = new AzureOpenAIAdapter({
+      endpoint: "https://resource.openai.azure.com",
+      apiVersion: "2024-10-21",
+      deployments: { "fixture-model": "deployment-name" },
+      auth: { kind: "entra" },
+      credential: {
+        getToken: () =>
+          Promise.resolve({ token: "fixture-token", expiresOnTimestamp: Date.now() + 3_600_000 }),
+      },
+      fetch: () => Promise.resolve(jsonResponse(completion(textMessage))),
+    });
+
+    await expect(adapter.complete(request, testContext())).resolves.toMatchObject({
+      finishReason: "stop",
+    });
+  });
+
   it("maps Azure content-filter API errors and finish reasons to a typed error", async () => {
     const filteredError = new AzureOpenAIAdapter({
       endpoint: "https://resource.openai.azure.com",
@@ -296,6 +364,43 @@ describe("Azure OpenAI adapter", () => {
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ProviderError);
     expect(error).toMatchObject({ code: "provider_content_filtered" });
+  });
+
+  it("streams Azure responses and maps content-filter finish reasons", async () => {
+    const adapterFor = (finishReason: string) =>
+      new AzureOpenAIAdapter({
+        endpoint: "https://resource.openai.azure.com",
+        apiVersion: "2024-10-21",
+        deployments: { "fixture-model": "deployment-name" },
+        auth: { kind: "api_key", apiKey: { reveal: () => "fixture-key" } },
+        fetch: () =>
+          Promise.resolve(
+            new Response(
+              `data: ${JSON.stringify({
+                id: "azure-stream",
+                object: "chat.completion.chunk",
+                created: 1,
+                model: "fixture-deployment",
+                choices: [{ index: 0, delta: { content: "answer" }, finish_reason: finishReason }],
+              })}\n\ndata: [DONE]\n\n`,
+              { headers: { "content-type": "text/event-stream" } },
+            ),
+          ),
+      });
+
+    let deltaCount = 0;
+    for await (const delta of adapterFor("stop").stream(request, testContext())) {
+      expect(delta.type).toBeDefined();
+      deltaCount += 1;
+    }
+    expect(deltaCount).toBeGreaterThan(0);
+
+    const filteredDeltas = adapterFor("content_filter").stream(request, testContext());
+    await expect(async () => {
+      for await (const delta of filteredDeltas) {
+        expect(delta.type).toBeDefined();
+      }
+    }).rejects.toMatchObject({ code: "provider_content_filtered" });
   });
 
   it("rejects requests without a configured logical deployment", async () => {
