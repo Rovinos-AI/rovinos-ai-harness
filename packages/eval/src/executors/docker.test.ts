@@ -12,6 +12,7 @@ import { defineSuite } from "../load.js";
 import { TrialConfigSchema } from "../executor.js";
 import { evalSuiteCode } from "../trial.js";
 import type { TrialSpec } from "../trial.js";
+import { trialLogSinks } from "../execution-capture.js";
 
 const mocks = vi.hoisted(() => ({ runDockerProcess: vi.fn() }));
 
@@ -106,6 +107,7 @@ async function createRun(workDir: string, key: string, run: boolean): Promise<vo
 afterEach(async () => {
   mocks.runDockerProcess.mockReset();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   await Promise.all(
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
@@ -125,7 +127,12 @@ describe("DockerExecutor", () => {
         throw new Error("synthetic_key_missing");
       }
       await createRun(workDir, key, true);
-      return { exitCode: 0, timedOut: false } satisfies DockerProcessResult;
+      return {
+        exitCode: 0,
+        timedOut: false,
+        stdout: "synthetic container stdout",
+        stderr: "synthetic container stderr",
+      } satisfies DockerProcessResult;
     });
 
     const result = await new DockerExecutor(
@@ -141,7 +148,12 @@ describe("DockerExecutor", () => {
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2, costMicros: 0 });
     expect(result.exitCode).toBe(0);
     expect(result.durationMs).toBeGreaterThan(0);
+    expect(trialLogSinks(result.dbPath)).toEqual([
+      { name: "stdout", content: "synthetic container stdout" },
+      { name: "stderr", content: "synthetic container stderr" },
+    ]);
     expect(invocation?.env.HARNESS_EVAL_KEY).toBe(Buffer.alloc(32, 9).toString("base64"));
+    expect(invocation?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
     expect(invocation?.args).toContain(
       `HARNESS_EVAL_METADATA=${JSON.stringify({
         suite: evalSuiteCode(trial.suite),
@@ -177,9 +189,28 @@ describe("DockerExecutor", () => {
     expect(JSON.stringify(invocation?.args)).not.toContain("A synthetic goal.");
   });
 
+  it("passes explicit telemetry export settings only with the opt-in", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    let args: readonly string[] = [];
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.synthetic:4318");
+    mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
+      args = options.args;
+      return Promise.resolve({ exitCode: 0, timedOut: false, stdout: "", stderr: "" });
+    });
+
+    await new DockerExecutor(
+      { image: "synthetic/harness" },
+      { exportTelemetry: true },
+    ).run(makeTrial(workDir));
+
+    expect(args).toContain("--env");
+    expect(args).toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+    expect(JSON.stringify(args)).not.toContain("collector.synthetic");
+  });
+
   it("returns a safe error when Docker exits without creating a run", async () => {
     const workDir = join(await createDirectory(), "trial");
-    mocks.runDockerProcess.mockResolvedValue({ exitCode: 17, timedOut: false });
+    mocks.runDockerProcess.mockResolvedValue({ exitCode: 17, timedOut: false, stdout: "", stderr: "" });
 
     const result = await new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(workDir));
 
@@ -196,7 +227,7 @@ describe("DockerExecutor", () => {
     let containerName: string | undefined;
     mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
       containerName = options.containerName;
-      return Promise.resolve({ exitCode: null, timedOut: true });
+      return Promise.resolve({ exitCode: null, timedOut: true, stdout: "", stderr: "" });
     });
 
     const pending = new DockerExecutor({
@@ -214,7 +245,7 @@ describe("DockerExecutor", () => {
     let args: string[] = [];
     mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
       args = [...options.args];
-      return Promise.resolve({ exitCode: 1, timedOut: false });
+      return Promise.resolve({ exitCode: 1, timedOut: false, stdout: "", stderr: "" });
     });
 
     await new DockerExecutor({

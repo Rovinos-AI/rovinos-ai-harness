@@ -3,7 +3,10 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { logs } from "@opentelemetry/api-logs";
 import { createCanaries } from "../canary.js";
+import { configureEvalTelemetry } from "../execution-capture.js";
+import { defineSuite } from "../load.js";
 import type { GradeContext } from "./types.js";
 import { createNoCanaryLeakGrader } from "./no-canary-leak.js";
 
@@ -104,6 +107,83 @@ describe("createNoCanaryLeakGrader", () => {
     await expect(grader.grade(logs)).resolves.toMatchObject({
       pass: false,
       codes: ["canary_in_logs"],
+    });
+  });
+
+  it("scans automatically captured in-process spans, including unattributed records", async () => {
+    const current = await trial();
+    const { InProcessExecutor } = await import("../executors/inprocess.js");
+    const executor = new InProcessExecutor({
+      model: () => ({
+        complete: () =>
+          Promise.resolve({
+            provider: "synthetic",
+            model: "synthetic",
+            parts: [{ type: "text", text: "done" }],
+            providerBlobs: null,
+            usage: { inputTokens: 1, outputTokens: 1 },
+            finishReason: "stop",
+            latencyMs: 0,
+            schemaValid: true,
+            repairAttempts: 0,
+            fallbackDepth: 0,
+          }),
+      }),
+    });
+
+    const suite = defineSuite({
+      schemaVersion: 1,
+      tasks: [{ id: "synthetic_task", input: { goal: "synthetic" }, graders: [], tags: [] }],
+    });
+    const task = suite.tasks[0];
+    if (task === undefined) {
+      throw new Error("synthetic_task_missing");
+    }
+    const result = await executor.run({
+      suite,
+      task,
+      variantId: "baseline",
+      variant: { id: "baseline" },
+      trialIndex: 0,
+      seed: 1,
+      workDir: join(current.root, "executor-trial"),
+    });
+    const grade = await createNoCanaryLeakGrader({ canaries: ["synthetic_task"] }).grade({
+      result,
+    });
+
+    expect(grade.codes).toContain("canary_in_telemetry");
+  });
+
+  it("scans automatic in-memory log records", async () => {
+    const current = await trial();
+    configureEvalTelemetry();
+    logs.getLogger("synthetic.eval").emit({ body: canary });
+
+    await expect(
+      createNoCanaryLeakGrader({ canaries: [canary] }).grade(current.context),
+    ).resolves.toMatchObject({
+      pass: false,
+      codes: ["canary_in_telemetry"],
+    });
+  });
+
+  it("scans the Docker collector file and captured executor stdout/stderr", async () => {
+    const current = await trial();
+    const grader = createNoCanaryLeakGrader({ canaries: [canary] });
+    await writeFile(join(current.root, "telemetry.json"), `collector span ${canary}`);
+
+    await expect(grader.grade(current.context)).resolves.toMatchObject({
+      pass: false,
+      codes: ["canary_in_telemetry"],
+    });
+
+    await writeFile(join(current.root, "telemetry.json"), "clean collector output");
+    const { setTrialProcessOutput } = await import("../execution-capture.js");
+    setTrialProcessOutput(current.context.result.dbPath, "", `stderr ${canary}`);
+    await expect(grader.grade(current.context)).resolves.toMatchObject({
+      pass: false,
+      codes: expect.arrayContaining(["canary_in_logs"]),
     });
   });
 

@@ -18,12 +18,15 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api-logs": "0.223.0",
     "@rovinos/core": "workspace:^",
     "@rovinos/models": "workspace:^",
     "@rovinos/pii": "workspace:^",
     "@rovinos/policy": "workspace:^",
     "@rovinos/sandbox": "workspace:^",
     "@rovinos/schemas": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
     "@rovinos/vault": "workspace:^",
     "zod": "4.6.7"
   },

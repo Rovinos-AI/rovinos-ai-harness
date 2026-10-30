@@ -11,6 +11,7 @@ import { z } from "zod";
 import { evalSuiteCode, TrialResultSchema, type TrialResult, type TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
+import { setTrialProcessOutput } from "../execution-capture.js";
 
 const DockerMemorySchema = z
   .string()
@@ -99,6 +100,18 @@ function evalMetadataForTrial(trial: TrialSpec): string {
     task: trial.task.id,
     trial: trial.trialIndex,
   });
+}
+
+function telemetryEnvironmentArgs(exportTelemetry: boolean | undefined): string[] {
+  if (exportTelemetry !== true) {
+    return [];
+  }
+  return [
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+  ].flatMap((name) => (process.env[name] === undefined ? [] : ["--env", name]));
 }
 
 function mapStatus(status: z.infer<typeof RunStatus>): TrialResult["status"] | undefined {
@@ -232,6 +245,7 @@ export class DockerExecutor implements TrialExecutor {
       "HARNESS_EVAL_KEY",
       "--env",
       `HARNESS_EVAL_METADATA=${evalMetadataForTrial(trial)}`,
+      ...telemetryEnvironmentArgs(this.dependencies.exportTelemetry),
       this.options.image,
       "node",
       "dist/bin.js",
@@ -254,6 +268,7 @@ export class DockerExecutor implements TrialExecutor {
     } catch {
       throw new DockerExecutorError("docker_process_failed");
     }
+    setTrialProcessOutput(prepared.dbPath, outcome.stdout ?? "", outcome.stderr ?? "");
     const durationMs = Math.max(0, Math.floor(clock.now() - startedAt));
     const storedResult = await readRunResult(prepared, durationMs, this.dependencies);
     if (outcome.timedOut) {

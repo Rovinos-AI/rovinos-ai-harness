@@ -5,6 +5,11 @@ import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
 import { evalSuiteCode, TrialResultSchema, type TrialResult, type TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
+import {
+  captureProcessOutput,
+  configureEvalTelemetry,
+  setTrialProcessOutput,
+} from "../execution-capture.js";
 
 /** Factories for isolated model, tool, and policy ports. */
 export interface InProcessExecutorOptions extends TrialExecutionDependencies {
@@ -35,6 +40,7 @@ export class InProcessExecutor implements TrialExecutor {
 
   /** {@inheritDoc TrialExecutor.run} */
   async run(trial: TrialSpec): Promise<TrialResult> {
+    configureEvalTelemetry(this.options.exportTelemetry);
     const clock = this.options.clock ?? systemClock;
     const startedAt = clock.now();
     const prepared = await prepareTrial(trial, this.options);
@@ -56,6 +62,7 @@ export class InProcessExecutor implements TrialExecutor {
       },
     });
 
+    let result: TrialResult;
     try {
       const goal =
         trial.task.input.metadata === undefined
@@ -63,17 +70,25 @@ export class InProcessExecutor implements TrialExecutor {
           : { goal: trial.task.input.goal, metadata: trial.task.input.metadata };
       const hasContextStrategy =
         trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
-      const run = await runtime.run(goal, {
-        ...(hasContextStrategy ? { role: "eval" } : {}),
-        evalMetadata: {
-          suite: evalSuiteCode(trial.suite),
-          task: trial.task.id,
-          trial: trial.trialIndex,
+      const captured = await captureProcessOutput(
+        () => {
+          return runtime.run(goal, {
+            ...(hasContextStrategy ? { role: "eval" } : {}),
+            evalMetadata: {
+              suite: evalSuiteCode(trial.suite),
+              task: trial.task.id,
+              trial: trial.trialIndex,
+            },
+          });
         },
-      });
+        (stdout, stderr) => {
+          setTrialProcessOutput(prepared.dbPath, stdout, stderr);
+        },
+      );
+      const run = captured.result;
       const runId = run.events[0]?.runId;
       const durationMs = Math.max(0, Math.floor(clock.now() - startedAt));
-      const result: TrialResult = {
+      const trialResult: TrialResult = {
         status: resultStatus(run.status),
         ...(runId === undefined ? {} : { runId }),
         dbPath: prepared.dbPath,
@@ -85,9 +100,10 @@ export class InProcessExecutor implements TrialExecutor {
           ? { errorCode: "trial_unsettled" }
           : {}),
       };
-      return TrialResultSchema.parse(result);
+      result = TrialResultSchema.parse(trialResult);
     } finally {
       await runtime.close();
     }
+    return result;
   }
 }

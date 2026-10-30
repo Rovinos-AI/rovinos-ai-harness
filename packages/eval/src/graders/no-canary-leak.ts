@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { scanForCanaries, type CanarySink } from "../canary.js";
+import { evalTelemetrySinks, trialLogSinks } from "../execution-capture.js";
 import type { Grader, GradeContext, GradeResult } from "./types.js";
 import { GradeResultSchema } from "./types.js";
 
@@ -110,8 +111,15 @@ export function createNoCanaryLeakGrader(options: NoCanaryLeakGraderOptions): Gr
         (canary) => countHits(encodedCanaries([canary]), fixtureSinks) === 0,
       );
       const workspace = await readTree(ctx.result.workspaceDir);
-      const externalTelemetry = ctx.telemetry ?? [];
-      const logSinks = ctx.logs ?? [];
+      const collectorOutput = await readIfPresent(
+        join(dirname(dirname(ctx.result.dbPath)), "telemetry.json"),
+      );
+      const telemetry = [
+        ...evalTelemetrySinks(),
+        ...(collectorOutput === undefined ? [] : [collectorOutput]),
+        ...(ctx.telemetry ?? []),
+      ];
+      const logSinks = [...trialLogSinks(ctx.result.dbPath), ...(ctx.logs ?? [])];
       const counts: Record<string, number> = {};
 
       const eventHits = countHits(expanded, eventDb);
@@ -122,7 +130,10 @@ export function createNoCanaryLeakGrader(options: NoCanaryLeakGraderOptions): Gr
       if (vaultHits > 0) {
         counts.canary_in_vault_plaintext = vaultHits;
       }
-      const telemetryHits = countHits(expanded, externalTelemetry);
+      const telemetryHits = Math.max(
+        countHits(expanded, telemetry),
+        telemetry.some(({ name }) => name.startsWith("in-memory-log-invalid-")) ? 1 : 0,
+      );
       if (telemetryHits > 0) {
         counts.canary_in_telemetry = telemetryHits;
       }

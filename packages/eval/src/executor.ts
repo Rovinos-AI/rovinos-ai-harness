@@ -66,6 +66,8 @@ export interface PreparedTrial {
 export interface TrialExecutionDependencies {
   readonly clock?: Clock;
   readonly randomBytes?: (size: number) => Uint8Array;
+  /** Preserve a caller-configured external pipeline; defaults to memory-only eval telemetry. */
+  readonly exportTelemetry?: boolean;
 }
 
 /** System clock used for elapsed-time measurements. */
