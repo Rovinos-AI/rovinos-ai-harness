@@ -1894,16 +1894,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:^1.19.9":
-  version: 1.19.17
-  resolution: "@hono/node-server@npm:1.19.17"
-  peerDependencies:
-    hono: ^4
-  checksum: 10c0/e77907e3b5db8ab68ed4f297ad84807bfdd698636408de86ab8d36dab4658504ac4c0ed9d9436bc272a0172b9b7a5a4b578532e0b5baf97674c7b420cb5cff4b
-  languageName: node
-  linkType: hard
-
-"@hono/node-server@npm:^2.0.12":
+"@hono/node-server@npm:^1.19.9 || ^2.1.3, @hono/node-server@npm:^2.0.12":
   version: 2.1.5
   resolution: "@hono/node-server@npm:2.1.5"
   peerDependencies:
@@ -2050,6 +2041,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@modelcontextprotocol/core@npm:2.4.0":
+  version: 2.4.0
+  resolution: "@modelcontextprotocol/core@npm:2.4.0"
+  dependencies:
+    zod: "npm:^4.2.0"
+  checksum: 10c0/4dd07f18c7eee3f3cf7bcea9a7dd11799f13ce2255fda9ae77aff9978a21d16ee4026f63e5a3e13d5d91209acc3e7d6b97d459c1ff1b78f3b872eb0597b3dd53
+  languageName: node
+  linkType: hard
+
 "@modelcontextprotocol/ext-apps@npm:2.0.3, @modelcontextprotocol/ext-apps@npm:^2.0.0":
   version: 2.0.3
   resolution: "@modelcontextprotocol/ext-apps@npm:2.0.3"
@@ -2121,15 +2121,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@modelcontextprotocol/node@npm:2.1.1":
-  version: 2.1.1
-  resolution: "@modelcontextprotocol/node@npm:2.1.1"
+"@modelcontextprotocol/node@npm:2.1.2":
+  version: 2.1.2
+  resolution: "@modelcontextprotocol/node@npm:2.1.2"
   dependencies:
-    "@hono/node-server": "npm:^1.19.9"
+    "@hono/node-server": "npm:^1.19.9 || ^2.1.3"
     hono: "npm:^4.11.4"
   peerDependencies:
-    "@modelcontextprotocol/server": ^2.3.0
-  checksum: 10c0/3ae1b8379f8479e2a524ed8e4cb7c524cec573dea39e987a789402eb72c7a2ce835b4ade223c4f765b735085d73b35412291953e17373fdacca2768b7f0942c4
+    "@modelcontextprotocol/server": ^2.4.0
+  checksum: 10c0/0aebe06454b9e583658f702fd1c8af4eddb91f91a7b5dd7b7ffdbe19d0b8503400e2cbcf8b6511c14767fde5ffcfc73154921c52644269b5e4eb41d600be2594
   languageName: node
   linkType: hard
 
@@ -2140,6 +2140,16 @@ __metadata:
     "@modelcontextprotocol/core": "npm:2.3.1"
     zod: "npm:^4.2.0"
   checksum: 10c0/f3e8159af5cb51211109ae4817c0cfcdf349171c090d4a355dafe6117038f9a807052289cb1376d67ad4c005e3772cf1af076dbded498636a022d7c641253f12
+  languageName: node
+  linkType: hard
+
+"@modelcontextprotocol/server@npm:2.4.0":
+  version: 2.4.0
+  resolution: "@modelcontextprotocol/server@npm:2.4.0"
+  dependencies:
+    "@modelcontextprotocol/core": "npm:2.4.0"
+    zod: "npm:^4.2.0"
+  checksum: 10c0/e52966e6f115296c6dbfd08550e81773f5f71fb4809c7411b11fcc619b3bd621b07f296a5571de777ea2351eca7003e6b3f4d172fe8c21563be1205b1ee4f0ec
   languageName: node
   linkType: hard
 
@@ -2855,8 +2865,8 @@ __metadata:
     "@modelcontextprotocol/client": "npm:2.3.1"
     "@modelcontextprotocol/core": "npm:2.3.1"
     "@modelcontextprotocol/ext-apps": "npm:2.0.3"
-    "@modelcontextprotocol/node": "npm:2.1.1"
-    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@modelcontextprotocol/node": "npm:2.1.2"
+    "@modelcontextprotocol/server": "npm:2.4.0"
     "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/context-async-hooks": "npm:2.12.0"
@@ -2927,8 +2937,8 @@ __metadata:
   resolution: "@rovinos/control-plane@workspace:packages/control-plane"
   dependencies:
     "@modelcontextprotocol/client": "npm:2.3.1"
-    "@modelcontextprotocol/node": "npm:2.1.1"
-    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@modelcontextprotocol/node": "npm:2.1.2"
+    "@modelcontextprotocol/server": "npm:2.4.0"
     "@rovinos/approval-app": "workspace:^"
     "@rovinos/core": "workspace:^"
     "@rovinos/models": "workspace:^"
@@ -2948,7 +2958,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/core@workspace:packages/core"
   dependencies:
-    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@modelcontextprotocol/server": "npm:2.4.0"
     "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/context": "workspace:^"
     "@rovinos/mcp": "workspace:^"
@@ -3029,7 +3039,7 @@ __metadata:
   resolution: "@rovinos/mcp@workspace:packages/mcp"
   dependencies:
     "@modelcontextprotocol/client": "npm:2.3.1"
-    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@modelcontextprotocol/server": "npm:2.4.0"
     "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/crypto": "workspace:^"
     "@rovinos/schemas": "workspace:^"
@@ -9125,8 +9135,8 @@ __metadata:
     "@eslint-community/eslint-plugin-eslint-comments": "npm:4.8.1"
     "@modelcontextprotocol/client": "npm:2.3.1"
     "@modelcontextprotocol/inspector": "npm:2.12.0"
-    "@modelcontextprotocol/node": "npm:2.1.1"
-    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@modelcontextprotocol/node": "npm:2.1.2"
+    "@modelcontextprotocol/server": "npm:2.4.0"
     "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/core": "npm:2.12.0"
