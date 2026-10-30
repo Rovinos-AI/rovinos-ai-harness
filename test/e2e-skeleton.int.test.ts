@@ -82,9 +82,9 @@ import { InMemoryEventStore, type EventStore } from "@rovinos/store";
 import { createEventBuilders } from "@rovinos/store/testing";
 import { createPolicyCheckedAppCallHandler } from "@rovinos/host";
 import { SqliteEventStore } from "@rovinos/store-sqlite";
-import { ProviderError, requestHash, type ProviderAdapter } from "@rovinos/models";
+import { ProviderError, type ProviderAdapter } from "@rovinos/models";
 import { FakeProvider } from "@rovinos/models/testing";
-import { ReplayReportSchema, ResolvedRunSchema, replayRun } from "@rovinos/replay";
+import { ReplayReportSchema } from "@rovinos/replay";
 import { ApprovalNotificationSchema, buildApprovalPayload } from "@rovinos/policy";
 import {
   ApprovalListResultSchema,
@@ -96,7 +96,6 @@ import {
   Id,
   JsonValue,
   KeysConfigSchema,
-  ModelRequestSchema,
   ModelsConfigSchema,
   PiiConfigSchema,
   RunConfigSchema,
@@ -757,164 +756,7 @@ describe("replay", () => {
     const report = jsonResult(ReplayReportSchema, result.stdout);
     expect(report.originalRunId).toBe(runId);
     expect(report.status).toBe("error");
-    const store = new SqliteEventStore(current.eventStorePath);
-    let divergenceEventType: string | undefined;
-    let sourceEvents: Event[] = [];
-    try {
-      sourceEvents = await readEvents(store, runId);
-      divergenceEventType = sourceEvents.find(
-        (event) => event.seq === report.divergence?.seq,
-      )?.type;
-    } finally {
-      await store.close();
-    }
-    const config = await loadConfig({ configPath: current.configPath });
-    const outcome = await replayRun(
-      ResolvedRunSchema.parse({
-        rootRunId: runId,
-        runs: [{ runId, role: "root", events: sourceEvents }],
-      }),
-      { config: { run: config.run } },
-    );
-    const sourceRequest = sourceEvents.find((event) => event.type === "model_request");
-    const replayRequest = outcome.events.find((event) => event.type === "model_request");
-    const capturedRequest = current.model.requests[0]?.request;
-    const requestWithEventFields = (request: typeof sourceRequest) => {
-      if (capturedRequest === undefined || request?.type !== "model_request") {
-        return undefined;
-      }
-      return ModelRequestSchema.parse({
-        ...capturedRequest,
-        requestId: request.requestId,
-        model: { provider: request.provider, model: request.model },
-        ...(request.role === undefined ? {} : { role: request.role }),
-        messages: request.messages,
-      });
-    };
-    const sourceCandidate =
-      sourceRequest?.type === "model_request" ? requestWithEventFields(sourceRequest) : undefined;
-    const replayCandidate =
-      replayRequest?.type === "model_request" ? requestWithEventFields(replayRequest) : undefined;
-    const matchingStablePrefix = (request: typeof sourceRequest): number => {
-      if (request?.type !== "model_request") {
-        return -1;
-      }
-      for (let stablePrefixMessages = 0; stablePrefixMessages <= request.messages.length; stablePrefixMessages += 1) {
-        const hash = requestHash(
-          ModelRequestSchema.parse({
-            requestId: request.requestId,
-            model: { provider: request.provider, model: request.model },
-            ...(request.role === undefined ? {} : { role: request.role }),
-            messages: request.messages,
-            stablePrefixMessages,
-          }),
-        );
-        if (hash === request.requestHash) {
-          return stablePrefixMessages;
-        }
-      }
-      return -1;
-    };
-    expect({
-      report: `${String(report.divergence?.seq)}:${divergenceEventType}:${report.divergence?.code}`,
-      outcome: `${String(outcome.divergence?.seq)}:${outcome.divergence?.code}`,
-      requestHashMatches:
-        sourceRequest?.type === "model_request" &&
-        replayRequest?.type === "model_request" &&
-        sourceRequest.requestHash === replayRequest.requestHash,
-      capturedSourceAndReplayRequestsMatch:
-        sourceCandidate !== undefined &&
-        replayCandidate !== undefined &&
-        requestHash(sourceCandidate) === requestHash(replayCandidate),
-      sourceMatchesCapturedParameters:
-        capturedRequest !== undefined &&
-        sourceRequest?.type === "model_request" &&
-        requestHash(capturedRequest) === sourceRequest.requestHash,
-      capturedRequestCount: current.model.requests.length,
-      providerMatches:
-        sourceRequest?.type === "model_request" &&
-        replayRequest?.type === "model_request" &&
-        sourceRequest.provider === replayRequest.provider,
-      modelMatches:
-        sourceRequest?.type === "model_request" &&
-        replayRequest?.type === "model_request" &&
-        sourceRequest.model === replayRequest.model,
-      roleMatches:
-        sourceRequest?.type === "model_request" &&
-        replayRequest?.type === "model_request" &&
-        sourceRequest.role === replayRequest.role,
-      sourceMessagesMatch:
-        sourceRequest?.type === "model_request" &&
-        replayRequest?.type === "model_request" &&
-        JSON.stringify(sourceRequest.messages) === JSON.stringify(replayRequest.messages),
-      sourceStablePrefix: matchingStablePrefix(sourceRequest),
-      replayStablePrefix: matchingStablePrefix(replayRequest),
-      replayMatchesCapturedParameters:
-        capturedRequest !== undefined &&
-        replayRequest?.type === "model_request" &&
-        requestHash(
-          ModelRequestSchema.parse({
-            ...capturedRequest,
-            requestId: replayRequest.requestId,
-            model: { provider: replayRequest.provider, model: replayRequest.model },
-            ...(replayRequest.role === undefined ? {} : { role: replayRequest.role }),
-            messages: replayRequest.messages,
-          }),
-        ) === replayRequest.requestHash,
-      capturedRequestKeys:
-        capturedRequest === undefined ? [] : Object.keys(capturedRequest).sort(),
-      capturedToolIds: capturedRequest?.tools?.map(({ toolId }) => toolId) ?? [],
-      capturedStablePrefix: capturedRequest?.stablePrefixMessages ?? -1,
-      sourceEventTypes: sourceEvents.slice(0, 12).map(({ seq, type }) => `${seq}:${type}`),
-      replayFailures: outcome.events.flatMap((event) => {
-        if (event.type === "run_status_changed" && event.to === "failed") {
-          return [`${event.seq}:run_status_changed:${event.reason}`];
-        }
-        if (event.type === "tool_result" && event.outcome !== "ok") {
-          return [`${event.seq}:tool_result:${event.errorCode ?? "none"}`];
-        }
-        return [];
-      }),
-      sourceMessageStructure:
-        sourceRequest?.type === "model_request"
-          ? sourceRequest.messages.map(({ role, parts }) =>
-              `${role}:${parts.map(({ type }) => type)}`,
-            )
-          : [],
-      replayMessageStructure:
-        replayRequest?.type === "model_request"
-          ? replayRequest.messages.map(({ role, parts }) =>
-              `${role}:${parts.map(({ type }) => type)}`,
-            )
-          : [],
-      sourceMessageCount:
-        sourceRequest?.type === "model_request" ? sourceRequest.messages.length : -1,
-      replayMessageCount:
-        replayRequest?.type === "model_request" ? replayRequest.messages.length : -1,
-    }).toEqual({
-      report: "diagnostic:only",
-      outcome: "diagnostic:only",
-      requestHashMatches: true,
-      capturedSourceAndReplayRequestsMatch: true,
-      sourceMatchesCapturedParameters: true,
-      capturedRequestCount: 0,
-      providerMatches: true,
-      modelMatches: true,
-      roleMatches: true,
-      sourceMessagesMatch: true,
-      sourceStablePrefix: 0,
-      replayStablePrefix: 0,
-      replayMatchesCapturedParameters: true,
-      capturedRequestKeys: [],
-      capturedToolIds: [],
-      capturedStablePrefix: 0,
-      sourceEventTypes: [],
-      replayFailures: [],
-      sourceMessageStructure: [],
-      replayMessageStructure: [],
-      sourceMessageCount: 0,
-      replayMessageCount: 0,
-    });
+    expect(report.divergence?.code).toBe("replay_missing_result");
     expect(result.stdout.join("")).not.toContain(current.canary);
   });
 });
