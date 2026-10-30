@@ -2,11 +2,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import {
-  FileCassetteStore,
-  ProviderResultSchema,
-  requestHash,
-} from "@rovinos/models";
+import { FileCassetteStore, ProviderResultSchema, requestHash } from "@rovinos/models";
 import {
   assertBaselineUpdateAllowed,
   createGoldenSignature,
@@ -19,6 +15,7 @@ import { recordGoldenScenario, withGoldenTracing } from "../test/replay/golden/s
 
 const GOLDEN_DIRECTORY = "test/replay/golden";
 
+/** Options for recording or explicitly updating the golden replay fixture. */
 export interface ReplayGoldenOptions {
   readonly command: "record" | "update";
   readonly directory?: string;

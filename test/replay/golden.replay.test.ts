@@ -2,11 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import {
-  CassetteFileSchema,
-  FileCassetteStore,
-  requestHash,
-} from "@rovinos/models";
+import { CassetteFileSchema, FileCassetteStore, requestHash } from "@rovinos/models";
 import {
   compareGoldenSignature,
   createReplayReport,
@@ -53,19 +49,21 @@ it("replays the scripted golden run without divergence or behavioral differences
     expect(scenario.coverageEvents.some((event) => event.type === "context_compacted")).toBe(true);
     expect(recordedEvents.some((event) => event.type === "checkpoint_written")).toBe(true);
     expect(
-      recordedEvents.some((event) => event.type === "approval_resolved" && event.decision === "edit"),
-    ).toBe(true);
-    expect(
       recordedEvents.some(
-        (event) => event.type === "tool_intent" && event.idempotent,
+        (event) => event.type === "approval_resolved" && event.decision === "edit",
       ),
     ).toBe(true);
+    expect(recordedEvents.some((event) => event.type === "tool_intent" && event.idempotent)).toBe(
+      true,
+    );
+    expect(recordedEvents.some((event) => event.type === "tool_intent" && !event.idempotent)).toBe(
+      true,
+    );
     expect(
       recordedEvents.some(
-        (event) => event.type === "tool_intent" && !event.idempotent,
+        (event) => event.type === "tool_intent" && event.policyDecision === "deny",
       ),
     ).toBe(true);
-    expect(recordedEvents.some((event) => event.type === "tool_intent" && event.policyDecision === "deny")).toBe(true);
   });
 });
 
@@ -103,7 +101,7 @@ it("loads synthetic cassette and signature fixtures without canary patterns", as
   expect(signature.containsRealData).toBe(false);
   expect(cassette.entries.length).toBeGreaterThan(0);
   expect(`${cassetteText}\n${signatureText}`).not.toMatch(
-    /(?:canary|[A-Z0-9._%+-]+@example\.(?:com|net|org))/iu,
+    /(?:canary|[\w.%+-]+@example\.(?:com|net|org))/iu,
   );
 
   await withGoldenTracing(async () => {

@@ -45,6 +45,7 @@ const editableTool = Code.parse("synthetic.editable");
 const deniedTool = Code.parse("synthetic.denied");
 const approvalId = Code.parse("cli.synthetic");
 
+/** Runtime inputs and outputs for the synthetic golden scenario. */
 export interface GoldenScenario {
   readonly config: RuntimeConfig;
   readonly crashResumed: boolean;
@@ -58,6 +59,15 @@ export interface GoldenScenario {
 interface AppendBoundary {
   readonly callIds: readonly string[];
   readonly eventTypes: readonly Event["type"][];
+}
+
+interface GoldenRuntimeOptions {
+  readonly dataDir: string;
+  readonly store: EventStore;
+  readonly clock: FakeClock;
+  readonly ids: SequentialIdGenerator;
+  readonly model: FakeModelPort;
+  readonly policy: PolicyPort;
 }
 
 class TrackingEventStore extends InMemoryEventStore {
@@ -142,9 +152,7 @@ function createPolicy(): PolicyPort {
 }
 
 function createTool(): ToolPort {
-  const definition = (
-    idempotent: boolean,
-  ): FakeToolDefinition => ({
+  const definition = (idempotent: boolean): FakeToolDefinition => ({
     idempotent,
     timeoutMs: 1_000,
     execute: (toolCall) =>
@@ -217,6 +225,29 @@ async function addSyntheticCompaction(runtime: Runtime, runId: string): Promise<
   });
 }
 
+function createGoldenRuntime({
+  dataDir,
+  store,
+  clock,
+  ids,
+  model,
+  policy,
+}: GoldenRuntimeOptions): Promise<Runtime> {
+  return createRuntime(config, {
+    dataDir,
+    store,
+    clock,
+    ids,
+    model,
+    policy,
+    tool: createTool(),
+    transientVault: true,
+    sandboxBackend: {
+      exec: () => Promise.reject(new Error("Unused synthetic sandbox backend.")),
+    },
+  });
+}
+
 async function executeScenario(
   store: EventStore,
   reverseToolCalls: boolean,
@@ -229,26 +260,12 @@ async function executeScenario(
   const clock = new FakeClock(1_000);
   const ids = new SequentialIdGenerator();
   const dataDir = await mkdtemp(join(tmpdir(), "harness-golden-replay-"));
-  const createRuntimeWithPorts = () =>
-    createRuntime(config, {
-      dataDir,
-      store,
-      clock,
-      ids,
-      model,
-      policy,
-      tool: createTool(),
-      transientVault: true,
-      sandboxBackend: {
-        exec: () => Promise.reject(new Error("Unused synthetic sandbox backend.")),
-      },
-    });
+  const runtimeOptions = { dataDir, store, clock, ids, model, policy };
+  const createRuntimeWithPorts = () => createGoldenRuntime(runtimeOptions);
   let runtime = await createRuntimeWithPorts();
-  let runId: Id | undefined;
   let crashResumed = false;
   try {
     const started = runtime.start("synthetic golden scenario");
-    runId = started.runId;
     const recoverCrash = async (
       operation: () => Promise<RunLoopResult>,
     ): Promise<RunLoopResult> => {
@@ -280,10 +297,7 @@ async function executeScenario(
       }
       result = await recoverCrash(() => runtime.resume(started.runId));
     }
-    if (runId === undefined) {
-      throw new Error("Expected the scripted run identifier.");
-    }
-    const events = await readEvents(runtime.store, runId);
+    const events = await readEvents(runtime.store, started.runId);
     return {
       config,
       crashResumed,
@@ -292,8 +306,8 @@ async function executeScenario(
       responses,
       coverageEvents: [],
       resolved: ResolvedRunSchema.parse({
-        rootRunId: runId,
-        runs: [{ runId, role: "root", events }],
+        rootRunId: started.runId,
+        runs: [{ runId: started.runId, role: "root", events }],
       }),
     };
   } finally {
@@ -316,6 +330,7 @@ function crashBoundaryForEditableResult(store: TrackingEventStore): number {
   return index + 1;
 }
 
+/** Records the synthetic golden scenario, optionally reversing its first tool calls for mutation. */
 export async function recordGoldenScenario(reverseToolCalls = false): Promise<GoldenScenario> {
   const referenceStore = new TrackingEventStore();
   await executeScenario(referenceStore, reverseToolCalls, false, false);
