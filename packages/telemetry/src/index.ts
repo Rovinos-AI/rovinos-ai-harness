@@ -89,6 +89,7 @@ export {
   type VaultRunReader,
   type VaultRunViewOptions,
 } from "./sentinel/run-values.js";
+export { normalizeForScan, variantsOf } from "./sentinel/variants.js";
 export { ActiveRuns, activeRuns, type ActiveRunsOptions } from "./sentinel/active-runs.js";
 export {
   assertSentinelGate,
