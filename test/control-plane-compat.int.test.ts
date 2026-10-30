@@ -10,10 +10,7 @@ import {
   startControlPlaneHttp,
   type ControlPlaneServerOptions,
 } from "@rovinos/control-plane";
-import {
-  createRuntime,
-  type ToolPort,
-} from "@rovinos/core";
+import { createRuntime, type ToolPort } from "@rovinos/core";
 import { FakeModelPort } from "@rovinos/core/testing";
 import {
   Code,
@@ -215,187 +212,184 @@ describe("control-plane client compatibility", () => {
     clientClasses.flatMap((clientClass) =>
       protocolEras.map((protocolEra) => ({ clientClass, protocolEra })),
     ),
-  )(
-    "$clientClass.name client on $protocolEra.name",
-    async ({ clientClass, protocolEra }) => {
-      const store = new InMemoryEventStore();
-      const { runId, approvalId, payload, runtime } = await createSuspendedApproval(store);
-      let confirmationCount = 0;
-      const serverOptions: ControlPlaneServerOptions = {
-        approvalHtml: "<html>synthetic approval</html>",
-        runsConsoleHtml: "<html>synthetic runs</html>",
-        confirmation: { key: Buffer.alloc(32, 19) },
-        isAppContext: () => clientClass.name === "reference-host",
-        approvalApp: {
-          authorize: () => ({
-            allowed: true,
-            tokenId: Code.parse("token.compatibility"),
-            principal: Principal.parse("cli.reference_host"),
+  )("$clientClass.name client on $protocolEra.name", async ({ clientClass, protocolEra }) => {
+    const store = new InMemoryEventStore();
+    const { runId, approvalId, payload, runtime } = await createSuspendedApproval(store);
+    let confirmationCount = 0;
+    const serverOptions: ControlPlaneServerOptions = {
+      approvalHtml: "<html>synthetic approval</html>",
+      runsConsoleHtml: "<html>synthetic runs</html>",
+      confirmation: { key: Buffer.alloc(32, 19) },
+      isAppContext: () => clientClass.name === "reference-host",
+      approvalApp: {
+        authorize: () => ({
+          allowed: true,
+          tokenId: Code.parse("token.compatibility"),
+          principal: Principal.parse("cli.reference_host"),
+        }),
+      },
+      operations: {
+        resolveApproval: async ({
+          runId: resolvedRunId,
+          approvalId: resolvedId,
+          decision,
+          approverId,
+        }) =>
+          runtime.resolveApproval(resolvedRunId, resolvedId, decision, {
+            metadata: { decidedBy: "human", approverId },
           }),
-        },
-        operations: {
-          resolveApproval: async ({
-            runId: resolvedRunId,
-            approvalId: resolvedId,
-            decision,
-            approverId,
-          }) =>
-            runtime.resolveApproval(resolvedRunId, resolvedId, decision, {
-              metadata: { decidedBy: "human", approverId },
-            }),
-          resumeRun: (resumedRunId) => runtime.resume(resumedRunId),
-        },
+        resumeRun: (resumedRunId) => runtime.resume(resumedRunId),
+      },
+    };
+    let closeServer: () => Promise<void>;
+    let clientTransport: InMemoryTransport | StreamableHTTPClientTransport;
+    if (protocolEra.name === "2025-11-25") {
+      const [clientMemoryTransport, serverMemoryTransport] = InMemoryTransport.createLinkedPair();
+      const memoryServer = createControlPlaneServer(store, serverOptions);
+      await memoryServer.connect(serverMemoryTransport);
+      clientTransport = clientMemoryTransport;
+      closeServer = async () => {
+        await memoryServer.close();
+        await serverMemoryTransport.close();
       };
-      let closeServer: () => Promise<void>;
-      let clientTransport: InMemoryTransport | StreamableHTTPClientTransport;
-      if (protocolEra.name === "2025-11-25") {
-        const [clientMemoryTransport, serverMemoryTransport] = InMemoryTransport.createLinkedPair();
-        const memoryServer = createControlPlaneServer(store, serverOptions);
-        await memoryServer.connect(serverMemoryTransport);
-        clientTransport = clientMemoryTransport;
-        closeServer = async () => {
-          await memoryServer.close();
-          await serverMemoryTransport.close();
-        };
-      } else {
-        const httpServer = await startControlPlaneHttp(store, 0, {
-          ...serverOptions,
-          controlPlane: ControlPlaneConfigSchema.parse({
-            auth: {
-              tokens: [
-                {
-                  id: "token.compatibility",
-                  secret: "env:CONTROL_PLANE_COMPAT_TEST_TOKEN",
-                  scopes: ["admin"],
-                },
-              ],
-            },
-          }),
-          secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) },
-        });
-        clientTransport = new StreamableHTTPClientTransport(new URL(httpServer.endpoint), {
-          requestInit: { headers: { authorization: AUTHORIZATION } },
-        });
-        closeServer = () => httpServer.close();
-      }
-      const client = new Client(
-        { name: `control-plane-${clientClass.name}`, version: "1.0.0" },
-        {
-          versionNegotiation: { mode: protocolEra.mode },
-          capabilities: clientClass.capabilities,
-        },
+    } else {
+      const httpServer = await startControlPlaneHttp(store, 0, {
+        ...serverOptions,
+        controlPlane: ControlPlaneConfigSchema.parse({
+          auth: {
+            tokens: [
+              {
+                id: "token.compatibility",
+                secret: "env:CONTROL_PLANE_COMPAT_TEST_TOKEN",
+                scopes: ["admin"],
+              },
+            ],
+          },
+        }),
+        secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) },
+      });
+      clientTransport = new StreamableHTTPClientTransport(new URL(httpServer.endpoint), {
+        requestInit: { headers: { authorization: AUTHORIZATION } },
+      });
+      closeServer = () => httpServer.close();
+    }
+    const client = new Client(
+      { name: `control-plane-${clientClass.name}`, version: "1.0.0" },
+      {
+        versionNegotiation: { mode: protocolEra.mode },
+        capabilities: clientClass.capabilities,
+      },
+    );
+    if (clientClass.elicitation) {
+      client.setRequestHandler("elicitation/create", (request) => {
+        if (!("requestedSchema" in request.params)) {
+          return { action: "cancel" };
+        }
+        const schema = request.params.requestedSchema;
+        if ("confirm" in schema.properties) {
+          confirmationCount += 1;
+          return { action: "accept", content: { confirm: confirmationCount > 1 } };
+        }
+        return { action: "accept", content: { decision: "approve" } };
+      });
+    }
+
+    let cliFallbackAvailable = false;
+    let cliSelfApprovalFailedClosed = false;
+    let cliSelfApprovalLeftApprovalPending = false;
+    let elicitationSelfApprovalFailedClosed = false;
+    let elicitationResolved = false;
+    let appResolved = false;
+    let resumeStarted = false;
+    try {
+      await client.connect(clientTransport);
+
+      const { tools } = await client.listTools();
+      const names = tools.map(({ name }) => name);
+      expect(names).toContain("list_runs");
+      expect(names).toContain("get_run");
+      expect(names.some((name) => name.startsWith("harness.approvals."))).toBe(
+        clientClass.appTools,
       );
-      if (clientClass.elicitation) {
-        client.setRequestHandler("elicitation/create", (request) => {
-          if (!("requestedSchema" in request.params)) {
-            return { action: "cancel" };
-          }
-          const schema = request.params.requestedSchema;
-          if ("confirm" in schema.properties) {
-            confirmationCount += 1;
-            return { action: "accept", content: { confirm: confirmationCount > 1 } };
-          }
-          return { action: "accept", content: { decision: "approve" } };
+      expect(names.includes("harness.runs.list")).toBe(clientClass.appTools);
+      expect(names.includes("harness.runs.get")).toBe(clientClass.appTools);
+
+      const listed = await client.callTool({ name: "list_runs", arguments: {} });
+      const inspected = await client.callTool({ name: "get_run", arguments: { runId } });
+      expect(listed.structuredContent).toMatchObject({ runs: [{ runId, status: "suspended" }] });
+      expect(inspected.structuredContent).toMatchObject({ runId, status: "suspended" });
+      expect(JSON.stringify([listed, inspected])).not.toContain("COMPATIBILITY_PRIVATE_CANARY");
+      expect([...listed.content, ...inspected.content].every(({ type }) => type === "text")).toBe(
+        true,
+      );
+
+      if (clientClass.name === "no-ui") {
+        const fallback = await client.callTool({
+          name: "review_approval",
+          arguments: { approvalId },
         });
-      }
-
-      let cliFallbackAvailable = false;
-      let cliSelfApprovalFailedClosed = false;
-      let cliSelfApprovalLeftApprovalPending = false;
-      let elicitationSelfApprovalFailedClosed = false;
-      let elicitationResolved = false;
-      let appResolved = false;
-      let resumeStarted = false;
-      try {
-        await client.connect(clientTransport);
-
-        const { tools } = await client.listTools();
-        const names = tools.map(({ name }) => name);
-        expect(names).toContain("list_runs");
-        expect(names).toContain("get_run");
-        expect(names.some((name) => name.startsWith("harness.approvals."))).toBe(
-          clientClass.appTools,
+        cliFallbackAvailable = JSON.stringify(fallback).includes("harness approvals approve");
+        const headBefore = await store.head(runId);
+        const selfApproval = await client.callTool({
+          name: "approve",
+          arguments: { approvalId },
+        });
+        cliSelfApprovalFailedClosed = JSON.stringify(selfApproval).includes(
+          "human_confirmation_unavailable",
         );
-        expect(names.includes("harness.runs.list")).toBe(clientClass.appTools);
-        expect(names.includes("harness.runs.get")).toBe(clientClass.appTools);
-
-        const listed = await client.callTool({ name: "list_runs", arguments: {} });
-        const inspected = await client.callTool({ name: "get_run", arguments: { runId } });
-        expect(listed.structuredContent).toMatchObject({ runs: [{ runId, status: "suspended" }] });
-        expect(inspected.structuredContent).toMatchObject({ runId, status: "suspended" });
-        expect(JSON.stringify([listed, inspected])).not.toContain("COMPATIBILITY_PRIVATE_CANARY");
-        expect(
-          [...listed.content, ...inspected.content].every(({ type }) => type === "text"),
-        ).toBe(true);
-
-        if (clientClass.name === "no-ui") {
-          const fallback = await client.callTool({
-            name: "review_approval",
-            arguments: { approvalId },
-          });
-          cliFallbackAvailable = JSON.stringify(fallback).includes("harness approvals approve");
-          const headBefore = await store.head(runId);
-          const selfApproval = await client.callTool({
-            name: "approve",
-            arguments: { approvalId },
-          });
-          cliSelfApprovalFailedClosed = JSON.stringify(selfApproval).includes(
-            "human_confirmation_unavailable",
-          );
-          cliSelfApprovalLeftApprovalPending = (await store.head(runId)) === headBefore;
-          await runtime.resolveApproval(runId, approvalId, "approve", {
-            metadata: { decidedBy: "human", approverId: "cli.compatibility" },
-          });
-          await runtime.resume(runId);
-        } else if (clientClass.name === "elicitation-only") {
-          const selfApproval = await client.callTool({
-            name: "approve",
-            arguments: { approvalId },
-          });
-          elicitationSelfApprovalFailedClosed = JSON.stringify(selfApproval).includes(
-            "human_confirmation_declined",
-          );
-          const reviewed = await client.callTool({
-            name: "review_approval",
-            arguments: { approvalId },
-          });
-          elicitationResolved =
-            typeof reviewed.structuredContent === "object" &&
-            reviewed.structuredContent !== null &&
-            "resolved" in reviewed.structuredContent &&
-            reviewed.structuredContent.resolved === true;
-        } else {
-          const headBefore = await store.head(runId);
-          await resolveInReferenceHost(client, runId, approvalId, payload);
-          appResolved = (await store.head(runId)) > headBefore;
-        }
-
-        if (clientClass.name !== "no-ui") {
-          const resumed = await client.callTool({ name: "resume_run", arguments: { runId } });
-          resumeStarted =
-            typeof resumed.structuredContent === "object" &&
-            resumed.structuredContent !== null &&
-            "started" in resumed.structuredContent &&
-            resumed.structuredContent.started === true;
-        }
-        expect(cliFallbackAvailable).toBe(clientClass.name === "no-ui");
-        expect(cliSelfApprovalFailedClosed).toBe(clientClass.name === "no-ui");
-        expect(cliSelfApprovalLeftApprovalPending).toBe(clientClass.name === "no-ui");
-        expect(elicitationSelfApprovalFailedClosed).toBe(clientClass.name === "elicitation-only");
-        expect(elicitationResolved).toBe(clientClass.name === "elicitation-only");
-        expect(appResolved).toBe(clientClass.name === "reference-host");
-        expect(resumeStarted).toBe(clientClass.name !== "no-ui");
-        await vi.waitFor(async () => {
-          const status = await store.listRuns({ limit: 1 });
-          expect(status.runs[0]?.status).toBe("completed");
+        cliSelfApprovalLeftApprovalPending = (await store.head(runId)) === headBefore;
+        await runtime.resolveApproval(runId, approvalId, "approve", {
+          metadata: { decidedBy: "human", approverId: "cli.compatibility" },
         });
-      } finally {
-        await client.close();
-        await closeServer();
-        await runtime.close();
+        await runtime.resume(runId);
+      } else if (clientClass.name === "elicitation-only") {
+        const selfApproval = await client.callTool({
+          name: "approve",
+          arguments: { approvalId },
+        });
+        elicitationSelfApprovalFailedClosed = JSON.stringify(selfApproval).includes(
+          "human_confirmation_declined",
+        );
+        const reviewed = await client.callTool({
+          name: "review_approval",
+          arguments: { approvalId },
+        });
+        elicitationResolved =
+          typeof reviewed.structuredContent === "object" &&
+          reviewed.structuredContent !== null &&
+          "resolved" in reviewed.structuredContent &&
+          reviewed.structuredContent.resolved === true;
+      } else {
+        const headBefore = await store.head(runId);
+        await resolveInReferenceHost(client, runId, approvalId, payload);
+        appResolved = (await store.head(runId)) > headBefore;
       }
-    },
-  );
+
+      if (clientClass.name !== "no-ui") {
+        const resumed = await client.callTool({ name: "resume_run", arguments: { runId } });
+        resumeStarted =
+          typeof resumed.structuredContent === "object" &&
+          resumed.structuredContent !== null &&
+          "started" in resumed.structuredContent &&
+          resumed.structuredContent.started === true;
+      }
+      expect(cliFallbackAvailable).toBe(clientClass.name === "no-ui");
+      expect(cliSelfApprovalFailedClosed).toBe(clientClass.name === "no-ui");
+      expect(cliSelfApprovalLeftApprovalPending).toBe(clientClass.name === "no-ui");
+      expect(elicitationSelfApprovalFailedClosed).toBe(clientClass.name === "elicitation-only");
+      expect(elicitationResolved).toBe(clientClass.name === "elicitation-only");
+      expect(appResolved).toBe(clientClass.name === "reference-host");
+      expect(resumeStarted).toBe(clientClass.name !== "no-ui");
+      await vi.waitFor(async () => {
+        const status = await store.listRuns({ limit: 1 });
+        expect(status.runs[0]?.status).toBe("completed");
+      });
+    } finally {
+      await client.close();
+      await closeServer();
+      await runtime.close();
+    }
+  });
 });
 
 beforeAll(async () => {

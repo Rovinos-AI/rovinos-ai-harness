@@ -197,8 +197,8 @@ export function createControlPlaneServer(
     const capabilities = requestClientCapabilities(context, server);
     const principal = controlPlanePrincipal(context);
     return {
-      tools: filterToolsForClient(definitions, capabilities).filter((tool) =>
-        principal === undefined || hasControlPlaneScope(principal, toolScope(tool.name)),
+      tools: filterToolsForClient(definitions, capabilities).filter(
+        (tool) => principal === undefined || hasControlPlaneScope(principal, toolScope(tool.name)),
       ),
     };
   });
@@ -398,10 +398,7 @@ function requestClientCapabilities(
   server: McpServer,
 ): ConfirmationClientCapabilities | undefined {
   const envelope = z.record(z.string(), z.unknown()).safeParse(context.mcpReq.envelope);
-  if (
-    envelope.success &&
-    Object.hasOwn(envelope.data, CLIENT_CAPABILITIES_META_KEY)
-  ) {
+  if (envelope.success && Object.hasOwn(envelope.data, CLIENT_CAPABILITIES_META_KEY)) {
     const capabilities = confirmationClientCapabilitiesSchema.safeParse(
       envelope.data[CLIENT_CAPABILITIES_META_KEY],
     );

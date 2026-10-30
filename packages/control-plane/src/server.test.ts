@@ -2,6 +2,7 @@
 import {
   InMemoryTransport,
   Client,
+  StreamableHTTPClientTransport,
   type Client as McpClient,
   type InMemoryTransport as MemoryTransport,
 } from "@modelcontextprotocol/client";
@@ -31,9 +32,11 @@ import {
   RUN_RESOURCE_URI_TEMPLATE,
   RUNS_RESOURCE_URI,
 } from "./index.js";
-import { createControlPlaneServer } from "./server.js";
+import { createControlPlaneServer, startControlPlaneHttp } from "./server.js";
 
 const CONTENT_CANARY = "PRIVATE_EVENT_CONTENT_CANARY";
+const HTTP_TOKEN = "CONTROL_PLANE_TEST_TOKEN_LONG_ENOUGH";
+const AUTHORIZATION = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${HTTP_TOKEN}`;
 const contentFields = Object.entries(EVENT_FIELD_CLASS).flatMap(([type, fields]) =>
   Object.entries(fields)
     .filter(([, fieldClass]) => fieldClass === "content")
@@ -268,6 +271,7 @@ describe("control-plane inspection tools", () => {
     expect(tools.find(({ name }) => name === "approve")?._meta).toEqual({
       ui: { visibility: ["app"] },
     });
+
     expect(tools.find(({ name }) => name === "deny")?._meta).toEqual({
       ui: { visibility: ["app"] },
     });
@@ -280,6 +284,49 @@ describe("control-plane inspection tools", () => {
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
       ui: { resourceUri: "ui://harness/runs/v1" },
     });
+  });
+
+  it("omits app-only tools from modern HTTP clients without UI capabilities", async () => {
+    const store = new InMemoryEventStore();
+    const server = await startControlPlaneHttp(store, 0, {
+      approvalHtml: "<html>test</html>",
+      controlPlane: ControlPlaneConfigSchema.parse({
+        auth: {
+          tokens: [
+            {
+              id: "token.test",
+              secret: "env:CONTROL_PLANE_TEST_TOKEN",
+              scopes: ["admin"],
+            },
+          ],
+        },
+      }),
+      secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) },
+    });
+    const client = new Client(
+      { name: "control-plane-modern-no-ui-test", version: "1.0.0" },
+      { versionNegotiation: { mode: { pin: "2026-07-28" } }, capabilities: {} },
+    );
+    try {
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(server.endpoint), {
+          requestInit: { headers: { authorization: AUTHORIZATION } },
+        }),
+      );
+      const { tools } = await client.listTools();
+      const names = tools.map(({ name }) => name);
+
+      expect(names).toContain("list_runs");
+      expect(names).toContain("get_run");
+      expect(names.some((name) => name.startsWith("harness.approvals."))).toBe(false);
+      expect(names.some((name) => name.startsWith("harness.inputs."))).toBe(false);
+      expect(names).not.toContain("harness.runs.list");
+      expect(names).not.toContain("harness.runs.get");
+    } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
   });
 
   it("lists metadata with pagination and status filtering", async () => {
