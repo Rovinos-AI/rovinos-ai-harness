@@ -24,8 +24,12 @@ class DockerHumanError extends HarnessError {
   }
 }
 
-async function latestStatus(runtime: Runtime, runId: Id): Promise<RunStatus> {
-  const { runs } = await runtime.store.listRuns({ limit: 1 });
+/** Reads the run status and raises a coded failure if the run has disappeared. */
+export async function readLatestStatus(
+  store: Pick<Runtime["store"], "listRuns">,
+  runId: Id,
+): Promise<RunStatus> {
+  const { runs } = await store.listRuns({ limit: 1 });
   const summary = runs.find((candidate) => candidate.runId === runId);
   if (summary === undefined) {
     throw new DockerHumanError();
@@ -67,7 +71,7 @@ export async function runDockerHuman(options: {
       if (processTimedOut) {
         return "suspended";
       }
-      return latestStatus(runtime, options.runId);
+      return readLatestStatus(runtime.store, options.runId);
     });
     return {
       approvals: human.counts,

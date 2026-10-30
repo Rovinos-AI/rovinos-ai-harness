@@ -82,6 +82,53 @@ interface ApprovalScenario {
   readonly policy: PolicyPort;
 }
 
+function approvalScenario(): ApprovalScenario {
+  let modelCalls = 0;
+  return {
+    model: {
+      complete: () => {
+        const call = modelCalls === 0;
+        modelCalls += 1;
+        return Promise.resolve({
+          provider: "synthetic",
+          model: "synthetic",
+          parts: call
+            ? [
+                {
+                  type: "tool_call" as const,
+                  callId: Id.parse("00000000000000000000000001"),
+                  toolId: "fake.echo",
+                  args: { value: "synthetic" },
+                },
+              ]
+            : [{ type: "text" as const, text: "done" }],
+          providerBlobs: null,
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: call ? "tool_calls" : "stop",
+          latencyMs: 0,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+        });
+      },
+    },
+    tool: {
+      prepare: (call) => Promise.resolve(call),
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    },
+    policy: {
+      version: "synthetic",
+      decide: () => ({
+        decision: "ask",
+        ruleId: "eval_approval",
+        reason: "synthetic_approval",
+        editable: [],
+      }),
+    },
+  };
+}
+
 async function createRun(
   workDir: string,
   key: string,
@@ -197,50 +244,7 @@ describe("DockerExecutor", () => {
   it("resolves and resumes approvals through the simulated human", async () => {
     const root = await createDirectory();
     const workDir = join(root, "trial");
-    let modelCalls = 0;
-    const scenario: ApprovalScenario = {
-      model: {
-        complete: () => {
-          const call = modelCalls === 0;
-          modelCalls += 1;
-          return Promise.resolve({
-            provider: "synthetic",
-            model: "synthetic",
-            parts: call
-              ? [
-                  {
-                    type: "tool_call" as const,
-                    callId: Id.parse("00000000000000000000000001"),
-                    toolId: "fake.echo",
-                    args: { value: "synthetic" },
-                  },
-                ]
-              : [{ type: "text" as const, text: "done" }],
-            providerBlobs: null,
-            usage: { inputTokens: 1, outputTokens: 1 },
-            finishReason: call ? "tool_calls" : "stop",
-            latencyMs: 0,
-            schemaValid: true,
-            repairAttempts: 0,
-            fallbackDepth: 0,
-          });
-        },
-      },
-      tool: {
-        prepare: (call) => Promise.resolve(call),
-        describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
-        execute: () => Promise.resolve({ outcome: "ok", result: null }),
-      },
-      policy: {
-        version: "synthetic",
-        decide: () => ({
-          decision: "ask",
-          ruleId: "eval_approval",
-          reason: "synthetic_approval",
-          editable: [],
-        }),
-      },
-    };
+    const scenario = approvalScenario();
     const invocations: DockerProcessOptions[] = [];
     mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
       invocations.push(options);
@@ -271,6 +275,33 @@ describe("DockerExecutor", () => {
     expect(invocations).toHaveLength(2);
     expect(invocations[1]?.args).toContain("resume");
     expect(invocations[1]?.args.at(-1)).toBe(result.runId);
+  });
+
+  it("reports a timeout if the Docker resume process times out", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const scenario = approvalScenario();
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      if (options.args.includes("resume")) {
+        return { exitCode: null, timedOut: true } satisfies DockerProcessResult;
+      }
+      await createRun(workDir, key, true, scenario);
+      return { exitCode: 1, timedOut: false } satisfies DockerProcessResult;
+    });
+
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, { rules: [], default: "deny", maxResumes: 1 }),
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      errorCode: "trial_timeout",
+      exitCode: 124,
+      approvals: { denied: 1 },
+    });
   });
 
   it("returns a safe error when Docker exits without creating a run", async () => {

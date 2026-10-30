@@ -13,7 +13,9 @@ import type { ApprovalCounts } from "./trial.js";
 import { HumanScriptSchema } from "./schema.js";
 import type { HumanScript } from "./schema.js";
 
-type SimulatedHumanRuntime = Pick<Runtime, "store" | "resolveApproval">;
+type SimulatedHumanRuntime = Pick<Runtime, "resolveApproval"> & {
+  readonly store: Pick<Runtime["store"], "read">;
+};
 
 interface MutableApprovalCounts {
   approved: number;
