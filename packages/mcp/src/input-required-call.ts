@@ -224,7 +224,9 @@ export async function handleInputRequiredCall(options: {
     if (protectedRequests.sensitiveKeys.has(request.inputKey)) {
       return "declined_sensitive";
     }
-    return protectedRequests.policyDeclinedInputKeys.includes(request.inputKey) ? "rejected" : "asked";
+    return protectedRequests.policyDeclinedInputKeys.includes(request.inputKey)
+      ? "rejected"
+      : "asked";
   }
   const inputResponses = restoreInputResponses(
     outcome.inputResponses,

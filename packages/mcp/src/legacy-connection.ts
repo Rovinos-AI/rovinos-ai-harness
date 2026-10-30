@@ -48,8 +48,7 @@ export class LegacyConnectionElicitation {
         if (!this.#completionTracker.complete(elicitationId)) {
           return;
         }
-        const callbacks =
-          this.#completionCallbacks.get(elicitationId) ?? this.#activeCallbacks;
+        const callbacks = this.#completionCallbacks.get(elicitationId) ?? this.#activeCallbacks;
         this.#completionCallbacks.delete(elicitationId);
         callbacks?.onComplete(elicitationId);
       },
@@ -91,10 +90,7 @@ export class LegacyConnectionElicitation {
     return predecessor.then(operation).finally(release);
   }
 
-  #trackCompletion(
-    elicitationId: string,
-    callbacks: LegacyElicitationCallbacks | undefined,
-  ): void {
+  #trackCompletion(elicitationId: string, callbacks: LegacyElicitationCallbacks | undefined): void {
     this.#completionTracker.track(elicitationId);
     if (callbacks === undefined) {
       return;

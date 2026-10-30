@@ -287,7 +287,9 @@ async function recordLegacyPolicyDecline(
 async function handleInputRequired(
   options: McpElicitationPortOptions,
   input: ElicitationInputRequired,
-): Promise<ReturnType<ElicitationPort["handleInputRequired"]> extends Promise<infer T> ? T : never> {
+): Promise<
+  ReturnType<ElicitationPort["handleInputRequired"]> extends Promise<infer T> ? T : never
+> {
   if (inputSignalAborted(input.signal)) {
     return { kind: "error", errorCode: "mcp_input_request_invalid" };
   }

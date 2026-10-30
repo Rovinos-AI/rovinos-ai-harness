@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  SdkError,
-  SdkErrorCode,
-  type ElicitRequestURLParams,
-} from "@modelcontextprotocol/client";
+import { SdkError, SdkErrorCode, type ElicitRequestURLParams } from "@modelcontextprotocol/client";
 import { HarnessError } from "@rovinos/schemas";
 
 /** Safe protocol failure retaining only the numeric JSON-RPC code. */

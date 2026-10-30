@@ -1244,10 +1244,7 @@ describe("durable MCP input requests", () => {
       callId: "66666666666666666666666666",
     });
 
-    expect(events.map(({ type }) => type)).toEqual([
-      "tool_intent",
-      "tool_result",
-    ]);
+    expect(events.map(({ type }) => type)).toEqual(["tool_intent", "tool_result"]);
   });
 
   it("suspends with a checkpoint and resumes from a separate recorder with stored answers", async () => {

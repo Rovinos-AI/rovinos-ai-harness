@@ -149,8 +149,6 @@ describe("invokeMcpTool elicitation metadata", () => {
         server: serverConfig({ enabled: true, modes: ["url"] }),
         params: { name: "echo", arguments: {} },
       }),
-    ).rejects.toMatchObject(
-      new McpProtocolError(-32042, urlElicitations),
-    );
+    ).rejects.toMatchObject(new McpProtocolError(-32042, urlElicitations));
   });
 });

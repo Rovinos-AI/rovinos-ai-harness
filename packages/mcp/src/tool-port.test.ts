@@ -60,7 +60,10 @@ async function fixture(
     readonly offloadBinaryResults?: boolean;
     readonly authRequiredMethod?: "tools/list" | "tools/call";
     readonly elicitation?: ServerConfig["elicitation"];
-    readonly urlOptions?: { readonly requireHttps?: boolean; readonly urlAllowHosts?: readonly string[] };
+    readonly urlOptions?: {
+      readonly requireHttps?: boolean;
+      readonly urlAllowHosts?: readonly string[];
+    };
   } = {},
 ): Promise<Fixture> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -584,9 +587,10 @@ describe("McpToolPort", () => {
             kind: "retry" as const,
             inputResponses: {
               "server-key": {
-                action: input.policyDeclinedInputKeys?.includes("server-key") === true
-                  ? ("decline" as const)
-                  : action,
+                action:
+                  input.policyDeclinedInputKeys?.includes("server-key") === true
+                    ? ("decline" as const)
+                    : action,
               },
             },
           }),

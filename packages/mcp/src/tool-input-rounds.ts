@@ -8,10 +8,7 @@ import {
 import { Id, type JsonValue as JsonValueType } from "@rovinos/schemas";
 import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
 import type { ElicitationUrlOptions } from "./elicitation/url.js";
-import {
-  handleLegacyLiveElicitation,
-  legacyUrlInputRequiredResult,
-} from "./elicitation/legacy.js";
+import { handleLegacyLiveElicitation, legacyUrlInputRequiredResult } from "./elicitation/legacy.js";
 import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
 import { checkElicitationUrl } from "./elicitation/url.js";
 import { validateInputRequiredResult } from "./elicitation/validate.js";
@@ -42,7 +39,7 @@ interface CallToolWithInputRoundsOptions {
   readonly protectInputMetadata?: (value: string) => Promise<string>;
   readonly urlOptions?: ElicitationUrlOptions;
   readonly errorCode: (error: unknown, signal: AbortSignal) => string;
-};
+}
 
 function createLegacyElicitation(options: CallToolWithInputRoundsOptions) {
   const parsedCallId = Id.safeParse(options.call.callId);
@@ -127,7 +124,9 @@ async function callRound(options: {
   readonly inputRetry: ElicitationRetry | undefined;
   readonly legacyElicitation: ReturnType<typeof createLegacyElicitation>;
   readonly errorCode: CallToolWithInputRoundsOptions["errorCode"];
-}): Promise<{ readonly result: CallToolResult; readonly source: "mcp_mrtr" | "mcp_legacy" } | ToolRoundOutcome> {
+}): Promise<
+  { readonly result: CallToolResult; readonly source: "mcp_mrtr" | "mcp_legacy" } | ToolRoundOutcome
+> {
   try {
     return {
       result: await options.connection.callTool({

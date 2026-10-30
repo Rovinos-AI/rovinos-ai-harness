@@ -14,27 +14,19 @@ export type ElicitationUrlCheck =
   | {
       readonly accepted: false;
       readonly reason:
-        | "invalid"
-        | "scheme"
-        | "credentials"
-        | "https_required"
-        | "ip_literal"
-        | "host_not_allowed";
+        "invalid" | "scheme" | "credentials" | "https_required" | "ip_literal" | "host_not_allowed";
     };
 
 function normalizedHostname(hostname: string): string {
   const normalized = hostname.toLowerCase().replace(/\.$/u, "");
   const unwrapped =
-    normalized.startsWith("[") && normalized.endsWith("]")
-      ? normalized.slice(1, -1)
-      : normalized;
+    normalized.startsWith("[") && normalized.endsWith("]") ? normalized.slice(1, -1) : normalized;
   return isIP(unwrapped) === 6 ? unwrapped : domainToASCII(normalized);
 }
 
 function isLoopback(hostname: string): boolean {
-  const unwrapped = hostname.startsWith("[") && hostname.endsWith("]")
-    ? hostname.slice(1, -1)
-    : hostname;
+  const unwrapped =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
   return (
     unwrapped === "localhost" ||
     unwrapped.endsWith(".localhost") ||

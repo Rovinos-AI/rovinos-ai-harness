@@ -56,10 +56,11 @@ describe("checkElicitationUrl", () => {
     expect(checkElicitationUrl("http://example.test", { requireHttps: false })).toEqual({
       accepted: false,
       reason: "https_required",
-    }    );
-    expect(
-      checkElicitationUrl("https://[::1]/path", { urlAllowHosts: ["[::1]"] }),
-    ).toEqual({ accepted: true, suspicious: false });
+    });
+    expect(checkElicitationUrl("https://[::1]/path", { urlAllowHosts: ["[::1]"] })).toEqual({
+      accepted: true,
+      suspicious: false,
+    });
   });
 
   it.each(["https://127.0.0.1", "https://[::1]"])(
@@ -70,9 +71,9 @@ describe("checkElicitationUrl", () => {
   );
 
   it("allows an explicitly allowlisted IP literal", () => {
-    expect(
-      checkElicitationUrl("https://127.0.0.1/path", { urlAllowHosts: ["127.0.0.1"] }),
-    ).toEqual({ accepted: true, suspicious: false });
+    expect(checkElicitationUrl("https://127.0.0.1/path", { urlAllowHosts: ["127.0.0.1"] })).toEqual(
+      { accepted: true, suspicious: false },
+    );
   });
 
   it("matches the optional host allowlist exactly", () => {

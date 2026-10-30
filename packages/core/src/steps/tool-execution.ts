@@ -108,7 +108,8 @@ function createAttemptElicitationPort(
     ...(elicitation.recordLegacyTimeout === undefined
       ? {}
       : {
-          recordLegacyTimeout: (input) => elicitation.recordLegacyTimeout?.(input) ?? Promise.resolve(),
+          recordLegacyTimeout: (input) =>
+            elicitation.recordLegacyTimeout?.(input) ?? Promise.resolve(),
         }),
     ...(elicitation.recordLegacyPolicyDecline === undefined
       ? {}

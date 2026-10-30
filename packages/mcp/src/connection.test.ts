@@ -36,12 +36,15 @@ const inputSchema = {
   additionalProperties: false,
 } satisfies Tool["inputSchema"];
 
-function legacyElicitInput(server: McpServer, params: {
-  readonly mode: "url";
-  readonly elicitationId: string;
-  readonly message: string;
-  readonly url: string;
-}): Promise<{ readonly action: string }> {
+function legacyElicitInput(
+  server: McpServer["server"],
+  params: {
+    readonly mode: "url";
+    readonly elicitationId: string;
+    readonly message: string;
+    readonly url: string;
+  },
+): Promise<{ readonly action: string }> {
   const method: unknown = Reflect.get(server, "elicitInput");
   if (typeof method !== "function") {
     return Promise.reject(new Error("Legacy elicitation is unavailable."));
@@ -299,7 +302,7 @@ describe("McpConnection", () => {
     const peer = await createMemoryPeer({
       count: 1,
       onCall: async (_transport, _params, server) => {
-        const response = await legacyElicitInput(server, {
+        const response = await legacyElicitInput(server.server, {
           mode: "url",
           elicitationId: "live-url-id",
           message: "Confirm the action",
@@ -348,7 +351,7 @@ describe("McpConnection", () => {
       expect(answers).toEqual(["Confirm the action:live-url-id"]);
       expect(onComplete).toHaveBeenCalledWith("live-url-id");
       await expect(
-        legacyElicitInput(peer.server, {
+        legacyElicitInput(peer.server.server, {
           mode: "url",
           elicitationId: "outside-call",
           message: "Outside a tool call",

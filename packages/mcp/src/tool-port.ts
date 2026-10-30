@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  ProtocolError,
-  type CallToolResult,
-} from "@modelcontextprotocol/client";
+import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client";
 import { Code, compileJsonSchema } from "@rovinos/schemas";
 import type { JsonValue as JsonValueType, ServerConfig } from "@rovinos/schemas";
 import * as telemetry from "@rovinos/telemetry";

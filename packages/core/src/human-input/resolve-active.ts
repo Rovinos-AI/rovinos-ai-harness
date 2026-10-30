@@ -5,7 +5,12 @@ import type { Tokenizer } from "@rovinos/pii";
 import type { AuditingVaultResolver } from "@rovinos/vault";
 import { assertApproverMayResolve } from "../approval-principals.js";
 import type { Clock, RunRecorder } from "../recorder.js";
-import { foldRunState, type InputRequestedEvent, type RunState, type ToolIntentEvent } from "../run-state.js";
+import {
+  foldRunState,
+  type InputRequestedEvent,
+  type RunState,
+  type ToolIntentEvent,
+} from "../run-state.js";
 import { INPUT_WAIT_SPAN } from "../spans.js";
 import { ensureTracing } from "../runtime-tracing-init.js";
 import { pendingRequest } from "./resolve-log.js";
@@ -15,7 +20,11 @@ import {
   requestForValidation,
 } from "./resolve-validation.js";
 import { validateInputResponse, type InputResolution } from "./resolve.js";
-import { InputNotFoundError, InputPrincipalInvalidError, InputTokenizerUnavailableError } from "./resolve-errors.js";
+import {
+  InputNotFoundError,
+  InputPrincipalInvalidError,
+  InputTokenizerUnavailableError,
+} from "./resolve-errors.js";
 
 type ActiveInputResolution =
   | InputResolution
@@ -44,9 +53,7 @@ interface PreparedActiveResolution {
 
 function activeResolutionNeedsSchema(resolution: ActiveInputResolution): boolean {
   return (
-    "principal" in resolution &&
-    resolution.action === "accept" &&
-    resolution.answer !== undefined
+    "principal" in resolution && resolution.action === "accept" && resolution.answer !== undefined
   );
 }
 
@@ -60,7 +67,8 @@ async function prepareActiveResolution(options: {
   readonly events: readonly Event[];
 }): Promise<PreparedActiveResolution> {
   const { runId, request, state, intent, resolution, dependencies, events } = options;
-  const principal = "principal" in resolution ? Principal.safeParse(resolution.principal) : undefined;
+  const principal =
+    "principal" in resolution ? Principal.safeParse(resolution.principal) : undefined;
   if (principal !== undefined && !principal.success) {
     throw new InputPrincipalInvalidError();
   }

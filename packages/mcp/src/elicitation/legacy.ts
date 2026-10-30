@@ -106,9 +106,7 @@ export async function handleLegacyLiveElicitation(
 }
 
 /** Converts the SDK's legacy `-32042` error into a validated MRTR-shaped URL request batch. */
-export function legacyUrlInputRequiredResult(
-  error: McpProtocolError,
-): CallToolResult | undefined {
+export function legacyUrlInputRequiredResult(error: McpProtocolError): CallToolResult | undefined {
   if (error.protocolCode !== -32042 || error.urlElicitations === undefined) {
     return undefined;
   }
@@ -119,7 +117,11 @@ export function legacyUrlInputRequiredResult(
   if (inputRequests.length === 0) {
     return undefined;
   }
-  return { content: [], resultType: "input_required", inputRequests: Object.fromEntries(inputRequests) };
+  return {
+    content: [],
+    resultType: "input_required",
+    inputRequests: Object.fromEntries(inputRequests),
+  };
 }
 
 /** Tracks legacy completion IDs; unknown notifications are ignored. */
