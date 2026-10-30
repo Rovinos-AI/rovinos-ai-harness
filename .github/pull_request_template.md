@@ -21,6 +21,7 @@
 - [ ] Telemetry follows CONVENTIONS §5.
 - [ ] Canary scenarios cover any new sink, boundary, or log path.
 - [ ] No unrelated lint rules or tests were weakened or removed.
+- [ ] If this PR changes agent behavior, I regenerated the golden run with `yarn replay:update` and explained why in the PR description.
 
 ## How it was tested
 
