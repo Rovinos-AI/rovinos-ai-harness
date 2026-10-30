@@ -144,9 +144,10 @@ describe("eval suite schemas", () => {
       {
         type: "llm_judge",
         rubricId: "readability",
-        rubric: "Check the synthetic response for clarity.",
+        rubric: "- id: clarity\n  description: The response is clear.\n  weight: 1",
         model: { provider: "test", model: "fixture" },
         passThreshold: 0.75,
+        votes: 3,
       },
       { type: "no_canary_leak" },
     ];
@@ -164,9 +165,29 @@ describe("eval suite schemas", () => {
       GraderSpecSchema.safeParse({
         type: "llm_judge",
         rubricId: "readability",
-        rubric: "Check the synthetic response.",
+        rubric: "- id: clarity\n  description: The response is clear.\n  weight: 1",
         model: { provider: "test", model: "fixture" },
         passThreshold: 1.1,
+      }).success,
+    ).toBe(false);
+    expect(
+      GraderSpecSchema.safeParse({
+        type: "llm_judge",
+        rubricId: "readability",
+        rubric: "not a valid rubric",
+        model: { provider: "test", model: "fixture" },
+        passThreshold: 0.75,
+      }).success,
+    ).toBe(false);
+    expect(
+      GraderSpecSchema.safeParse({
+        type: "llm_judge",
+        rubricId: "readability",
+        rubric:
+          "- id: clarity\n  description: Clear.\n  weight: 1\n- id: clarity\n  description: Clear.\n  weight: 1",
+        model: { provider: "test", model: "fixture" },
+        passThreshold: 0.75,
+        votes: 2,
       }).success,
     ).toBe(false);
   });

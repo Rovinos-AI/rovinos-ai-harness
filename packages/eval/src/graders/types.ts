@@ -4,6 +4,7 @@ import type { Event } from "@rovinos/schemas";
 import type { ValidateWithTokensOptions } from "@rovinos/pii";
 import type { SandboxBackend } from "@rovinos/sandbox";
 import { z } from "zod";
+import { TrialUsageSchema } from "../trial.js";
 import type { TrialResult } from "../trial.js";
 
 /** Metadata-only result returned by every grader. */
@@ -14,6 +15,7 @@ export const GradeResultSchema = z
     score: z.number().min(0).max(1),
     codes: z.array(Code),
     counts: z.record(Code, z.number().int().nonnegative()).optional(),
+    usage: TrialUsageSchema.optional(),
   })
   .strict();
 
