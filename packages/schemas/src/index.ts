@@ -134,6 +134,7 @@ export { DeploymentConfigSchema, type DeploymentConfig } from "./config/deployme
 export {
   ModelEnforcementConfigSchema,
   ModelPricingRateSchema,
+  ModelProviderQuirksSchema,
   ModelRetryConfigSchema,
   ModelProviderConfigSchema,
   ModelRoutingConfigSchema,
@@ -141,6 +142,7 @@ export {
   type ModelEnforcementConfig,
   type ModelPricingRate,
   type ModelProviderConfig,
+  type ModelProviderQuirks,
   type ModelRoutingConfig,
   type ModelRetryConfig,
   type ModelsConfig,

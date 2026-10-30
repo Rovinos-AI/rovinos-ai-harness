@@ -28,6 +28,28 @@ describe("lookupCapabilities", () => {
     ).toMatchObject({ structuredOutput: "none" });
   });
 
+  it("uses conservative defaults for OpenAI-compatible endpoints and honors overrides", () => {
+    expect(
+      lookupCapabilities({ provider: "openai_compatible", model: "local" }).capabilities,
+    ).toEqual({
+      structuredOutput: "json_mode",
+      forcedToolChoice: false,
+      parallelToolCalls: false,
+      maxContextTokens: 0,
+      opaqueRoundTrip: false,
+    });
+    expect(
+      lookupCapabilities(
+        { provider: "openai_compatible", model: "local" },
+        { structuredOutput: "native", forcedToolChoice: true, opaqueRoundTrip: true },
+      ).capabilities,
+    ).toMatchObject({
+      structuredOutput: "native",
+      forcedToolChoice: true,
+      opaqueRoundTrip: true,
+    });
+  });
+
   it("defaults Bedrock to forced-tool structured output and opaque round trips", () => {
     expect(lookupCapabilities({ provider: "bedrock", model: "nova-pro" })).toEqual({
       capabilities: {

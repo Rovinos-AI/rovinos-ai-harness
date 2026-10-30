@@ -36,6 +36,8 @@ const OpaqueBlobSchema = z.looseObject({
 export interface ChatCompletionsQuirks {
   readonly structuredOutput: Capabilities["structuredOutput"];
   readonly parallelToolCalls: boolean;
+  readonly useMaxTokens?: boolean | undefined;
+  readonly supportsStrictSchema?: boolean | undefined;
 }
 
 /** The subset of a Chat Completions response consumed by the shared mapper. */
@@ -212,10 +214,21 @@ function mapOutputFormat(
       json_schema: {
         name: request.output.name,
         schema: z.record(z.string(), JsonValue).parse(request.output.schema),
-        strict: true,
+        strict: quirks.supportsStrictSchema ?? true,
       },
     },
   };
+}
+
+function mapMaxOutputTokens(
+  request: ModelRequest,
+  quirks: ChatCompletionsQuirks,
+): Record<string, number> {
+  if (request.maxOutputTokens === undefined) {
+    return {};
+  }
+  const parameter = quirks.useMaxTokens === true ? "max_tokens" : "max_completion_tokens";
+  return { [parameter]: request.maxOutputTokens };
 }
 
 /**
@@ -237,9 +250,7 @@ export function toChatRequest(
     ...tools,
     ...mapToolChoice(request),
     ...(tools.tools === undefined ? {} : { parallel_tool_calls: quirks.parallelToolCalls }),
-    ...(request.maxOutputTokens === undefined
-      ? {}
-      : { max_completion_tokens: request.maxOutputTokens }),
+    ...mapMaxOutputTokens(request, quirks),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     ...mapOutputFormat(request, quirks),
   };
