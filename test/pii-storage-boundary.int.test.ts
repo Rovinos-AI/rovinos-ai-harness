@@ -87,6 +87,7 @@ function snapshotFor(runId: Id, snapshotId: Id, contextCanary: string, planCanar
   return {
     snapshotId,
     runId,
+    v: 1,
     atSeq: 2,
     createdAt: 100,
     traceparent: `00-${traceId}-${spanId}-01`,
