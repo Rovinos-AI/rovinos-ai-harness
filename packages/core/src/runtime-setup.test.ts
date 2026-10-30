@@ -30,4 +30,25 @@ describe("detokenization tool registry validation", () => {
       toolId: "mail.send",
     });
   });
+
+  it("checks every allowlisted tool against the runtime registry", () => {
+    const configWithMultipleTools = PiiConfigSchema.parse({
+      detokenize: [
+        { toolId: "mail.send", args: ["/to"] },
+        { toolId: "files.read", args: ["/path"] },
+      ],
+    });
+
+    expect(() => {
+      assertDetokenizeToolsRegistered(configWithMultipleTools, {
+        describe: (toolId) =>
+          toolId === Code.parse("mail.send") ? { idempotent: true, timeoutMs: 1_000 } : undefined,
+      });
+    }).toThrow(
+      expect.objectContaining({
+        code: "pii_detokenize_tool_unknown",
+        toolId: "files.read",
+      }),
+    );
+  });
 });
