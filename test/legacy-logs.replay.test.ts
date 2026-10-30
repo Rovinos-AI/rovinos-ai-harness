@@ -2,6 +2,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { z } from "zod";
+import { requestHash } from "@rovinos/models";
 import { foldRunState } from "@rovinos/core";
 import {
   compareGoldenSignature,
@@ -14,6 +16,32 @@ import { resumeLegacyRun, withGoldenTracing } from "./replay/golden/scenario.js"
 import { LegacyLogHeaderSchema } from "./legacy-log-schema.js";
 
 const fixturesDirectory = join(import.meta.dirname, "fixtures", "legacy-logs");
+
+it("upcasts the v1 model-request fixture while preserving legacy hash verification", async () => {
+  const text = await readFile(join(fixturesDirectory, "v1", "model-request.json"), "utf8");
+  const fixture = parseJson(
+    z.object({ containsRealData: z.literal(false), event: RawEventEnvelopeSchema }).strict(),
+    text,
+  );
+  const event = upcastEvent(fixture.event);
+  expect(event).toMatchObject({
+    type: "model_request",
+    v: 2,
+    requestParametersHash: null,
+    requestHash: fixture.event.requestHash,
+  });
+  if (event.type !== "model_request") {
+    throw new Error("Expected a legacy model request.");
+  }
+  expect(event.requestHash).toBe(
+    requestHash({
+      requestId: event.requestId,
+      model: { provider: event.provider, model: event.model },
+      messages: event.messages,
+      stablePrefixMessages: 0,
+    }),
+  );
+});
 
 it("loads, projects, replays, and resumes every committed synthetic legacy log", async () => {
   const versions = (await readdir(fixturesDirectory, { withFileTypes: true }))

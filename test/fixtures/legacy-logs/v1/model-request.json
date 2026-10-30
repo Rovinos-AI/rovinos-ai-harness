@@ -1,0 +1,23 @@
+{
+  "containsRealData": false,
+  "event": {
+    "runId": "00000000000000000000000000",
+    "seq": 3,
+    "ts": 1000,
+    "v": 1,
+    "traceId": "031f379f21e375dfef0c1fdf22b3e18c",
+    "spanId": "7112767a62509317",
+    "segmentId": "00000000000000000000000001",
+    "type": "model_request",
+    "requestId": "00000000000000000000000002",
+    "provider": "unknown",
+    "model": "unknown",
+    "requestHash": "43915bcf650f77a3f5d2f9dbd3661f317ac6bf58d14f9ded65a0099ea2611f85",
+    "messages": [
+      {
+        "role": "user",
+        "parts": [{ "type": "text", "text": "synthetic golden scenario" }]
+      }
+    ]
+  }
+}
