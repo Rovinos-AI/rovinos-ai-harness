@@ -49,13 +49,14 @@ export async function generateLegacyLog(root: string, version: string): Promise<
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const versionIndex = args.indexOf("--version");
-  if (versionIndex < 0 || args.length !== 2 || args[versionIndex + 1] === undefined) {
+  const version = args[versionIndex + 1];
+  if (versionIndex < 0 || args.length !== 2 || version === undefined) {
     process.stderr.write("Usage: gen-legacy-log.ts --version <version>\n");
     process.exitCode = 2;
   } else {
     const root = fileURLToPath(new URL("../", import.meta.url));
     try {
-      await generateLegacyLog(root, args[versionIndex + 1]);
+      await generateLegacyLog(root, version);
       process.stdout.write("Synthetic legacy log generated.\n");
     } catch {
       process.stderr.write("Unable to generate synthetic legacy log.\n");
