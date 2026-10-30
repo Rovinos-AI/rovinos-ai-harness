@@ -2,8 +2,7 @@
 import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
 import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
-import { TrialResultSchema } from "../trial.js";
-import type { TrialResult, TrialSpec } from "../trial.js";
+import { evalSuiteCode, TrialResultSchema, type TrialResult, type TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
 
@@ -64,7 +63,14 @@ export class InProcessExecutor implements TrialExecutor {
           : { goal: trial.task.input.goal, metadata: trial.task.input.metadata };
       const hasContextStrategy =
         trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
-      const run = await runtime.run(goal, hasContextStrategy ? { role: "eval" } : {});
+      const run = await runtime.run(goal, {
+        ...(hasContextStrategy ? { role: "eval" } : {}),
+        evalMetadata: {
+          suite: evalSuiteCode(trial.suite),
+          task: trial.task.id,
+          trial: trial.trialIndex,
+        },
+      });
       const runId = run.events[0]?.runId;
       const durationMs = Math.max(0, Math.floor(clock.now() - startedAt));
       const result: TrialResult = {

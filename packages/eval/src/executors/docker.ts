@@ -8,8 +8,7 @@ import type { RunStatus } from "@rovinos/schemas";
 import { runDockerProcess } from "@rovinos/sandbox";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";
-import { TrialResultSchema } from "../trial.js";
-import type { TrialResult, TrialSpec } from "../trial.js";
+import { evalSuiteCode, TrialResultSchema, type TrialResult, type TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
 
@@ -92,6 +91,14 @@ function inputForTrial(trial: TrialSpec): string {
       ? { goal: trial.task.input.goal }
       : { goal: trial.task.input.goal, metadata: trial.task.input.metadata },
   );
+}
+
+function evalMetadataForTrial(trial: TrialSpec): string {
+  return JSON.stringify({
+    suite: evalSuiteCode(trial.suite),
+    task: trial.task.id,
+    trial: trial.trialIndex,
+  });
 }
 
 function mapStatus(status: z.infer<typeof RunStatus>): TrialResult["status"] | undefined {
@@ -223,6 +230,8 @@ export class DockerExecutor implements TrialExecutor {
       "HARNESS_DATA_DIR=/harness/data",
       "--env",
       "HARNESS_EVAL_KEY",
+      "--env",
+      `HARNESS_EVAL_METADATA=${evalMetadataForTrial(trial)}`,
       this.options.image,
       "node",
       "dist/bin.js",

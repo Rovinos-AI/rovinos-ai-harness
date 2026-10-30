@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  Code as CodeSchema,
   ModelsConfigSchema,
   type SandboxConfigSchema,
   type Code,
@@ -23,7 +24,7 @@ import {
   type DeploymentConfig,
   type VaultConfig,
 } from "@rovinos/schemas";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Context } from "@opentelemetry/api";
 import type { SandboxBackend, WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import type { ProviderAdapter } from "@rovinos/models";
@@ -129,6 +130,18 @@ export interface RuntimeRunHandle {
   readonly completion: Promise<RunLoopResult>;
 }
 
+/** Safe identifiers attached only to root runs initiated by the eval runner. */
+export const EvalRunMetadataSchema = z
+  .object({
+    suite: CodeSchema,
+    task: CodeSchema,
+    trial: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred identifiers attached only to root runs initiated by the eval runner. */
+export type EvalRunMetadata = z.infer<typeof EvalRunMetadataSchema>;
+
 /** Composed run-loop operations and their shared dependencies. */
 export interface Runtime {
   readonly store: EventStore;
@@ -150,6 +163,7 @@ export interface Runtime {
       readonly replayOf?: Id;
       readonly parentRunId?: Id;
       readonly rootSpanParent?: Context;
+      readonly evalMetadata?: EvalRunMetadata;
     },
   ): Promise<RunLoopResult>;
   /** Starts a run and exposes when its initial events are durable and when execution settles. */
@@ -163,6 +177,7 @@ export interface Runtime {
       readonly rootSpanParent?: Context;
       readonly requestedBy?: Principal;
       readonly onProgress?: NonNullable<RunContext["onProgress"]>;
+      readonly evalMetadata?: EvalRunMetadata;
     },
   ): RuntimeRunHandle;
   /** Starts a follow-up run and exposes durable startup and eventual completion. */

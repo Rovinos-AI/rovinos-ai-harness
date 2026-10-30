@@ -10,6 +10,7 @@ import type { DockerProcessOptions, DockerProcessResult } from "@rovinos/sandbox
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineSuite } from "../load.js";
 import { TrialConfigSchema } from "../executor.js";
+import { evalSuiteCode } from "../trial.js";
 import type { TrialSpec } from "../trial.js";
 
 const mocks = vi.hoisted(() => ({ runDockerProcess: vi.fn() }));
@@ -114,6 +115,7 @@ describe("DockerExecutor", () => {
   it("uses the isolated database to collect run status and usage", async () => {
     const root = await createDirectory();
     const workDir = join(root, "trial");
+    const trial = makeTrial(workDir);
     let invocation: DockerProcessOptions | undefined;
     let now = 0;
     mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
@@ -132,7 +134,7 @@ describe("DockerExecutor", () => {
         clock: { now: () => (now += 10) },
         randomBytes: (size) => new Uint8Array(size).fill(9),
       },
-    ).run(makeTrial(workDir));
+    ).run(trial);
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeDefined();
@@ -140,6 +142,13 @@ describe("DockerExecutor", () => {
     expect(result.exitCode).toBe(0);
     expect(result.durationMs).toBeGreaterThan(0);
     expect(invocation?.env.HARNESS_EVAL_KEY).toBe(Buffer.alloc(32, 9).toString("base64"));
+    expect(invocation?.args).toContain(
+      `HARNESS_EVAL_METADATA=${JSON.stringify({
+        suite: evalSuiteCode(trial.suite),
+        task: trial.task.id,
+        trial: trial.trialIndex,
+      })}`,
+    );
     // threat: T-02, T-07, T-08, T-16
     expect(invocation?.args).toEqual(
       expect.arrayContaining([

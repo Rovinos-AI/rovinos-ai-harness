@@ -3,9 +3,9 @@ import type { Runtime, RuntimeOverrides, ModelCompletion, ToolPort } from "@rovi
 import { FakeModelPort } from "@rovinos/core/testing";
 import { Code, Id } from "@rovinos/schemas";
 import type { VaultValueEntry } from "@rovinos/schemas";
+import type { CanarySet } from "@rovinos/eval";
 import { findTokens, tokenType } from "@rovinos/vault";
 import type { Token } from "@rovinos/vault";
-import type { CanarySet } from "./canaries.js";
 
 export const ECHO_TOOL = Code.parse("canary.echo");
 export const FAIL_TOOL = Code.parse("canary.fail");
