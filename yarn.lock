@@ -2994,9 +2994,12 @@ __metadata:
   resolution: "@rovinos/eval@workspace:packages/eval"
   dependencies:
     "@rovinos/core": "workspace:^"
+    "@rovinos/models": "workspace:^"
+    "@rovinos/pii": "workspace:^"
     "@rovinos/policy": "workspace:^"
     "@rovinos/sandbox": "workspace:^"
     "@rovinos/schemas": "workspace:^"
+    "@rovinos/vault": "workspace:^"
     vitest: "npm:4.1.12"
     zod: "npm:4.6.7"
   languageName: unknown
