@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApprovalEditsSchema } from "@rovinos/policy";
-import { Code, JsonPointerSchema, JsonValue, ModelRefSchema } from "@rovinos/schemas";
+import { Code, JsonPointerSchema, JsonValue, ModelRefSchema, parseYaml } from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Assertions that inspect an eval trial's event trajectory. */
@@ -45,6 +45,37 @@ export const TrajectoryAssertionSchema = z.discriminatedUnion("type", [
 /** Inferred trajectory assertion contract. */
 export type TrajectoryAssertion = z.infer<typeof TrajectoryAssertionSchema>;
 
+/** One weighted criterion used by an LLM judge. */
+export const JudgeCriterionSchema = z
+  .object({
+    id: Code,
+    description: z.string().min(1),
+    weight: z.number().positive(),
+  })
+  .strict();
+
+/** Parsed rubric criteria for an LLM judge. */
+export const JudgeRubricSchema = z
+  .array(JudgeCriterionSchema)
+  .min(1)
+  .superRefine((criteria, context) => {
+    const ids = new Set<string>();
+    for (const [index, criterion] of criteria.entries()) {
+      if (ids.has(criterion.id)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "id"],
+          message: "Rubric criterion ids must be unique.",
+          params: { errorCode: "judge_rubric_id_duplicate" },
+        });
+      }
+      ids.add(criterion.id);
+    }
+  });
+
+/** Inferred LLM judge rubric criterion. */
+export type JudgeCriterion = z.infer<typeof JudgeCriterionSchema>;
+
 const FileDiffGraderSchema = z
   .object({
     type: z.literal("file_diff"),
@@ -64,6 +95,33 @@ const FileDiffGraderSchema = z
       });
     }
   });
+
+/** Validated suite configuration for an LLM judge. */
+export const LlmJudgeGraderSpecSchema = z
+  .object({
+    type: z.literal("llm_judge"),
+    rubricId: Code,
+    rubric: z.string().min(1),
+    model: ModelRefSchema,
+    passThreshold: z.number().min(0).max(1),
+    votes: z.literal(3).optional(),
+  })
+  .strict()
+  .superRefine((grader, context) => {
+    try {
+      parseYaml(JudgeRubricSchema, grader.rubric);
+    } catch {
+      context.addIssue({
+        code: "custom",
+        path: ["rubric"],
+        message: "LLM judge rubric must be valid YAML criteria.",
+        params: { errorCode: "judge_rubric_invalid" },
+      });
+    }
+  });
+
+/** Inferred LLM judge grader configuration. */
+export type LlmJudgeGraderSpec = z.infer<typeof LlmJudgeGraderSpecSchema>;
 
 /** Supported eval grader contracts. */
 export const GraderSpecSchema = z.discriminatedUnion("type", [
@@ -87,15 +145,7 @@ export const GraderSpecSchema = z.discriminatedUnion("type", [
       assertions: z.array(TrajectoryAssertionSchema),
     })
     .strict(),
-  z
-    .object({
-      type: z.literal("llm_judge"),
-      rubricId: Code,
-      rubric: z.string().min(1),
-      model: ModelRefSchema,
-      passThreshold: z.number().min(0).max(1),
-    })
-    .strict(),
+  LlmJudgeGraderSpecSchema,
   z.object({ type: z.literal("no_canary_leak") }).strict(),
 ]);
 
