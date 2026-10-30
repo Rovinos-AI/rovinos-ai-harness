@@ -63,3 +63,8 @@ export {
   type ElicitationPort,
   type ElicitationRetry,
 } from "./elicitation/mrtr.js";
+export {
+  checkElicitationUrl,
+  type ElicitationUrlCheck,
+  type ElicitationUrlOptions,
+} from "./elicitation/url.js";
