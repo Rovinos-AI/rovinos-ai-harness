@@ -798,10 +798,15 @@ it("reconnects the dedicated Postgres listener after its connection drops", asyn
   const runId = builders.nextRunId();
   const controller = new AbortController();
   const iterator = store
-    .watch(runId, { fromSeq: 1, signal: controller.signal })
+    .watch(runId, { fromSeq: 0, signal: controller.signal })
     [Symbol.asyncIterator]();
   try {
     await store.append(runId, [builders.runCreated(runId)], 0);
+    // A visible backend can still be connecting; yielding an event proves subscription startup finished.
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { seq: 0, type: "run_created" },
+    });
     const firstEvent = iterator.next();
     const listenerPid = await waitForListenerPid(admin);
     await admin.query("SELECT pg_terminate_backend($1)", [listenerPid]);
@@ -821,18 +826,20 @@ it("reconnects the dedicated Postgres listener after its connection drops", asyn
 });
 
 async function waitForListenerPid(admin: Pool, previousPid?: number): Promise<number> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const result = await admin.query<{ pid: number }>(
-      "SELECT pid FROM pg_stat_activity WHERE application_name = $1 ORDER BY backend_start DESC LIMIT 1",
-      ["harness_event_store_listener"],
-    );
-    const pid = result.rows[0]?.pid;
-    if (pid !== undefined && pid !== previousPid) {
+  return vi.waitFor(
+    async () => {
+      const result = await admin.query<{ pid: number }>(
+        "SELECT pid FROM pg_stat_activity WHERE application_name = $1 AND state = 'idle' AND query = 'LISTEN harness_events' ORDER BY backend_start DESC LIMIT 1",
+        ["harness_event_store_listener"],
+      );
+      const pid = result.rows[0]?.pid;
+      if (pid === undefined || pid === previousPid) {
+        throw new Error("Postgres event listener did not connect");
+      }
       return pid;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error("Postgres event listener did not connect");
+    },
+    { timeout: 3_000, interval: 25 },
+  );
 }
 
 it("rejects reopening an encrypted Postgres store without its codec", async () => {
