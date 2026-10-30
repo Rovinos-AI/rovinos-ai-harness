@@ -5,7 +5,7 @@ import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, RunRecorder } from "../recorder.js";
 import type { IdGenerator, RunContext, ToolPort } from "../ports.js";
 import { toolRunContext } from "./prepare-tool.js";
-import { createMcpElicitationPort } from "./input-step.js";
+import { createAgentAskUserHandler, createMcpElicitationPort } from "./input-step.js";
 
 interface ToolContextOptions {
   readonly recorder: RunRecorder;
@@ -49,6 +49,16 @@ export function createToolExecutionContext(
       ids: options.ids,
       recorder: options.recorder,
       checkpointer: options.checkpointer,
+    }),
+    askUser: createAgentAskUserHandler({
+      callId,
+      clock: options.clock,
+      events,
+      history: options.history ?? [],
+      ids: options.ids,
+      recorder: options.recorder,
+      checkpointer: options.checkpointer,
+      signal: options.signal,
     }),
     ...(inputRetry === undefined ? {} : { inputRetry }),
   };

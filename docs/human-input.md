@@ -53,6 +53,17 @@ channels that report themselves available. The first valid answer wins, other
 channels are cancelled, and an invalid form answer may be requested once more.
 Pending requests remain listable when no channel is currently connected.
 
+## Agent questions
+
+The built-in `agent.ask_user` tool records a question as an agent-sourced input
+request and suspends the run until a human responds. The agent may omit a form
+schema for a free-response answer or provide a `FormSchema` to validate a
+structured answer. Accepted answers are tokenized before they are stored and
+returned to the model; decline and cancel responses contain only their action.
+Requests expire after seven days by default, with an optional per-question
+`expiresInMs` up to seven days. The example policy explicitly allows this tool;
+operators can change its rule to `ask` or `deny`.
+
 `resolveInput(store, runId, requestId, { action, answer?, principal, tokenizer,
 resolver?, clock?, queue?, expiresAfterMs? })` can be called from a separate
 process. It verifies that the request is pending and its run is not already

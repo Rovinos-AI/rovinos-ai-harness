@@ -26,6 +26,7 @@ import type {
 } from "@rovinos/models";
 import type { ElicitationPort, ElicitationRetry } from "@rovinos/mcp";
 import type { ToolResumeStrategy } from "./resume-policy.js";
+import type { AskUserInput } from "./builtin/ask-user-tool.js";
 import { z } from "zod";
 
 /** Provider-neutral request contract shared with the model gateway. */
@@ -39,6 +40,8 @@ export interface RunContext {
   readonly onProgress?: (progress: ModelProgress) => void;
   /** Durable MRTR handler installed by the core tool step. */
   readonly elicitation?: ElicitationPort;
+  /** Durable human-input handler installed for the built-in `agent.ask_user` tool. */
+  readonly askUser?: (request: AskUserInput) => Promise<ToolExecutionResult>;
   /** Resolved MRTR responses for a retried MCP call. */
   readonly inputRetry?: ElicitationRetry;
   /** The active run's available tools, used to prevent children from widening access. */
