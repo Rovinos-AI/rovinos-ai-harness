@@ -5,6 +5,7 @@ import { EventSchema, Id } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import type { GradeContext } from "./types.js";
+import { completedTrialResult } from "../../test-utils/trial-result.js";
 import { createSchemaValidGrader } from "./schema-valid.js";
 
 const runId = Id.parse("00000000000000000000000001");
@@ -62,16 +63,9 @@ function emptyResponse(seq: number): Event {
 
 function context(events: readonly Event[]): GradeContext {
   return {
-    result: {
-      status: "completed",
+    result: completedTrialResult({
       runId,
-      dbPath: "/synthetic/run.db",
-      workspaceDir: "/synthetic/workspace",
-      durationMs: 0,
-      usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
-      approvals: { approved: 0, denied: 0, edited: 0 },
-      unsafeAutoApprove: false,
-    },
+    }),
     events,
   };
 }

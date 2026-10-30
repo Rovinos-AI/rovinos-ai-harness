@@ -5,6 +5,7 @@ import { AdapterRegistry, ModelGateway } from "@rovinos/models";
 import type { ProviderAdapter } from "@rovinos/models";
 import { describe, expect, it } from "vitest";
 import { LlmJudgeGraderSpecSchema } from "../schema.js";
+import { completedTrialResult } from "../../test-utils/trial-result.js";
 import type { GradeContext } from "./types.js";
 import { buildJudgeView, createJudgeVerdictSchema, createLlmJudgeGrader } from "./llm-judge.js";
 
@@ -79,14 +80,11 @@ function events(): Event[] {
 
 function context(trialEvents: readonly Event[] = events()): GradeContext {
   return {
-    result: {
-      status: "completed",
+    result: completedTrialResult({
       runId,
-      dbPath: "/synthetic/run.db",
-      workspaceDir: "/synthetic/workspace",
       durationMs: 1,
       usage: { inputTokens: 1, outputTokens: 1, costMicros: 1 },
-    },
+    }),
     events: trialEvents,
   };
 }
@@ -274,13 +272,12 @@ describe("createLlmJudgeGrader", () => {
     });
     const missingEvents = await grader.grade({ result: context().result });
     const missingRunId = await grader.grade({
-      result: {
-        status: "completed",
+      result: completedTrialResult({
         dbPath: "/synthetic/run.db",
         workspaceDir: "/synthetic/workspace",
         durationMs: 1,
         usage: { inputTokens: 1, outputTokens: 1, costMicros: 1 },
-      },
+      }),
       events: [],
     });
 

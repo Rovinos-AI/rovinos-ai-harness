@@ -3,22 +3,16 @@ import { Id } from "@rovinos/schemas";
 import type { ExecResult, ExecSpec, SandboxBackend } from "@rovinos/sandbox";
 import { describe, expect, it, vi } from "vitest";
 import type { GradeContext } from "./types.js";
+import { completedTrialResult } from "../../test-utils/trial-result.js";
 import { createTestCommandGrader } from "./test-command.js";
 
 const runId = Id.parse("00000000000000000000000001");
 
 function context(backend?: SandboxBackend, includeRunId = true): GradeContext {
   return {
-    result: {
-      status: "completed",
+    result: completedTrialResult({
       ...(includeRunId ? { runId } : {}),
-      dbPath: "/synthetic/run.db",
-      workspaceDir: "/synthetic/workspace",
-      durationMs: 0,
-      usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
-      approvals: { approved: 0, denied: 0, edited: 0 },
-      unsafeAutoApprove: false,
-    },
+    }),
     ...(backend === undefined ? {} : { backend }),
   };
 }
