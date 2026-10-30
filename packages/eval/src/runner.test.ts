@@ -37,6 +37,8 @@ function resultFor(trial: TrialSpec, status: TrialResult["status"] = "completed"
     workspaceDir: join(trial.workDir, "workspace"),
     durationMs: 1,
     usage: { inputTokens: 1, outputTokens: 2, costMicros: 3 },
+    approvals: { approved: 0, denied: 0, edited: 0 },
+    unsafeAutoApprove: false,
     exitCode: status === "completed" ? 0 : 1,
   };
 }

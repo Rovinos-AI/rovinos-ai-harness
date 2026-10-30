@@ -18,7 +18,9 @@ export {
   TrialResultSchema,
   TrialSpecSchema,
   TrialUsageSchema,
+  ApprovalCountsSchema,
   type EvalVariant,
+  type ApprovalCounts,
   type TrialResult,
   type TrialSpec,
 } from "./trial.js";
@@ -33,6 +35,7 @@ export {
   type TrialExecutionDependencies,
 } from "./executor.js";
 export { InProcessExecutor, type InProcessExecutorOptions } from "./executors/inprocess.js";
+export { SimulatedHuman, SimulatedHumanError, type SimulatedHumanRunResult } from "./human.js";
 export {
   DockerExecutor,
   DockerExecutorError,

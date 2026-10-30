@@ -16,6 +16,8 @@ function context(backend?: SandboxBackend, includeRunId = true): GradeContext {
       workspaceDir: "/synthetic/workspace",
       durationMs: 0,
       usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+      approvals: { approved: 0, denied: 0, edited: 0 },
+      unsafeAutoApprove: false,
     },
     ...(backend === undefined ? {} : { backend }),
   };
