@@ -24,6 +24,7 @@
     "@rovinos/policy": "workspace:^",
     "@rovinos/sandbox": "workspace:^",
     "@rovinos/schemas": "workspace:^",
+    "@rovinos/telemetry": "workspace:^",
     "@rovinos/vault": "workspace:^",
     "zod": "4.6.7"
   },

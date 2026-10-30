@@ -258,6 +258,66 @@ describe("ModelsConfigSchema", () => {
     ).toThrow();
   });
 
+  it("validates Azure OpenAI endpoint, auth, deployment mapping, and capabilities", () => {
+    expect(
+      ModelProviderConfigSchema.parse({
+        id: "azure",
+        kind: "azure_openai",
+        endpoint: "https://resource.openai.azure.com",
+        apiVersion: "2024-10-21",
+        deployments: { "gpt-4o": "production-deployment" },
+        auth: { kind: "api_key", apiKey: "env:AZURE_OPENAI_API_KEY" },
+        deploymentCapabilities: {
+          "gpt-4o": { structuredOutput: "native", parallelToolCalls: true },
+        },
+      }),
+    ).toMatchObject({
+      kind: "azure_openai",
+      deployments: { "gpt-4o": "production-deployment" },
+      auth: { kind: "api_key", apiKey: "env:AZURE_OPENAI_API_KEY" },
+      deploymentCapabilities: {
+        "gpt-4o": { structuredOutput: "native", parallelToolCalls: true },
+      },
+    });
+    expect(() =>
+      ModelProviderConfigSchema.parse({
+        id: "azure",
+        kind: "azure_openai",
+        endpoint: "http://resource.openai.azure.com",
+        apiVersion: "2024-10-21",
+        deployments: { "gpt-4o": "deployment" },
+        auth: { kind: "entra" },
+      }),
+    ).toThrow();
+    for (const missing of [
+      {
+        apiVersion: "2024-10-21",
+        deployments: { "gpt-4o": "deployment" },
+        auth: { kind: "entra" },
+      },
+      {
+        endpoint: "https://resource.openai.azure.com",
+        deployments: { "gpt-4o": "deployment" },
+        auth: { kind: "entra" },
+      },
+      {
+        endpoint: "https://resource.openai.azure.com",
+        apiVersion: "2024-10-21",
+        deployments: {},
+        auth: { kind: "entra" },
+      },
+      {
+        endpoint: "https://resource.openai.azure.com",
+        apiVersion: "2024-10-21",
+        deployments: { "gpt-4o": "deployment" },
+      },
+    ]) {
+      expect(() =>
+        ModelProviderConfigSchema.parse({ id: "azure", kind: "azure_openai", ...missing }),
+      ).toThrow();
+    }
+  });
+
   it("applies the HTTP trust rule to OpenAI-compatible provider URL combinations", () => {
     const cases: readonly {
       readonly baseUrl: string;

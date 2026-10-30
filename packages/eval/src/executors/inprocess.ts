@@ -8,6 +8,7 @@ import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
 import { SimulatedHuman } from "../human.js";
+import { createProviderCaptureAdapter } from "../trajectory.js";
 
 /** Factories for isolated model, tool, and policy ports. */
 export interface InProcessExecutorOptions extends TrialExecutionDependencies {
@@ -113,7 +114,7 @@ export class InProcessExecutor implements TrialExecutor {
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000 + trial.seed),
       ids: new SequentialIdGenerator(),
-      model: this.options.model(trial),
+      model: createProviderCaptureAdapter(this.options.model(trial), trial.task.canaries ?? []),
       ...(this.options.tool === undefined ? {} : { tool: this.options.tool(trial) }),
       ...(this.options.policy === undefined ? {} : { policy: this.options.policy(trial) }),
       secretResolver: {

@@ -4,11 +4,16 @@ export {
   EvalSuiteSchema,
   EvalTaskSchema,
   GraderSpecSchema,
+  JudgeCriterionSchema,
+  JudgeRubricSchema,
+  LlmJudgeGraderSpecSchema,
   HumanScriptSchema,
   TrajectoryAssertionSchema,
   type EvalSuite,
   type EvalTask,
   type GraderSpec,
+  type JudgeCriterion,
+  type LlmJudgeGraderSpec,
   type HumanScript,
   type TrajectoryAssertion,
 } from "./schema.js";
@@ -44,13 +49,27 @@ export {
 } from "./executors/docker.js";
 export {
   createFileDiffGrader,
+  buildJudgeView,
+  createLlmJudgeGrader,
+  createJudgeVerdictSchema,
+  JudgeViewSchema,
   createSchemaValidGrader,
   createTestCommandGrader,
   GradeResultSchema,
   type GradeContext,
   type GradeResult,
   type Grader,
+  type JudgeView,
+  type LlmJudgeGraderOptions,
 } from "./graders/index.js";
+export {
+  evaluateTrajectory,
+  TrajectoryAssertionResultSchema,
+  TrajectoryContextSchema,
+  TrajectoryResultSchema,
+  type TrajectoryContext,
+  type TrajectoryResult,
+} from "./trajectory.js";
 export {
   EvalRunnerError,
   runEval,

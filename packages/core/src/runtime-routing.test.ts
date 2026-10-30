@@ -436,6 +436,23 @@ describe("createRuntime model routing", () => {
             apiKey: "env:LOCAL_API_KEY",
             baseUrl: "http://localhost:1234/v1",
           },
+          {
+            id: "azure-openai",
+            kind: "azure_openai",
+            endpoint: "https://resource.openai.azure.com",
+            apiVersion: "2024-10-21",
+            deployments: { "gpt-4o": "production-deployment" },
+            auth: { kind: "api_key", apiKey: "env:AZURE_OPENAI_API_KEY" },
+            deploymentCapabilities: { "gpt-4o": { structuredOutput: "native" } },
+          },
+          {
+            id: "azure-entra",
+            kind: "azure_openai",
+            endpoint: "https://entra.openai.azure.com",
+            apiVersion: "2024-10-21",
+            deployments: { "gpt-4o": "entra-deployment" },
+            auth: { kind: "entra" },
+          },
         ],
         routing: { default: [{ provider: "anthropic", model: "claude-model" }] },
       }),
@@ -447,8 +464,9 @@ describe("createRuntime model routing", () => {
     );
 
     expect(model).toBeDefined();
-    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(resolve).toHaveBeenCalledTimes(3);
     expect(resolve).toHaveBeenCalledWith("env:ANTHROPIC_API_KEY");
+    expect(resolve).toHaveBeenCalledWith("env:AZURE_OPENAI_API_KEY");
   });
 
   it("requires a resolver for configured secret references", async () => {

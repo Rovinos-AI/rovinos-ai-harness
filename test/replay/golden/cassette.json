@@ -1,0 +1,85 @@
+{
+  "containsRealData": false,
+  "entries": [
+    {
+      "hash": "2fa1c7297823655ce3fea1f979a8d010c14d1565edbbad5a22dbaaf52639dd8d",
+      "response": {
+        "parts": [
+          {
+            "type": "tool_call",
+            "callId": "00000000000000000000000071",
+            "toolId": "synthetic.idempotent",
+            "args": {
+              "key": "synthetic"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "tool_calls",
+        "latencyMs": 1
+      }
+    },
+    {
+      "hash": "34dec5d0a4408fa982b4becb5999006a2e51c1734e3fbccf39adaf1d0be36694",
+      "response": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "synthetic final answer"
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "stop",
+        "latencyMs": 1
+      }
+    },
+    {
+      "hash": "cc950a25f581efc92979d64c8ad574337ea6e5f07716d42724126c59a6d0531b",
+      "response": {
+        "parts": [
+          {
+            "type": "tool_call",
+            "callId": "00000000000000000000000073",
+            "toolId": "synthetic.denied",
+            "args": {
+              "value": "blocked"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "tool_calls",
+        "latencyMs": 1
+      }
+    },
+    {
+      "hash": "facf5ec7bd0d11c30994cae10d796892ce72d466edb7645043c5962dbc782541",
+      "response": {
+        "parts": [
+          {
+            "type": "tool_call",
+            "callId": "00000000000000000000000072",
+            "toolId": "synthetic.editable",
+            "args": {
+              "value": "before"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "tool_calls",
+        "latencyMs": 1
+      }
+    }
+  ]
+}

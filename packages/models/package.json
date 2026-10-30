@@ -25,6 +25,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "1.1.0",
     "@aws-sdk/client-bedrock-runtime": "3.1156.0",
+    "@azure/identity": "4.14.0",
     "@google/genai": "2.31.0",
     "@rovinos/schemas": "workspace:^",
     "@rovinos/telemetry": "workspace:^",
