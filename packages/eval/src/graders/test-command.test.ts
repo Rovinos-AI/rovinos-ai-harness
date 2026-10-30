@@ -7,17 +7,17 @@ import { createTestCommandGrader } from "./test-command.js";
 
 const runId = Id.parse("00000000000000000000000001");
 
-function context(backend: SandboxBackend): GradeContext {
+function context(backend?: SandboxBackend, includeRunId = true): GradeContext {
   return {
     result: {
       status: "completed",
-      runId,
+      ...(includeRunId ? { runId } : {}),
       dbPath: "/synthetic/run.db",
       workspaceDir: "/synthetic/workspace",
       durationMs: 0,
       usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     },
-    backend,
+    ...(backend === undefined ? {} : { backend }),
   };
 }
 
@@ -78,5 +78,30 @@ describe("createTestCommandGrader", () => {
     expect(failed).toMatchObject({ pass: false, score: 0, codes: ["exit_nonzero"] });
     expect(timedOut).toMatchObject({ pass: false, score: 0, codes: ["timeout"] });
     expect(JSON.stringify([failed, timedOut])).not.toContain("synthetic-command-output-canary");
+  });
+
+  it("reports an unavailable backend or run id as an exit failure", async () => {
+    const grader = createTestCommandGrader({ type: "test_command", argv: ["test"] });
+    const noBackend = await grader.grade(context());
+    const backend: SandboxBackend = {
+      exec: vi.fn<SandboxBackend["exec"]>().mockResolvedValue(processResult(0)),
+    };
+    const noRunId = await grader.grade(context(backend, false));
+
+    expect(noBackend).toMatchObject({ pass: false, codes: ["exit_nonzero"] });
+    expect(noRunId).toMatchObject({ pass: false, codes: ["exit_nonzero"] });
+  });
+
+  it("maps backend failures to metadata-only exit failures", async () => {
+    const backend: SandboxBackend = {
+      exec: vi.fn<SandboxBackend["exec"]>().mockRejectedValue(new Error("synthetic backend error")),
+    };
+    const result = await createTestCommandGrader({
+      type: "test_command",
+      argv: ["test"],
+    }).grade(context(backend));
+
+    expect(result).toMatchObject({ pass: false, codes: ["exit_nonzero"] });
+    expect(JSON.stringify(result)).not.toContain("synthetic backend error");
   });
 });

@@ -10,6 +10,7 @@ import { createSchemaValidGrader } from "./schema-valid.js";
 const runId = Id.parse("00000000000000000000000001");
 const answerSchemaRef = `${fileURLToPath(new URL("./schema-fixture.ts", import.meta.url))}#AnswerSchema`;
 const tokenSchemaRef = `${fileURLToPath(new URL("./schema-fixture.ts", import.meta.url))}#TokenizedAnswerSchema`;
+const throwingSchemaRef = `${fileURLToPath(new URL("./schema-fixture.ts", import.meta.url))}#ThrowingSchema`;
 
 function response(seq: number, text: string): Event {
   return EventSchema.parse({
@@ -103,6 +104,36 @@ describe("createSchemaValidGrader", () => {
     expect(noJson).toMatchObject({ pass: false, codes: ["no_json"] });
     expect(invalid).toMatchObject({ pass: false, codes: ["schema_invalid"] });
     expect(JSON.stringify([noJson, invalid])).not.toContain(canary);
+  });
+
+  it("returns metadata codes for empty text, unavailable schemas, and validation exceptions", async () => {
+    const emptyText = await createSchemaValidGrader({
+      type: "schema_valid",
+      schemaRef: answerSchemaRef,
+    }).grade(context([emptyResponse(1)]));
+    const schemaFile = fileURLToPath(new URL("./schema-fixture.ts", import.meta.url));
+    const missingExport = await createSchemaValidGrader({
+      type: "schema_valid",
+      schemaRef: `${schemaFile}#MissingSchema`,
+    }).grade(context([response(1, '{"answer":"ok"}')]));
+    const invalidRef = await createSchemaValidGrader({
+      type: "schema_valid",
+      schemaRef: "#",
+    }).grade(context([response(1, '{"answer":"ok"}')]));
+    const missingModule = await createSchemaValidGrader({
+      type: "schema_valid",
+      schemaRef: `${schemaFile}.missing#Schema`,
+    }).grade(context([response(1, '{"answer":"ok"}')]));
+    const thrownValidation = await createSchemaValidGrader({
+      type: "schema_valid",
+      schemaRef: throwingSchemaRef,
+    }).grade(context([response(1, '{"answer":"value"}')]));
+
+    expect(emptyText).toMatchObject({ pass: false, codes: ["no_json"] });
+    expect(missingExport).toMatchObject({ pass: false, codes: ["schema_invalid"] });
+    expect(invalidRef).toMatchObject({ pass: false, codes: ["schema_invalid"] });
+    expect(missingModule).toMatchObject({ pass: false, codes: ["schema_invalid"] });
+    expect(thrownValidation).toMatchObject({ pass: false, codes: ["schema_invalid"] });
   });
 
   it("accepts tokenized output through audited validation when configured", async () => {
