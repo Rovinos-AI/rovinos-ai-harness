@@ -21,6 +21,7 @@ import {
   type ServersConfig,
   type StoreConfig,
   type DeploymentConfig,
+  type ElicitationConfig,
   type VaultConfig,
 } from "@rovinos/schemas";
 import type { z } from "zod";
@@ -111,6 +112,7 @@ export interface RuntimeConfig {
   readonly keys?: KeysConfig | undefined;
   readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
   readonly servers?: ServersConfig;
+  readonly elicitation?: ElicitationConfig;
   readonly controlPlane?: ControlPlaneConfig | undefined;
 }
 

@@ -1329,6 +1329,54 @@ describe("durable MCP input requests", () => {
     ]);
   });
 
+  it("declines URL requests rejected by URL policy without presenting them", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    let outcomeKind: string | undefined;
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              const outcome = await runContext.elicitation?.handleInputRequired({
+                callId: callIds.idempotent,
+                serverId: "mcp_test",
+                round: 1,
+                maxPerRun: 3,
+                inputRequests: [
+                  {
+                    inputKey: "url",
+                    mode: "url",
+                    message: "Open this URL",
+                    url: "http://example.test/account",
+                  },
+                ],
+                sensitiveInputKeys: [],
+                policyDeclinedInputKeys: ["url"],
+              });
+              outcomeKind = outcome?.kind;
+              return { outcome: "ok", result: null };
+            },
+          },
+        ],
+      ]),
+    );
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      calls: [{ callId: callIds.idempotent, toolId: "known_tool", args: { value: "initial" } }],
+    });
+    const state = foldRunState([...history, ...events]);
+    expect(outcomeKind).toBe("retry");
+    expect(state.status).toBe("running");
+    expect(state.pendingInputs.size).toBe(0);
+    expect(Array.from(state.resolvedInputs.values())).toMatchObject([
+      { action: "decline", decidedBy: "policy" },
+    ]);
+  });
+
   it("fails closed when an MCP server exceeds the per-run input limit", async () => {
     const { recorder } = createRecorder();
     const history = await createRun(recorder, []);

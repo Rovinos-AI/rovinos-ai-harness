@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { checkElicitationUrl } from "./url.js";
 
 describe("checkElicitationUrl", () => {
@@ -100,5 +100,18 @@ describe("checkElicitationUrl", () => {
 
   it("rejects malformed URLs", () => {
     expect(checkElicitationUrl("not a URL")).toEqual({ accepted: false, reason: "invalid" });
+  });
+
+  it("does not fetch or open accepted URLs", () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      expect(checkElicitationUrl("https://example.test/path")).toEqual({
+        accepted: true,
+        suspicious: false,
+      });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
   });
 });

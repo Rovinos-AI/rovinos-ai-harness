@@ -59,6 +59,7 @@ async function fixture(
     readonly offloadBinaryResults?: boolean;
     readonly authRequiredMethod?: "tools/list" | "tools/call";
     readonly elicitation?: ServerConfig["elicitation"];
+    readonly urlOptions?: { readonly requireHttps?: boolean; readonly urlAllowHosts?: readonly string[] };
   } = {},
 ): Promise<Fixture> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -125,6 +126,7 @@ async function fixture(
         ...(options.offloadBinaryResults === undefined
           ? {}
           : { offloadBinaryResults: options.offloadBinaryResults }),
+        ...(options.urlOptions === undefined ? {} : { urlOptions: options.urlOptions }),
       },
     );
   } catch (error) {
@@ -193,6 +195,19 @@ function requiredResult(requestState: string, message = "Provide a value"): Call
       },
     },
     requestState,
+  };
+}
+
+function requiredUrlResult(url: string): CallToolResult {
+  return {
+    content: [],
+    resultType: "input_required",
+    inputRequests: {
+      "server-key": {
+        method: "elicitation/create",
+        params: { mode: "url", message: "Continue in your browser", url },
+      },
+    },
   };
 }
 
@@ -541,6 +556,63 @@ describe("McpToolPort", () => {
       vi.restoreAllMocks();
     }
   });
+
+  it.each([
+    ["https://example.test/account", "accept", []],
+    ["https://example.test/account", "cancel", []],
+    ["http://example.test/account", "accept", ["server-key"]],
+  ] as const)(
+    "handles URL-mode input %s with action %s and policy declines %j",
+    async (url, action, policyDeclinedInputKeys) => {
+      const current = await fixture({
+        elicitation: { ...mrtrConfig, modes: ["url"] },
+      });
+      const responses: CallToolResult[] = [
+        requiredUrlResult(url),
+        { content: [{ type: "text", text: "complete" }] },
+      ];
+      const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation(() => {
+        const response = responses.shift();
+        return response === undefined
+          ? Promise.reject(new Error("Unexpected extra tool call"))
+          : Promise.resolve(response);
+      });
+      const handleInputRequired = vi.fn(
+        (input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
+          Promise.resolve({
+            kind: "retry" as const,
+            inputResponses: {
+              "server-key": {
+                action: input.policyDeclinedInputKeys?.includes("server-key")
+                  ? ("decline" as const)
+                  : action,
+              },
+            },
+          }),
+      );
+      try {
+        const result = await current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            elicitation: { handleInputRequired },
+            tokenizeHumanInput: (value) => Promise.resolve(value),
+            protectInputMetadata: (value) => Promise.resolve(value),
+          }),
+        );
+        expect(result).toMatchObject({
+          outcome: "ok",
+          result: { content: [{ type: "text", text: "complete" }] },
+        });
+        expect(handleInputRequired).toHaveBeenCalledWith(
+          expect.objectContaining({ policyDeclinedInputKeys }),
+        );
+        expect(callTool).toHaveBeenCalledTimes(2);
+      } finally {
+        callTool.mockRestore();
+        await current.close();
+      }
+    },
+  );
 
   it("retries an input-required call with the response and byte-identical request state", async () => {
     const requestState = "state-\u0000-\u{1f4a1}";

@@ -13,6 +13,7 @@ import type { McpConnection, McpConnectionDependencies } from "./connection.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { McpProtocolError } from "./errors.js";
 import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
+import type { ElicitationUrlOptions } from "./elicitation/url.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
@@ -66,6 +67,8 @@ export type McpToolPortDependencies = McpConnectionDependencies;
 export interface McpToolPortOptions {
   /** Set only when an outer OffloadingToolPort consumes binary payloads. */
   readonly offloadBinaryResults?: boolean;
+  /** Global URL safety policy for MCP elicitation. */
+  readonly urlOptions?: ElicitationUrlOptions;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -167,6 +170,7 @@ async function callToolWithInputRounds(options: {
   readonly inputRetry?: ElicitationRetry;
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata?: (value: string) => Promise<string>;
+  readonly urlOptions?: ElicitationUrlOptions;
 }): Promise<ToolRoundOutcome> {
   const { connection, route, call, signal } = options;
   let inputRetry = options.inputRetry;
@@ -200,6 +204,7 @@ async function callToolWithInputRounds(options: {
       ...(options.protectInputMetadata === undefined
         ? {}
         : { protectInputMetadata: options.protectInputMetadata }),
+      ...(options.urlOptions === undefined ? {} : { urlOptions: options.urlOptions }),
     });
     if (handled.kind === "failure" || handled.kind === "suspend") {
       return handled;
@@ -246,6 +251,7 @@ async function executeRegisteredTool(options: {
   readonly inputRetry?: ElicitationRetry;
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata?: (value: string) => Promise<string>;
+  readonly urlOptions?: ElicitationUrlOptions;
 }): Promise<McpToolExecutionResult> {
   const { route, call, signal } = options;
   if (signal.aborted) {
@@ -380,6 +386,9 @@ export class McpToolPort {
             ...(context.protectInputMetadata === undefined
               ? {}
               : { protectInputMetadata: context.protectInputMetadata }),
+            ...(this.options.urlOptions === undefined
+              ? {}
+              : { urlOptions: this.options.urlOptions }),
           });
           setOutcome(span, outcome);
           return outcome;

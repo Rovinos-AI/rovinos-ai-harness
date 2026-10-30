@@ -295,6 +295,7 @@ describe("McpConnection", () => {
       "ToolRegistryError",
       "UNREGISTERED_TOOL_ID",
       "buildRequestMeta",
+      "checkElicitationUrl",
       "createMcpTransport",
       "createServersAuthorizedCheck",
       "createServersReachableChecks",

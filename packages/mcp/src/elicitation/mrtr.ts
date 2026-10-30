@@ -10,6 +10,7 @@ export interface ElicitationInputRequired {
   readonly round: number;
   readonly inputRequests: readonly ValidatedInputRequest[];
   readonly sensitiveInputKeys: readonly string[];
+  readonly policyDeclinedInputKeys?: readonly string[];
   readonly maxPerRun: number;
   readonly signal?: AbortSignal;
   readonly requestState?: string;

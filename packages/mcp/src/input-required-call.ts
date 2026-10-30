@@ -8,6 +8,7 @@ import type {
   ElicitationRetry,
 } from "./elicitation/mrtr.js";
 import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
+import { checkElicitationUrl, type ElicitationUrlOptions } from "./elicitation/url.js";
 import {
   InputRequestContentSchema,
   McpInputRequestError,
@@ -29,6 +30,7 @@ interface ProtectedInputRequests {
   readonly protectedRequestState?: string;
   readonly rawKeysByProtectedKey: ReadonlyMap<string, string>;
   readonly sensitiveInputKeys: readonly string[];
+  readonly policyDeclinedInputKeys: readonly string[];
   readonly sensitiveKeys: ReadonlySet<string>;
 }
 
@@ -50,6 +52,7 @@ function protectInputRequests(
   tokenizedContent: JsonValueType,
   protectedKeys: readonly string[],
   protectedRequestState: string | undefined,
+  policyDeclinedKeys: ReadonlySet<string>,
 ): ProtectedInputRequests {
   const tokenizedRequests = InputRequestContentSchema.parse(tokenizedContent);
   const rawKeysByProtectedKey = new Map(
@@ -76,11 +79,15 @@ function protectInputRequests(
       );
     })
     .map(({ inputKey }) => inputKey);
+  const policyDeclinedInputKeys = requestsWithKeys
+    .filter((request) => policyDeclinedKeys.has(rawKeysByProtectedKey.get(request.inputKey) ?? ""))
+    .map(({ inputKey }) => inputKey);
   return {
     tokenizedRequests: requestsWithKeys,
     ...(protectedRequestState === undefined ? {} : { protectedRequestState }),
     rawKeysByProtectedKey,
     sensitiveInputKeys,
+    policyDeclinedInputKeys,
     sensitiveKeys: new Set(sensitiveInputKeys),
   };
 }
@@ -89,6 +96,7 @@ async function tokenizeInputRequests(options: {
   readonly validated: ReturnType<typeof validateInputRequiredResult>;
   readonly tokenizeHumanInput: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata: (value: string) => Promise<string>;
+  readonly urlOptions?: ElicitationUrlOptions;
 }): Promise<ProtectedInputRequests> {
   const { validated, tokenizeHumanInput, protectInputMetadata } = options;
   const tokenizedContent = await tokenizeHumanInput(
@@ -101,7 +109,22 @@ async function tokenizeInputRequests(options: {
     validated.requestState === undefined
       ? undefined
       : await protectInputMetadata(validated.requestState);
-  return protectInputRequests(validated, tokenizedContent, protectedKeys, protectedRequestState);
+  const policyDeclinedKeys = new Set(
+    validated.inputRequests
+      .filter(
+        (request) =>
+          request.mode === "url" &&
+          !checkElicitationUrl(request.url ?? "", options.urlOptions).accepted,
+      )
+      .map(({ inputKey }) => inputKey),
+  );
+  return protectInputRequests(
+    validated,
+    tokenizedContent,
+    protectedKeys,
+    protectedRequestState,
+    policyDeclinedKeys,
+  );
 }
 
 function restoreInputResponses(
@@ -134,6 +157,7 @@ async function askForInput(options: {
     maxPerRun: options.route.server.elicitation.maxPerRun,
     inputRequests: options.requests.tokenizedRequests,
     sensitiveInputKeys: options.requests.sensitiveInputKeys,
+    policyDeclinedInputKeys: options.requests.policyDeclinedInputKeys,
     signal: options.signal,
     ...(options.requests.protectedRequestState === undefined
       ? {}
@@ -151,6 +175,7 @@ export async function handleInputRequiredCall(options: {
   readonly elicitation?: ElicitationPort;
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata?: (value: string) => Promise<string>;
+  readonly urlOptions?: ElicitationUrlOptions;
 }): Promise<InputRequiredCallOutcome> {
   const prepared = await prepareInputRequired(options);
   if (prepared.kind === "failure") {
@@ -181,7 +206,11 @@ export async function handleInputRequiredCall(options: {
   }
   for (const request of requests.tokenizedRequests) {
     countMcpInputRequest(
-      requests.sensitiveKeys.has(request.inputKey) ? "declined_sensitive" : "asked",
+      requests.sensitiveKeys.has(request.inputKey)
+        ? "declined_sensitive"
+        : requests.policyDeclinedInputKeys.includes(request.inputKey)
+          ? "rejected"
+          : "asked",
     );
   }
   if (outcome.kind === "suspend") {
@@ -219,6 +248,7 @@ async function prepareInputRequired(options: {
   readonly elicitation?: ElicitationPort;
   readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
   readonly protectInputMetadata?: (value: string) => Promise<string>;
+  readonly urlOptions?: ElicitationUrlOptions;
 }): Promise<PreparedInputRequired | Extract<InputRequiredCallOutcome, { kind: "failure" }>> {
   const round = options.round + 1;
   if (round > options.route.server.elicitation.maxRounds) {
@@ -249,6 +279,7 @@ async function prepareInputRequired(options: {
       validated,
       tokenizeHumanInput: options.tokenizeHumanInput,
       protectInputMetadata: options.protectInputMetadata,
+      ...(options.urlOptions === undefined ? {} : { urlOptions: options.urlOptions }),
     });
   } catch (error) {
     if (isRecorderFailure(error)) {

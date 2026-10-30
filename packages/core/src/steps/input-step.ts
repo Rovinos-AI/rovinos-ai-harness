@@ -23,7 +23,10 @@ function inputRequestPartials(
   readonly inputResponses: Record<string, InputResponse>;
   readonly pendingCount: number;
 } {
-  const sensitiveKeys = new Set(input.sensitiveInputKeys);
+  const declinedKeys = new Set([
+    ...input.sensitiveInputKeys,
+    ...(input.policyDeclinedInputKeys ?? []),
+  ]);
   const partials: EventPartial[] = [];
   const inputResponses: Record<string, InputResponse> = {};
   let pendingCount = 0;
@@ -44,7 +47,7 @@ function inputRequestPartials(
       ...(request.url === undefined ? {} : { url: request.url }),
       ...(input.requestState === undefined ? {} : { requestState: input.requestState }),
     });
-    if (!sensitiveKeys.has(request.inputKey)) {
+    if (!declinedKeys.has(request.inputKey)) {
       pendingCount++;
       continue;
     }

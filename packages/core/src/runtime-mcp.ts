@@ -47,6 +47,18 @@ export async function createConfiguredMcpToolPort(
         ? {}
         : { createTransport: overrides.mcpTransportFactory }),
     },
-    { offloadBinaryResults: overrides.workspace !== undefined },
+    {
+      offloadBinaryResults: overrides.workspace !== undefined,
+      ...(config.elicitation === undefined
+        ? {}
+        : {
+            urlOptions: {
+              requireHttps: config.elicitation.requireHttps,
+              ...(config.elicitation.urlAllowHosts === undefined
+                ? {}
+                : { urlAllowHosts: config.elicitation.urlAllowHosts }),
+            },
+          }),
+    },
   );
 }
