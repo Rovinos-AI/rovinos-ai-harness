@@ -7,9 +7,11 @@ import {
 } from "@rovinos/schemas";
 import {
   AnthropicAdapter,
+  AzureOpenAIAdapter,
   createRoutingModelGateway,
   OpenAIAdapter,
   OpenAICompatibleAdapter,
+  type AzureOpenAIAuth,
   type RequestSanitizer,
   type ProviderAdapter,
 } from "@rovinos/models";
@@ -18,7 +20,10 @@ import type { Clock } from "./recorder.js";
 import { parseRuntimeModelsConfig } from "./runtime-config.js";
 
 type RuntimeModelConfigErrorCode =
-  "secret_resolver_unavailable" | "model_provider_base_url_missing" | "model_provider_key_missing";
+  | "secret_resolver_unavailable"
+  | "model_provider_azure_config_invalid"
+  | "model_provider_base_url_missing"
+  | "model_provider_key_missing";
 
 class RuntimeModelConfigError extends HarnessError {
   readonly code: RuntimeModelConfigErrorCode;
@@ -65,10 +70,56 @@ function definedCapabilities(
   };
 }
 
+async function configuredAzureAdapter(
+  provider: ModelsConfig["providers"][number],
+  secretResolver: RuntimeModelOverrides["secretResolver"],
+  clock: Clock,
+): Promise<AzureOpenAIAdapter> {
+  if (
+    provider.endpoint === undefined ||
+    provider.apiVersion === undefined ||
+    provider.deployments === undefined ||
+    provider.auth === undefined
+  ) {
+    throw new RuntimeModelConfigError("model_provider_azure_config_invalid");
+  }
+  let auth: AzureOpenAIAuth;
+  if (provider.auth.kind === "entra") {
+    auth = { kind: "entra" };
+  } else {
+    if (secretResolver === undefined) {
+      throw new RuntimeModelConfigError("secret_resolver_unavailable");
+    }
+    auth = {
+      kind: "api_key",
+      apiKey: await secretResolver.resolve(provider.auth.apiKey),
+    };
+  }
+  const capabilities = definedCapabilities(provider.capabilities);
+  return new AzureOpenAIAdapter({
+    endpoint: provider.endpoint,
+    apiVersion: provider.apiVersion,
+    deployments: provider.deployments,
+    auth,
+    provider: provider.id,
+    maxOutputTokens: provider.maxOutputTokens,
+    clock,
+    ...(capabilities === undefined ? {} : { capabilities }),
+    ...(provider.deploymentCapabilities === undefined
+      ? {}
+      : { deploymentCapabilities: provider.deploymentCapabilities }),
+  });
+}
+
 async function configuredAdapter(
   provider: ModelsConfig["providers"][number],
   secretResolver: RuntimeModelOverrides["secretResolver"],
+  clock: Clock,
 ): Promise<ProviderAdapter> {
+  if (provider.kind === "azure_openai") {
+    return configuredAzureAdapter(provider, secretResolver, clock);
+  }
+
   let apiKey: { reveal(): string } = { reveal: () => "not-needed" };
   if (provider.apiKey !== undefined) {
     if (secretResolver === undefined) {
@@ -116,7 +167,9 @@ export async function createConfiguredModelPort(
   const adapters =
     overrides.providerAdapters ??
     (await Promise.all(
-      models.providers.map((provider) => configuredAdapter(provider, overrides.secretResolver)),
+      models.providers.map((provider) =>
+        configuredAdapter(provider, overrides.secretResolver, overrides.clock),
+      ),
     ));
   if (
     adapters.length === 0 &&
