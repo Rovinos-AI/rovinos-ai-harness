@@ -59,6 +59,7 @@ function createSnapshot(
   return {
     snapshotId,
     runId,
+    v: 1,
     atSeq,
     createdAt: nextTimestamp(),
     traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,

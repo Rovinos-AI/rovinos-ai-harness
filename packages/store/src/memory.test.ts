@@ -137,6 +137,36 @@ describe("InMemoryEventStore", () => {
     await expect(store.head(otherRunId)).resolves.toBe(0);
   });
 
+  it("writes upcast events with the current schema version", async () => {
+    const store = new InMemoryEventStore();
+    await store.append(runId, [runCreated(runId, 10)], 0);
+    await store.append(
+      runId,
+      [
+        {
+          runId,
+          ts: 11,
+          v: 1,
+          traceId,
+          spanId,
+          segmentId: runId,
+          type: "approval_resolved",
+          approvalId: otherRunId,
+          decision: "approve",
+          approverId: "cli.synthetic",
+          waitMs: 1,
+        },
+      ],
+      1,
+    );
+
+    await expect(collect(store.read(runId))).resolves.toMatchObject([
+      { type: "run_created", v: 1 },
+      { type: "approval_resolved", v: 2, decidedBy: "human" },
+    ]);
+    await store.close();
+  });
+
   it("commits model usage with its event and rolls both back on a sequence conflict", async () => {
     const store = new InMemoryEventStore();
     await store.append(runId, [runCreated(runId, 10)], 0);
