@@ -3010,6 +3010,7 @@ __metadata:
     "@rovinos/policy": "workspace:^"
     "@rovinos/sandbox": "workspace:^"
     "@rovinos/schemas": "workspace:^"
+    "@rovinos/telemetry": "workspace:^"
     "@rovinos/vault": "workspace:^"
     vitest: "npm:4.1.12"
     zod: "npm:4.6.7"

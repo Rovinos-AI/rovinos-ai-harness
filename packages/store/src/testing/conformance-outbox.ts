@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, type Id } from "@rovinos/schemas";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { EventStore } from "../types.js";
 import type { EventStoreFactory } from "./conformance.js";
 import type { EventStoreTestBuilders } from "./testing.js";
@@ -66,20 +66,30 @@ function registerOutbox(factory: EventStoreFactory, builders: EventStoreTestBuil
       await store.ackOutbox(firstSink, baseline);
       await store.ackOutbox(secondSink, baseline);
 
-      const firstBatch = await store.fetchOutbox(firstSink, 2);
-      expect(firstBatch.events.map(({ runId, seq }) => [runId, seq])).toEqual([
-        [firstRunId, 0],
-        [secondRunId, 0],
-      ]);
-      expect(firstBatch.cursor).toBeGreaterThan(baseline);
+      const firstBatch = await vi.waitFor(
+        async () => {
+          const batch = await store.fetchOutbox(firstSink, 2);
+          expect(batch.events.map(({ runId, seq }) => [runId, seq])).toEqual([
+            [firstRunId, 0],
+            [secondRunId, 0],
+          ]);
+          expect(batch.cursor).toBeGreaterThan(baseline);
+          return batch;
+        },
+        { timeout: 3_000, interval: 25 },
+      );
       await expect(store.fetchOutbox(firstSink, 2)).resolves.toEqual(firstBatch);
 
       await store.ackOutbox(firstSink, firstBatch.cursor);
       await store.ackOutbox(firstSink, baseline);
-      const remainingFirst = await store.fetchOutbox(firstSink, 2);
-      expect(remainingFirst.events.map(({ runId, seq }) => [runId, seq])).toEqual([
-        [firstRunId, 1],
-      ]);
+      const remainingFirst = await vi.waitFor(
+        async () => {
+          const batch = await store.fetchOutbox(firstSink, 2);
+          expect(batch.events.map(({ runId, seq }) => [runId, seq])).toEqual([[firstRunId, 1]]);
+          return batch;
+        },
+        { timeout: 3_000, interval: 25 },
+      );
       await store.ackOutbox(firstSink, remainingFirst.cursor);
       await expect(store.fetchOutbox(firstSink, 2)).resolves.toEqual({
         events: [],

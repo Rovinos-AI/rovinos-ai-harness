@@ -211,10 +211,18 @@ tokenization in tasks 13.4 and 13.7 lands, run goals and event content are store
 ## `harness replay`
 
 `harness replay (--run <id> | --trace <trace-id-or-traceparent>) [--strict] [--golden <file>]
-[--update-baseline] [--report <path>] [--json]` resolves a recorded run and loads its validated event
-log. Trace lookup includes matching subagent runs. This task only prints the root and matching run IDs
-and roles; options for replay execution and baseline/report actions are not implemented yet and are
-rejected with `replay_option_unavailable`. Event content is never printed.
+[--update-baseline [--force-in-ci]] [--report <path>] [--json]` replays a validated event log using
+recorded model, tool, and human results, then emits a metadata-only report. Trace lookup includes
+matching subagent runs. Exit code `0` means identical or noise-only results; `--strict` makes
+noise-only differences fail with code `1`. Behavioral differences return `1`; replay divergence,
+missing recorded results, or corrupt logs return `8`; invalid options or golden files return `2`.
+
+`--golden` compares the normalized replay signature with a JSON golden file whose schema requires
+`"containsRealData": false`. `--report` writes the deterministic JSON report; `--json` emits that
+same report to stdout. Reports contain only safe event metadata and diff summaries, never event
+content. Use `--update-baseline` to explicitly rewrite a golden signature; updates are refused when
+`CI=1` or in GitHub Actions unless `--force-in-ci` is provided, and are never written after replay
+divergence.
 
 ## `harness cancel`
 
