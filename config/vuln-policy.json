@@ -1,0 +1,10 @@
+{
+  "exceptions": [
+    {
+      "id": "GHSA-xcx6-jx8p-x3h5",
+      "reason": "Known gap documented in docs/guarantees.md; upgrade is tracked by #614 and is blocked until @azure/identity allows msal-node ^6.",
+      "expires": "2027-01-31",
+      "owner": "rovinoscr"
+    }
+  ]
+}
