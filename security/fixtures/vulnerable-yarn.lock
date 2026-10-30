@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+"lodash@npm:4.17.20":
+  version: 4.17.20
+  resolution: "lodash@npm:4.17.20"
+  languageName: node
+  linkType: hard
