@@ -5,6 +5,11 @@
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
+    "./request-signature": {
+      "source": "./src/request-signature.ts",
+      "types": "./dist/request-signature.d.ts",
+      "default": "./dist/request-signature.js"
+    },
     "./browser": {
       "source": "./src/browser.ts",
       "types": "./dist/browser.d.ts",

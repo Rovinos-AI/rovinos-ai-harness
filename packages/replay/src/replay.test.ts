@@ -72,6 +72,7 @@ async function readEvents(store: EventStore, runId: Id): Promise<EventValue[]> {
 async function recordRun(
   script: readonly ModelCompletion[],
   policy?: PolicyPort,
+  goal = "synthetic replay goal",
 ): Promise<ResolvedRun> {
   const store = new InMemoryEventStore();
   const runtime = await createRuntime(runConfig, {
@@ -83,7 +84,7 @@ async function recordRun(
     ...(policy === undefined ? {} : { policy }),
   });
   try {
-    const started = runtime.start("synthetic replay goal");
+    const started = runtime.start(goal);
     let result = await started.completion;
     while (result.status === "suspended") {
       const approval = result.state.pendingApprovals.values().next().value;
@@ -140,6 +141,26 @@ afterEach(async () => {
 });
 
 describe("replayRun", () => {
+  it("replays a PII-tokenized round trip without request divergence", async () => {
+    const raw = "synthetic.replay@example.test";
+    const original = await recordRun(
+      [completion([{ type: "text", text: `Reply to ${raw}` }])],
+      undefined,
+      `Contact ${raw}`,
+    );
+    const events = original.runs[0]?.events ?? [];
+    expect(JSON.stringify(events)).not.toContain(raw);
+    expect(JSON.stringify(events)).toContain("<EMAIL_1>");
+    const request = events.find((event) => event.type === "model_request");
+    expect(request?.v).toBe(2);
+    expect(request?.requestParametersHash).toMatch(/^[a-f0-9]{64}$/u);
+
+    const outcome = await replayRun(original, { config: runConfig });
+    expect(outcome.status).toBe("completed");
+    expect(outcome.divergence).toBeUndefined();
+    expect(JSON.stringify(outcome.events)).not.toContain(raw);
+  });
+
   it("re-executes a run with replayOf and a linked replay span", async () => {
     const original = await recordRun([completion([{ type: "text", text: "synthetic answer" }])]);
     const originalEvents = original.runs[0]?.events ?? [];

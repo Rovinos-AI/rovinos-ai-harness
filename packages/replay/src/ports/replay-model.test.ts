@@ -6,7 +6,10 @@ import {
   type Event,
   type ModelRequest,
 } from "@rovinos/schemas";
-import { requestHash } from "@rovinos/models";
+import {
+  modelRequestParametersHash,
+  storedModelRequestHash,
+} from "@rovinos/schemas/request-signature";
 import { ResolvedRunSchema } from "../resolve.js";
 import { describe, expect, it } from "vitest";
 import { ReplayDivergenceError, ReplayModelPort } from "./replay-model.js";
@@ -35,14 +38,17 @@ function request(text: string, requestId: string): ModelRequest {
 }
 
 function requestEvent(seq: number, req: ModelRequest, eventRunId = runId): Event {
+  const requestParametersHash = modelRequestParametersHash(req);
   return EventSchema.parse({
     ...base(seq, eventRunId),
+    v: 2,
     type: "model_request",
     requestId: req.requestId,
     provider: req.model.provider,
     model: req.model.model,
     role: req.role,
-    requestHash: requestHash(req),
+    requestHash: storedModelRequestHash(req.messages, requestParametersHash),
+    requestParametersHash,
     messages: req.messages,
   });
 }
@@ -81,6 +87,52 @@ const runCreated = EventSchema.parse({
 });
 
 describe("ReplayModelPort", () => {
+  it.each(["tool_description", "tool_schema", "stable_prefix", "prefix_content"] as const)(
+    "still diverges when %s changes",
+    async (change) => {
+      const recorded: ModelRequest = {
+        ...request("<EMAIL_1>", "00000000000000000000000003"),
+        stablePrefixMessages: 1,
+        tools: [{ toolId: "lookup", description: "original", inputSchema: { type: "object" } }],
+      };
+      const changed: ModelRequest = {
+        ...recorded,
+        ...(change === "stable_prefix" ? { stablePrefixMessages: 0 } : {}),
+        ...(change === "prefix_content"
+          ? { messages: [{ role: "user", parts: [{ type: "text", text: "changed prefix" }] }] }
+          : {}),
+        ...(change === "tool_description"
+          ? {
+              tools: [
+                { toolId: "lookup", description: "changed", inputSchema: { type: "object" } },
+              ],
+            }
+          : {}),
+        ...(change === "tool_schema"
+          ? {
+              tools: [
+                { toolId: "lookup", description: "original", inputSchema: { type: "string" } },
+              ],
+            }
+          : {}),
+      };
+      const model = new ReplayModelPort(
+        resolved([runCreated, requestEvent(1, recorded), responseEvent(2, recorded, "recorded")]),
+        { ids, clock },
+      );
+      await expect(
+        model.complete(changed, { runId, signal: new AbortController().signal }),
+      ).rejects.toMatchObject({
+        code: "replay_divergence",
+        seq: 1,
+        hashMismatchCode: "model_request_hash_mismatch",
+      });
+      await expect(
+        model.complete(recorded, { runId, signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ parts: [{ type: "text", text: "recorded" }] });
+    },
+  );
+
   it("serves recorded responses in order through the cassette provider", async () => {
     const first = request("first prompt", "00000000000000000000000003");
     const second = request("second prompt", "00000000000000000000000004");

@@ -30,6 +30,7 @@ export const EVENT_FIELD_CLASS = {
     model: "meta",
     role: "meta",
     requestHash: "meta",
+    requestParametersHash: "meta",
     schemaHash: "meta",
     messages: "content",
   },
