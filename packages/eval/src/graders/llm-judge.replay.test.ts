@@ -11,6 +11,7 @@ import {
 } from "@rovinos/models";
 import { describe, expect, it } from "vitest";
 import { LlmJudgeGraderSpecSchema } from "../schema.js";
+import { completedTrialResult } from "../../test-utils/trial-result.js";
 import type { GradeContext } from "./types.js";
 import { createLlmJudgeGrader } from "./llm-judge.js";
 
@@ -56,14 +57,11 @@ describe("LLM judge cassette replay", () => {
       detectRealData: () => Promise.resolve(false),
     };
     const context: GradeContext = {
-      result: {
-        status: "completed",
+      result: completedTrialResult({
         runId,
-        dbPath: "/synthetic/run.db",
-        workspaceDir: "/synthetic/workspace",
         durationMs: 1,
         usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
-      },
+      }),
       events: [],
     };
     const spec = LlmJudgeGraderSpecSchema.parse({
