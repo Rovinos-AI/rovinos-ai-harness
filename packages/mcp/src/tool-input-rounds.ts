@@ -54,13 +54,19 @@ function createLegacyElicitation(options: CallToolWithInputRoundsOptions) {
       elicitationId: string,
       requestSignal: AbortSignal,
     ): Promise<ElicitResult> => {
+      const requestFields: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(requestParams)) {
+        if (key !== "elicitationId") {
+          requestFields[key] = value;
+        }
+      }
       let requests: ReturnType<typeof validateInputRequiredResult>["inputRequests"];
       try {
         requests = validateInputRequiredResult(
           {
             resultType: "input_required",
             inputRequests: {
-              [elicitationId]: { method: "elicitation/create", params: requestParams },
+              [elicitationId]: { method: "elicitation/create", params: requestFields },
             },
           },
           options.route.server,

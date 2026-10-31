@@ -749,6 +749,7 @@ describe("McpToolPort", () => {
         const answer = await live.handle(
           {
             mode: "url",
+            elicitationId: "legacy-live-id",
             message: "Continue in your browser",
             url: "https://example.test/account",
           },
@@ -802,6 +803,7 @@ describe("McpToolPort", () => {
         const answer = await live.handle(
           {
             mode: "url",
+            elicitationId: "unsafe-url-id",
             message: "Continue in your browser",
             url: "https://untrusted.example/account",
           },
@@ -850,6 +852,7 @@ describe("McpToolPort", () => {
         const answer = await live.handle(
           {
             mode: "url",
+            elicitationId: "timed-out-url-id",
             message: "Continue in your browser",
             url: "https://example.test/account",
           },
