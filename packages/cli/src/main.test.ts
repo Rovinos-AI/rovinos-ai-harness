@@ -242,6 +242,7 @@ describe("CLI main", () => {
       "doctor",
       "keys",
       "policy",
+      "pii",
       "servers",
       "store",
       "replay",

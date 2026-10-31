@@ -19,6 +19,7 @@ import {
   type ConfirmationClientCapabilities,
   type ConfirmationGateOptions,
 } from "./confirmation-gate.js";
+import { filterToolsForClient } from "./capabilities.js";
 import { RunSupervisor } from "./run-supervisor.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
 import { registerApproveTool } from "./tools/approve.js";
@@ -54,9 +55,6 @@ import { startControlPlaneHttpTransport, type ControlPlaneHttpHandle } from "./h
 import { toolDefinitions, toolScope } from "./tool-definitions.js";
 
 export type { ControlPlaneHttpHandle };
-
-const MCP_APP_EXTENSION = "io.modelcontextprotocol/ui";
-const MCP_APP_MIME = "text/html;profile=mcp-app";
 
 /** Mutation operations supplied by the composed runtime. */
 export interface ControlPlaneOperations {
@@ -196,26 +194,15 @@ export function createControlPlaneServer(
   });
   const definitions = toolDefinitions();
   server.server.setRequestHandler("tools/list", (_request, context) => {
-    const supportsApps = supportsMcpApps(requestClientCapabilities(context, server));
+    const capabilities = requestClientCapabilities(context, server);
     const principal = controlPlanePrincipal(context);
     return {
-      tools: definitions.filter(
-        (tool) =>
-          (!isAppOnlyTool(tool._meta) || supportsApps) &&
-          (principal === undefined || hasControlPlaneScope(principal, toolScope(tool.name))),
+      tools: filterToolsForClient(definitions, capabilities).filter(
+        (tool) => principal === undefined || hasControlPlaneScope(principal, toolScope(tool.name)),
       ),
     };
   });
   return server;
-}
-
-function isAppOnlyTool(meta: unknown): boolean {
-  const parsed = z
-    .looseObject({
-      ui: z.looseObject({ visibility: z.array(z.string()).optional() }),
-    })
-    .safeParse(meta);
-  return parsed.success && parsed.data.ui.visibility?.includes("app") === true;
 }
 
 function registerRunInspection(
@@ -406,20 +393,12 @@ function withSharedControlPlaneState(
   };
 }
 
-function supportsMcpApps(capabilities: ConfirmationClientCapabilities | undefined): boolean {
-  const extension = z
-    .object({ mimeTypes: z.array(z.string()) })
-    .loose()
-    .safeParse(capabilities?.extensions?.[MCP_APP_EXTENSION]);
-  return extension.success && extension.data.mimeTypes.includes(MCP_APP_MIME);
-}
-
 function requestClientCapabilities(
   context: ServerContext,
   server: McpServer,
 ): ConfirmationClientCapabilities | undefined {
   const envelope = z.record(z.string(), z.unknown()).safeParse(context.mcpReq.envelope);
-  if (envelope.success) {
+  if (envelope.success && Object.hasOwn(envelope.data, CLIENT_CAPABILITIES_META_KEY)) {
     const capabilities = confirmationClientCapabilitiesSchema.safeParse(
       envelope.data[CLIENT_CAPABILITIES_META_KEY],
     );

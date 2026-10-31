@@ -17,6 +17,16 @@ belongs in `packages/schemas/src/cli/<command>.ts` and is documented alongside t
 successful command in JSON mode writes exactly one newline-terminated JSON document to stdout;
 command text and error codes are sent to stderr.
 
+## `harness pii explain`
+
+`harness pii explain --boundary <boundary> --destination <hosted|local|tool:id> --entity <type>`
+prints the effective action and matching policy rule. Unsafe `allow` rules for local model input
+are shown as `tokenize` unless `pii.allowRawToLocalModels` is explicitly enabled; hosted model
+input `allow` rules are also shown as `tokenize`.
+`harness pii explain --matrix` prints rows for every built-in and configured custom entity across
+each boundary and the destinations represented by provider trust, policy rules, and the detokenize
+allowlist. Use `--json` for the validated machine-readable matrix.
+
 ## `harness keys generate`
 
 Generates a fresh cryptographically random 32-byte key and prints its base64 value. Store it in an

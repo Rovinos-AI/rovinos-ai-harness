@@ -86,6 +86,7 @@ export type PiiPresidioConfig = z.infer<typeof PiiPresidioConfigSchema>;
 
 export const PiiConfigSchema = PiiPolicySchema.safeExtend({
   enabled: z.boolean().default(true),
+  allowRawToLocalModels: z.boolean().default(false),
   custom: z.array(CustomDetectorSchema).optional(),
   failMode: z.enum(["closed", "regex_only"]).default("closed"),
   presidio: PiiPresidioConfigSchema.optional(),

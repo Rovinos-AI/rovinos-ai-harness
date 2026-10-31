@@ -34,7 +34,12 @@ function createSanitizer(
     audits.push(audit);
   });
   const detectors = { detect };
-  const tokenizer = new Tokenizer({ detectors, policy: config, vault });
+  const tokenizer = new Tokenizer({
+    detectors,
+    policy: config,
+    vault,
+    allowRawToLocalModels: config.allowRawToLocalModels,
+  });
   return {
     audits,
     resolver,
@@ -43,6 +48,7 @@ function createSanitizer(
       detectors,
       policy: config,
       resolver,
+      allowRawToLocalModels: config.allowRawToLocalModels,
     }),
     tokenizer,
     vault,
@@ -90,6 +96,7 @@ describe("PiiMessageSanitizer", () => {
 
   it("resolves existing tokens for local allow and audits model-input detokenization", async () => {
     const config = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
@@ -134,8 +141,32 @@ describe("PiiMessageSanitizer", () => {
     });
   });
 
+  it("keeps local model input tokenized unless the raw-value opt-in is enabled", async () => {
+    const config = PiiConfigSchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+      ],
+    });
+    const { sanitizer } = createSanitizer(config);
+
+    const result = await sanitizer.sanitize(
+      [{ role: "user", parts: [{ type: "text", text: `Contact ${canary}` }] }],
+      target("local"),
+      runId,
+    );
+
+    expect(JSON.stringify(result)).not.toContain(canary);
+    expect(JSON.stringify(result)).toContain("<EMAIL_1>");
+  });
+
   it("sanitizes model-visible tool and output schemas using the target policy", async () => {
     const config = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
@@ -211,6 +242,7 @@ describe("PiiMessageSanitizer", () => {
 
   it("re-checks detokenized text and JSON for blocked overlapping entities", async () => {
     const config = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["custom_contact"],
@@ -265,6 +297,7 @@ describe("PiiMessageSanitizer", () => {
 
   it("re-sanitizes the original messages when a local attempt falls back to hosted", async () => {
     const config = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
@@ -460,6 +493,7 @@ describe("PiiMessageSanitizer", () => {
 
   it("fails closed if model-input token resolution fails or the token is unknown", async () => {
     const config = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
@@ -495,6 +529,7 @@ describe("PiiMessageSanitizer", () => {
 
   it("fails closed when resolving an unknown allowlisted token", async () => {
     const config = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
@@ -517,6 +552,7 @@ describe("PiiMessageSanitizer", () => {
 
   it("fails closed if detokenized JSON keys would collide", async () => {
     const config = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
