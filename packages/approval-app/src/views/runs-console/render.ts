@@ -174,6 +174,14 @@ export function renderRunDetail(
     strings.runDetailApprovals,
     formatNumber(detail.pendingApprovals.length, locale),
   );
+  if (detail.pendingInputs > 0) {
+    appendMetadata(
+      document,
+      metadata,
+      strings.runDetailInputs,
+      formatMessage(strings.needsInput, { count: detail.pendingInputs }, locale),
+    );
+  }
   section.append(metadata);
   for (const approval of detail.pendingApprovals) {
     const button = element(
@@ -207,6 +215,15 @@ function renderRunRow(
   row.append(runIdCell, statusCell, ageCell, stepsCell, approvalCell, detailsCell);
   runIdCell.scope = "row";
   statusCell.append(createStatusBadge(document, statusKind(run.status), run.status));
+  if (run.pendingInputs > 0) {
+    statusCell.append(
+      createStatusBadge(
+        document,
+        "warning",
+        formatMessage(strings.needsInput, { count: run.pendingInputs }, locale),
+      ),
+    );
+  }
   if (run.pendingApprovals > 0) {
     const approvalButton = element(
       document,

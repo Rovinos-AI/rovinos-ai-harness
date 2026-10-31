@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   ApprovalAppGetRequestSchema,
   ApprovalAppInputSchema,
+  InputAnswerRequestSchema,
+  InputAnswerResponseSchema,
+  InputAppGetRequestSchema,
+  InputAppInputSchema,
+  InputAppListSchema,
   ResolveRequest,
   ResolveResponse,
   RevealRequest,
@@ -29,6 +34,39 @@ describe("approval tool contracts", () => {
     expect(ApprovalAppGetRequestSchema.safeParse({ approvalId, runId: approvalId }).success).toBe(
       false,
     );
+  });
+
+  it("validates input app payloads, lookups, and human answer outcomes", () => {
+    const requestId = "00000000000000000000000003";
+    const input = {
+      requestId,
+      source: "mcp_mrtr",
+      serverId: "mcp.example",
+      round: 0,
+      mode: "form",
+      message: "Review <EMAIL_1>",
+      schema: {
+        type: "object",
+        required: ["email"],
+        properties: { email: { type: "string", format: "email" } },
+      },
+      runId: approvalId,
+      ageMs: 10,
+    };
+    expect(InputAppInputSchema.parse(input)).toEqual(input);
+    expect(InputAppGetRequestSchema.parse({ requestId })).toEqual({ requestId });
+    expect(InputAppListSchema.parse({ inputs: [] })).toEqual({ inputs: [] });
+    expect(
+      InputAnswerRequestSchema.parse({
+        requestId,
+        action: "accept",
+        answer: { email: "person@example.test" },
+      }),
+    ).toMatchObject({ requestId, action: "accept" });
+    expect(InputAnswerRequestSchema.safeParse({ requestId, action: "decline", answer: "no" }).success)
+      .toBe(false);
+    expect(InputAnswerResponseSchema.parse({ resolved: true })).toEqual({ resolved: true });
+    expect(InputAppInputSchema.safeParse({ ...input, unexpected: true }).success).toBe(false);
   });
 
   it("validates app input with a distinct approval id", () => {

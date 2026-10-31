@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, InputRequestSchema, JsonValue, RunStatus } from "@rovinos/schemas";
+import {
+  Code,
+  Id,
+  InputAnswerRequestSchema,
+  InputAnswerResponseSchema,
+  InputAppPendingSummarySchema,
+  InputRequestSchema,
+  JsonValue,
+  RunStatus,
+} from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 
@@ -22,6 +31,7 @@ export const controlPlaneRunSummarySchema = z
     lastSeq: z.number().int().nonnegative(),
     steps: z.number().int().nonnegative(),
     pendingApprovals: z.number().int().nonnegative(),
+    pendingInputs: z.number().int().nonnegative().default(0),
   })
   .strict();
 
@@ -87,18 +97,7 @@ export const inputRequestInputSchema = z.object({ requestId: Id }).strict();
 export const listPendingInputsInputSchema = z.object({ runId: Id.optional() }).strict();
 
 /** Metadata-only input row returned by `list_pending_inputs`. */
-export const pendingInputSummarySchema = z
-  .object({
-    requestId: Id,
-    runId: Id,
-    source: z.enum(["mcp_mrtr", "mcp_legacy", "agent"]),
-    mode: z.enum(["form", "url"]),
-    serverId: Code.optional(),
-    round: z.number().int().nonnegative(),
-    ageMs: z.number().int().nonnegative(),
-    expiresAt: z.number().int().nonnegative().nullable(),
-  })
-  .strict();
+export const pendingInputSummarySchema = InputAppPendingSummarySchema;
 
 /** Structured metadata-only output for `list_pending_inputs`. */
 export const listPendingInputsOutputSchema = z
@@ -116,18 +115,10 @@ export const getInputResultSchema = z.union([
 ]);
 
 /** Validated input for app-only `answer_input`. */
-export const answerInputInputSchema = z
-  .object({
-    requestId: Id,
-    action: z.enum(["accept", "decline", "cancel"]),
-    answer: JsonValue.optional(),
-  })
-  .strict();
+export const answerInputInputSchema = InputAnswerRequestSchema;
 
 /** Metadata-only output for input resolution tools. */
-export const inputResolutionOutputSchema = z
-  .object({ resolved: z.boolean(), code: Code.optional() })
-  .strict();
+export const inputResolutionOutputSchema = InputAnswerResponseSchema;
 
 /** Validated input for run lifecycle tools. */
 export const runLifecycleInputSchema = z.object({ runId: Id }).strict();
@@ -208,6 +199,7 @@ export const getRunOutputSchema = z
       .strict()
       .optional(),
     pendingApprovals: z.array(pendingApprovalSchema),
+    pendingInputs: z.number().int().nonnegative().default(0),
     recentEvents: z.array(SafeEvent),
   })
   .strict();

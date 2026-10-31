@@ -62,6 +62,28 @@ describe("createAppTelemetry", () => {
     await telemetry.dispose();
   });
 
+  it("accepts only the action enum on input spans", async () => {
+    type InputAttrs = SpanAttrs<"ui.input">;
+    expectTypeOf<InputAttrs>().toEqualTypeOf<{
+      action: "accept" | "decline" | "cancel" | "open_link" | "done";
+    }>();
+    const callTool = createCallTool();
+    const telemetry = createAppTelemetry({
+      bridge: { callTool },
+      manifest: { spans: ["ui.input"] as const },
+      now: () => 10,
+    });
+    await waitForActive(telemetry);
+    telemetry.record("ui.input", { action: "open_link" });
+    // @ts-expect-error Input telemetry cannot include free text.
+    telemetry.record("ui.input", { action: "accept", url: "untrusted" });
+    await telemetry.flush();
+    expect(callTool).toHaveBeenNthCalledWith(2, APP_TELEMETRY_TOOL_NAME, {
+      spans: [{ name: "ui.input", action: "open_link", startOffsetMs: 0, durationMs: 0 }],
+    });
+    await telemetry.dispose();
+  });
+
   it("records elapsed duration and shim-relative offset", async () => {
     const callTool = createCallTool();
     const times = [100, 120, 134, 150];

@@ -51,18 +51,20 @@ describe("ingestBatch", () => {
           { name: "ui.decision", decision: "approve", startOffsetMs: 5, durationMs: 10 },
           { name: "ui.error", code: "ui.failure", startOffsetMs: 15, durationMs: 20 },
           { name: "ui.interaction", kind: "click", count: 2, startOffsetMs: 35, durationMs: 25 },
+          { name: "ui.input", action: "open_link", startOffsetMs: 60, durationMs: 10 },
         ],
       },
       { stamp: validStamp },
     );
     const spans = collector.getFinishedSpans().slice(start);
 
-    expect(acknowledgment).toEqual({ accepted: 4, dropped: 0 });
+    expect(acknowledgment).toEqual({ accepted: 5, dropped: 0 });
     expect(spans.map((span) => span.name)).toEqual([
       "harness.ui.render",
       "harness.ui.decision",
       "harness.ui.error",
       "harness.ui.interaction",
+      "harness.ui.input",
     ]);
     expect(spans[0]?.attributes).toMatchObject({
       "harness.app.id": "approval",
@@ -77,6 +79,7 @@ describe("ingestBatch", () => {
       "harness.ui.interaction.kind": "click",
       "harness.ui.interaction.count": 2,
     });
+    expect(spans[4]?.attributes["harness.ui.input.action"]).toBe("open_link");
   });
 
   it("drops invalid and unknown spans independently and never exports their canary values", () => {

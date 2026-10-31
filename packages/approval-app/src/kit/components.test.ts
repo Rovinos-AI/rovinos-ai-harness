@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
 import axe from "axe-core";
+import type { JsonValue } from "@rovinos/schemas/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appendTokenText,
   createConfirmationDialog,
   createDataTable,
   createElicitationForm,
+  createFormFromSchema,
   createEmptyState,
   createErrorState,
   createMeter,
@@ -253,6 +255,235 @@ describe("shared MCP App components", () => {
     }
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("renders and validates every shared form schema field and constraint", () => {
+    const onSubmit = vi.fn<(values: Readonly<Record<string, JsonValue>>) => void>();
+    const form = createFormFromSchema(
+      document,
+      {
+        type: "object",
+        required: ["name", "email", "count", "choice", "tags"],
+        properties: {
+          name: {
+            type: "string",
+            title: malicious,
+            description: malicious,
+            minLength: 2,
+            maxLength: 8,
+            default: "Rovinos",
+          },
+          email: { type: "string", format: "email", default: "person@example.test" },
+          count: { type: "integer", minimum: 1, maximum: 10, default: 3 },
+          score: { type: "number", minimum: 0.5, maximum: 5.5, default: 2.5 },
+          enabled: { type: "boolean", default: true },
+          choice: {
+            type: "string",
+            oneOf: [
+              { const: "safe", title: malicious },
+              { const: "other", title: "Other" },
+            ],
+            default: "safe",
+          },
+          tags: {
+            type: "array",
+            items: {
+              type: "string",
+              anyOf: [
+                { const: "one", title: malicious },
+                { const: "two", title: "Two" },
+              ],
+            },
+            minItems: 1,
+            maxItems: 2,
+            default: ["one"],
+          },
+        },
+      },
+      onSubmit,
+    );
+    document.body.append(form);
+    expect(form.querySelectorAll("img")).toHaveLength(0);
+    expect(form.querySelector("label")?.textContent).toBe(malicious);
+    expect(form.querySelectorAll("option")[0]?.textContent).toBe(malicious);
+    expect(form.querySelector<HTMLInputElement>('input[name="email"]')?.type).toBe("email");
+    expect(form.querySelector<HTMLInputElement>('input[name="count"]')?.step).toBe("1");
+    expect(form.querySelector<HTMLInputElement>('input[name="score"]')?.step).toBe("any");
+    expect(form.querySelector<HTMLInputElement>('input[name="enabled"]')?.checked).toBe(true);
+    expect(form.querySelector<HTMLSelectElement>('select[name="choice"]')?.value).toBe("0");
+    expect(form.querySelector<HTMLSelectElement>('select[name="tags"]')?.value).toBe("0");
+    expect(form.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe("Rovinos");
+    expect(form.querySelector<HTMLInputElement>('input[name="name"]')?.minLength).toBe(2);
+    expect(form.querySelector<HTMLInputElement>('input[name="name"]')?.maxLength).toBe(8);
+
+    const window = document.defaultView;
+    if (window === null) {
+      throw new Error("Expected a jsdom window");
+    }
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
+      name: "Rovinos",
+      email: "person@example.test",
+      count: 3,
+      score: 2.5,
+      enabled: true,
+      choice: "safe",
+      tags: ["one"],
+    });
+
+    onSubmit.mockClear();
+    const name = form.querySelector<HTMLInputElement>('input[name="name"]');
+    if (name === null) {
+      throw new Error("Expected the name control");
+    }
+    name.value = "x";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(form.querySelector('[role="alert"]')?.textContent).toContain("highlighted fields");
+
+    name.value = "RovinosTooLong";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+
+    name.value = "Rovinos";
+    const count = form.querySelector<HTMLInputElement>('input[name="count"]');
+    const score = form.querySelector<HTMLInputElement>('input[name="score"]');
+    if (count === null || score === null) {
+      throw new Error("Expected numeric controls");
+    }
+    count.value = "0";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(count.getAttribute("aria-invalid")).toBe("true");
+
+    count.value = "3";
+    score.value = "6";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(score.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("does not implicitly select an optional enum without a default", () => {
+    const onSubmit = vi.fn();
+    const form = createFormFromSchema(
+      document,
+      {
+        type: "object",
+        properties: { choice: { type: "string", enum: ["one", "two"] } },
+      },
+      onSubmit,
+    );
+    const choice = form.querySelector<HTMLSelectElement>("select");
+    if (choice === null) {
+      throw new Error("Expected an enum selector");
+    }
+    expect(choice.selectedIndex).toBe(-1);
+    const window = document.defaultView;
+    if (window === null) {
+      throw new Error("Expected a jsdom window");
+    }
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith({});
+  });
+
+  it("validates string formats, patterns, and multi-select bounds", () => {
+    const onSubmit = vi.fn();
+    const form = createFormFromSchema(
+      document,
+      {
+        type: "object",
+        required: ["code", "website", "date", "dateTime", "tags"],
+        properties: {
+          code: { type: "string", pattern: "^[A-Z]{3}$", default: "ABC" },
+          website: { type: "string", format: "uri", default: "https://example.test" },
+          date: { type: "string", format: "date", default: "2026-03-04" },
+          dateTime: { type: "string", format: "date-time", default: "2026-03-04T12:30:00Z" },
+          tags: {
+            type: "array",
+            items: { type: "string", enum: ["one", "two", "three"] },
+            minItems: 1,
+            maxItems: 2,
+            default: ["one"],
+          },
+        },
+      },
+      onSubmit,
+    );
+    document.body.append(form);
+    const window = document.defaultView;
+    if (window === null) {
+      throw new Error("Expected a jsdom window");
+    }
+    const submit = (): void => {
+      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    };
+
+    submit();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(form.querySelector<HTMLInputElement>('input[name="date"]')?.type).toBe("date");
+    expect(form.querySelector<HTMLInputElement>('input[name="dateTime"]')?.type).toBe(
+      "datetime-local",
+    );
+
+    onSubmit.mockClear();
+    const code = form.querySelector<HTMLInputElement>('input[name="code"]');
+    const website = form.querySelector<HTMLInputElement>('input[name="website"]');
+    const date = form.querySelector<HTMLInputElement>('input[name="date"]');
+    const dateTime = form.querySelector<HTMLInputElement>('input[name="dateTime"]');
+    const tags = form.querySelector<HTMLSelectElement>('select[name="tags"]');
+    if (code === null || website === null || date === null || dateTime === null || tags === null) {
+      throw new Error("Expected all constrained form controls");
+    }
+
+    code.value = "abc";
+    submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(code.getAttribute("aria-invalid")).toBe("true");
+
+    code.value = "ABC";
+    website.value = "not-a-url";
+    submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(website.getAttribute("aria-invalid")).toBe("true");
+
+    website.value = "https://example.test";
+    date.value = "";
+    submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(date.getAttribute("aria-invalid")).toBe("true");
+
+    date.value = "2026-03-04";
+    dateTime.value = "";
+    submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(dateTime.getAttribute("aria-invalid")).toBe("true");
+
+    dateTime.value = "2026-03-04T12:30";
+    for (const option of Array.from(tags.options)) {
+      option.selected = false;
+    }
+    submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(tags.getAttribute("aria-invalid")).toBe("true");
+
+    for (const option of Array.from(tags.options)) {
+      option.selected = true;
+    }
+    submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(tags.getAttribute("aria-invalid")).toBe("true");
+
+    tags.options.item(2).selected = false;
+    submit();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
+      code: "ABC",
+      website: "https://example.test",
+      date: "2026-03-04",
+      tags: ["one", "two"],
+    });
   });
 
   it("renders data in a native keyboard-scrollable table without interpreting markup", () => {

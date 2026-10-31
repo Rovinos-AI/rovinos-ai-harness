@@ -14,21 +14,22 @@ const secondRunId = "00000000000000000000000002";
 const approvalId = "00000000000000000000000003";
 const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
-function runList(count = 1, pendingApprovals = 0): RunConsoleList {
+function runList(count = 1, pendingApprovals = 0, pendingInputs = 0): RunConsoleList {
   return {
     runs: Array.from({ length: count }, (_, index) => ({
       runId: index === 0 ? firstRunId : secondRunId,
-      status: pendingApprovals > 0 && index === 0 ? "suspended" : "running",
+      status: (pendingApprovals > 0 || pendingInputs > 0) && index === 0 ? "suspended" : "running",
       createdAt: 1000,
       lastTs: 2000,
       lastSeq: 3,
       steps: index + 1,
       pendingApprovals: index === 0 ? pendingApprovals : 0,
+      pendingInputs: index === 0 ? pendingInputs : 0,
     })),
   };
 }
 
-function runDetail(canary?: string): RunConsoleDetail {
+function runDetail(canary?: string, pendingInputs = 0): RunConsoleDetail {
   return {
     runId: firstRunId,
     status: "suspended",
@@ -42,6 +43,7 @@ function runDetail(canary?: string): RunConsoleDetail {
         expiresAt: 10_000,
       },
     ],
+    pendingInputs,
     ...(canary === undefined ? {} : { recentEvents: [{ content: canary }] }),
   };
 }
@@ -143,13 +145,14 @@ describe("runs console view", () => {
   });
 
   it("renders a long semantic table with status, age, steps, and approval badge", async () => {
-    const { view } = await setup({ list: runList(40, 2) });
+    const { view } = await setup({ list: runList(40, 2, 1) });
     expect(document.querySelectorAll("tbody tr")).toHaveLength(40);
     expect(document.querySelector("caption")?.textContent).toBe("Runs");
     expect(document.querySelector("tbody th[scope=row]")?.textContent).toBe(firstRunId);
     expect(document.querySelector(".status-warning")?.textContent).toBe("suspended");
     expect(document.body.textContent).toContain("9 seconds ago");
     expect(document.body.textContent).toContain("Needs approval (2)");
+    expect(document.body.textContent).toContain("Needs input (1)");
     const result = await axe.run(document, { rules: { "color-contrast": { enabled: false } } });
     expect(result.violations).toEqual([]);
     view.dispose();
@@ -226,7 +229,7 @@ describe("runs console view", () => {
     const canary = "SYNTHETIC_EVENT_CONTENT_CANARY";
     const { view, calls, openApproval, emitted } = await setup({
       list: runList(1, 1),
-      detail: runDetail(canary),
+      detail: runDetail(canary, 2),
     });
     const approvalButton = [...document.querySelectorAll("button")].find((button) =>
       button.textContent.includes("Needs approval"),
@@ -242,6 +245,7 @@ describe("runs console view", () => {
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain("Input tokens");
     });
+    expect(document.body.textContent).toContain("Needs input (2)");
     expect(calls).toContainEqual({
       name: "harness.runs.get",
       args: { runId: firstRunId },
