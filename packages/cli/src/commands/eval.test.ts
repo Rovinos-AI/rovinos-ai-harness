@@ -245,7 +245,7 @@ describe("harness eval run", () => {
     expect(stderr).toEqual(["budget_exceeded\n"]);
   });
 
-  it("rejects graders requiring unavailable execution context before launching trials", async () => {
+  it("rejects test_command before trials with its typed context code", async () => {
     const suitePath = await createSuite();
     await writeFile(
       suitePath,
@@ -276,6 +276,71 @@ describe("harness eval run", () => {
 
     expect(exitCode).toBe(ExitCode.failure);
     expect(executorStarted).toBe(false);
-    expect(stderr).toEqual(["eval_grader_context_unavailable\n"]);
+    expect(stderr).toEqual(["eval_test_command_context_unavailable\n"]);
+  });
+
+  it("rejects llm_judge before trials with its typed context code", async () => {
+    const suitePath = await createSuite();
+    await writeFile(
+      suitePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        tasks: [
+          {
+            id: "selected_task",
+            input: { goal: "synthetic goal" },
+            graders: [
+              {
+                type: "llm_judge",
+                rubricId: "synthetic_rubric",
+                rubric: "- id: criterion\n  description: synthetic criterion\n  weight: 1",
+                model: { provider: "openai", model: "synthetic_model" },
+                passThreshold: 0.5,
+              },
+            ],
+            tags: ["selected"],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    let executorStarted = false;
+    const { context, stderr } = createContext();
+    const command = createEvalCommand({
+      loadEval: () => Promise.resolve(evalApi),
+      createExecutor: () => {
+        executorStarted = true;
+        return createExecutor("completed", 0, []);
+      },
+    });
+
+    const exitCode = await main(["eval", "run", suitePath], context, [command]);
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(executorStarted).toBe(false);
+    expect(stderr).toEqual(["eval_llm_judge_context_unavailable\n"]);
+  });
+
+  it("fails Docker cassette-off before constructing the executor", async () => {
+    const suitePath = await createSuite();
+    let executorStarted = false;
+    const { context, stderr } = createContext();
+    const command = createEvalCommand({
+      loadEval: () => Promise.resolve(evalApi),
+      createExecutor: () => {
+        executorStarted = true;
+        return createExecutor("completed", 0, []);
+      },
+    });
+
+    const exitCode = await main(
+      ["eval", "run", suitePath, "--isolation", "docker", "--cassette", "off"],
+      context,
+      [command],
+    );
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(executorStarted).toBe(false);
+    expect(stderr).toEqual(["eval_docker_live_model_unavailable\n"]);
   });
 });

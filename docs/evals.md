@@ -86,8 +86,17 @@ cassette miss instead of calling a live provider. `--cassette off` defaults to D
 isolation. `--isolation inprocess|docker` selects the executor explicitly, and
 `--export-telemetry` opts into the caller-configured telemetry exporters (off by default).
 Docker uses `ghcr.io/rovinos-ai/harness:<CLI version>` unless `HARNESS_EVAL_IMAGE`
-overrides the image.
+overrides the image. Docker execution is currently blocked by default-deny network
+isolation: `--isolation docker --cassette off` fails before trials start with
+`eval_docker_live_model_unavailable`. Network access and credential forwarding are
+tracked separately in [issue #660](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/660).
 
 The CLI summary contains task and variant identifiers, pass rates, cost, and steps.
 With global `--json`, stdout contains one validated content-free report document;
 Markdown, JSON, JUnit, and trial JSONL files contain metadata and grader codes only.
+
+The CLI currently rejects `test_command` and `llm_judge` graders before launching
+trials with `eval_test_command_context_unavailable` and
+`eval_llm_judge_context_unavailable`. The executor interface does not expose a
+trial-scoped sandbox backend or cassette-aware model gateway to the post-run grader
+phase; adding those capabilities requires a separate executor/grader integration.
