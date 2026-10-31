@@ -25,6 +25,7 @@ import { storeCommand } from "./commands/store.js";
 import { replayCommand } from "./commands/replay.js";
 import { healthcheckCommand } from "./healthcheck.js";
 import { workerCommand } from "./commands/worker.js";
+import { piiCommand } from "./commands/pii.js";
 
 /** Static command registry; later epics add their owned commands here. */
 export const COMMANDS: CommandModule[] = [
@@ -39,6 +40,7 @@ export const COMMANDS: CommandModule[] = [
   doctorCommand,
   keysCommand,
   policyCommand,
+  piiCommand,
   serversCommand,
   storeCommand,
   replayCommand,

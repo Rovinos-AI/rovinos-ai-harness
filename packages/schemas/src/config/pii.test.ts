@@ -6,6 +6,8 @@ describe("JSON Pointer and PII detokenization config", () => {
   it("enables runtime PII boundaries by default and accepts an explicit disable", () => {
     expect(PiiConfigSchema.parse({}).enabled).toBe(true);
     expect(PiiConfigSchema.parse({ enabled: false }).enabled).toBe(false);
+    expect(PiiConfigSchema.parse({}).allowRawToLocalModels).toBe(false);
+    expect(PiiConfigSchema.parse({ allowRawToLocalModels: true }).allowRawToLocalModels).toBe(true);
   });
 
   it("defaults to fail-closed detection and validates optional Presidio settings", () => {

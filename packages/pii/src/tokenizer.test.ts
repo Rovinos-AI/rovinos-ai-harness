@@ -92,6 +92,45 @@ describe("Tokenizer.tokenizeText", () => {
     await expect(vault.stats(runA)).resolves.toEqual({ entries: action === "tokenize" ? 1 : 0 });
   });
 
+  it("downgrades local model-input allows unless explicitly opted in", async () => {
+    const policy = PiiPolicySchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+      ],
+    });
+    const vault = new InMemoryVault();
+    const tokenizer = new Tokenizer({
+      detectors: { detect: emailDetector },
+      policy,
+      vault,
+    });
+    const optedIn = new Tokenizer({
+      detectors: { detect: emailDetector },
+      policy,
+      vault: new InMemoryVault(),
+      allowRawToLocalModels: true,
+    });
+    const localContext = { boundary: "model_input", destination: "local" } as const;
+
+    await expect(
+      tokenizer.tokenizeText(runA, "alice@example.test", localContext),
+    ).resolves.toMatchObject({
+      text: "<EMAIL_1>",
+      actions: [{ action: "tokenize" }],
+    });
+    await expect(
+      optedIn.tokenizeText(runA, "alice@example.test", localContext),
+    ).resolves.toMatchObject({
+      text: "alice@example.test",
+      actions: [{ action: "allow" }],
+    });
+  });
+
   it("replaces multiple and adjacent detections from the end without shifting offsets", async () => {
     const tokenizer = createTokenizer();
 

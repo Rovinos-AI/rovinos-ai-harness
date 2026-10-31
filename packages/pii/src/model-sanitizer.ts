@@ -16,6 +16,7 @@ import {
 import { countPiiBlobHit } from "@rovinos/telemetry";
 import { findTokens, tokenType, type AuditingVaultResolver, type Token } from "@rovinos/vault";
 import { evaluatePiiPolicy } from "./policy.js";
+import { resolveDestination } from "./destination.js";
 import { detectOutsideTokenSpans } from "./tokenizer-helpers.js";
 import { PiiBlobContainsPiiError, PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import { PiiTokenUnresolvableError } from "./detokenize.js";
@@ -37,6 +38,7 @@ export interface PiiMessageSanitizerDependencies {
   readonly detectors: PiiDetectorRegistry;
   readonly policy: PiiPolicy;
   readonly resolver: AuditingVaultResolver;
+  readonly allowRawToLocalModels?: boolean;
 }
 
 interface SanitizationContext {
@@ -83,8 +85,8 @@ export class PiiMessageSanitizer {
   ): Promise<Message[]> {
     const context: SanitizationContext = {
       runId,
-      destination: target.trust,
-      allowRaw: target.trust === "local",
+      destination: resolveDestination({ boundary: "model_input", provider: target }),
+      allowRaw: target.trust === "local" && this.dependencies.allowRawToLocalModels === true,
       recordPiiAction: options.recordPiiAction,
       signal: options.signal,
     };
@@ -127,8 +129,8 @@ export class PiiMessageSanitizer {
     const messages = await this.sanitize(request.messages, target, runId, options);
     const context: SanitizationContext = {
       runId,
-      destination: target.trust,
-      allowRaw: target.trust === "local",
+      destination: resolveDestination({ boundary: "model_input", provider: target }),
+      allowRaw: target.trust === "local" && this.dependencies.allowRawToLocalModels === true,
       recordPiiAction: options.recordPiiAction,
       signal: options.signal,
     };

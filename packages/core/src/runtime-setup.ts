@@ -219,6 +219,31 @@ class PiiToolPortAlreadyWrappedError extends HarnessError {
   }
 }
 
+class PiiDetokenizeToolUnknownError extends HarnessError {
+  readonly code = "pii_detokenize_tool_unknown";
+
+  constructor(readonly toolId: string) {
+    super("A PII detokenization rule references an unknown tool.");
+  }
+}
+
+/**
+ * Fails startup when a configured detokenization rule references no registered tool.
+ *
+ * @param config - Validated PII configuration.
+ * @param tool - The composed tool registry.
+ */
+export function assertDetokenizeToolsRegistered(
+  config: PiiConfig,
+  tool: Pick<ToolPort, "describe">,
+): void {
+  for (const rule of config.detokenize ?? []) {
+    if (tool.describe(rule.toolId) === undefined) {
+      throw new PiiDetokenizeToolUnknownError(rule.toolId);
+    }
+  }
+}
+
 function validatePiiConfig(config: RuntimeConfig, overrides: RuntimeOverrides): PiiConfig {
   const pii = PiiConfigSchema.parse(config.pii ?? {});
   if (!pii.enabled && process.env.NODE_ENV === "production") {
@@ -295,6 +320,9 @@ async function composeRuntimeSetup(options: {
   const tools = await createRuntimeTools(config, overrides, keys, dataDir);
   resources.tools = tools;
   const { tool, sandboxBackend } = tools;
+  if (piiConfig.enabled) {
+    assertDetokenizeToolsRegistered(piiConfig, tool);
+  }
   const workspaceSnapshotter = createRuntimeWorkspaceSnapshotter({
     dataDir,
     config,
