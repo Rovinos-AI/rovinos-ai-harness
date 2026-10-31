@@ -30,7 +30,9 @@ import { PolicyEngine } from "@rovinos/policy";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as telemetry from "@rovinos/telemetry";
-import { RunRecorder, type EventPartial } from "../recorder.js";
+import { handleLegacyLiveElicitation } from "@rovinos/mcp";
+import type { HumanInputChannel } from "../human-input/channels.js";
+import { RunEventRecordingError, RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
 import { applyResolvedApprovals } from "../approvals.js";
 import { expireInput, resolveInput } from "../human-input/resolve.js";
@@ -42,6 +44,7 @@ import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
 import type { PolicyPort, RunContext, ToolPort } from "../ports.js";
 import { modelToolOptions } from "./model-step.js";
+import { createAgentAskUserHandler } from "./ask-user-step.js";
 import {
   applyApprovalDecision,
   applyDanglingIntents,
@@ -1176,6 +1179,128 @@ async function resolveEvent(
 }
 
 describe("durable MCP input requests", () => {
+  async function runLegacyLiveTool(options: {
+    readonly channels?: readonly HumanInputChannel[];
+    readonly callId?: string;
+    readonly timeoutMs?: number;
+    readonly policyDecline?: boolean;
+    readonly recordTimeoutTwice?: boolean;
+  }): Promise<readonly Event[]> {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    const callId = callIds.idempotent;
+    const request = {
+      inputKey: "legacy-id",
+      mode: "url" as const,
+      message: "Continue on the server website",
+      url: "https://example.test/continue",
+    };
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              const legacyInput = {
+                callId: options.callId ?? callId,
+                serverId: Code.parse("mcp.test"),
+                elicitationId: request.inputKey,
+                request,
+                timeoutMs: options.timeoutMs ?? 20,
+                signal: runContext.signal,
+              };
+              if (options.policyDecline === true) {
+                await runContext.elicitation?.recordLegacyPolicyDecline?.(legacyInput);
+                return { outcome: "ok", result: { action: "decline" } };
+              }
+              const response = await handleLegacyLiveElicitation({
+                active: true,
+                request,
+                timeoutMs: legacyInput.timeoutMs,
+                signal: runContext.signal,
+                handle: (validatedRequest, signal) =>
+                  runContext.elicitation?.handleLegacyLive?.({
+                    ...legacyInput,
+                    request: validatedRequest,
+                    signal,
+                  }) ?? Promise.resolve(undefined),
+                onTimeout: (validatedRequest) =>
+                  runContext.elicitation?.recordLegacyTimeout?.({
+                    ...legacyInput,
+                    request: validatedRequest,
+                  }) ?? Promise.resolve(),
+              });
+              if (options.recordTimeoutTwice === true) {
+                await runContext.elicitation?.recordLegacyTimeout?.(legacyInput);
+              }
+              return { outcome: "ok", result: { action: response.action } };
+            },
+          },
+        ],
+      ]),
+    );
+    return toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      ...(options.channels === undefined ? {} : { inputChannels: options.channels }),
+      calls: [{ callId, toolId: "known_tool", args: {} }],
+    });
+  }
+
+  it("records and answers a legacy live request through the default input port", async () => {
+    const channel: HumanInputChannel = {
+      id: Code.parse("cli.test"),
+      available: () => true,
+      present: () => Promise.resolve({ action: "accept", principal: Code.parse("cli.test") }),
+    };
+    const events = await runLegacyLiveTool({ channels: [channel] });
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "input_requested",
+      "input_resolved",
+      "tool_result",
+    ]);
+    expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+      action: "accept",
+      decidedBy: "human",
+      approverId: "cli.test",
+    });
+  });
+
+  it("records a legacy live timeout as a durable timeout resolution", async () => {
+    const events = await runLegacyLiveTool({ timeoutMs: 5, recordTimeoutTwice: true });
+
+    expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+      action: "cancel",
+      decidedBy: "timeout",
+    });
+  });
+
+  it("durably records a legacy input policy decline", async () => {
+    const events = await runLegacyLiveTool({ policyDecline: true });
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "input_requested",
+      "input_resolved",
+      "tool_result",
+    ]);
+    expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+      action: "decline",
+      decidedBy: "policy",
+    });
+  });
+
+  it("cancels a legacy live request that is not bound to the in-flight call", async () => {
+    const events = await runLegacyLiveTool({
+      callId: "66666666666666666666666666",
+    });
+
+    expect(events.map(({ type }) => type)).toEqual(["tool_intent", "tool_result"]);
+  });
+
   it("suspends with a checkpoint and resumes from a separate recorder with stored answers", async () => {
     const { recorder, store } = createRecorder();
     const history = await createRun(recorder, []);
@@ -1357,6 +1482,56 @@ describe("durable MCP input requests", () => {
     expect(Array.from(state.resolvedInputs.values())).toMatchObject([
       { action: "decline", decidedBy: "policy" },
     ]);
+  });
+
+  it("declines URL requests rejected by URL policy without presenting them", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    let outcomeKind: string | undefined;
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "known_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: async (_call, runContext) => {
+              const outcome = await runContext.elicitation?.handleInputRequired({
+                callId: callIds.idempotent,
+                serverId: "mcp_test",
+                source: "mcp_legacy",
+                round: 1,
+                maxPerRun: 3,
+                inputRequests: [
+                  {
+                    inputKey: "url",
+                    mode: "url",
+                    message: "Open this URL",
+                    url: "http://example.test/account",
+                  },
+                ],
+                sensitiveInputKeys: [],
+                policyDeclinedInputKeys: ["url"],
+              });
+              outcomeKind = outcome?.kind;
+              return { outcome: "ok", result: null };
+            },
+          },
+        ],
+      ]),
+    );
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      calls: [{ callId: callIds.idempotent, toolId: "known_tool", args: { value: "initial" } }],
+    });
+    const state = foldRunState([...history, ...events]);
+    expect(outcomeKind).toBe("retry");
+    expect(state.status).toBe("running");
+    expect(state.pendingInputs.size).toBe(0);
+    expect(Array.from(state.resolvedInputs.values())).toMatchObject([
+      { source: "mcp_legacy", action: "decline", decidedBy: "policy" },
+    ]);
+    expect(Array.from(state.inputRequests.values())).toMatchObject([{ source: "mcp_legacy" }]);
   });
 
   it("fails closed when an MCP server exceeds the per-run input limit", async () => {
@@ -1615,6 +1790,94 @@ describe("durable MCP input requests", () => {
 });
 
 describe("durable agent.ask_user requests", () => {
+  it("uses the default expiry for a durable question without an explicit expiry", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, [
+      { callId: callIds.nonIdempotent, toolId: "agent.ask_user", idempotent: false },
+    ]);
+    const dependencies = toolStepDependencies(recorder, new AskUserTool(), history);
+    const events: Event[] = [];
+    const askUser = createAgentAskUserHandler({
+      callId: callIds.nonIdempotent,
+      clock: dependencies.clock,
+      events,
+      history,
+      ids: dependencies.ids,
+      recorder,
+      checkpointer: dependencies.checkpointer,
+      signal: dependencies.signal,
+    });
+
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await askUser({ question: "Continue?" });
+      const event = history[0];
+      if (event === undefined) {
+        throw new Error("Expected run events.");
+      }
+      return event;
+    });
+
+    expect(events.find((event) => event.type === "input_requested")).toMatchObject({
+      type: "input_requested",
+      expiresAt: 604_800_100,
+    });
+  });
+
+  it("rejects a durable question when its call is aborted", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, [
+      { callId: callIds.nonIdempotent, toolId: "agent.ask_user", idempotent: false },
+    ]);
+    const dependencies = toolStepDependencies(recorder, new AskUserTool(), history);
+    const controller = new AbortController();
+    controller.abort();
+    const askUser = createAgentAskUserHandler({
+      callId: callIds.nonIdempotent,
+      clock: dependencies.clock,
+      events: [],
+      history,
+      ids: dependencies.ids,
+      recorder,
+      checkpointer: dependencies.checkpointer,
+      signal: controller.signal,
+    });
+
+    await expect(askUser({ question: "Continue?" })).resolves.toMatchObject({
+      outcome: "error",
+      errorCode: "input_request_invalid",
+    });
+  });
+
+  it("wraps failures while recording a durable question", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, [
+      { callId: callIds.nonIdempotent, toolId: "agent.ask_user", idempotent: false },
+    ]);
+    const dependencies = toolStepDependencies(recorder, new AskUserTool(), history);
+    const askUser = createAgentAskUserHandler({
+      callId: callIds.nonIdempotent,
+      clock: dependencies.clock,
+      events: [],
+      history,
+      ids: dependencies.ids,
+      recorder,
+      checkpointer: dependencies.checkpointer,
+      signal: dependencies.signal,
+    });
+    vi.spyOn(recorder, "recordBatch").mockRejectedValue(new Error("synthetic recorder failure"));
+
+    await expect(
+      recorder.withStepSpan(RUN_SPAN, {}, async () => {
+        await askUser({ question: "Continue?" });
+        const event = history[0];
+        if (event === undefined) {
+          throw new Error("Expected run events.");
+        }
+        return event;
+      }),
+    ).rejects.toBeInstanceOf(RunEventRecordingError);
+  });
+
   it("expires unanswered questions as cancelled", async () => {
     const { recorder, store } = createRecorder();
     const history = await createRun(recorder, []);

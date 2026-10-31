@@ -4,8 +4,12 @@ import type { ElicitationRetry } from "@rovinos/mcp";
 import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, RunRecorder } from "../recorder.js";
 import type { IdGenerator, RunContext, ToolPort } from "../ports.js";
+import type { Tokenizer } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
+import type { HumanInputChannel } from "../human-input/channels.js";
 import { toolRunContext } from "./prepare-tool.js";
-import { createAgentAskUserHandler, createMcpElicitationPort } from "./input-step.js";
+import { createMcpElicitationPort } from "./input-step.js";
+import { createAgentAskUserHandler } from "./ask-user-step.js";
 
 interface ToolContextOptions {
   readonly recorder: RunRecorder;
@@ -17,6 +21,9 @@ interface ToolContextOptions {
   readonly ids?: IdGenerator;
   readonly checkpointer?: Checkpointer;
   readonly history?: readonly Event[];
+  readonly inputChannels?: readonly HumanInputChannel[];
+  readonly tokenizer?: Pick<Tokenizer, "tokenizeJson">;
+  readonly resolver?: AuditingVaultResolver;
 }
 
 /** Creates the run-scoped tool context and installs durable MRTR handling when resuming. */
@@ -42,6 +49,7 @@ export function createToolExecutionContext(
   return {
     ...base,
     elicitation: createMcpElicitationPort({
+      runId: options.runId,
       callId,
       clock: options.clock,
       events,
@@ -49,6 +57,9 @@ export function createToolExecutionContext(
       ids: options.ids,
       recorder: options.recorder,
       checkpointer: options.checkpointer,
+      ...(options.inputChannels === undefined ? {} : { inputChannels: options.inputChannels }),
+      ...(options.tokenizer === undefined ? {} : { tokenizer: options.tokenizer }),
+      ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
     }),
     askUser: createAgentAskUserHandler({
       callId,

@@ -34,6 +34,7 @@ import {
 } from "./runtime-runs.js";
 import { QuotaService } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
+import { assertRuntimeOverrideRequirements } from "./runtime-overrides.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
@@ -66,14 +67,6 @@ class ApprovalEditUnavailableError extends HarnessError {
 
   constructor() {
     super("approval_edit_unavailable");
-  }
-}
-
-class AlreadyTokenizedRequiresReplayPortsError extends HarnessError {
-  readonly code = "already_tokenized_requires_replay_ports";
-
-  constructor() {
-    super("alreadyTokenized is only available with isolated replay ports.");
   }
 }
 
@@ -380,6 +373,15 @@ function createRuntimeResume(
               ? {}
               : { snapshotKeep: config.store.snapshotKeep }),
             resumePolicy: config.run.resume.onNonIdempotent,
+            ...(options.overrides.inputChannels === undefined
+              ? {}
+              : { inputChannels: options.overrides.inputChannels }),
+            ...(options.pii === undefined
+              ? {}
+              : {
+                  inputTokenizer: options.pii.tokenizer,
+                  inputResolver: options.pii.resolver,
+                }),
             ...(config.sandbox?.restoreOnResume === undefined
               ? {}
               : { restoreOnResume: config.sandbox.restoreOnResume }),
@@ -399,28 +401,11 @@ function createRuntimeResume(
   };
 }
 
-/**
- * Builds a runtime from validated config with injectable ports.
- * Supply tools in decorator order `Offloading(Pii(Policy(Tools)))`; the loop
- * evaluates policy after preparation so it only sees tokenized arguments.
- * Binary results use the outer offloader and are never returned as previews.
- *
- * @param config - Validated run and model configuration.
- * @param overrides - Optional stores, ports, and deterministic test dependencies.
- * @returns Shared run, resume, cancellation, and store operations.
- */
+/** Builds a runtime from validated config and injectable ports. Binary results are offloaded. */
 export async function createRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
-  if (
-    overrides.alreadyTokenized === true &&
-    (overrides.transientVault !== true ||
-      overrides.store === undefined ||
-      overrides.model === undefined ||
-      overrides.tool === undefined)
-  ) {
-    throw new AlreadyTokenizedRequiresReplayPortsError();
-  }
+  assertRuntimeOverrideRequirements(overrides);
   return composeRuntime(await setupRuntime(config, overrides));
 }

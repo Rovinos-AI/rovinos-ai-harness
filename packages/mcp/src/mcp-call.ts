@@ -6,6 +6,7 @@ import {
   type CallToolRequestOptions,
   type CallToolResult,
   type Client,
+  UrlElicitationRequiredError,
 } from "@modelcontextprotocol/client";
 import type { ServerConfig } from "@rovinos/schemas";
 import { McpProtocolError } from "./errors.js";
@@ -45,7 +46,7 @@ export async function invokeMcpTool(options: {
     return await options.client.callTool(
       {
         ...callParams,
-        ...(options.inputRetry === undefined
+        ...(options.inputRetry === undefined || options.inputRetry.source === "mcp_legacy"
           ? {}
           : {
               inputResponses: toWireInputResponses(options.inputRetry.inputResponses),
@@ -63,6 +64,9 @@ export async function invokeMcpTool(options: {
       },
     );
   } catch (error) {
+    if (error instanceof UrlElicitationRequiredError) {
+      throw new McpProtocolError(error.code, error.elicitations);
+    }
     if (error instanceof ProtocolError) {
       throw new McpProtocolError(error.code);
     }

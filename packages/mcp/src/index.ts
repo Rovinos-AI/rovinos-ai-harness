@@ -62,4 +62,16 @@ export {
   type ElicitationInputRequired,
   type ElicitationPort,
   type ElicitationRetry,
+  type LegacyElicitationInput,
 } from "./elicitation/mrtr.js";
+export {
+  checkElicitationUrl,
+  type ElicitationUrlCheck,
+  type ElicitationUrlOptions,
+} from "./elicitation/url.js";
+export {
+  handleLegacyLiveElicitation,
+  LegacyElicitationCompletionTracker,
+  legacyUrlInputRequiredResult,
+  type LegacyLiveElicitationOptions,
+} from "./elicitation/legacy.js";

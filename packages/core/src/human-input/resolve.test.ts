@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
+  FakeClock,
   Id,
   PiiPolicySchema,
   type Detection,
@@ -12,10 +13,13 @@ import { InMemoryEventStore, RunQueueJobSchema, SeqConflictError } from "@rovino
 import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { Tokenizer } from "@rovinos/pii";
 import { describe, expect, it, vi } from "vitest";
+import { RunRecorder } from "../recorder.js";
+import { resolveActiveInput } from "./resolve-active.js";
 import {
   resolveInput,
   expireInput,
   InputAnswerInvalidError,
+  InputPrincipalInvalidError,
   InputNotExpiredError,
 } from "./resolve.js";
 
@@ -234,6 +238,23 @@ function resumeQueue(
 }
 
 describe("resolveInput", () => {
+  it("rejects an invalid principal in the active resolution path", async () => {
+    const store = await makePendingInput();
+    const history = await readEvents(store);
+    const recorder = new RunRecorder(store, runId, segmentId, history.length, new FakeClock(500));
+
+    await expect(
+      resolveActiveInput({
+        recorder,
+        events: [],
+        history,
+        runId,
+        requestId,
+        resolution: { action: "cancel", principal: Code.parse("system.other") },
+      }),
+    ).rejects.toBeInstanceOf(InputPrincipalInvalidError);
+  });
+
   it("resolves a pending request from another process and never records the raw answer", async () => {
     const store = await makePendingInput();
     const resolution = await resolveInput(store, runId, requestId, {

@@ -22,6 +22,7 @@ import { createTestContextManager, createTestSpanCollector } from "@rovinos/tele
 import { lookupSpanDefinition } from "@rovinos/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
+import { McpProtocolError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
@@ -59,6 +60,10 @@ async function fixture(
     readonly offloadBinaryResults?: boolean;
     readonly authRequiredMethod?: "tools/list" | "tools/call";
     readonly elicitation?: ServerConfig["elicitation"];
+    readonly urlOptions?: {
+      readonly requireHttps?: boolean;
+      readonly urlAllowHosts?: readonly string[];
+    };
   } = {},
 ): Promise<Fixture> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -125,6 +130,7 @@ async function fixture(
         ...(options.offloadBinaryResults === undefined
           ? {}
           : { offloadBinaryResults: options.offloadBinaryResults }),
+        ...(options.urlOptions === undefined ? {} : { urlOptions: options.urlOptions }),
       },
     );
   } catch (error) {
@@ -193,6 +199,19 @@ function requiredResult(requestState: string, message = "Provide a value"): Call
       },
     },
     requestState,
+  };
+}
+
+function requiredUrlResult(url: string): CallToolResult {
+  return {
+    content: [],
+    resultType: "input_required",
+    inputRequests: {
+      "server-key": {
+        method: "elicitation/create",
+        params: { mode: "url", message: "Continue in your browser", url },
+      },
+    },
   };
 }
 
@@ -539,6 +558,331 @@ describe("McpToolPort", () => {
       ).resolves.toEqual({ kind: "failure", errorCode: "mcp_input_request_invalid" });
     } finally {
       vi.restoreAllMocks();
+    }
+  });
+
+  it.each([
+    ["https://example.test/account", "accept", []],
+    ["https://example.test/account", "cancel", []],
+    ["http://example.test/account", "accept", ["server-key"]],
+  ] as const)(
+    "handles URL-mode input %s with action %s and policy declines %j",
+    async (url, action, policyDeclinedInputKeys) => {
+      const current = await fixture({
+        elicitation: { ...mrtrConfig, modes: ["url"] },
+      });
+      const responses: CallToolResult[] = [
+        requiredUrlResult(url),
+        { content: [{ type: "text", text: "complete" }] },
+      ];
+      const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockImplementation(() => {
+        const response = responses.shift();
+        return response === undefined
+          ? Promise.reject(new Error("Unexpected extra tool call"))
+          : Promise.resolve(response);
+      });
+      const handleInputRequired = vi.fn(
+        (input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
+          Promise.resolve({
+            kind: "retry" as const,
+            inputResponses: {
+              "server-key": {
+                action:
+                  input.policyDeclinedInputKeys?.includes("server-key") === true
+                    ? ("decline" as const)
+                    : action,
+              },
+            },
+          }),
+      );
+      try {
+        const result = await current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            elicitation: { handleInputRequired },
+            tokenizeHumanInput: (value) => Promise.resolve(value),
+            protectInputMetadata: (value) => Promise.resolve(value),
+          }),
+        );
+        expect(result).toMatchObject({
+          outcome: "ok",
+          result: { content: [{ type: "text", text: "complete" }] },
+        });
+        expect(handleInputRequired).toHaveBeenCalledWith(
+          expect.objectContaining({ policyDeclinedInputKeys }),
+        );
+        expect(callTool).toHaveBeenCalledTimes(2);
+      } finally {
+        callTool.mockRestore();
+        await current.close();
+      }
+    },
+  );
+
+  it("persists legacy URL-required errors and retries without MRTR response metadata", async () => {
+    const current = await fixture({
+      elicitation: { ...mrtrConfig, modes: ["url"] },
+    });
+    const callTool = vi
+      .spyOn(McpConnection.prototype, "callTool")
+      .mockRejectedValueOnce(
+        new McpProtocolError(-32042, [
+          {
+            mode: "url",
+            elicitationId: "legacy-input-id",
+            message: "Continue in your browser",
+            url: "https://example.test/account",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "complete" }] });
+    const handleInputRequired = vi.fn(
+      (_input: Parameters<NonNullable<McpToolContext["elicitation"]>["handleInputRequired"]>[0]) =>
+        Promise.resolve({
+          kind: "retry" as const,
+          inputResponses: {
+            "legacy-input-id": { action: "accept" as const },
+          },
+        }),
+    );
+    try {
+      const result = await current.port.execute(
+        call,
+        context(new AbortController().signal, {
+          elicitation: { handleInputRequired },
+          tokenizeHumanInput: (value) => Promise.resolve(value),
+          protectInputMetadata: (value) => Promise.resolve(value),
+        }),
+      );
+      expect(result).toMatchObject({
+        outcome: "ok",
+        result: { content: [{ type: "text", text: "complete" }] },
+      });
+      expect(handleInputRequired).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "mcp_legacy",
+          inputRequests: [expect.objectContaining({ inputKey: "legacy-input-id" })],
+        }),
+      );
+      expect(callTool).toHaveBeenCalledTimes(2);
+      expect(callTool.mock.calls[1]?.[0].inputRetry).toMatchObject({
+        source: "mcp_legacy",
+      });
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("suspends a legacy URL-required request until the human input is available", async () => {
+    const current = await fixture({ elicitation: { ...mrtrConfig, modes: ["url"] } });
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockRejectedValue(
+      new McpProtocolError(-32042, [
+        {
+          mode: "url",
+          elicitationId: "legacy-input-id",
+          message: "Continue in your browser",
+          url: "https://example.test/account",
+        },
+      ]),
+    );
+    const handleInputRequired = vi.fn(() => Promise.resolve({ kind: "suspend" as const }));
+    try {
+      await expect(
+        current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            elicitation: { handleInputRequired },
+            tokenizeHumanInput: (value) => Promise.resolve(value),
+            protectInputMetadata: (value) => Promise.resolve(value),
+          }),
+        ),
+      ).resolves.toMatchObject({
+        outcome: "ok",
+        suspend: true,
+        suspendReason: "awaiting_input",
+      });
+      expect(handleInputRequired).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "mcp_legacy" }),
+      );
+      expect(callTool).toHaveBeenCalledTimes(1);
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("does not call a legacy tool again when its resolved input was declined", async () => {
+    const current = await fixture({ elicitation: { ...mrtrConfig, modes: ["url"] } });
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool");
+    try {
+      await expect(
+        current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            inputRetry: {
+              source: "mcp_legacy",
+              round: 1,
+              inputResponses: { "legacy-input-id": { action: "decline" } },
+            },
+          }),
+        ),
+      ).resolves.toMatchObject({ outcome: "error", errorCode: "mcp_input_declined" });
+      expect(callTool).not.toHaveBeenCalled();
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("handles active legacy live URL requests and records completion", async () => {
+    const current = await fixture({ elicitation: { ...mrtrConfig, modes: ["url"] } });
+    const handleLegacyLive = vi.fn(() => Promise.resolve({ action: "accept" as const }));
+    const onLegacyComplete = vi.fn();
+    const callTool = vi
+      .spyOn(McpConnection.prototype, "callTool")
+      .mockImplementation(async (request) => {
+        const live = request.legacyElicitation;
+        if (live === undefined) {
+          throw new Error("Legacy callbacks were not attached.");
+        }
+        const answer = await live.handle(
+          {
+            mode: "url",
+            elicitationId: "legacy-live-id",
+            message: "Continue in your browser",
+            url: "https://example.test/account",
+          },
+          "legacy-live-id",
+          new AbortController().signal,
+        );
+        live.onComplete("legacy-live-id");
+        return { content: [{ type: "text", text: answer.action }] };
+      });
+    try {
+      await expect(
+        current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            elicitation: { handleInputRequired: vi.fn(), handleLegacyLive, onLegacyComplete },
+          }),
+        ),
+      ).resolves.toMatchObject({
+        outcome: "ok",
+        result: { content: [{ type: "text", text: "accept" }] },
+      });
+      expect(handleLegacyLive).toHaveBeenCalledWith(
+        expect.objectContaining({
+          callId: call.callId,
+          elicitationId: "legacy-live-id",
+          serverId: "mcp_test",
+        }),
+      );
+      expect(onLegacyComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ elicitationId: "legacy-live-id" }),
+      );
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("declines unsafe legacy URLs without presenting them to a channel", async () => {
+    const current = await fixture({
+      elicitation: { ...mrtrConfig, modes: ["url"] },
+      urlOptions: { urlAllowHosts: ["trusted.example"] },
+    });
+    const recordLegacyPolicyDecline = vi.fn(() => Promise.resolve());
+    const callTool = vi
+      .spyOn(McpConnection.prototype, "callTool")
+      .mockImplementation(async (request) => {
+        const live = request.legacyElicitation;
+        if (live === undefined) {
+          throw new Error("Legacy callbacks were not attached.");
+        }
+        const answer = await live.handle(
+          {
+            mode: "url",
+            elicitationId: "unsafe-url-id",
+            message: "Continue in your browser",
+            url: "https://untrusted.example/account",
+          },
+          "unsafe-url-id",
+          new AbortController().signal,
+        );
+        return { content: [{ type: "text", text: answer.action }] };
+      });
+    try {
+      await expect(
+        current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            elicitation: {
+              handleInputRequired: vi.fn(),
+              handleLegacyLive: vi.fn(),
+              recordLegacyPolicyDecline,
+            },
+          }),
+        ),
+      ).resolves.toMatchObject({
+        outcome: "ok",
+        result: { content: [{ type: "text", text: "decline" }] },
+      });
+      expect(recordLegacyPolicyDecline).toHaveBeenCalledWith(
+        expect.objectContaining({ elicitationId: "unsafe-url-id" }),
+      );
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("records a legacy live timeout and returns cancellation to the server", async () => {
+    const current = await fixture({
+      elicitation: { ...mrtrConfig, modes: ["url"], legacyLiveTimeoutMs: 1 },
+    });
+    const recordLegacyTimeout = vi.fn(() => Promise.resolve());
+    const callTool = vi
+      .spyOn(McpConnection.prototype, "callTool")
+      .mockImplementation(async (request) => {
+        const live = request.legacyElicitation;
+        if (live === undefined) {
+          throw new Error("Legacy callbacks were not attached.");
+        }
+        const answer = await live.handle(
+          {
+            mode: "url",
+            elicitationId: "timed-out-url-id",
+            message: "Continue in your browser",
+            url: "https://example.test/account",
+          },
+          "timed-out-url-id",
+          new AbortController().signal,
+        );
+        return { content: [{ type: "text", text: answer.action }] };
+      });
+    try {
+      await expect(
+        current.port.execute(
+          call,
+          context(new AbortController().signal, {
+            elicitation: {
+              handleInputRequired: vi.fn(),
+              handleLegacyLive: () => new Promise(() => undefined),
+              recordLegacyTimeout,
+            },
+          }),
+        ),
+      ).resolves.toMatchObject({
+        outcome: "ok",
+        result: { content: [{ type: "text", text: "cancel" }] },
+      });
+      expect(recordLegacyTimeout).toHaveBeenCalledWith(
+        expect.objectContaining({ elicitationId: "timed-out-url-id" }),
+      );
+    } finally {
+      callTool.mockRestore();
+      await current.close();
     }
   });
 
