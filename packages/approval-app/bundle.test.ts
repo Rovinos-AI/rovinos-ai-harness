@@ -91,7 +91,12 @@ describe("single-file approval app", () => {
         },
       }),
     );
-    expect(views.map(({ name }) => name)).toEqual(["approval", "input", "runs-console", "configured"]);
+    expect(views.map(({ name }) => name)).toEqual([
+      "approval",
+      "input",
+      "runs-console",
+      "configured",
+    ]);
     for (const { html } of views) {
       expect(html).not.toMatch(/https?:\/\//iu);
       expect(await gzipSize(html)).toBeLessThanOrEqual(150 * 1024);

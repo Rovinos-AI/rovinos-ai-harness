@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  formSchemaToZod,
-  type FormSchema,
-  type JsonValue,
-} from "@rovinos/schemas/browser";
+import { formSchemaToZod, type FormSchema, type JsonValue } from "@rovinos/schemas/browser";
 import { getStrings } from "./strings.js";
 
 type FormProperty = FormSchema["properties"][string];
@@ -43,7 +39,10 @@ function arrayControl(
   select.id = id;
   select.multiple = true;
   if ("enum" in field.items) {
-    appendOptions(select, field.items.enum.map((value) => ({ value, label: value })));
+    appendOptions(
+      select,
+      field.items.enum.map((value) => ({ value, label: value })),
+    );
   } else {
     appendOptions(
       select,
@@ -68,7 +67,10 @@ function choiceControl(
       field.oneOf.map(({ const: value, title }) => ({ value, label: title })),
     );
   } else if (field.enum !== undefined) {
-    appendOptions(select, field.enum.map((value) => ({ value, label: value })));
+    appendOptions(
+      select,
+      field.enum.map((value) => ({ value, label: value })),
+    );
   }
   return select;
 }
@@ -210,8 +212,7 @@ function arrayValue(entry: FormEntry, required: boolean): JsonValue | undefined 
   const { field } = entry;
   const values = Array.from(entry.control.selectedOptions).flatMap((option) => {
     const index = Number(option.value);
-    const value =
-      "enum" in field.items ? field.items.enum[index] : field.items.anyOf[index]?.const;
+    const value = "enum" in field.items ? field.items.enum[index] : field.items.anyOf[index]?.const;
     return value === undefined ? [] : [value];
   });
   if (values.length === 0 && !required && field.default === undefined) {
@@ -304,25 +305,18 @@ function applySelectDefaults(entry: FormEntry): void {
     for (const option of Array.from(control.options)) {
       const index = Number(option.value);
       const value =
-        "enum" in field.items
-          ? field.items.enum[index]
-          : field.items.anyOf[index]?.const;
+        "enum" in field.items ? field.items.enum[index] : field.items.anyOf[index]?.const;
       option.selected = value !== undefined && defaults.has(value);
     }
     return;
   }
-  if (
-    field.type === "string" &&
-    (field.enum !== undefined || field.oneOf !== undefined)
-  ) {
+  if (field.type === "string" && (field.enum !== undefined || field.oneOf !== undefined)) {
     if (field.default === undefined) {
       control.selectedIndex = -1;
       return;
     }
     if (field.oneOf !== undefined) {
-      control.selectedIndex = field.oneOf.findIndex(
-        ({ const: value }) => value === field.default,
-      );
+      control.selectedIndex = field.oneOf.findIndex(({ const: value }) => value === field.default);
       return;
     }
     control.selectedIndex = field.enum?.indexOf(field.default) ?? -1;
@@ -344,7 +338,8 @@ function appendFormField(options: AppendFormFieldOptions): void {
   const label = element(form.ownerDocument, "label", field.title ?? name);
   label.htmlFor = id;
   const control = schemaFormControl(form.ownerDocument, field, name, id);
-  control.required = required.has(name) && !(isInputControl(control) && control.type === "checkbox");
+  control.required =
+    required.has(name) && !(isInputControl(control) && control.type === "checkbox");
   const entry = { control, field };
   applySelectDefaults(entry);
   if (field.description !== undefined) {

@@ -17,10 +17,7 @@ import { formatMessage, getStrings } from "../../kit/strings.js";
 
 type InputStrings = ReturnType<typeof getStrings>;
 type InputAction = "accept" | "decline" | "cancel" | "open_link" | "done";
-type AnswerSubmitter = (
-  request: InputAnswerRequest,
-  telemetryAction?: InputAction,
-) => void;
+type AnswerSubmitter = (request: InputAnswerRequest, telemetryAction?: InputAction) => void;
 
 /** Callbacks and host context needed to render and resolve a human input request. */
 export interface InputViewOptions {
@@ -154,16 +151,13 @@ function createAnswerSubmitter(options: {
       status.textContent = strings.inputResolveFailed;
       setControlsDisabled(main, false);
     };
-    void viewOptions.onAnswer(request).then(
-      (resolved) => {
-        if (resolved) {
-          status.textContent = resolveStatus(request.action, strings);
-          return;
-        }
-        showFailure();
-      },
-      showFailure,
-    );
+    void viewOptions.onAnswer(request).then((resolved) => {
+      if (resolved) {
+        status.textContent = resolveStatus(request.action, strings);
+        return;
+      }
+      showFailure();
+    }, showFailure);
   };
 }
 
@@ -250,23 +244,26 @@ function renderUrlInput(options: {
     cancelLabel: strings.cancelInput,
     onConfirm: () => {
       open.disabled = true;
-      void viewOptions.onOpenLink(url).then((opened) => {
-        if (opened) {
-          status.textContent = strings.urlOpened;
-          const done = element(document, "button", strings.inputDone);
-          done.type = "button";
-          done.addEventListener("click", () => {
-            submitAnswer({ requestId: input.requestId, action: "accept" }, "done");
-          });
-          urlSection.append(done);
-          return;
-        }
-        status.textContent = strings.linkRequestDenied;
-        open.disabled = false;
-      }, () => {
-        status.textContent = strings.linkRequestDenied;
-        open.disabled = false;
-      });
+      void viewOptions.onOpenLink(url).then(
+        (opened) => {
+          if (opened) {
+            status.textContent = strings.urlOpened;
+            const done = element(document, "button", strings.inputDone);
+            done.type = "button";
+            done.addEventListener("click", () => {
+              submitAnswer({ requestId: input.requestId, action: "accept" }, "done");
+            });
+            urlSection.append(done);
+            return;
+          }
+          status.textContent = strings.linkRequestDenied;
+          open.disabled = false;
+        },
+        () => {
+          status.textContent = strings.linkRequestDenied;
+          open.disabled = false;
+        },
+      );
     },
   });
   open.addEventListener("click", () => {
@@ -328,12 +325,9 @@ function renderList(
   const list = element(document, "ul");
   for (const input of inputs) {
     const item = element(document, "li");
-    const source = input.source === "agent" ? strings.inputAgent : input.serverId ?? strings.mcpServer;
-    const button = element(
-      document,
-      "button",
-      formatMessage(strings.openInput, { source }),
-    );
+    const source =
+      input.source === "agent" ? strings.inputAgent : (input.serverId ?? strings.mcpServer);
+    const button = element(document, "button", formatMessage(strings.openInput, { source }));
     button.type = "button";
     button.addEventListener("click", () => {
       options.onSelect(input.requestId);

@@ -5,11 +5,7 @@ import { join } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  INPUT_RESOURCE_URI,
-  loadInputHtml,
-  registerInputResource,
-} from "./input.js";
+import { INPUT_RESOURCE_URI, loadInputHtml, registerInputResource } from "./input.js";
 import { MCP_APP_HTML_MIME_TYPE } from "./approval.js";
 
 const temporaryDirectories: string[] = [];

@@ -63,8 +63,9 @@ describe("approval tool contracts", () => {
         answer: { email: "person@example.test" },
       }),
     ).toMatchObject({ requestId, action: "accept" });
-    expect(InputAnswerRequestSchema.safeParse({ requestId, action: "decline", answer: "no" }).success)
-      .toBe(false);
+    expect(
+      InputAnswerRequestSchema.safeParse({ requestId, action: "decline", answer: "no" }).success,
+    ).toBe(false);
     expect(InputAnswerResponseSchema.parse({ resolved: true })).toEqual({ resolved: true });
     expect(InputAppInputSchema.safeParse({ ...input, unexpected: true }).success).toBe(false);
   });

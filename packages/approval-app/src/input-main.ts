@@ -29,9 +29,7 @@ const telemetry = createAppTelemetry({
 });
 let rendered = false;
 
-function recordInputAction(
-  action: "accept" | "decline" | "cancel" | "open_link" | "done",
-): void {
+function recordInputAction(action: "accept" | "decline" | "cancel" | "open_link" | "done"): void {
   telemetry.record("ui.input", { action });
   void telemetry.flush();
 }
@@ -149,9 +147,7 @@ app.addEventListener("toolresult", (params) => {
     return;
   }
   try {
-    receiveToolResult(
-      parseJson(InputAppInputSchema.or(InputAppListSchema), text.text),
-    );
+    receiveToolResult(parseJson(InputAppInputSchema.or(InputAppListSchema), text.text));
   } catch {
     view.receive(undefined);
   }

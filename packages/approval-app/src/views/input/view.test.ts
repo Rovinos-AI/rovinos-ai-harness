@@ -120,7 +120,8 @@ describe("input MCP App view", () => {
       expect(onOpenLink).toHaveBeenCalledExactlyOnceWith("https://login.example.co.uk/connect");
       expect(document.body.textContent).toContain("I'm done");
     });
-    [...document.querySelectorAll("button")].find((button) => button.textContent === "I'm done")
+    [...document.querySelectorAll("button")]
+      .find((button) => button.textContent === "I'm done")
       ?.click();
     await vi.waitFor(() => {
       expect(onAnswer).toHaveBeenCalledWith({ requestId, action: "accept" });
