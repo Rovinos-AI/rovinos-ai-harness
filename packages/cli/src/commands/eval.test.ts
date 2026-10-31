@@ -93,8 +93,7 @@ describe("harness eval run", () => {
     const outputDirectory = join(temporaryDirectory ?? "", "reports");
     const trials: TrialSpec[] = [];
     let executorOptions:
-      | Parameters<NonNullable<EvalCommandDependencies["createExecutor"]>>[1]
-      | undefined;
+      Parameters<NonNullable<EvalCommandDependencies["createExecutor"]>>[1] | undefined;
     const { context, stdout, stderr } = createContext();
     const command = createEvalCommand({
       loadEval: () => Promise.resolve(evalApi),
@@ -156,7 +155,8 @@ describe("harness eval run", () => {
     const suitePath = await createSuite();
     const outputDirectory = join(temporaryDirectory ?? "", "reports");
     const trials: TrialSpec[] = [];
-    let executorOptions: { exportTelemetry: boolean; cassette: string; isolation: string } | undefined;
+    let executorOptions:
+      { exportTelemetry: boolean; cassette: string; isolation: string } | undefined;
     const { context, stdout, stderr } = createContext();
     const command = createEvalCommand({
       loadEval: () => Promise.resolve(evalApi),
@@ -198,7 +198,17 @@ describe("harness eval run", () => {
     });
 
     const exitCode = await main(
-      ["eval", "run", suitePath, "--filter", "selected_task", "--fail-under", "0.5", "--out", outputDirectory],
+      [
+        "eval",
+        "run",
+        suitePath,
+        "--filter",
+        "selected_task",
+        "--fail-under",
+        "0.5",
+        "--out",
+        outputDirectory,
+      ],
       context,
       [command],
     );

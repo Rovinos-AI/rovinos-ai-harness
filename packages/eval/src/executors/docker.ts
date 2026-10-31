@@ -2,8 +2,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createRuntime, foldRunState } from "@rovinos/core";
-import { HarnessError, type RunStatus } from "@rovinos/schemas";
-import type { Event } from "@rovinos/schemas";
+import { HarnessError, type Event, type RunStatus } from "@rovinos/schemas";
 import { runDockerProcess } from "@rovinos/sandbox";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";

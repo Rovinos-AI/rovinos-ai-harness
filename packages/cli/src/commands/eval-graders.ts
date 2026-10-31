@@ -102,9 +102,7 @@ async function gradeRecord(
   const key = `${record.taskId}\u0000${record.variantId}\u0000${String(record.trialIndex)}`;
   const events = eventsByTrial.get(key) ?? [];
   const graders = await Promise.all(
-    task.graders.map((spec) =>
-      gradeSpec(api, { spec, task, result: record.result, events }),
-    ),
+    task.graders.map((spec) => gradeSpec(api, { spec, task, result: record.result, events })),
   );
   return { ...gradeBase, graders };
 }

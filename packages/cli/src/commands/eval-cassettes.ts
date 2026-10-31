@@ -7,18 +7,12 @@ import type { EvalPackage, TrialSpec } from "./eval-types.js";
 /** Creates a model port that replays responses from the suite cassette directory. */
 export function cassetteModelFactory(suiteDirectory: string): (trial: TrialSpec) => ModelPort {
   return (trial) => {
-    const path = join(
-      suiteDirectory,
-      "cassettes",
-      trial.task.id,
-      `${trial.variantId}.json`,
-    );
+    const path = join(suiteDirectory, "cassettes", trial.task.id, `${trial.variantId}.json`);
     return {
       async complete(request) {
         const { CassetteMissError, FileCassetteStore } = await import("@rovinos/models");
-        const { modelRequestParametersHash, storedModelRequestHash } = await import(
-          "@rovinos/schemas/request-signature"
-        );
+        const { modelRequestParametersHash, storedModelRequestHash } =
+          await import("@rovinos/schemas/request-signature");
         const hash = storedModelRequestHash(request.messages, modelRequestParametersHash(request));
         const store = new FileCassetteStore(path);
         const response = await store.get(hash, request);

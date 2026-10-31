@@ -63,7 +63,10 @@ export async function collectTrialEvents(options: {
 }
 
 /** Creates the configured in-process or Docker trial executor. */
-export function createDefaultExecutor(api: EvalPackage, options: EvalExecutorOptions): TrialExecutor {
+export function createDefaultExecutor(
+  api: EvalPackage,
+  options: EvalExecutorOptions,
+): TrialExecutor {
   const dependencies = {
     exportTelemetry: options.exportTelemetry,
     models: options.config.models,
@@ -72,8 +75,7 @@ export function createDefaultExecutor(api: EvalPackage, options: EvalExecutorOpt
       : { secretResolver: options.context.secretResolver }),
   };
   if (options.isolation === "docker") {
-    const image =
-      process.env.HARNESS_EVAL_IMAGE ?? `ghcr.io/rovinos-ai/harness:${HARNESS_VERSION}`;
+    const image = process.env.HARNESS_EVAL_IMAGE ?? `ghcr.io/rovinos-ai/harness:${HARNESS_VERSION}`;
     return new api.DockerExecutor({ image }, dependencies);
   }
   return new api.InProcessExecutor({

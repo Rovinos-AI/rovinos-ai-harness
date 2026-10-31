@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
-import type { Event } from "@rovinos/schemas";
+import { FakeClock, SequentialIdGenerator, type Event, type Id } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
 import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/core";
-import type { Id } from "@rovinos/schemas";
 import { TrialResultSchema, evalSuiteCode } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
@@ -42,7 +40,10 @@ function trialKey(trial: TrialSpec): string {
 
 type RuntimeRunResult = Awaited<ReturnType<Runtime["run"]>>;
 
-async function readTokenizedEvents(runtime: Runtime, runId: Id | undefined): Promise<readonly Event[]> {
+async function readTokenizedEvents(
+  runtime: Runtime,
+  runId: Id | undefined,
+): Promise<readonly Event[]> {
   if (runId === undefined) {
     return [];
   }

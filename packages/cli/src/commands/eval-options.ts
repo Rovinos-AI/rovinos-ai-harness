@@ -65,7 +65,12 @@ export function createVariants(
     const parts = value.split("/");
     const provider = parts.length === 2 ? parts[0] : defaultProvider;
     const model = parts.length === 2 ? parts[1] : parts[0];
-    if (provider === undefined || model === undefined || provider.length === 0 || model.length === 0) {
+    if (
+      provider === undefined ||
+      model === undefined ||
+      provider.length === 0 ||
+      model.length === 0
+    ) {
       throw new EvalOptionError("usage");
     }
     try {

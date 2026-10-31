@@ -137,8 +137,7 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   if (results.some(({ status }) => status === "skipped_budget")) {
     return ExitCode.budgetExceeded;
   }
-  return failUnder !== undefined &&
-    report.aggregates.some(({ passRate }) => passRate < failUnder)
+  return failUnder !== undefined && report.aggregates.some(({ passRate }) => passRate < failUnder)
     ? ExitCode.failure
     : ExitCode.ok;
 }
@@ -171,7 +170,11 @@ export function createEvalCommand(dependencies: EvalCommandDependencies = {}): C
         .option("--seed <n>", "deterministic suite seed")
         .option("--fail-under <rate>", "fail when any pass rate is below this value")
         .option("--max-cost-usd <amount>", "stop starting trials after this cumulative cost")
-        .option("--export-telemetry", "export eval telemetry through the configured pipeline", false)
+        .option(
+          "--export-telemetry",
+          "export eval telemetry through the configured pipeline",
+          false,
+        )
         .action(async (suitePath: string, options: EvalOptions) => {
           const api = await (dependencies.loadEval ?? (() => import("@rovinos/eval")))();
           const result = await runEvalCommand({
