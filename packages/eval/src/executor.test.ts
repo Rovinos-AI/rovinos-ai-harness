@@ -96,6 +96,23 @@ describe("prepareTrial", () => {
     await expect(prepareTrial(trial(join(root, "first")))).rejects.toThrow();
   });
 
+  it("applies validated variant overrides without sharing trial storage or keys", async () => {
+    const root = await createDirectory();
+    const baseline = trial(join(root, "baseline"));
+    const overridden = await prepareTrial({
+      ...baseline,
+      variant: {
+        ...baseline.variant,
+        configOverrides: { run: { budgets: { maxSteps: 9 } } },
+      },
+    });
+
+    expect(overridden.config.run.budgets.maxSteps).toBe(9);
+    expect(overridden.config.store.dialect).toBe("sqlite");
+    expect(overridden.config.vault.backend).toBe("sqlite");
+    expect(overridden.config.keys.currentKeyId).toBe("trial_2a");
+  });
+
   it("rejects a filesystem root as a trial directory", async () => {
     await expect(prepareTrial(trial("/"))).rejects.toThrow("trial_workdir_invalid");
   });

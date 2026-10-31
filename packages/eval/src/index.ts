@@ -36,7 +36,10 @@ export {
   TrialUsageSchema,
   ApprovalCountsSchema,
   TrialExecutionMetricsSchema,
+  EvalVariantsFileSchema,
+  parseEvalVariants,
   type EvalVariant,
+  type EvalVariantsFile,
   type EvalTrialRecord,
   type ApprovalCounts,
   type TrialExecutionMetrics,
@@ -120,3 +123,23 @@ export { passAtK, summarize, aggregateEvalMetrics } from "./report/aggregate.js"
 export { buildEvalReport, serializeEvalReport } from "./report/json.js";
 export { renderMarkdownReport } from "./report/markdown.js";
 export { renderJunitReport } from "./report/junit.js";
+export {
+  bootstrapMeanDifference,
+  BootstrapMeanDifferenceSchema,
+  fisherExactTest,
+  holmBonferroni,
+  SeededRandom,
+  type BootstrapMeanDifference,
+  type ContingencyTable,
+} from "./stats.js";
+export {
+  compareEvalReports,
+  EvalComparisonMetricSchema,
+  EvalComparisonReportSchema,
+  EvalComparisonSchema,
+  renderComparisonTable,
+  type ComparisonOptions,
+  type EvalComparison,
+  type EvalComparisonMetric,
+  type EvalComparisonReport,
+} from "./report/compare.js";
