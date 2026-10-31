@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, JsonValue, formSchemaToZod, type Id, type InputRequest } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
-import { inputRequired, type McpServer, type ServerContext } from "@modelcontextprotocol/server";
+import {
+  inputRequired,
+  type CallToolResult,
+  type McpServer,
+  type ServerContext,
+} from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";
 import type { ControlPlaneAuditHandler, ControlPlanePrincipal } from "../auth.js";
@@ -10,11 +15,7 @@ import type {
   ConfirmationGate,
   HumanInputResult,
 } from "../confirmation-gate.js";
-import {
-  inputRequestInputSchema,
-  inputResolutionOutputSchema,
-  type InputResolutionOutput,
-} from "../schemas.js";
+import { inputRequestInputSchema, inputResolutionOutputSchema } from "../schemas.js";
 import type { ResolveInputOperation } from "./answer-input.js";
 import { findInputRequest, findPendingInput } from "./input-state.js";
 
@@ -260,11 +261,7 @@ function inputResult(input: {
   readonly resolved: boolean;
   readonly code?: string;
   readonly text?: string;
-}): {
-  readonly structuredContent: InputResolutionOutput;
-  readonly content: readonly [{ readonly type: "text"; readonly text: string }];
-  readonly isError?: true;
-} {
+}): CallToolResult {
   const code = input.code === undefined ? undefined : Code.safeParse(input.code);
   const result = inputResolutionOutputSchema.parse({
     resolved: input.resolved,
