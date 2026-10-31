@@ -59,7 +59,7 @@ export function summarize(values: readonly number[]): {
 /** Aggregates metadata-only trial metrics by task and variant in stable order. */
 export function aggregateEvalMetrics(input: readonly EvalTrialMetrics[]): EvalAggregate[] {
   const trials = EvalTrialMetricsSchema.array().parse(input);
-  const groups = new Map<string, EvalTrialMetrics[]>();
+  const groups = new Map<string, [EvalTrialMetrics, ...EvalTrialMetrics[]]>();
   for (const trial of trials) {
     const key = `${trial.taskId}\u0000${trial.variantId}`;
     const group = groups.get(key);
@@ -73,9 +73,6 @@ export function aggregateEvalMetrics(input: readonly EvalTrialMetrics[]): EvalAg
   const aggregates: EvalAggregate[] = [];
   for (const group of groups.values()) {
     const first = group[0];
-    if (first === undefined) {
-      continue;
-    }
     const n = group.length;
     const passes = group.filter(({ passed }) => passed).length;
     const passRate = passes / n;

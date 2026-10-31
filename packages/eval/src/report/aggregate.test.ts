@@ -30,6 +30,8 @@ describe("eval report aggregation", () => {
     expect([1, 2, 3, 4, 5].map((k) => passAtK(5, 2, k))).toEqual([0.4, 0.7, 0.9, 1, 1]);
     expect([1, 2, 3, 4, 5].map((k) => passAtK(5, 0, k))).toEqual([0, 0, 0, 0, 0]);
     expect([1, 2, 3, 4, 5].map((k) => passAtK(5, 5, k))).toEqual([1, 1, 1, 1, 1]);
+    expect(() => passAtK(2, 3, 1)).toThrow();
+    expect(() => passAtK(2, 1, 0)).toThrow();
   });
 
   it("uses the nearest-rank p95 and an averaged even-sample median", () => {
@@ -66,5 +68,19 @@ describe("eval report aggregation", () => {
       steps: { mean: 3, median: 3, p95: 5 },
       latencyMs: { mean: 12, median: 12, p95: 14 },
     });
+  });
+
+  it("sorts multiple task and variant groups independently of input order", () => {
+    const report = aggregateEvalMetrics([
+      metric(0, true),
+      EvalTrialMetricsSchema.parse({ ...metric(0, true), taskId: "task_b" }),
+      EvalTrialMetricsSchema.parse({ ...metric(0, true), variantId: "variant_z" }),
+    ]);
+
+    expect(report.map(({ taskId, variantId }) => `${taskId}/${variantId}`)).toEqual([
+      "task_b/baseline",
+      "task_one/baseline",
+      "task_one/variant_z",
+    ]);
   });
 });

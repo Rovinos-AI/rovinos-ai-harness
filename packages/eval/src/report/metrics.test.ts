@@ -87,11 +87,15 @@ describe("eval report metrics", () => {
         outputTokens: 6,
         costMicros: 7,
       }),
+      reportGrade(true, [], "file_diff"),
     ]);
 
     expect(metric).toMatchObject({
       passed: false,
-      graders: [{ graderId: "file_diff", pass: false, codes: ["content_mismatch"] }],
+      graders: [
+        { graderId: "file_diff", pass: false, codes: ["content_mismatch"] },
+        { graderId: "file_diff", pass: true, codes: [] },
+      ],
       inputTokens: 7,
       outputTokens: 9,
       costMicros: 11,

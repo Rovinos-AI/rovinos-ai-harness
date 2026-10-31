@@ -63,4 +63,62 @@ describe("Markdown eval report", () => {
       "
     `);
   });
+
+  it("sorts multiple variants and tasks and handles reports without failures", () => {
+    const report = buildEvalReport({
+      trials: [
+        reportTrial({ taskId: "task_b", variantId: "variant_b" }),
+        reportTrial({ taskId: "task_a", variantId: "variant_b" }),
+        reportTrial({ taskId: "task_a", variantId: "variant_a", trialIndex: 1 }),
+        reportTrial({ taskId: "task_a", variantId: "variant_a", trialIndex: 0 }),
+      ],
+      grades: [
+        {
+          taskId: "task_b",
+          variantId: "variant_b",
+          trialIndex: 0,
+          graders: [reportGrade(false, ["failure_b"])],
+        },
+        {
+          taskId: "task_a",
+          variantId: "variant_b",
+          trialIndex: 0,
+          graders: [reportGrade(false, ["failure_variant_b"])],
+        },
+        {
+          taskId: "task_a",
+          variantId: "variant_a",
+          trialIndex: 1,
+          graders: [reportGrade(false, ["failure_trial_1"])],
+        },
+        {
+          taskId: "task_a",
+          variantId: "variant_a",
+          trialIndex: 0,
+          graders: [reportGrade(false, ["failure_trial_0"])],
+        },
+      ],
+    });
+    const markdown = renderMarkdownReport({
+      ...report,
+      aggregates: [...report.aggregates].reverse(),
+      trials: [...report.trials].reverse(),
+    });
+
+    expect(markdown.indexOf("## Variant `variant_a`")).toBeLessThan(
+      markdown.indexOf("## Variant `variant_b`"),
+    );
+    expect(markdown.indexOf("| task_a |")).toBeLessThan(markdown.indexOf("| task_b |"));
+    expect(markdown.indexOf("trial 0: `failure_trial_0`")).toBeLessThan(
+      markdown.indexOf("trial 1: `failure_trial_1`"),
+    );
+    expect(markdown).toContain("`failure_variant_b`");
+    const successReport = buildEvalReport({
+      trials: [reportTrial()],
+      grades: [
+        { taskId: "task_one", variantId: "baseline", trialIndex: 0, graders: [reportGrade(true)] },
+      ],
+    });
+    expect(renderMarkdownReport(successReport)).toContain("## Failures\n\nNo failures.");
+  });
 });
