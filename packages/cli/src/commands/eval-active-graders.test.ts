@@ -349,13 +349,15 @@ it("keeps malformed judge output off disk while charging failed verdict usage", 
 
 it("replays repaired judge verdicts under the original vote identity with all attempt usage", async () => {
   const { suite, context, secrets } = await setup([judge], 1);
-  const complete = vi.fn<ProviderAdapter["complete"]>(() =>
-    Promise.resolve({
+  let callNumber = 0;
+  const complete = vi.fn<ProviderAdapter["complete"]>(() => {
+    callNumber += 1;
+    return Promise.resolve({
       parts: [
         {
           type: "text",
           text:
-            complete.mock.calls.length === 1
+            callNumber === 1
               ? '{"reason":"synthetic private reasoning"}'
               : '{"criteria":[{"id":"criterion","met":true}],"verdict":"pass"}',
         },
@@ -363,8 +365,8 @@ it("replays repaired judge verdicts under the original vote identity with all at
       usage: { inputTokens: 2, outputTokens: 1, cacheReadTokens: 1 },
       finishReason: "stop",
       latencyMs: 1,
-    }),
-  );
+    });
+  });
   const original = core.createConfiguredModelPort;
   const configured = vi
     .spyOn(core, "createConfiguredModelPort")

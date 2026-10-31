@@ -97,7 +97,7 @@ async function finishTrial(context: TrialGrading, grades: EvalGradeRecord[]): Pr
   const { api, trial, capabilities } = context;
   const results = await Promise.all(
     trial.task.graders.map((spec) =>
-      spec.type === "no_canary_leak" ? undefined : gradeSpec(spec, context),
+      spec.type === "no_canary_leak" ? Promise.resolve(undefined) : gradeSpec(spec, context),
     ),
   );
   // Privacy checks include artifacts produced by every other grader, regardless of suite order.
