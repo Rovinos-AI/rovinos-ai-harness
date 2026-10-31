@@ -2,9 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { HarnessError } from "@rovinos/schemas";
-import type { Event } from "@rovinos/schemas";
-import { CommanderError } from "commander";
-import { z } from "zod";
+import { Option } from "commander";
 import type { EvalSuite } from "@rovinos/eval";
 import type { CommandModule } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
@@ -34,19 +32,6 @@ class EvalCliError extends HarnessError {
   }
 }
 
-function validateGraders(suite: EvalSuite): void {
-  for (const task of suite.tasks) {
-    for (const grader of task.graders) {
-      if (grader.type === "test_command") {
-        throw new EvalCliError("eval_test_command_context_unavailable");
-      }
-      if (grader.type === "llm_judge") {
-        throw new EvalCliError("eval_llm_judge_context_unavailable");
-      }
-    }
-  }
-}
-
 class EvalCommandExitError extends HarnessError {
   override readonly code: "budget_exceeded" | "eval_failed";
 
@@ -56,25 +41,15 @@ class EvalCommandExitError extends HarnessError {
   }
 }
 
-async function runEvalCommand(
-  api: EvalPackage,
-  context: Parameters<CommandModule["register"]>[1],
-  suitePath: string,
-  options: EvalOptions,
-  dependencies: EvalCommandDependencies,
-): Promise<ExitCode> {
-  const config = await context.loadConfig();
-  const absoluteSuitePath = resolve(suitePath);
-  const suite = filterSuite(api, await api.loadSuite(absoluteSuitePath), options.filter);
-  validateGraders(suite);
-  if (
-    (options.isolation !== undefined &&
-      !z.enum(["inprocess", "docker"]).safeParse(options.isolation).success) ||
-    (options.cassette !== undefined &&
-      !z.enum(["record", "replay", "off"]).safeParse(options.cassette).success)
-  ) {
-    throw new EvalCliError("usage");
-  }
+interface EvalRunCommandArgs {
+  readonly api: EvalPackage;
+  readonly context: Parameters<CommandModule["register"]>[1];
+  readonly suitePath: string;
+  readonly options: EvalOptions;
+  readonly dependencies: EvalCommandDependencies;
+}
+
+function executionModes(options: EvalOptions) {
   const cassette = options.cassette ?? (options.isolation === "docker" ? "off" : "replay");
   const isolation = options.isolation ?? (cassette === "off" ? "docker" : "inprocess");
   if (isolation === "docker") {
@@ -84,10 +59,52 @@ async function runEvalCommand(
         : "eval_docker_live_model_unavailable",
     );
   }
-  const failUnder = options.failUnder === undefined ? undefined : nonnegativeNumber(options.failUnder);
+  return { cassette, isolation };
+}
+
+function parseFailUnder(options: EvalOptions): number | undefined {
+  const failUnder =
+    options.failUnder === undefined ? undefined : nonnegativeNumber(options.failUnder);
   if (failUnder !== undefined && failUnder > 1) {
     throw new EvalCliError("usage");
   }
+  return failUnder;
+}
+
+async function runTrialPlan(args: {
+  readonly api: EvalPackage;
+  readonly suite: EvalSuite;
+  readonly variants: ReturnType<typeof createVariants>;
+  readonly executor: Awaited<ReturnType<NonNullable<EvalCommandDependencies["createExecutor"]>>>;
+  readonly outDir: string;
+  readonly options: EvalOptions;
+}) {
+  const { api, suite, variants, executor, outDir, options } = args;
+  return api.runEval(suite, variants, executor, {
+    outDir,
+    concurrency: options.concurrency === undefined ? 2 : positiveInteger(options.concurrency),
+    ...(options.trials === undefined ? {} : { trials: positiveInteger(options.trials) }),
+    ...(options.seed === undefined ? {} : { seed: positiveInteger(options.seed, true) }),
+    ...(options.maxCostUsd === undefined
+      ? {}
+      : { maxCostUsd: nonnegativeNumber(options.maxCostUsd) }),
+  });
+}
+
+async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
+  const { api, context, suitePath, options, dependencies } = args;
+  const config = await context.loadConfig();
+  const absoluteSuitePath = resolve(suitePath);
+  const suite = filterSuite(api, await api.loadSuite(absoluteSuitePath), options.filter);
+  const grader = unavailableGrader(suite);
+  if (grader === "test_command") {
+    throw new EvalCliError("eval_test_command_context_unavailable");
+  }
+  if (grader === "llm_judge") {
+    throw new EvalCliError("eval_llm_judge_context_unavailable");
+  }
+  const { cassette, isolation } = executionModes(options);
+  const failUnder = parseFailUnder(options);
   const variants = createVariants(api, options.model, cassette, config);
   const outDir = resolve(
     options.out ?? join(process.cwd(), "eval-out", String(context.clock.now())),
@@ -100,17 +117,15 @@ async function runEvalCommand(
     exportTelemetry: options.exportTelemetry ?? false,
     context,
   });
-  const results = await api.runEval(suite, variants, executor, {
-    outDir,
-    concurrency: options.concurrency === undefined ? 2 : positiveInteger(options.concurrency),
-    ...(options.trials === undefined ? {} : { trials: positiveInteger(options.trials) }),
-    ...(options.seed === undefined ? {} : { seed: positiveInteger(options.seed, true) }),
-    ...(options.maxCostUsd === undefined
-      ? {}
-      : { maxCostUsd: nonnegativeNumber(options.maxCostUsd) }),
-  });
+  const results = await runTrialPlan({ api, suite, variants, executor, outDir, options });
   const records = api.parseEvalTrialJsonl(await readFile(join(outDir, "trials.jsonl"), "utf8"));
-  const eventsByTrial = await collectTrialEvents(api, suite, variants, records, executor);
+  const eventsByTrial = await collectTrialEvents({
+    api,
+    suite,
+    variants,
+    records,
+    executor,
+  });
   if (cassette === "record") {
     await recordCassettes(dirname(absoluteSuitePath), records, eventsByTrial);
   }
@@ -141,8 +156,16 @@ export function createEvalCommand(dependencies: EvalCommandDependencies = {}): C
         .option("--model <provider/model[,provider/model]>", "comma-separated model variants")
         .option("--trials <n>", "trials per task")
         .option("--filter <tag|taskId>", "select tasks by tag or id")
-        .option("--isolation <mode>", "inprocess or docker")
-        .option("--cassette <mode>", "record, replay, or off")
+        .addOption(
+          new Option("--isolation <mode>", "inprocess or docker").choices(["inprocess", "docker"]),
+        )
+        .addOption(
+          new Option("--cassette <mode>", "record, replay, or off").choices([
+            "record",
+            "replay",
+            "off",
+          ]),
+        )
         .option("--concurrency <n>", "maximum concurrent trials")
         .option("--out <dir>", "report output directory")
         .option("--seed <n>", "deterministic suite seed")
@@ -151,7 +174,13 @@ export function createEvalCommand(dependencies: EvalCommandDependencies = {}): C
         .option("--export-telemetry", "export eval telemetry through the configured pipeline", false)
         .action(async (suitePath: string, options: EvalOptions) => {
           const api = await (dependencies.loadEval ?? (() => import("@rovinos/eval")))();
-          const result = await runEvalCommand(api, context, suitePath, options, dependencies);
+          const result = await runEvalCommand({
+            api,
+            context,
+            suitePath,
+            options,
+            dependencies,
+          });
           if (result !== ExitCode.ok) {
             throw new EvalCommandExitError(
               result === ExitCode.budgetExceeded ? "budget_exceeded" : "eval_failed",

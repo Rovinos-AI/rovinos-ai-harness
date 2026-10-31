@@ -2,9 +2,8 @@
 import type { HarnessConfig } from "@rovinos/config";
 import { Code, HarnessError } from "@rovinos/schemas";
 import { CommanderError } from "commander";
-import type { EvalVariant, EvalSuite } from "@rovinos/eval";
-
-type EvalPackage = typeof import("@rovinos/eval");
+import type { EvalSuite, EvalVariant } from "@rovinos/eval";
+import type { EvalPackage } from "./eval-types.js";
 
 class EvalOptionError extends HarnessError {
   override readonly code: "usage" | "eval_filter_empty";
@@ -15,6 +14,7 @@ class EvalOptionError extends HarnessError {
   }
 }
 
+/** Values parsed by Commander for `harness eval run`. */
 export interface EvalOptions {
   readonly model?: string;
   readonly trials?: string;
@@ -29,6 +29,7 @@ export interface EvalOptions {
   readonly exportTelemetry?: boolean;
 }
 
+/** Parses a positive integer command-line value. */
 export function positiveInteger(value: string, allowZero = false): number {
   const parsed = Number(value);
   if (
@@ -40,6 +41,7 @@ export function positiveInteger(value: string, allowZero = false): number {
   return parsed;
 }
 
+/** Parses a non-negative numeric command-line value. */
 export function nonnegativeNumber(value: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -48,13 +50,14 @@ export function nonnegativeNumber(value: string): number {
   return parsed;
 }
 
+/** Creates variants from the model option and configured default provider. */
 export function createVariants(
   api: EvalPackage,
   modelOption: string | undefined,
   cassette: "record" | "replay" | "off",
   config: HarnessConfig,
 ): EvalVariant[] {
-  const defaultProvider = config.models?.providers[0]?.id ?? "openai";
+  const defaultProvider = config.models.providers[0]?.id ?? "openai";
   if (modelOption === undefined) {
     return [{ id: "default", ...(cassette === "off" ? {} : { cassetteMode: cassette }) }];
   }
@@ -80,6 +83,7 @@ export function createVariants(
   );
 }
 
+/** Returns a suite containing only tasks selected by the optional filter. */
 export function filterSuite(
   api: EvalPackage,
   suite: EvalSuite,

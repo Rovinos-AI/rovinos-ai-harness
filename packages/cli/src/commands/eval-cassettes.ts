@@ -4,6 +4,7 @@ import type { Event } from "@rovinos/schemas";
 import type { ModelPort } from "@rovinos/core";
 import type { EvalPackage, TrialSpec } from "./eval-types.js";
 
+/** Creates a model port that replays responses from the suite cassette directory. */
 export function cassetteModelFactory(suiteDirectory: string): (trial: TrialSpec) => ModelPort {
   return (trial) => {
     const path = join(
@@ -46,6 +47,7 @@ function trialIdentity(record: {
   return `${record.taskId}\u0000${record.variantId}\u0000${String(record.trialIndex)}`;
 }
 
+/** Writes tokenized model request and response events to cassette files. */
 export async function recordCassettes(
   suiteDirectory: string,
   records: ReturnType<EvalPackage["parseEvalTrialJsonl"]>,

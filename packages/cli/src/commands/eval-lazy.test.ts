@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@rovinos/config";
 import { afterEach, expect, it, vi } from "vitest";
+import type * as EvalApi from "@rovinos/eval";
 import type { CliContext } from "../command.js";
 import { createOutput } from "../output.js";
 
@@ -14,7 +15,7 @@ it("loads the eval package only when the eval command runs", async () => {
   const loaded: boolean[] = [];
   vi.doMock("@rovinos/eval", async () => {
     loaded.push(true);
-    return await vi.importActual<typeof import("@rovinos/eval")>("@rovinos/eval");
+    return vi.importActual<typeof EvalApi>("@rovinos/eval");
   });
 
   const { evalCommand } = await import("./eval.js");

@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import type { EvalPackage } from "./eval-types.js";
 import { cassetteModelFactory } from "./eval-cassettes.js";
 
+/** Runtime configuration passed to an eval executor. */
 export interface EvalExecutorOptions {
   readonly isolation: "inprocess" | "docker";
   readonly cassette: "record" | "replay" | "off";
@@ -17,6 +18,7 @@ export interface EvalExecutorOptions {
   readonly context: Parameters<CommandModule["register"]>[1];
 }
 
+/** Optional executor factory for tests and alternate execution environments. */
 export interface EvalExecutorDependencies {
   readonly createExecutor?: (
     api: EvalPackage,
@@ -60,10 +62,11 @@ export async function collectTrialEvents(options: {
   return eventsByTrial;
 }
 
+/** Creates the configured in-process or Docker trial executor. */
 export function createDefaultExecutor(api: EvalPackage, options: EvalExecutorOptions): TrialExecutor {
   const dependencies = {
     exportTelemetry: options.exportTelemetry,
-    ...(options.config.models === undefined ? {} : { models: options.config.models }),
+    models: options.config.models,
     ...(options.context.secretResolver === undefined
       ? {}
       : { secretResolver: options.context.secretResolver }),

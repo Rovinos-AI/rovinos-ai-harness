@@ -2890,6 +2890,7 @@ __metadata:
     "@rovinos/eval": "workspace:^"
     "@rovinos/host": "workspace:^"
     "@rovinos/mcp": "workspace:^"
+    "@rovinos/models": "workspace:^"
     "@rovinos/pii": "workspace:^"
     "@rovinos/policy": "workspace:^"
     "@rovinos/replay": "workspace:^"

@@ -64,16 +64,18 @@ function createExecutor(
   trials: TrialSpec[],
 ): TrialExecutor {
   return {
-    run: async (trial) => {
+    run: (trial) => {
       trials.push(trial);
-      return evalApi.TrialResultSchema.parse({
-        status,
-        dbPath: join(trial.workDir, "data", "harness.db"),
-        workspaceDir: join(trial.workDir, "workspace"),
-        durationMs: 1,
-        usage: { inputTokens: 2, outputTokens: 3, costMicros },
-        exitCode: status === "completed" ? 0 : 1,
-      });
+      return Promise.resolve(
+        evalApi.TrialResultSchema.parse({
+          status,
+          dbPath: join(trial.workDir, "data", "harness.db"),
+          workspaceDir: join(trial.workDir, "workspace"),
+          durationMs: 1,
+          usage: { inputTokens: 2, outputTokens: 3, costMicros },
+          exitCode: status === "completed" ? 0 : 1,
+        }),
+      );
     },
   };
 }

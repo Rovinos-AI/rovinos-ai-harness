@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { EvalPackage } from "./eval-types.js";
 import type { EvalReport } from "@rovinos/eval";
 
+/** Writes metadata-only report formats to the output directory. */
 export async function writeReportFiles(
   api: EvalPackage,
   outDir: string,
@@ -16,6 +17,7 @@ export async function writeReportFiles(
   ]);
 }
 
+/** Prints aggregate report rows to the CLI table output. */
 export function writeSummaryTable(
   context: { out: { table(rows: readonly (readonly (string | number | boolean)[])[]): void } },
   report: EvalReport,
