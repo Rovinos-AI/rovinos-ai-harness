@@ -3,7 +3,7 @@
 ## Pull requests
 
 For pull requests and release tags, the `static` job builds the harness and sandbox images into local
-OCI archives. It does not push images, sign them, or publish anything. Pinned Syft and Trivy
+Docker archives. It does not push images, sign them, or publish anything. Pinned Syft and Trivy
 containers read those archives without mounting the Docker socket. Syft writes a CycloneDX JSON SBOM
 for each image. Trivy writes a JSON vulnerability report that
 `scripts/security/scan-image.ts` normalizes and evaluates with the shared policy evaluator from

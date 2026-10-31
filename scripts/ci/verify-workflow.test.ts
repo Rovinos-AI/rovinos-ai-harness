@@ -233,11 +233,15 @@ describe("GitHub workflows", () => {
     expect(positiveControl?.run).toContain("scripts/security/scan-image.ts --positive-control");
     expect(build?.if).toBe("github.event_name == 'pull_request' || github.ref_type == 'tag'");
     expect(scan?.if).toBe("github.event_name == 'pull_request' || github.ref_type == 'tag'");
-    expect(buildCommand).toContain("type=oci,dest=$RUNNER_TEMP/harness.oci.tar");
-    expect(buildCommand).toContain("type=oci,dest=$RUNNER_TEMP/harness-sandbox.oci.tar");
+    expect(buildCommand).toContain("type=docker,dest=$RUNNER_TEMP/harness.tar");
+    expect(buildCommand).toContain("type=docker,dest=$RUNNER_TEMP/harness-sandbox.tar");
     expect(buildCommand).not.toContain("--push");
     expect(scan?.env?.SYFT_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/u);
     expect(scan?.env?.TRIVY_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/u);
+    expect(scanCommand).toContain('local image_archive="$RUNNER_TEMP/$image_name.tar"');
+    expect(scanCommand).toContain('--volume "$image_archive:/image.tar:ro"');
+    expect(scanCommand).toContain("scan docker-archive:/image.tar");
+    expect(scanCommand).toContain("image --input /image.tar");
     expect(scanCommand).toContain("cyclonedx-json=");
     expect(scanCommand).toContain("scripts/security/scan-image.ts");
     expect(scanCommand).not.toContain("cosign sign");

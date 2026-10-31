@@ -160,13 +160,13 @@ jobs:
             --file Dockerfile \
             --tag harness:pr \
             --provenance=false \
-            --output "type=oci,dest=$RUNNER_TEMP/harness.oci.tar" \
+            --output "type=docker,dest=$RUNNER_TEMP/harness.tar" \
             .
           docker buildx build \
             --file Dockerfile.sandbox \
             --tag harness-sandbox:pr \
             --provenance=false \
-            --output "type=oci,dest=$RUNNER_TEMP/harness-sandbox.oci.tar" \
+            --output "type=docker,dest=$RUNNER_TEMP/harness-sandbox.tar" \
             .
       - name: Generate PR SBOMs and scan images
         if: github.event_name == 'pull_request' || github.ref_type == 'tag'
@@ -179,12 +179,12 @@ jobs:
 
           scan_image() {
             local image_name="$1"
-            local image_archive="$RUNNER_TEMP/$image_name.oci.tar"
+            local image_archive="$RUNNER_TEMP/$image_name.tar"
             if ! docker run --rm \
               --volume "$image_archive:/image.tar:ro" \
               --volume "$PWD/reports/image-vulnerability:/reports" \
               --env SYFT_CHECK_FOR_APP_UPDATE=false \
-              "$SYFT_IMAGE" scan oci-archive:/image.tar \
+              "$SYFT_IMAGE" scan docker-archive:/image.tar \
               --output "cyclonedx-json=/reports/$image_name.cdx.json"; then
               return 1
             fi
