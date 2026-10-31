@@ -8,7 +8,7 @@ import { defineSuite } from "./load.js";
 import { EvalRunnerError, runEval } from "./runner.js";
 import type { TrialExecutor } from "./executor.js";
 import { completedTrialResult } from "../test-utils/trial-result.js";
-import { TrialResultSchema } from "./trial.js";
+import { EvalTrialRecordSchema } from "./trial.js";
 import type { TrialResult, TrialSpec } from "./trial.js";
 
 const directories: string[] = [];
@@ -86,7 +86,7 @@ describe("runEval", () => {
     const lines = (await readFile(join(outDir, "trials.jsonl"), "utf8"))
       .trim()
       .split("\n")
-      .map((line) => parseJson(TrialResultSchema, line));
+      .map((line) => parseJson(EvalTrialRecordSchema, line));
     const resultFile = await readFile(join(outDir, "trials.jsonl"), "utf8");
 
     expect(maxActive).toBe(2);
@@ -98,8 +98,13 @@ describe("runEval", () => {
     expect(resultFile).not.toContain("synthetic failure");
     expect(new Set(results.map(({ dbPath }) => dbPath)).size).toBe(4);
     expect(lines).toHaveLength(4);
-    expect(lines[0]?.workspaceDir).toBe(results[1]?.workspaceDir);
-    expect(lines.at(-1)?.workspaceDir).toBe(results[0]?.workspaceDir);
+    expect(lines[0]?.result.workspaceDir).toBe(results[1]?.workspaceDir);
+    expect(lines.at(-1)?.result.workspaceDir).toBe(results[0]?.workspaceDir);
+    expect(lines[0]).toMatchObject({
+      schemaVersion: 1,
+      taskId: "task_one",
+      variantId: "baseline",
+    });
   });
 
   it("rejects duplicate variant ids before starting trials", async () => {

@@ -87,6 +87,20 @@ export const TrialUsageSchema = z
   })
   .strict();
 
+/** Metadata-only runtime counters collected from one trial's event log. */
+export const TrialExecutionMetricsSchema = z
+  .object({
+    steps: z.number().int().nonnegative(),
+    repairAttempts: z.number().int().nonnegative(),
+    fallbackDepth: z.number().int().nonnegative(),
+    deniedToolCalls: z.number().int().nonnegative(),
+    budgetExceeded: z.boolean(),
+  })
+  .strict();
+
+/** Inferred runtime counters collected for one trial. */
+export type TrialExecutionMetrics = z.infer<typeof TrialExecutionMetricsSchema>;
+
 /** Metadata-only result returned and streamed for one trial. */
 export const TrialResultSchema = z
   .object({
@@ -96,6 +110,13 @@ export const TrialResultSchema = z
     workspaceDir: z.string().min(1),
     durationMs: z.number().int().nonnegative(),
     usage: TrialUsageSchema,
+    metrics: TrialExecutionMetricsSchema.default({
+      steps: 0,
+      repairAttempts: 0,
+      fallbackDepth: 0,
+      deniedToolCalls: 0,
+      budgetExceeded: false,
+    }),
     approvals: ApprovalCountsSchema.default({ approved: 0, denied: 0, edited: 0 }),
     unsafeAutoApprove: z.boolean().default(false),
     exitCode: z.number().int().optional(),
@@ -115,3 +136,19 @@ export const TrialResultSchema = z
 
 /** Inferred metadata-only result from one trial. */
 export type TrialResult = z.infer<typeof TrialResultSchema>;
+
+/** Versioned JSONL record linking a validated trial result to its task and variant. */
+export const EvalTrialRecordSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    suiteCode: Code,
+    taskId: Code,
+    variantId: Code,
+    trialIndex: z.number().int().nonnegative(),
+    seed: z.number().int().nonnegative().max(0xffff_ffff),
+    result: TrialResultSchema,
+  })
+  .strict();
+
+/** Inferred versioned line written to `trials.jsonl`. */
+export type EvalTrialRecord = z.infer<typeof EvalTrialRecordSchema>;

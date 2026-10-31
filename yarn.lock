@@ -3014,6 +3014,7 @@ __metadata:
     "@rovinos/schemas": "workspace:^"
     "@rovinos/telemetry": "workspace:^"
     "@rovinos/vault": "workspace:^"
+    saxes: "npm:6.0.0"
     vitest: "npm:4.1.12"
     zod: "npm:4.6.7"
   languageName: unknown
@@ -9269,7 +9270,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"saxes@npm:^6.0.0":
+"saxes@npm:6.0.0, saxes@npm:^6.0.0":
   version: 6.0.0
   resolution: "saxes@npm:6.0.0"
   dependencies:
