@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { IdGenerator } from "@rovinos/core";
 import type { ModelGateway } from "@rovinos/models";
-import { Code, createVerdictSchema, ModelRequestSchema, parseYaml, VerdictSchema } from "@rovinos/schemas";
-import type { Event, JsonValue, ModelRequest, ModelUsage } from "@rovinos/schemas";
+import { Code, createVerdictSchema, ModelRequestSchema, parseYaml } from "@rovinos/schemas";
+import type { Event, JsonValue, ModelRequest, ModelUsage, Verdict } from "@rovinos/schemas";
 import { z } from "zod";
 import { JudgeRubricSchema, LlmJudgeGraderSpecSchema } from "../schema.js";
 import type { JudgeCriterion, LlmJudgeGraderSpec } from "../schema.js";
@@ -109,9 +109,7 @@ export function buildJudgeView(events: readonly Event[], result: TrialResult): J
 }
 
 /** Creates the strict output contract whose criterion ids are limited to the rubric. */
-export function createJudgeVerdictSchema(
-  criteria: readonly JudgeCriterion[],
-): z.ZodType<z.infer<typeof VerdictSchema>> {
+export function createJudgeVerdictSchema(criteria: readonly JudgeCriterion[]): z.ZodType<Verdict> {
   const validatedCriteria = JudgeRubricSchema.parse(criteria);
   return createVerdictSchema(validatedCriteria.map(({ id }) => id));
 }

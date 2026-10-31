@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   HarnessError,
-  MessageSchema,
-  toPiiActionEventPayload,
   type Code,
   type Event,
   type Id,
   type JsonValue,
-  type Message,
   type RunConfig,
 } from "@rovinos/schemas";
 import type { Context, Link } from "@opentelemetry/api";
@@ -18,11 +15,9 @@ import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from 
 import type { RunState } from "./run-state.js";
 import type { Clock, RunRecorder } from "./recorder.js";
 import { withRunStartup } from "./run-startup.js";
-import { modelStep, type ModelStepResult } from "./steps/model-step.js";
+import { type ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
-import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
-import { toolStep } from "./steps/tool-step.js";
-import type { PreparedToolCall } from "./steps/prepare-tool.js";
+import { preflightModelBudget } from "./steps/model-preflight.js";
 import { suspendedOutcome } from "./steps/suspended-outcome.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type {
@@ -36,7 +31,7 @@ import type {
   ToolPort,
 } from "./ports.js";
 import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
-import { PiiBlockedError, type Tokenizer } from "@rovinos/pii";
+import type { Tokenizer } from "@rovinos/pii";
 import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { HumanInputChannel } from "./human-input/channels.js";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
@@ -45,6 +40,7 @@ import type { ValueTransform } from "@rovinos/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
 import { modelQuotaHooks } from "./model-quota-hooks.js";
+import { runToolCalls } from "./steps/tool-call-runner.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
@@ -121,14 +117,6 @@ class RunAbortedError extends HarnessError {
   }
 }
 
-class StructuredModelCallError extends HarnessError {
-  readonly code = "model_failed";
-
-  constructor() {
-    super("Structured model call failed.");
-  }
-}
-
 /**
  * Runs a new model-driven run until a final answer or a configured budget is exceeded.
  *
@@ -193,12 +181,13 @@ async function recoverInterruptedModelResponse(
     return recordRunCompleted(options.recorder, events, execution.checkpointer);
   }
   if (recovery.kind === "tool_calls") {
-    return runToolCalls(
+    return runToolCalls({
       options,
       events,
       execution,
-      recovery.calls.map((call) => ({ call })),
-    );
+      calls: recovery.calls.map((call) => ({ call })),
+      lifecycle: toolCallLifecycle(options, events, execution),
+    });
   }
   return undefined;
 }
@@ -301,7 +290,13 @@ async function finishModelStep(
     return failedEvent;
   }
   if (modelResult.preparedCalls.length > 0) {
-    return runToolCalls(options, events, execution, modelResult.preparedCalls);
+    return runToolCalls({
+      options,
+      events,
+      execution,
+      calls: modelResult.preparedCalls,
+      lifecycle: toolCallLifecycle(options, events, execution),
+    });
   }
   if (options.finalOutputSchema !== undefined) {
     return finishStructuredFinalOutput(options, events, execution);
@@ -315,6 +310,18 @@ async function finishStructuredFinalOutput(
   execution: RunLoopExecution,
 ): Promise<Event> {
   return runStructuredFinalOutput(options, events, execution);
+}
+
+function toolCallLifecycle(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+) {
+  return {
+    suspendIfShutdown: () => suspendIfShutdown(options, events, execution),
+    drainSentinelTrips: () => drainSentinelTrips(options.recorder, events),
+    checkpointAfterStep: () => checkpointAfterStep(execution.checkpointer, events),
+  };
 }
 
 async function prepareModelStep(
@@ -345,151 +352,6 @@ async function prepareModelStep(
   return stopped === undefined
     ? { context: builtContext.messages, contextMetadata, deadlineTs: preflight.deadlineTs }
     : { context: builtContext.messages, contextMetadata, ...preflight, event: stopped };
-}
-
-async function runToolCalls(
-  options: RunLoopExecutionOptions,
-  events: Event[],
-  execution: RunLoopExecution,
-  calls: readonly PreparedToolCall[],
-): Promise<Event | undefined> {
-  const nestedModelEvents: Event[] = [];
-  const quotaHooks = modelQuotaHooks(options);
-  const requestStructuredModel: NonNullable<RunContext["requestStructuredModel"]> = async ({
-    messages,
-    outputSchema,
-    temperature,
-    signal,
-  }) => {
-    let judgeMessages: Message[] = messages;
-    if (options.inputTokenizer !== undefined) {
-      let modelInput;
-      try {
-        modelInput = await options.inputTokenizer.tokenizeJson(execution.runId, judgeMessages, {
-          boundary: "storage",
-          destination: "any",
-        });
-      } catch (error) {
-        if (error instanceof PiiBlockedError) {
-          nestedModelEvents.push(
-            await options.recorder.record({
-              type: "pii_action",
-              v: 1,
-              ...toPiiActionEventPayload({
-                boundary: "storage",
-                action: "block",
-                entities: error.entities.map(({ type, count }) => ({ type, count })),
-              }),
-            }),
-          );
-        }
-        throw error;
-      }
-      for (const summary of modelInput.actions) {
-        nestedModelEvents.push(
-          await options.recorder.record({
-            type: "pii_action",
-            v: 1,
-            ...toPiiActionEventPayload(summary),
-          }),
-        );
-      }
-      judgeMessages = MessageSchema.array().parse(modelInput.value);
-    }
-    const result = await modelStep({
-      recorder: options.recorder,
-      model: options.model,
-      ids: options.ids,
-      runId: execution.runId,
-      messages: judgeMessages,
-      contextMetadata: {
-        strategyId: "agent.verify",
-        strategyVersion: "1",
-        estimatedTokens: 0,
-        messageCount: judgeMessages.length,
-        stablePrefixMessages: 0,
-      },
-      signal,
-      deadlineTs: execution.budgetTracker.deadlineTs(foldRunState(events)),
-      role: "judge",
-      ...(options.provider === undefined ? {} : { provider: options.provider }),
-      ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-      outputSchema,
-      temperature,
-      failureMode: "tool",
-      ...(quotaHooks.usageUpdatesForCost === undefined
-        ? {}
-        : { usageUpdatesForCost: quotaHooks.usageUpdatesForCost }),
-      includeTools: false,
-    });
-    nestedModelEvents.push(...result.events);
-    if (result.outcome !== "response" || result.preparedCalls.length > 0) {
-      throw new StructuredModelCallError();
-    }
-    return result.completion;
-  };
-  for (const prepared of calls) {
-    const call = prepared.call;
-    const aborted = await suspendIfShutdown(options, events, execution);
-    if (aborted !== undefined) {
-      return aborted;
-    }
-    const budget = execution.budgetTracker.checkWithOpenChildren(events, options.clock.now());
-    if (!budget.ok) {
-      return recordBudgetFailureAndCheckpoint(
-        options.recorder,
-        events,
-        budget,
-        execution.checkpointer,
-      );
-    }
-    if (call.toolId === "agent.verify" && prepared.errorCode === undefined) {
-      const preflight = await preflightModelBudget({
-        budgetTracker: execution.budgetTracker,
-        checkpointer: execution.checkpointer,
-        events,
-        budgets: options.budgets,
-        now: options.clock.now(),
-        recorder: options.recorder,
-        ...quotaHooks,
-      });
-      if (preflight.event !== undefined) {
-        return preflight.event;
-      }
-    }
-    const toolEvents = await toolStep({
-      recorder: options.recorder,
-      tool: options.tool,
-      ...(options.policy === undefined ? {} : { policy: options.policy }),
-      clock: options.clock,
-      runId: execution.runId,
-      ids: options.ids,
-      checkpointer: execution.checkpointer,
-      history: events,
-      calls: [call],
-      preparedCalls: [prepared],
-      signal: options.signal,
-      depth: options.depth ?? 0,
-      requestStructuredModel,
-      ...(options.inputChannels === undefined ? {} : { inputChannels: options.inputChannels }),
-      ...(options.inputTokenizer === undefined ? {} : { tokenizer: options.inputTokenizer }),
-      ...(options.inputResolver === undefined ? {} : { resolver: options.inputResolver }),
-    });
-    events.push(
-      ...[...nestedModelEvents, ...toolEvents].sort((left, right) => left.seq - right.seq),
-    );
-    nestedModelEvents.length = 0;
-    await drainSentinelTrips(options.recorder, events);
-    const stopped = await suspendIfShutdown(options, events, execution);
-    if (stopped !== undefined) {
-      return stopped;
-    }
-    const state = await checkpointAfterStep(execution.checkpointer, events);
-    if (state.status === "suspended") {
-      return suspendedOutcome(events);
-    }
-  }
-  return undefined;
 }
 
 async function suspendIfShutdown(

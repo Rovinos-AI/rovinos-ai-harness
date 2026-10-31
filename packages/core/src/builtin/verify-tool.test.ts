@@ -62,11 +62,19 @@ describe("VerifyTool", () => {
 
     expect(result).toEqual({ outcome: "ok", result: verdict });
     expect(requestStructuredModel).toHaveBeenCalledOnce();
-    expect(requestStructuredModel.mock.calls[0]?.[0]).toMatchObject({
-      temperature: 0,
-      outputSchema: expect.objectContaining({ _zod: expect.any(Object) }),
-    });
-    expect(requestStructuredModel.mock.calls[0]?.[0].signal).toBe(context.signal);
+    const request = requestStructuredModel.mock.calls[0]?.[0];
+    expect(request?.temperature).toBe(0);
+    expect(request?.signal).toBe(context.signal);
+    if (request?.outputSchema === undefined) {
+      throw new Error("Expected the verifier to provide its verdict schema.");
+    }
+    expect(request.outputSchema.parse(verdict)).toEqual(verdict);
+    expect(() =>
+      request.outputSchema.parse({
+        criteria: [{ id: "unexpected", met: true }],
+        verdict: "pass",
+      }),
+    ).toThrow();
   });
 
   it("rejects malformed or duplicate criteria before requesting a judge", async () => {
@@ -175,10 +183,7 @@ describe("VerifyTool", () => {
   });
 
   it.each([
-    [
-      "missing",
-      { criteria: [{ id: "accurate", met: true }], verdict: "fail" },
-    ],
+    ["missing", { criteria: [{ id: "accurate", met: true }], verdict: "fail" }],
     [
       "extra",
       {
@@ -198,10 +203,7 @@ describe("VerifyTool", () => {
       ],
       verdict: "pass",
     });
-    const outputs = [
-      JSON.stringify(invalid),
-      JSON.stringify(expected),
-    ];
+    const outputs = [JSON.stringify(invalid), JSON.stringify(expected)];
     const adapter: ProviderAdapter = {
       provider: "test",
       kind: "openai",

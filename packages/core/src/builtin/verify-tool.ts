@@ -117,8 +117,6 @@ export class VerifyTool implements ToolPort {
       return failure();
     }
     const verdict = verdictSchema.safeParse(completion.enforcement.value);
-    return verdict.success
-      ? { outcome: "ok", result: JsonValue.parse(verdict.data) }
-      : failure();
+    return verdict.success ? { outcome: "ok", result: JsonValue.parse(verdict.data) } : failure();
   }
 }
