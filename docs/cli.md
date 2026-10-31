@@ -294,6 +294,25 @@ storage boundaries; legacy or externally supplied logs may still contain sensiti
 Unknown strategies list the registered identifiers and exit with code `2`; invalid model
 references and token counts also exit with code `2`. Missing runs report `run_not_found` (code `1`).
 
+## `harness eval run`
+
+`harness eval run <suite> [--model provider/model[,provider/model]] [--trials <n>]`
+runs a versioned suite and writes `trials.jsonl`, `eval-report.json`, `eval-report.md`,
+and `junit.xml` under `--out`; by default this is `./eval-out/<timestamp>` using the
+injected clock. `--filter <tag|taskId>`, `--isolation inprocess|docker`,
+`--cassette record|replay|off`, `--concurrency <n>`, `--seed <n>`,
+`--fail-under <rate>`, and `--max-cost-usd <amount>` further configure the run.
+In-process replay reads `cassettes/<taskId>/<variantId>.json` relative to the suite
+directory. A cassette miss is a coded failure and never falls back to a live provider.
+Cassette recording writes sanitized model events to that location.
+
+Isolation defaults to in-process with cassette replay; cassette off defaults to Docker.
+Docker uses `ghcr.io/rovinos-ai/harness:<CLI version>` unless `HARNESS_EVAL_IMAGE`
+overrides the image. `--export-telemetry` is off by default. Human output contains
+task/variant pass rates, cost, and steps; global `--json` emits the validated report
+as one document. Exit code `1` indicates a failed `--fail-under` threshold, and `6`
+indicates that the cost cap skipped trials.
+
 ## Exit codes
 
 These numeric values are stable for scripts and automation:
