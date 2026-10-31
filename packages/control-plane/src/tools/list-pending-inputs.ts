@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@rovinos/schemas";
+import { Code, type Id } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";
@@ -39,12 +39,7 @@ export function registerListPendingInputsTool(
         scope: "read",
         ...(parsed.runId === undefined ? {} : { runId: parsed.runId }),
         operation: async () => {
-          const allowedRunIds =
-            parsed.runId === undefined
-              ? principal?.runIds
-              : principal?.runIds === undefined
-                ? [parsed.runId]
-                : principal.runIds.filter((runId) => runId === parsed.runId);
+          const allowedRunIds = allowedInputRunIds(principal?.runIds, parsed.runId);
           const inputs = await listInputRequests(store, now(), allowedRunIds);
           const result = listPendingInputsOutputSchema.parse({ inputs });
           return {
@@ -56,4 +51,17 @@ export function registerListPendingInputsTool(
       });
     },
   );
+}
+
+function allowedInputRunIds(
+  principalRunIds: readonly Id[] | undefined,
+  requestedRunId: Id | undefined,
+): readonly Id[] | undefined {
+  if (requestedRunId === undefined) {
+    return principalRunIds;
+  }
+  if (principalRunIds === undefined) {
+    return [requestedRunId];
+  }
+  return principalRunIds.filter((runId) => runId === requestedRunId);
 }

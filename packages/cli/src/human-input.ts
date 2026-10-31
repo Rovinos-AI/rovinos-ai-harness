@@ -31,8 +31,7 @@ function requireInteractive(context: PromptContext): Interactive & {
   const interactive = context.interactive;
   if (
     interactive?.isTTY !== true ||
-    interactive.prompt === undefined ||
-    interactive.confirm === undefined
+    interactive.prompt === undefined
   ) {
     throw new HumanInputCommandError("confirmation_required");
   }
@@ -135,8 +134,7 @@ export function createTerminalInputChannel(
     id: Code.parse("cli.terminal"),
     available: () =>
       interactive?.isTTY === true &&
-      interactive.prompt !== undefined &&
-      interactive.confirm !== undefined,
+      interactive.prompt !== undefined,
     present: async (request, signal) => ({
       ...(await promptForInput(request, context, signal)),
       principal,

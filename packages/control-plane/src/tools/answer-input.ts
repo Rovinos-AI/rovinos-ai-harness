@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, JsonValue, type Id } from "@rovinos/schemas";
+import { Code, type Id, type JsonValue } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";
@@ -8,15 +8,13 @@ import { answerInputInputSchema, inputResolutionOutputSchema } from "../schemas.
 import { findInputRequest, findPendingInput } from "./input-state.js";
 
 /** Human resolution operation supplied by the composed runtime. */
-export interface ResolveInputOperation {
-  (input: {
-    readonly runId: Id;
-    readonly requestId: Id;
-    readonly action: "accept" | "decline" | "cancel";
-    readonly answer?: JsonValue;
-    readonly principal: string;
-  }): Promise<unknown>;
-}
+export type ResolveInputOperation = (input: {
+  readonly runId: Id;
+  readonly requestId: Id;
+  readonly action: "accept" | "decline" | "cancel";
+  readonly answer?: JsonValue;
+  readonly principal: string;
+}) => Promise<unknown>;
 
 /** Registers the app-only input resolution tool. */
 export function registerAnswerInputTool(

@@ -43,7 +43,7 @@ function readLine(
       if (!settled) {
         settled = true;
         cleanup();
-        reject(signal?.reason);
+        reject(signal?.reason instanceof Error ? signal.reason : new Error("prompt_aborted"));
       }
     };
     signal?.addEventListener("abort", onAbort, { once: true });

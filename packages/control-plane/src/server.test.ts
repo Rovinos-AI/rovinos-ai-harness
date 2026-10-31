@@ -232,10 +232,13 @@ describe("control-plane inspection tools", () => {
     expect(tools.map(({ name }) => name).sort()).toEqual([
       "cancel_run",
       "continue_run",
+      "get_input",
       "get_run",
+      "list_pending_inputs",
       "list_runs",
       "resume_run",
       "review_approval",
+      "review_input",
       "start_run",
     ]);
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({

@@ -17,7 +17,7 @@ import type { EventStore } from "@rovinos/store";
 import type { Command } from "commander";
 import type { CliContext, CommandModule } from "../command.js";
 import { cliPrincipal, createCommandRuntime } from "../command.js";
-import { createTerminalInputChannel, promptForInput } from "../human-input.js";
+import { promptForInput } from "../human-input.js";
 
 class InputsCodeError extends HarnessError {
   override readonly code: string;
@@ -51,8 +51,8 @@ async function* runIds(store: EventStore, onlyRunId?: Id): AsyncGenerator<Id> {
   let cursor: string | undefined;
   for (;;) {
     const page = await store.listRuns({ limit: 100, ...(cursor === undefined ? {} : { cursor }) });
-    for (const summary of page.runs) {
-      yield summary.runId;
+    for (const run of page.runs) {
+      yield run.runId;
     }
     if (page.nextCursor === undefined || page.nextCursor === cursor) {
       return;

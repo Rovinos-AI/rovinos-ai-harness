@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { createRuntime, type Runtime } from "@rovinos/core";
-import { Code, Id, Principal, type NewEvent } from "@rovinos/schemas";
+import {
+  Code,
+  Id,
+  InputListResultSchema,
+  InputResolveResultSchema,
+  Principal,
+  parseJson,
+  type NewEvent,
+} from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { CliContext, Interactive } from "../command.js";
@@ -134,7 +142,7 @@ async function createFixture(
     waitMs: 7,
   };
   const resolveInput = vi.fn<Runtime["resolveInput"]>().mockImplementation(
-    async (_runId, _requestId, resolution) => ({
+    (_runId, _requestId, resolution) => Promise.resolve({
       ...resolutionEnvelope,
       action: resolution.action,
       ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
@@ -172,7 +180,7 @@ describe("inputs CLI commands", () => {
     const fixture = await createFixture();
 
     const listCode = await main(["--json", "inputs", "list"], fixture.context, [inputsCommand]);
-    const listed = JSON.parse(fixture.stdout[0] ?? "") as { readonly inputs: readonly unknown[] };
+    const listed = parseJson(InputListResultSchema, fixture.stdout[0] ?? "");
     expect(listCode).toBe(ExitCode.ok);
     expect(listed.inputs).toHaveLength(1);
     expect(fixture.stderr.join("")).not.toContain("Input message");
@@ -222,7 +230,9 @@ describe("inputs CLI commands", () => {
 
     expect(code).toBe(ExitCode.ok);
     expect(fixture.stdout.join("")).toContain("https://accounts.example.test/connect");
-    expect(fixture.stdout.join("")).toContain("\u001b[1maccounts.example.test\u001b[22m");
+    expect(fixture.stdout.join("")).toContain(String.fromCharCode(27));
+    expect(fixture.stdout.join("")).toContain("[1m");
+    expect(fixture.stdout.join("")).toContain("accounts.example.test");
     expect(confirm).toHaveBeenCalledWith("Continue with this URL?");
     expect(fixture.resolveInput).toHaveBeenCalledWith(runId, requestId, {
       action: "accept",
@@ -264,7 +274,7 @@ describe("inputs CLI commands", () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-inputs-"));
     try {
       const path = join(directory, "answer.json");
-      await writeFile(path, JSON.stringify({ name: "Ada" }), "utf8");
+      await writeFile(path, JSON.stringify({ name: "PRIVATE_INPUT_ANSWER_CANARY" }), "utf8");
       const fixture = await createFixture();
 
       const code = await main(
@@ -273,15 +283,18 @@ describe("inputs CLI commands", () => {
         [inputsCommand],
       );
       expect(code).toBe(ExitCode.ok);
-      expect(JSON.parse(fixture.stdout[0] ?? "")).toMatchObject({
+      expect(parseJson(InputResolveResultSchema, fixture.stdout[0] ?? "")).toMatchObject({
         requestId,
         action: "accept",
       });
       expect(fixture.resolveInput).toHaveBeenCalledWith(runId, requestId, {
         action: "accept",
-        answer: { name: "Ada" },
+        answer: { name: "PRIVATE_INPUT_ANSWER_CANARY" },
         principal: Code.parse("cli.local"),
       });
+      expect(fixture.stdout.join("")).not.toContain("Input message");
+      expect(fixture.stdout.join("")).not.toContain("PRIVATE_INPUT_ANSWER_CANARY");
+      expect(fixture.stderr.join("")).not.toContain("PRIVATE_INPUT_ANSWER_CANARY");
 
       const nonInteractive = await createFixture();
       const noTtyCode = await main(

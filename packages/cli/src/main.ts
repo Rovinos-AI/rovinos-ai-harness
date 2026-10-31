@@ -119,7 +119,7 @@ function createProgram(out: Output, inputJsonFile: boolean): Command {
 
 function hasInputJsonFile(argv: readonly string[]): boolean {
   const answerIndex = argv.indexOf("answer");
-  if (argv.indexOf("inputs") === -1 || answerIndex === -1) {
+  if (!argv.includes("inputs") || answerIndex === -1) {
     return false;
   }
   const jsonIndex = argv.indexOf("--json", answerIndex + 1);
