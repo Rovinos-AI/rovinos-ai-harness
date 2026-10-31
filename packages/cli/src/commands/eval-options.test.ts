@@ -14,7 +14,13 @@ import { main } from "../main.js";
 import { createOutput } from "../output.js";
 import { createEvalCommand } from "./eval.js";
 import type { EvalCommandDependencies } from "./eval.js";
-import { createVariants, filterSuite, nonnegativeNumber, positiveInteger } from "./eval-options.js";
+import {
+  createVariants,
+  createVariantsFromFile,
+  filterSuite,
+  nonnegativeNumber,
+  positiveInteger,
+} from "./eval-options.js";
 
 const config = HarnessConfigSchema.parse({});
 const suite = evalApi.EvalSuiteSchema.parse({
@@ -62,6 +68,57 @@ describe("eval option parsing", () => {
     for (const invalid of ["", "/", "/model", "provider/", "bad provider/model"]) {
       expect(() => createVariants(evalApi, invalid, "off", config)).toThrow();
     }
+  });
+
+  it("loads variants YAML, validates config overrides, and resolves policy paths", () => {
+    const variants = createVariantsFromFile({
+      api: evalApi,
+      text: [
+        "variants:",
+        "  - id: baseline",
+        "    route:",
+        "      - provider: openai",
+        "        model: synthetic",
+        "    configOverrides:",
+        "      run:",
+        "        budgets:",
+        "          maxSteps: 12",
+        "  - id: candidate",
+        "    policyFile: policy.yaml",
+      ].join("\n"),
+      filePath: "/tmp/variants.yaml",
+      cassette: "replay",
+      config,
+    });
+
+    expect(variants).toEqual([
+      {
+        id: "baseline",
+        models: [{ provider: "openai", model: "synthetic" }],
+        configOverrides: { run: { budgets: { maxSteps: 12 } } },
+        cassetteMode: "replay",
+      },
+      {
+        id: "candidate",
+        policyFile: "/tmp/policy.yaml",
+        cassetteMode: "replay",
+      },
+    ]);
+    expect(() =>
+      createVariantsFromFile({
+        api: evalApi,
+        text: [
+          "variants:",
+          "  - id: baseline",
+          "    configOverrides:",
+          "      run: invalid",
+          "  - id: candidate",
+        ].join("\n"),
+        filePath: "/tmp/variants.yaml",
+        cassette: "off",
+        config,
+      }),
+    ).toThrow();
   });
 
   it("selects tasks by id or tag and rejects an empty selection", () => {
