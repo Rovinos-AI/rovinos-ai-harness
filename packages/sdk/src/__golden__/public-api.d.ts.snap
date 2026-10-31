@@ -423,6 +423,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 }>;
             }, z.core.$strict>>>;
             enabled: z.ZodDefault<z.ZodBoolean>;
+            allowRawToLocalModels: z.ZodDefault<z.ZodBoolean>;
             custom: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 name: z.ZodString;
                 pattern: z.ZodString;

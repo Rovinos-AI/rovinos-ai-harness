@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { context, trace } from "@opentelemetry/api";
+import { context, diag, trace } from "@opentelemetry/api";
 import { SpanId, TraceId, type Code, type PiiConfig } from "@rovinos/schemas";
 import {
   creditCardDetector,
@@ -12,6 +12,7 @@ import {
   secretsDetector,
   Tokenizer,
   urlCredentialsDetector,
+  hasLocalModelAllowRule,
   PresidioDetector,
   PiiMessageSanitizer,
   type Detector,
@@ -28,6 +29,7 @@ import type { Clock } from "./recorder.js";
 
 const fallbackTraceId = TraceId.parse("1".repeat(32));
 const fallbackSpanId = SpanId.parse("2".repeat(16));
+const piiLogger = diag.createComponentLogger({ namespace: "harness.pii" });
 
 const builtInDetectors: readonly Detector[] = [
   creditCardDetector,
@@ -47,6 +49,7 @@ export interface RuntimePiiOptions {
   readonly scopeOf: VaultScopeResolver;
   readonly policyVersion: Code;
   readonly clock: Clock;
+  readonly onWarning?: (code: "pii_local_allow_ignored") => void;
 }
 
 /** Builds the PII dependencies shared by the runtime's tool and storage boundaries. */
@@ -57,11 +60,19 @@ export function createRuntimePii({
   scopeOf,
   policyVersion,
   clock,
+  onWarning,
 }: RuntimePiiOptions): {
   readonly tokenizer: Tokenizer;
   readonly resolver: AuditingVaultResolver;
   readonly messageSanitizer: PiiMessageSanitizer;
 } {
+  if (config.enabled && !config.allowRawToLocalModels && hasLocalModelAllowRule(config)) {
+    if (onWarning === undefined) {
+      piiLogger.warn("pii_local_allow_ignored");
+    } else {
+      onWarning("pii_local_allow_ignored");
+    }
+  }
   const detectors = [
     ...builtInDetectors,
     ...(config.custom ?? []).map((detector) => createCustomDetector(detector)),
@@ -76,6 +87,7 @@ export function createRuntimePii({
     detectors: detectorRegistry,
     policy: config,
     vault,
+    allowRawToLocalModels: config.allowRawToLocalModels,
     scopeOf: scopes.scopeOf,
   });
   const resolver = new AuditingVaultResolver(
@@ -105,6 +117,7 @@ export function createRuntimePii({
     detectors: detectorRegistry,
     policy: config,
     resolver,
+    allowRawToLocalModels: config.allowRawToLocalModels,
   });
   return { tokenizer, resolver, messageSanitizer };
 }

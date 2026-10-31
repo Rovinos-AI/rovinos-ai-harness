@@ -2,19 +2,21 @@
 import { z } from "zod";
 import { Code } from "./primitives.js";
 
+export const PII_BUILTIN_ENTITIES = [
+  "email",
+  "phone",
+  "credit_card",
+  "iban",
+  "national_id",
+  "ip_address",
+  "person_name",
+  "location",
+  "api_key",
+  "url_credentials",
+] as const;
+
 export const PiiEntitySchema = z.union([
-  z.enum([
-    "email",
-    "phone",
-    "credit_card",
-    "iban",
-    "national_id",
-    "ip_address",
-    "person_name",
-    "location",
-    "api_key",
-    "url_credentials",
-  ]),
+  z.enum(PII_BUILTIN_ENTITIES),
   z.string().regex(/^custom_[a-z0-9_]{1,40}$/u),
 ]);
 

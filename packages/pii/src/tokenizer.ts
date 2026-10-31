@@ -63,13 +63,14 @@ export interface TokenizerDependencies {
   readonly detectors: PiiDetectorRegistry;
   readonly policy: PiiPolicy;
   readonly vault: VaultWriter;
+  readonly allowRawToLocalModels?: boolean;
   readonly scopeOf?: (runId: Id) => Id;
 }
 
 interface TokenizationContext {
   readonly boundary: PiiBoundary;
   readonly destination: Destination;
-  /** Prevent `allow` from exposing raw values to a hosted model. */
+  /** Prevent `allow` from exposing raw values to a model destination. */
   readonly allowRaw?: boolean;
 }
 
@@ -259,8 +260,14 @@ export class Tokenizer {
       boundary: context.boundary,
       destination: context.destination,
     });
+    const localModelRawDisabled =
+      context.boundary === "model_input" &&
+      context.destination === "local" &&
+      this.dependencies.allowRawToLocalModels !== true;
     const action =
-      context.allowRaw === false && policyAction === "allow" ? "tokenize" : policyAction;
+      (context.allowRaw === false || localModelRawDisabled) && policyAction === "allow"
+        ? "tokenize"
+        : policyAction;
     if (isKey && action !== "allow") {
       counts.keys.set(entity.data, (counts.keys.get(entity.data) ?? 0) + 1);
     }
