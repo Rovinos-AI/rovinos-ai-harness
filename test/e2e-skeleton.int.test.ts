@@ -2584,7 +2584,11 @@ describe("control plane", () => {
 
       await client.connect(transport);
       const { tools } = await client.listTools();
-      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+      expect(tools.map(({ name }) => name).sort()).toEqual([
+        "get_run",
+        "list_pending_inputs",
+        "list_runs",
+      ]);
     } finally {
       await client.close();
       await server.close();

@@ -131,6 +131,7 @@ function createContext() {
     }),
     resume: () => Promise.reject(new Error("Resume is not used by serve tests.")),
     resolveApproval: () => Promise.reject(new Error("Approval is not used by serve tests.")),
+    resolveInput: () => Promise.reject(new Error("Input is not used by serve tests.")),
     cancel: () => Promise.reject(new Error("Cancel is not used by serve tests.")),
     hasPendingApproval: () => Promise.resolve(false),
     tokenizeAppContent: (_runId, content) => Promise.resolve(content),

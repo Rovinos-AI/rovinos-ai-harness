@@ -155,7 +155,11 @@ describe("control-plane HTTP transport", () => {
     try {
       await client.connect(createHttpTransport(server.endpoint));
       const { tools } = await client.listTools();
-      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+      expect(tools.map(({ name }) => name).sort()).toEqual([
+        "get_run",
+        "list_pending_inputs",
+        "list_runs",
+      ]);
 
       const listed = await client.callTool({ name: "list_runs", arguments: {} });
       expect(listed.structuredContent).toMatchObject({
@@ -205,7 +209,11 @@ describe("control-plane HTTP transport", () => {
     try {
       await client.connect(createHttpTransport(server.endpoint));
       const { tools } = await client.listTools();
-      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+      expect(tools.map(({ name }) => name).sort()).toEqual([
+        "get_run",
+        "list_pending_inputs",
+        "list_runs",
+      ]);
       await expect(
         client.callTool({ name: "start_run", arguments: { goal: "synthetic" } }),
       ).resolves.toMatchObject({
@@ -449,10 +457,13 @@ describe("control-plane HTTP transport", () => {
       expect(tools.map(({ name }) => name).sort()).toEqual([
         "cancel_run",
         "continue_run",
+        "get_input",
         "get_run",
+        "list_pending_inputs",
         "list_runs",
         "resume_run",
         "review_approval",
+        "review_input",
         "start_run",
       ]);
       await expect(client.callTool({ name: "list_runs", arguments: {} })).resolves.toMatchObject({

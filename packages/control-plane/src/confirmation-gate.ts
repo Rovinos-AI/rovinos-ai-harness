@@ -18,7 +18,10 @@ const confirmSchema = z.object({ confirm: z.boolean() }).strict();
 export const confirmationClientCapabilitiesSchema = z
   .object({
     elicitation: z
-      .object({ form: z.record(z.string(), JsonValue).optional() })
+      .object({
+        form: z.record(z.string(), JsonValue).optional(),
+        url: z.record(z.string(), JsonValue).optional(),
+      })
       .loose()
       .optional(),
     extensions: z.record(z.string(), JsonValue).optional(),
@@ -77,13 +80,15 @@ export type ConfirmationGateResult =
 export interface HumanInputRequest<S extends z.ZodType> {
   readonly key: string;
   readonly answerSchema: S;
+  readonly capability?: "form" | "url";
+  readonly acceptWithoutContent?: boolean;
   readonly createRequest: (message: string) => ReturnType<typeof inputRequired.elicit>;
 }
 
 /** Result of a human elicitation that can carry a decision or other validated answer. */
 export type HumanInputResult<T> =
   | { readonly status: "accepted"; readonly content: T }
-  | { readonly status: "declined" }
+  | { readonly status: "declined"; readonly action?: "decline" | "cancel" }
   | { readonly status: "denied"; readonly code: string }
   | { readonly status: "input_required"; readonly result: InputRequiredResult };
 
@@ -196,7 +201,7 @@ export class ConfirmationGate {
       return this.acceptRetry(context, request, stateValue, elicitation);
     }
 
-    if (!supportsFormElicitation(request.clientCapabilities)) {
+    if (!supportsElicitation(request.clientCapabilities, elicitation.capability ?? "form")) {
       return { status: "denied", code: Code.parse("human_confirmation_unavailable") };
     }
 
@@ -263,6 +268,7 @@ export class ConfirmationGate {
       context.mcpReq.inputResponses,
       elicitation.key,
       elicitation.answerSchema,
+      elicitation.acceptWithoutContent === true,
     );
   }
 }
@@ -271,14 +277,24 @@ function parseHumanAnswer<S extends z.ZodType>(
   inputResponses: ServerContext["mcpReq"]["inputResponses"],
   key: string,
   answerSchema: S,
+  acceptWithoutContent: boolean,
 ): HumanInputResult<z.output<S>> {
   const responses = z.record(z.string(), z.unknown()).safeParse(inputResponses);
   const response = responses.success ? responses.data[key] : undefined;
   const action = z
     .looseObject({ action: z.enum(["accept", "decline", "cancel"]) })
     .safeParse(response);
-  if (!action.success || action.data.action !== "accept") {
+  if (!action.success) {
     return { status: "declined" };
+  }
+  if (action.data.action !== "accept") {
+    return { status: "declined", action: action.data.action };
+  }
+  if (acceptWithoutContent) {
+    const empty = answerSchema.safeParse({});
+    return empty.success
+      ? { status: "accepted", content: empty.data }
+      : { status: "denied", code: Code.parse("human_input_invalid") };
   }
   const answer = acceptedContent(inputResponses, key, answerSchema);
   if (answer === undefined || answer === null) {
@@ -290,10 +306,11 @@ function parseHumanAnswer<S extends z.ZodType>(
     : { status: "denied", code: Code.parse("human_input_invalid") };
 }
 
-function supportsFormElicitation(
+function supportsElicitation(
   capabilities: ConfirmationClientCapabilities | undefined,
+  mode: "form" | "url",
 ): boolean {
-  return capabilities?.elicitation?.form !== undefined;
+  return capabilities?.elicitation?.[mode] !== undefined;
 }
 
 function digestArguments(argumentsValue: Readonly<Record<string, unknown>>): string {

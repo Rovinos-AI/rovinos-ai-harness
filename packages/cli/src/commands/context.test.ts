@@ -123,6 +123,7 @@ async function harness() {
     resume: modelCall,
     cancel: modelCall,
     resolveApproval: () => Promise.reject(new Error("Approval is not used by context tests.")),
+    resolveInput: () => Promise.reject(new Error("Input is not used by context tests.")),
     hasPendingApproval: () => Promise.resolve(false),
     tokenizeAppContent: (_runId: Id, content: JsonValue) => Promise.resolve(content),
     onAppContent: () => Promise.resolve(),
