@@ -164,14 +164,20 @@ export function setTrialProcessOutput(dbPath: string, stdout: string, stderr: st
 /** Append process output from an additional Docker invocation for the same trial. */
 export function appendTrialProcessOutput(dbPath: string, stdout: string, stderr: string): void {
   const previous = logsByDbPath.get(dbPath);
+  const append = (current: string | undefined, next: string): string => {
+    if (current === undefined || current.length === 0) {
+      return next;
+    }
+    return next.length === 0 ? current : `${current}\n${next}`;
+  };
   logsByDbPath.set(dbPath, [
     {
       name: "stdout",
-      content: [previous?.[0]?.content, stdout].filter((part) => part !== undefined).join("\n"),
+      content: append(previous?.[0]?.content, stdout),
     },
     {
       name: "stderr",
-      content: [previous?.[1]?.content, stderr].filter((part) => part !== undefined).join("\n"),
+      content: append(previous?.[1]?.content, stderr),
     },
   ]);
 }

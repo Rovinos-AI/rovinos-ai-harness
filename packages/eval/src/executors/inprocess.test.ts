@@ -13,6 +13,7 @@ import type { TrialSpec } from "../trial.js";
 import { runEval } from "../runner.js";
 import {
   appendTrialProcessOutput,
+  captureProcessOutput,
   configureEvalTelemetry,
   evalTelemetrySinks,
   trialLogSinks,
@@ -133,6 +134,33 @@ describe("InProcessExecutor", () => {
       { name: "stdout", content: "initial stdout\nresume stdout" },
       { name: "stderr", content: "initial stderr\nresume stderr" },
     ]);
+  });
+
+  it("captures byte output and invokes write callbacks", async () => {
+    const captured: string[] = [];
+    const result = await captureProcessOutput(
+      async () => {
+        await new Promise<void>((resolve) => {
+          process.stdout.write("captured stdout", "utf8", () => {
+            resolve();
+          });
+        });
+        await new Promise<void>((resolve) => {
+          process.stderr.write(Buffer.from("captured stderr"), () => {
+            resolve();
+          });
+        });
+        return "completed";
+      },
+      (stdout, stderr) => captured.push(stdout, stderr),
+    );
+
+    expect(result).toMatchObject({
+      result: "completed",
+      stdout: "captured stdout",
+      stderr: "captured stderr",
+    });
+    expect(captured).toEqual(["captured stdout", "captured stderr"]);
   });
 
   it("runs a fake model/tool scenario and persists an isolated run", async () => {
