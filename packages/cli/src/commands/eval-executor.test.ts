@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessConfigSchema } from "@rovinos/config";
 import * as evalApi from "@rovinos/eval";
-import { HARNESS_VERSION, Id } from "@rovinos/schemas";
+import { HARNESS_VERSION } from "@rovinos/schemas";
 import type { TrialExecutor } from "@rovinos/eval";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOutput } from "../output.js";
@@ -94,12 +94,10 @@ describe("CLI eval executor", () => {
     const variant = evalApi.EvalVariantSchema.parse({ id: "variant" });
     const completed = evalApi.TrialResultSchema.parse({
       status: "completed",
-      runId: Id.parse("00000000000000000000000001"),
       dbPath: join(root, "completed", "data", "harness.db"),
       workspaceDir: join(root, "completed", "workspace"),
-      durationMs: 1,
+      durationMs: 0,
       usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
-      exitCode: 0,
     });
     const skipped = evalApi.TrialResultSchema.parse({
       status: "skipped_budget",
@@ -113,7 +111,13 @@ describe("CLI eval executor", () => {
       { taskId: "task", variantId: "variant", trialIndex: 1, seed: 2, result: skipped },
       { taskId: "missing", variantId: "variant", trialIndex: 2, seed: 3, result: completed },
       { taskId: "task", variantId: "missing", trialIndex: 3, seed: 4, result: completed },
-    ];
+    ].map((record) =>
+      evalApi.EvalTrialRecordSchema.parse({
+        schemaVersion: 1,
+        suiteCode: evalApi.evalSuiteCode(suite),
+        ...record,
+      }),
+    );
     const executor: TrialExecutor = { run: () => Promise.resolve(completed) };
 
     const collected = await collectTrialEvents({
