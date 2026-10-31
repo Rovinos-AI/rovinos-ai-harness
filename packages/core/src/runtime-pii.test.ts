@@ -500,6 +500,145 @@ describe("createRuntime PII composition", () => {
     }
   });
 
+  it("tokenizes verifier inputs and includes judge cost in the parent budget", async () => {
+    const requests: ModelRequest[] = [];
+    let defaultCalls = 0;
+    const models = ModelsConfigSchema.parse({
+      providers: [{ id: "hosted", kind: "openai", trust: "hosted" }],
+      routing: {
+        default: [{ provider: "hosted", model: "test-model" }],
+        roles: { judge: [{ provider: "hosted", model: "test-model" }] },
+      },
+      pricing: {
+        "hosted/test-model": {
+          inputMicrosPerMTok: 1_000_000,
+          outputMicrosPerMTok: 1_000_000,
+        },
+      },
+    });
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({ budgets: { maxCostUsd: 0.00001 } }),
+        keys,
+        models,
+        pii: PiiConfigSchema.parse({}),
+      },
+      {
+        dataDir: await dataDirectory(),
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        providerAdapters: [
+          {
+            provider: "hosted",
+            kind: "openai",
+            complete: (request) => {
+              requests.push(request);
+              if (request.role === "judge") {
+                return Promise.resolve({
+                  parts: [
+                    {
+                      type: "text",
+                      text: JSON.stringify({
+                        criteria: [{ id: "contact", met: true }],
+                        verdict: "pass",
+                      }),
+                    },
+                  ],
+                  usage: { inputTokens: 10, outputTokens: 2 },
+                  finishReason: "stop",
+                  latencyMs: 1,
+                });
+              }
+              defaultCalls += 1;
+              return Promise.resolve({
+                parts:
+                  defaultCalls === 1
+                    ? [
+                        {
+                          type: "tool_call",
+                          callId: Id.parse("11111111111111111111111111"),
+                          toolId: "agent.verify",
+                          args: {
+                            criteria: [
+                              {
+                                id: "contact",
+                                description: `Does this match ${email}.`,
+                              },
+                            ],
+                            subject: { contact: email },
+                          },
+                        },
+                      ]
+                    : [{ type: "text", text: "done" }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: defaultCalls === 1 ? "tool_calls" : "stop",
+                latencyMs: 1,
+              });
+            },
+          },
+        ],
+        policy: allowAllPolicy,
+        secretResolver,
+      },
+    );
+
+    try {
+      const result = await runtime.run("verify");
+      const judgeRequest = requests.find(({ role }) => role === "judge");
+      const recordedJudgeRequest = result.events.find(
+        (event) => event.type === "model_request" && event.role === "judge",
+      );
+      const judgeResponse = result.events.find(
+        (event) => event.type === "model_response" && event.requestId === judgeRequest?.requestId,
+      );
+      const responseCost = result.events.reduce(
+        (sum, event) =>
+          event.type === "model_response" ? sum + (event.costMicros ?? 0) : sum,
+        0,
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.events).toContainEqual(
+        expect.objectContaining({ type: "budget_exceeded", budget: "cost" }),
+      );
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_result",
+          toolId: "agent.verify",
+          outcome: "ok",
+          result: {
+            criteria: [{ id: "contact", met: true }],
+            verdict: "pass",
+          },
+        }),
+      );
+      expect(judgeRequest?.temperature).toBe(0);
+      expect(JSON.stringify(judgeRequest?.messages)).not.toContain(email);
+      expect(JSON.stringify(judgeRequest?.messages)).toContain("<EMAIL_1>");
+      expect(JSON.stringify(recordedJudgeRequest)).not.toContain(email);
+      expect(JSON.stringify(recordedJudgeRequest)).toContain("<EMAIL_1>");
+      expect(judgeResponse).toMatchObject({
+        type: "model_response",
+        costMicros: 12,
+      });
+      expect(
+        result.events
+          .filter(
+            (event) =>
+              (event.type === "tool_intent" && event.toolId === "agent.verify") ||
+              (event.type === "model_request" && event.role === "judge") ||
+              (event.type === "model_response" && event.requestId === judgeRequest?.requestId) ||
+              (event.type === "tool_result" && event.toolId === "agent.verify"),
+          )
+          .map(({ type }) => type),
+      ).toEqual(["tool_intent", "model_request", "model_response", "tool_result"]);
+      expect(result.state.usage.costMicros).toBe(responseCost);
+      expect(result.state.usage.costMicros).toBeGreaterThan(10);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("detokenizes only allowlisted arguments and tokenizes tool output before recording", async () => {
     const received: JsonValue[] = [];
     const store = new InMemoryEventStore();

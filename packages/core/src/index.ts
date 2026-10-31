@@ -201,6 +201,12 @@ export {
   type AskUserInput,
   type AskUserOutput,
 } from "./builtin/ask-user-tool.js";
+export {
+  VERIFY_TOOL_SPEC,
+  VerifyInputSchema,
+  VerifyTool,
+  type VerifyInput,
+} from "./builtin/verify-tool.js";
 export { AgentSpawnInputSchema, AgentSpawnTool } from "./subagent/spawn-tool.js";
 export {
   restrictToolPort,

@@ -144,7 +144,26 @@ export function planLastModelResponseRecovery(events: readonly Event[]): ModelRe
   const hasToolIntentAfterResponse = eventsAfterResponse.some(
     (event) => event.type === "tool_intent",
   );
-  if (toolCalls.length > 0 || hasToolIntentAfterResponse) {
+  const toolIntentsBeforeResponse = new Set(
+    events.flatMap((event) =>
+      event.type === "tool_intent" && event.seq < response.seq ? [event.callId] : [],
+    ),
+  );
+  const recordedToolResults = new Set(
+    events.flatMap((event) => (event.type === "tool_result" ? [event.callId] : [])),
+  );
+  const hasToolResultAfterResponse = eventsAfterResponse.some(
+    (event) => event.type === "tool_result" && toolIntentsBeforeResponse.has(event.callId),
+  );
+  const hasPendingToolIntentBeforeResponse = Array.from(toolIntentsBeforeResponse).some(
+    (callId) => !recordedToolResults.has(callId),
+  );
+  if (
+    toolCalls.length > 0 ||
+    hasToolIntentAfterResponse ||
+    hasToolResultAfterResponse ||
+    hasPendingToolIntentBeforeResponse
+  ) {
     return { kind: "none" };
   }
 
