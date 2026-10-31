@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { FakeClock, SequentialIdGenerator, type Event, type Id } from "@rovinos/schemas";
+import { Code, FakeClock, SequentialIdGenerator, type Event, type Id } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
 import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/core";
 import { TrialResultSchema, evalSuiteCode } from "../trial.js";
@@ -36,6 +36,14 @@ function resultStatus(status: string): TrialResult["status"] {
 
 function trialKey(trial: TrialSpec): string {
   return `${trial.task.id}\u0000${trial.variantId}\u0000${String(trial.trialIndex)}`;
+}
+
+function failureCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+  const parsed = Code.safeParse(error.code);
+  return parsed.success ? parsed.data : undefined;
 }
 
 type RuntimeRunResult = Awaited<ReturnType<Runtime["run"]>>;
@@ -148,16 +156,27 @@ export class InProcessExecutor implements TrialExecutor {
     const clock = this.options.clock ?? systemClock;
     const startedAt = clock.now();
     const prepared = await prepareTrial(trial, this.options);
+    let modelFailureCode: string | undefined;
+    const model = this.options.model?.(trial);
     const runtime = await createRuntime(prepared.runtimeConfig, {
       dataDir: prepared.dataDir,
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000 + trial.seed),
       ids: new SequentialIdGenerator(),
-      ...(this.options.model === undefined
+      ...(model === undefined
         ? {}
         : {
             model: createProviderCaptureAdapter(
-              this.options.model(trial),
+              {
+                complete: async (request, context) => {
+                  try {
+                    return await model.complete(request, context);
+                  } catch (error) {
+                    modelFailureCode = failureCode(error);
+                    throw error;
+                  }
+                },
+              },
               trial.task.canaries ?? [],
             ),
           }),
@@ -191,6 +210,9 @@ export class InProcessExecutor implements TrialExecutor {
       result = captured.result;
     } finally {
       await runtime.close();
+    }
+    if (modelFailureCode !== undefined && result.status !== "completed") {
+      result = TrialResultSchema.parse({ ...result, errorCode: modelFailureCode });
     }
     this.trialEvents.set(trialKey(trial), events);
     return result;
