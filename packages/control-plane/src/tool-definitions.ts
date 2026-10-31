@@ -40,6 +40,14 @@ import {
 export function toolDefinitions(): Tool[] {
   return [
     ...runToolDefinitions(),
+    ...inputToolDefinitions(),
+    ...approvalToolDefinitions(),
+    ...lifecycleToolDefinitions(),
+  ];
+}
+
+function inputToolDefinitions(): Tool[] {
+  return [
     {
       name: "list_pending_inputs",
       description: "List pending human inputs using metadata only.",
@@ -69,6 +77,11 @@ export function toolDefinitions(): Tool[] {
       annotations: { openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
     },
+  ];
+}
+
+function approvalToolDefinitions(): Tool[] {
+  return [
     {
       name: "harness.approvals.get",
       description: "Load one pending approval into its human review view.",
@@ -116,6 +129,11 @@ export function toolDefinitions(): Tool[] {
       annotations: { idempotentHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
     },
+  ];
+}
+
+function lifecycleToolDefinitions(): Tool[] {
+  return [
     {
       name: "start_run",
       description: "Start a run and return its metadata.",

@@ -35,14 +35,11 @@ export {
   type ConfirmationRequest,
 } from "./confirmation-gate.js";
 export { RunSupervisor, type RunSupervisorOptions } from "./run-supervisor.js";
-export { registerAnswerInputTool,
-type ResolveInputOperation,
-} from "./tools/answer-input.js";
+export { registerAnswerInputTool, type ResolveInputOperation } from "./tools/answer-input.js";
 export { registerGetInputTool } from "./tools/get-input.js";
 export { registerListPendingInputsTool } from "./tools/list-pending-inputs.js";
 export { registerReviewInputTool } from "./tools/review-input.js";
-export {
-registerApproveTool, type ApproveToolOptions } from "./tools/approve.js";
+export { registerApproveTool, type ApproveToolOptions } from "./tools/approve.js";
 export {
   elicitDecision,
   registerReviewApprovalTool,

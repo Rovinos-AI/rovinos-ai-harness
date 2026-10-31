@@ -39,7 +39,9 @@ export function registerGetInputTool(
         operation: async () => {
           if (found === undefined) {
             const existing = await findInputRequest(store, parsed.requestId, principal?.runIds);
-            return inputError(existing === undefined ? "input_not_found" : "input_already_resolved");
+            return inputError(
+              existing === undefined ? "input_not_found" : "input_already_resolved",
+            );
           }
           const result = getInputResult(found, now());
           return {

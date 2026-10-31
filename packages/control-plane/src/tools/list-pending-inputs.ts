@@ -4,10 +4,7 @@ import type { EventStore } from "@rovinos/store";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";
 import type { ControlPlaneAuditHandler } from "../auth.js";
-import {
-  listPendingInputsInputSchema,
-  listPendingInputsOutputSchema,
-} from "../schemas.js";
+import { listPendingInputsInputSchema, listPendingInputsOutputSchema } from "../schemas.js";
 import { listInputRequests } from "./input-state.js";
 
 /** Registers metadata-only pending input listing with read scope and run filtering. */

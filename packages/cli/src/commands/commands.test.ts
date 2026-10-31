@@ -266,11 +266,9 @@ describe("run, resume, and inspect CLI commands", () => {
     harness.context.interactive = interactive;
     const createRuntimeSpy = vi.spyOn(harness.context, "createRuntime");
 
-    const code = await main(
-      ["run", "--input", inputPath, "--interactive"],
-      harness.context,
-      [runCommand],
-    );
+    const code = await main(["run", "--input", inputPath, "--interactive"], harness.context, [
+      runCommand,
+    ]);
     const runtimeOverrides = createRuntimeSpy.mock.calls[0]?.[1];
     const channel = runtimeOverrides?.inputChannels?.[0];
     const request: InputRequest = {

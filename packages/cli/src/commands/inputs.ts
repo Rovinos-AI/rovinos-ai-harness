@@ -77,10 +77,7 @@ function inputRequest(event: Extract<Event, { type: "input_requested" }>): Input
   });
 }
 
-async function scanInputs(
-  store: EventStore,
-  onlyRunId?: Id,
-): Promise<LocatedInput[]> {
+async function scanInputs(store: EventStore, onlyRunId?: Id): Promise<LocatedInput[]> {
   const { foldRunState } = await import("@rovinos/core");
   const inputs: LocatedInput[] = [];
   for await (const runId of runIds(store, onlyRunId)) {
@@ -118,10 +115,7 @@ function summary(input: LocatedInput, now: number) {
   };
 }
 
-async function findInput(
-  store: EventStore,
-  requestId: Id,
-): Promise<LocatedInput> {
+async function findInput(store: EventStore, requestId: Id): Promise<LocatedInput> {
   const match = (await scanInputs(store)).find((input) => input.request.requestId === requestId);
   if (match === undefined) {
     throw new InputsCodeError("input_not_found");
@@ -134,7 +128,10 @@ async function findInput(
 
 async function withInputsRuntime<T>(
   context: CliContext,
-  operation: (runtime: Runtime, config: Awaited<ReturnType<CliContext["loadConfig"]>>) => Promise<T>,
+  operation: (
+    runtime: Runtime,
+    config: Awaited<ReturnType<CliContext["loadConfig"]>>,
+  ) => Promise<T>,
 ): Promise<T> {
   const config = await context.loadConfig();
   const runtime = await createCommandRuntime(context, config);
@@ -221,10 +218,10 @@ function registerAnswer(inputs: Command, context: CliContext): void {
           }
           answer = parseJson(JsonValue, await readFile(options.json, { encoding: "utf8" }));
         } else {
-          const response = await promptForInput(
-            found.request,
-            { interactive: context.interactive, out: context.out },
-          );
+          const response = await promptForInput(found.request, {
+            interactive: context.interactive,
+            out: context.out,
+          });
           if (response.action !== "accept") {
             throw new InputsCodeError("confirmation_declined");
           }

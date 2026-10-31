@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  Id,
-  InputRequestSchema,
-  JsonValue,
-  RunStatus,
-} from "@rovinos/schemas";
+import { Code, Id, InputRequestSchema, JsonValue, RunStatus } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 

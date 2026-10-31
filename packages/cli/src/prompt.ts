@@ -28,10 +28,7 @@ export function createTerminalPrompt(
   };
 }
 
-function readLine(
-  input: NodeJS.ReadableStream,
-  signal: AbortSignal | undefined,
-): Promise<string> {
+function readLine(input: NodeJS.ReadableStream, signal: AbortSignal | undefined): Promise<string> {
   const lines = createInterface({ input });
   return new Promise<string>((resolve, reject) => {
     let settled = false;

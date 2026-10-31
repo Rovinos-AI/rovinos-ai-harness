@@ -357,13 +357,20 @@ describe("control-plane human input tools", () => {
     const result = await client.callTool({ name: "review_input", arguments: { requestId } });
 
     expect(result.structuredContent).toEqual({ resolved: true });
-    expect(received[0]).toMatchObject({
-      params: {
-        mode: "url",
-        url: "https://accounts.example.test/connect",
-        message: expect.stringContaining(`run ${runId}`),
-      },
+    const request = z
+      .object({
+        params: z.object({
+          mode: z.literal("url"),
+          url: z.string(),
+          message: z.string(),
+        }),
+      })
+      .parse(received[0]);
+    expect(request.params).toMatchObject({
+      mode: "url",
+      url: "https://accounts.example.test/connect",
     });
+    expect(request.params.message).toContain(`run ${runId}`);
     expect(resolveInput).toHaveBeenCalledWith({
       runId,
       requestId,
@@ -384,9 +391,7 @@ describe("control-plane human input tools", () => {
       resolved: false,
       code: "human_confirmation_unavailable",
     });
-    expect(result.content).toContainEqual(
-      expect.objectContaining({ text: expect.stringContaining(`harness inputs answer ${requestId}`) }),
-    );
+    expect(JSON.stringify(result.content)).toContain(`harness inputs answer ${requestId}`);
     expect(resolveInput).not.toHaveBeenCalled();
   });
 
@@ -442,9 +447,8 @@ describe("control-plane human input tools", () => {
           requestStateToken: `${state}x`,
           resolveInput,
         });
-        outcome = z
-          .object({ structuredContent: z.object({ code: z.string() }) })
-          .parse(result).structuredContent.code;
+        outcome = z.object({ structuredContent: z.object({ code: z.string() }) }).parse(result)
+          .structuredContent.code;
       } else {
         const result = await reviewRequest({
           store,
@@ -456,15 +460,12 @@ describe("control-plane human input tools", () => {
           requestStateToken: state,
           resolveInput,
         });
-        outcome = z
-          .object({ structuredContent: z.object({ code: z.string() }) })
-          .parse(result).structuredContent.code;
+        outcome = z.object({ structuredContent: z.object({ code: z.string() }) }).parse(result)
+          .structuredContent.code;
       }
 
       expect(outcome).toBe(
-        invalidState === "tampered"
-          ? "confirmation_state_invalid"
-          : "confirmation_state_mismatch",
+        invalidState === "tampered" ? "confirmation_state_invalid" : "confirmation_state_mismatch",
       );
       expect(resolveInput).not.toHaveBeenCalled();
       await expectInputPending(store, runId, requestId);

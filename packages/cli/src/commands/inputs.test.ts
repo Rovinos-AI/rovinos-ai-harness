@@ -112,7 +112,11 @@ async function seedInput(
 }
 
 async function createFixture(
-  options: { readonly mode?: "form" | "url"; readonly resolved?: boolean; readonly interactive?: Interactive } = {},
+  options: {
+    readonly mode?: "form" | "url";
+    readonly resolved?: boolean;
+    readonly interactive?: Interactive;
+  } = {},
 ): Promise<Fixture> {
   const store = new InMemoryEventStore();
   if (options.resolved !== undefined || options.mode !== undefined) {
@@ -141,13 +145,15 @@ async function createFixture(
     approverId: Principal.parse("cli.local"),
     waitMs: 7,
   };
-  const resolveInput = vi.fn<Runtime["resolveInput"]>().mockImplementation(
-    (_runId, _requestId, resolution) => Promise.resolve({
-      ...resolutionEnvelope,
-      action: resolution.action,
-      ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
-    }),
-  );
+  const resolveInput = vi
+    .fn<Runtime["resolveInput"]>()
+    .mockImplementation((_runId, _requestId, resolution) =>
+      Promise.resolve({
+        ...resolutionEnvelope,
+        action: resolution.action,
+        ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
+      }),
+    );
   const runtimeWithResolve = { ...runtime, resolveInput };
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -242,11 +248,9 @@ describe("inputs CLI commands", () => {
 
   it("declines an input and returns exit code 7 for missing or resolved requests", async () => {
     const declined = await createFixture();
-    const declineCode = await main(
-      ["inputs", "decline", requestId],
-      declined.context,
-      [inputsCommand],
-    );
+    const declineCode = await main(["inputs", "decline", requestId], declined.context, [
+      inputsCommand,
+    ]);
     expect(declineCode).toBe(ExitCode.ok);
     expect(declined.resolveInput).toHaveBeenCalledWith(runId, requestId, {
       action: "decline",
@@ -254,19 +258,15 @@ describe("inputs CLI commands", () => {
     });
 
     const missing = await createFixture();
-    const missingCode = await main(
-      ["inputs", "show", Id.parse("C".repeat(26))],
-      missing.context,
-      [inputsCommand],
-    );
+    const missingCode = await main(["inputs", "show", Id.parse("C".repeat(26))], missing.context, [
+      inputsCommand,
+    ]);
     expect(missingCode).toBe(ExitCode.notFoundOrResolved);
 
     const resolved = await createFixture({ resolved: true });
-    const resolvedCode = await main(
-      ["inputs", "answer", requestId],
-      resolved.context,
-      [inputsCommand],
-    );
+    const resolvedCode = await main(["inputs", "answer", requestId], resolved.context, [
+      inputsCommand,
+    ]);
     expect(resolvedCode).toBe(ExitCode.notFoundOrResolved);
   });
 
@@ -277,11 +277,9 @@ describe("inputs CLI commands", () => {
       await writeFile(path, JSON.stringify({ name: "PRIVATE_INPUT_ANSWER_CANARY" }), "utf8");
       const fixture = await createFixture();
 
-      const code = await main(
-        ["inputs", "answer", requestId, "--json", path],
-        fixture.context,
-        [inputsCommand],
-      );
+      const code = await main(["inputs", "answer", requestId, "--json", path], fixture.context, [
+        inputsCommand,
+      ]);
       expect(code).toBe(ExitCode.ok);
       expect(parseJson(InputResolveResultSchema, fixture.stdout[0] ?? "")).toMatchObject({
         requestId,
@@ -297,11 +295,9 @@ describe("inputs CLI commands", () => {
       expect(fixture.stderr.join("")).not.toContain("PRIVATE_INPUT_ANSWER_CANARY");
 
       const nonInteractive = await createFixture();
-      const noTtyCode = await main(
-        ["inputs", "answer", requestId],
-        nonInteractive.context,
-        [inputsCommand],
-      );
+      const noTtyCode = await main(["inputs", "answer", requestId], nonInteractive.context, [
+        inputsCommand,
+      ]);
       expect(noTtyCode).toBe(ExitCode.usage);
       expect(nonInteractive.stderr).toContain("confirmation_required\n");
     } finally {

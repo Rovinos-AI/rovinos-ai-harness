@@ -83,7 +83,9 @@ export async function findInputRequest(
   store: EventStore,
   requestId: Id,
   allowedRunIds?: readonly Id[],
-): Promise<{ readonly runId: Id; readonly request: ReturnType<typeof InputRequestSchema.parse> } | undefined> {
+): Promise<
+  { readonly runId: Id; readonly request: ReturnType<typeof InputRequestSchema.parse> } | undefined
+> {
   for await (const runId of runIds(store, allowedRunIds)) {
     const run = await readRunState(store, runId);
     const event = run?.state.inputRequests.get(requestId);

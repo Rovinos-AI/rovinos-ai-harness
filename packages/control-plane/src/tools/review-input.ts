@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  JsonValue,
-  formSchemaToZod,
-  type Id,
-  type InputRequest,
-} from "@rovinos/schemas";
+import { Code, JsonValue, formSchemaToZod, type Id, type InputRequest } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
-import {
-  inputRequired,
-  type McpServer,
-  type ServerContext,
-} from "@modelcontextprotocol/server";
+import { inputRequired, type McpServer, type ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";
 import type { ControlPlaneAuditHandler, ControlPlanePrincipal } from "../auth.js";
@@ -160,28 +150,38 @@ async function requestHumanAnswer(
     if (url === undefined) {
       return undefined;
     }
-    return await input.confirmationGate.requireHumanInput(input.context, confirmationRequest, {
-      ...base,
-      answerSchema: z.object({}).strict(),
-      acceptWithoutContent: true,
-      createRequest: (elicitationMessage) =>
-        inputRequired.elicitUrl({ url, message: elicitationMessage }),
-    }, input.requestStateToken);
+    return input.confirmationGate.requireHumanInput(
+      input.context,
+      confirmationRequest,
+      {
+        ...base,
+        answerSchema: z.object({}).strict(),
+        acceptWithoutContent: true,
+        createRequest: (elicitationMessage) =>
+          inputRequired.elicitUrl({ url, message: elicitationMessage }),
+      },
+      input.requestStateToken,
+    );
   }
   const schema = input.request.schema;
   if (schema === undefined) {
     return undefined;
   }
-  return await input.confirmationGate.requireHumanInput(input.context, confirmationRequest, {
-    ...base,
-    answerSchema: formSchemaToZod(schema),
-    createRequest: (elicitationMessage) =>
-      inputRequired.elicit({
-        mode: "form",
-        message: elicitationMessage,
-        requestedSchema: elicitationFormSchema(schema),
-      }),
-  }, input.requestStateToken);
+  return input.confirmationGate.requireHumanInput(
+    input.context,
+    confirmationRequest,
+    {
+      ...base,
+      answerSchema: formSchemaToZod(schema),
+      createRequest: (elicitationMessage) =>
+        inputRequired.elicit({
+          mode: "form",
+          message: elicitationMessage,
+          requestedSchema: elicitationFormSchema(schema),
+        }),
+    },
+    input.requestStateToken,
+  );
 }
 
 async function resolveReviewedInput(
@@ -198,7 +198,8 @@ async function resolveReviewedInput(
       ...(result.status === "accepted" && request.mode === "form"
         ? { answer: JsonValue.parse(result.content) }
         : {}),
-      principal: input.principal === undefined ? "cli.control_plane" : `token.${input.principal.tokenId}`,
+      principal:
+        input.principal === undefined ? "cli.control_plane" : `token.${input.principal.tokenId}`,
     });
     return inputResult({ resolved: true });
   } catch (error) {
