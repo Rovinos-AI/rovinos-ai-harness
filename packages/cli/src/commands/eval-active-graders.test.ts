@@ -68,7 +68,11 @@ function agentModel(): ModelPort {
   };
 }
 
-async function setup(graders: readonly unknown[]) {
+async function setup(
+  graders: readonly unknown[],
+  maxRepairs = 0,
+  canaries: readonly string[] = [],
+) {
   root = await mkdtemp(join(process.cwd(), ".eval-active-"));
   const fixture = join(root, "fixture");
   await mkdir(fixture);
@@ -84,6 +88,7 @@ async function setup(graders: readonly unknown[]) {
           input: { goal: "synthetic goal" },
           workspace: { fixtureDir: fixture },
           graders,
+          ...(canaries.length === 0 ? {} : { canaries }),
           tags: [],
         },
       ],
@@ -100,7 +105,7 @@ async function setup(graders: readonly unknown[]) {
               "openai/judge": { inputMicrosPerMTok: 1_000_000_000_000, outputMicrosPerMTok: 0 },
             },
             retry: { maxAttempts: 1 },
-            enforcement: { maxRepairs: 0 },
+            enforcement: { maxRepairs },
           },
         }),
       ),
@@ -168,6 +173,37 @@ it("grades fixture and agent-written files in isolated runtime projects without 
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+it("checks privacy after command graders finish writing trial artifacts", async () => {
+  const canary = "synthetic-grading-canary@example.test";
+  const { suite, context } = await setup(
+    [
+      { type: "no_canary_leak" },
+      {
+        type: "test_command",
+        argv: [
+          process.execPath,
+          "-e",
+          `require('fs').writeFileSync('grader-output.txt', ${JSON.stringify(canary)})`,
+        ],
+      },
+    ],
+    0,
+    [canary],
+  );
+  const output = join(root ?? "", "privacy");
+  expect(
+    await main(["eval", "run", suite, "--out", output, "--fail-under", "1"], context, [
+      createEvalCommand({
+        createExecutor: () => new evalApi.InProcessExecutor({ model: () => model }),
+      }),
+    ]),
+  ).toBe(ExitCode.failure);
+  const metadata = await report(output);
+  expect(metadata.trials[0]?.graders[0]?.codes).toContain("canary_in_workspace_unexpected");
+  expect(metadata.trials[0]?.graders[1]?.pass).toBe(true);
+  expect(JSON.stringify(metadata)).not.toContain(canary);
 });
 
 it("records and replays voted judges with configured pricing and stops scheduling at judge cost", async () => {
@@ -309,6 +345,68 @@ it("keeps malformed judge output off disk while charging failed verdict usage", 
   await expect(
     readFile(join(root ?? "", "cassettes", "synthetic_task", "default.judge.json"), "utf8"),
   ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("replays repaired judge verdicts under the original vote identity with all attempt usage", async () => {
+  const { suite, context, secrets } = await setup([judge], 1);
+  const complete = vi.fn<ProviderAdapter["complete"]>(() =>
+    Promise.resolve({
+      parts: [
+        {
+          type: "text",
+          text:
+            complete.mock.calls.length === 1
+              ? '{"reason":"synthetic private reasoning"}'
+              : '{"criteria":[{"id":"criterion","met":true}],"verdict":"pass"}',
+        },
+      ],
+      usage: { inputTokens: 2, outputTokens: 1, cacheReadTokens: 1 },
+      finishReason: "stop",
+      latencyMs: 1,
+    }),
+  );
+  const original = core.createConfiguredModelPort;
+  const configured = vi
+    .spyOn(core, "createConfiguredModelPort")
+    .mockImplementation((config, overrides) =>
+      original(config, {
+        ...overrides,
+        providerAdapters: [{ provider: "openai", kind: "openai", complete }],
+      }),
+    );
+  const recorded = join(root ?? "", "repaired-record");
+  expect(
+    await main(
+      ["eval", "run", suite, "--cassette", "record", "--isolation", "inprocess", "--out", recorded],
+      context,
+      [
+        createEvalCommand({
+          createExecutor: () => new evalApi.InProcessExecutor({ model: () => model }),
+        }),
+      ],
+    ),
+  ).toBe(ExitCode.ok);
+  expect(complete).toHaveBeenCalledTimes(4);
+  const recordedReport = await report(recorded);
+  expect(recordedReport.trials[0]?.passed).toBe(true);
+  const cassette = parseJson(
+    CassetteFileSchema,
+    await readFile(join(root ?? "", "cassettes", "synthetic_task", "default.judge.json"), "utf8"),
+  );
+  expect(cassette.entries).toHaveLength(3);
+  expect(JSON.stringify(cassette)).not.toContain("synthetic private reasoning");
+  configured.mockRestore();
+  const replayed = join(root ?? "", "repaired-replay");
+  expect(
+    await main(["eval", "run", suite, "--out", replayed, "--fail-under", "1"], context, [
+      createEvalCommand(),
+    ]),
+  ).toBe(ExitCode.ok);
+  const replayedReport = await report(replayed);
+  expect(replayedReport.trials[0]?.graders).toEqual(recordedReport.trials[0]?.graders);
+  expect(replayedReport.trials[0]?.costMicros).toBe(recordedReport.trials[0]?.costMicros);
+  expect(complete).toHaveBeenCalledTimes(4);
+  expect(secrets).not.toHaveBeenCalled();
 });
 
 it.each(["off", "record", "replay"])(

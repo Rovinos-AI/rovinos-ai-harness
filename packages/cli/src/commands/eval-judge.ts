@@ -5,7 +5,14 @@ import { createHash } from "node:crypto";
 import { createConfiguredModelPort } from "@rovinos/core";
 import { CassetteProvider, FileCassetteStore, requestHash } from "@rovinos/models";
 import type { ProviderAdapter } from "@rovinos/models";
-import { FakeClock, SequentialIdGenerator, parseJson, parseYaml } from "@rovinos/schemas";
+import {
+  FakeClock,
+  ModelUsageSchema,
+  SequentialIdGenerator,
+  parseJson,
+  parseYaml,
+} from "@rovinos/schemas";
+import type { ModelUsage } from "@rovinos/schemas";
 import type { Grader, LlmJudgeGraderSpec, TrialSpec } from "@rovinos/eval";
 import type { EvalPackage } from "./eval-types.js";
 import type { EvalExecutorOptions } from "./eval-executor.js";
@@ -20,11 +27,26 @@ function recordAdapter(
   verdictSchema: ReturnType<EvalPackage["createJudgeVerdictSchema"]>,
   rubricId: string,
 ): ProviderAdapter {
+  let originalHash: string | undefined;
+  let usage: ModelUsage | undefined;
+  let latencyMs = 0;
   return {
     provider: adapter.provider,
     kind: "cassette",
     complete: async (request, context) => {
+      originalHash ??= judgeHash(rubricId, request.requestId, requestHash(request));
       const response = await adapter.complete(request, context);
+      usage = ModelUsageSchema.parse(
+        Object.fromEntries(
+          (["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"] as const).flatMap(
+            (field) =>
+              usage?.[field] === undefined && response.usage[field] === undefined
+                ? []
+                : [[field, (usage?.[field] ?? 0) + (response.usage[field] ?? 0)]],
+          ),
+        ),
+      );
+      latencyMs += response.latencyMs;
       let verdict;
       try {
         const text = response.parts
@@ -40,10 +62,14 @@ function recordAdapter(
         ...response,
         parts: [{ type: "text" as const, text: JSON.stringify(verdict) }],
       };
+      // Replay the logical vote without persisting the malformed repair transcript.
       await fileStore.set({
-        hash: judgeHash(rubricId, request.requestId, requestHash(request)),
-        response: sanitized,
+        hash: originalHash,
+        response: { ...sanitized, usage, latencyMs },
       });
+      originalHash = undefined;
+      usage = undefined;
+      latencyMs = 0;
       return sanitized;
     },
   };
