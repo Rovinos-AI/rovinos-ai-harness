@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { defineSuite } from "./load.js";
 import { EvalRunnerError, runEval } from "./runner.js";
 import type { TrialExecutor } from "./executor.js";
+import { completedTrialResult } from "../test-utils/trial-result.js";
 import { TrialResultSchema } from "./trial.js";
 import type { TrialResult, TrialSpec } from "./trial.js";
 
@@ -30,13 +31,15 @@ function makeSuite() {
 
 function resultFor(trial: TrialSpec, status: TrialResult["status"] = "completed"): TrialResult {
   return {
+    ...completedTrialResult({
+      runId: Id.parse("00000000000000000000000001"),
+      dbPath: join(trial.workDir, "data", "harness.db"),
+      workspaceDir: join(trial.workDir, "workspace"),
+      durationMs: 1,
+      usage: { inputTokens: 1, outputTokens: 2, costMicros: 3 },
+    }),
     status,
     ...(status === "error" ? { errorCode: "synthetic_error" } : {}),
-    runId: Id.parse("00000000000000000000000001"),
-    dbPath: join(trial.workDir, "data", "harness.db"),
-    workspaceDir: join(trial.workDir, "workspace"),
-    durationMs: 1,
-    usage: { inputTokens: 1, outputTokens: 2, costMicros: 3 },
     exitCode: status === "completed" ? 0 : 1,
   };
 }
