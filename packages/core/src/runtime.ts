@@ -13,6 +13,7 @@ import {
 import { composeAbortSignals, watchCancellation } from "./runtime-cancellation.js";
 import { cancelRun } from "./cancel.js";
 import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
+import { resolveInput as resolveInputEvent } from "./human-input/resolve.js";
 import { withResumeWakeUp } from "./runtime-approval-wake.js";
 import type { ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
@@ -307,6 +308,15 @@ function composeRuntime(
         ),
       );
     },
+    resolveInput: (runId, requestId, resolution) =>
+      resolveInputEvent(store, runId, requestId, {
+        ...resolution,
+        clock,
+        ...(options.pii === undefined
+          ? {}
+          : { tokenizer: options.pii.tokenizer, resolver: options.pii.resolver }),
+        ...(options.overrides.queue === undefined ? {} : { queue: options.overrides.queue }),
+      }),
     close: () =>
       closeRuntimeResources({
         store,

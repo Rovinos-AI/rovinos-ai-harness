@@ -34,6 +34,12 @@ const tools: Tool[] = [
     inputSchema: { type: "object" },
   },
   {
+    name: "answer_input",
+    description: "Answer an input request in app",
+    inputSchema: { type: "object" },
+    _meta: { ui: { visibility: ["app"] } },
+  },
+  {
     name: "approve",
     description: "Approve",
     inputSchema: { type: "object" },

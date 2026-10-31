@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue, RunStatus } from "@rovinos/schemas";
+import {
+  Code,
+  Id,
+  InputRequestSchema,
+  JsonValue,
+  RunStatus,
+} from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 
@@ -80,6 +86,54 @@ export const reviewApprovalDecisionSchema = z
 
 /** Metadata-only output for `review_approval`. */
 export const reviewApprovalOutputSchema = z.object({ resolved: z.boolean() }).strict();
+
+/** Validated input for `get_input` and `review_input`. */
+export const inputRequestInputSchema = z.object({ requestId: Id }).strict();
+/** Validated optional run filter for `list_pending_inputs`. */
+export const listPendingInputsInputSchema = z.object({ runId: Id.optional() }).strict();
+
+/** Metadata-only input row returned by `list_pending_inputs`. */
+export const pendingInputSummarySchema = z
+  .object({
+    requestId: Id,
+    runId: Id,
+    source: z.enum(["mcp_mrtr", "mcp_legacy", "agent"]),
+    mode: z.enum(["form", "url"]),
+    serverId: Code.optional(),
+    round: z.number().int().nonnegative(),
+    ageMs: z.number().int().nonnegative(),
+    expiresAt: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+
+/** Structured metadata-only output for `list_pending_inputs`. */
+export const listPendingInputsOutputSchema = z
+  .object({ inputs: z.array(pendingInputSummarySchema) })
+  .strict();
+
+/** Content-bearing, tokenized output for authorized `get_input` calls. */
+export const getInputOutputSchema = InputRequestSchema.extend({
+  runId: Id,
+  ageMs: z.number().int().nonnegative(),
+}).strict();
+export const getInputResultSchema = z.union([
+  getInputOutputSchema,
+  z.object({ code: Code }).strict(),
+]);
+
+/** Validated input for app-only `answer_input`. */
+export const answerInputInputSchema = z
+  .object({
+    requestId: Id,
+    action: z.enum(["accept", "decline", "cancel"]),
+    answer: JsonValue.optional(),
+  })
+  .strict();
+
+/** Metadata-only output for input resolution tools. */
+export const inputResolutionOutputSchema = z
+  .object({ resolved: z.boolean(), code: Code.optional() })
+  .strict();
 
 /** Validated input for run lifecycle tools. */
 export const runLifecycleInputSchema = z.object({ runId: Id }).strict();
@@ -184,6 +238,18 @@ export type ReviewApprovalInput = z.infer<typeof reviewApprovalInputSchema>;
 export type ReviewApprovalDecision = z.infer<typeof reviewApprovalDecisionSchema>;
 /** Inferred output for `review_approval`. */
 export type ReviewApprovalOutput = z.infer<typeof reviewApprovalOutputSchema>;
+/** Inferred input for `get_input` and `review_input`. */
+export type InputRequestInput = z.infer<typeof inputRequestInputSchema>;
+/** Inferred metadata-only pending input row. */
+export type PendingInputSummary = z.infer<typeof pendingInputSummarySchema>;
+/** Inferred metadata-only output for `list_pending_inputs`. */
+export type ListPendingInputsOutput = z.infer<typeof listPendingInputsOutputSchema>;
+/** Inferred content-bearing output for `get_input`. */
+export type GetInputOutput = z.infer<typeof getInputOutputSchema>;
+/** Inferred input for app-only `answer_input`. */
+export type AnswerInputInput = z.infer<typeof answerInputInputSchema>;
+/** Inferred metadata-only input-resolution output. */
+export type InputResolutionOutput = z.infer<typeof inputResolutionOutputSchema>;
 /** Inferred metadata-only decision output. */
 export type DecisionOutput = z.infer<typeof decisionOutputSchema>;
 /** Inferred metadata-only resume output. */

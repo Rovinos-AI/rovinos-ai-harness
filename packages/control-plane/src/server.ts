@@ -31,6 +31,13 @@ import { registerListRunsTool } from "./tools/list-runs.js";
 import { registerResumeRunTool } from "./tools/resume-run.js";
 import { registerStartRunTool } from "./tools/start-run.js";
 import { registerContinueRunTool } from "./tools/continue-run.js";
+import {
+  registerAnswerInputTool,
+  type ResolveInputOperation,
+} from "./tools/answer-input.js";
+import { registerGetInputTool } from "./tools/get-input.js";
+import { registerListPendingInputsTool } from "./tools/list-pending-inputs.js";
+import { registerReviewInputTool } from "./tools/review-input.js";
 import type { StartRunInput, ContinueRunInput } from "./schemas.js";
 import {
   registerApprovalAppTools,
@@ -76,6 +83,7 @@ export interface ControlPlaneOperations {
   readonly resumeRun?: (runId: Id, signal: AbortSignal, onClaimed: () => void) => Promise<unknown>;
   readonly cancelRun?: (runId: Id) => Promise<unknown>;
   readonly resolveApproval?: ResolveApprovalOperation;
+  readonly resolveInput?: ResolveInputOperation;
 }
 
 /** Optional dependencies for control-plane mutation and confirmation tools. */
@@ -158,6 +166,7 @@ export function createControlPlaneServer(
     confirmationGate,
     clientCapabilities,
   });
+  registerInputTools({ server, store, options, confirmationGate, clientCapabilities });
   const supervisor = options.runSupervisor ?? createRunSupervisor(options);
   registerStartRunTool(server, {
     ...(options.operations?.startRun === undefined
@@ -212,6 +221,9 @@ function registerRunInspection(
 ): void {
   registerListRunsTool(server, store, options.onAudit);
   registerGetRunTool(server, store, options.onAudit);
+  const now = (): number => options.clock?.now() ?? Date.now();
+  registerListPendingInputsTool(server, store, now, options.onAudit);
+  registerGetInputTool(server, store, now, options.onAudit);
   registerListRunsTool(server, store, options.onAudit, {
     name: "harness.runs.list",
     appOnly: true,
@@ -222,6 +234,34 @@ function registerRunInspection(
   });
   registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
   registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
+}
+
+function registerInputTools(input: {
+  readonly server: McpServer;
+  readonly store: EventStore;
+  readonly options: ControlPlaneServerOptions;
+  readonly confirmationGate: ConfirmationGate;
+  readonly clientCapabilities: (
+    context: ServerContext,
+  ) => ConfirmationClientCapabilities | undefined;
+}): void {
+  registerAnswerInputTool(input.server, {
+    store: input.store,
+    ...(input.options.operations?.resolveInput === undefined
+      ? {}
+      : { resolveInput: input.options.operations.resolveInput }),
+    isAppContext: input.options.isAppContext ?? (() => false),
+    ...(input.options.onAudit === undefined ? {} : { onAudit: input.options.onAudit }),
+  });
+  registerReviewInputTool(input.server, {
+    store: input.store,
+    confirmationGate: input.confirmationGate,
+    ...(input.options.operations?.resolveInput === undefined
+      ? {}
+      : { resolveInput: input.options.operations.resolveInput }),
+    clientCapabilities: input.clientCapabilities,
+    ...(input.options.onAudit === undefined ? {} : { onAudit: input.options.onAudit }),
+  });
 }
 
 function registerLifecycleTools(input: {
