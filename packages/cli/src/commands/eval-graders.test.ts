@@ -87,8 +87,14 @@ it("grades supported deterministic graders through the CLI on pass and failure p
   const suitePath = join(root, "suite.json");
   const output = join(root, "reports");
   const specs = [
-    { id: "file_pass", graders: [{ type: "file_diff", path: "answer.txt", expectedContains: "expected" }] },
-    { id: "file_fail", graders: [{ type: "file_diff", path: "answer.txt", expectedContains: "missing" }] },
+    {
+      id: "file_pass",
+      graders: [{ type: "file_diff", path: "answer.txt", expectedContains: "expected" }],
+    },
+    {
+      id: "file_fail",
+      graders: [{ type: "file_diff", path: "answer.txt", expectedContains: "missing" }],
+    },
     { id: "file_error", graders: [{ type: "file_diff", path: "throws", expectedContains: "x" }] },
     { id: "canary_pass", graders: [{ type: "no_canary_leak" }], canaries: ["not-in-artifacts"] },
     {
@@ -106,11 +112,15 @@ it("grades supported deterministic graders through the CLI on pass and failure p
     { id: "schema_fail", graders: [{ type: "schema_valid", schemaRef }] },
     {
       id: "trajectory_pass",
-      graders: [{ type: "trajectory", assertions: [{ type: "final_status", status: "completed" }] }],
+      graders: [
+        { type: "trajectory", assertions: [{ type: "final_status", status: "completed" }] },
+      ],
     },
     {
       id: "trajectory_fail",
-      graders: [{ type: "trajectory", assertions: [{ type: "final_status", status: "completed" }] }],
+      graders: [
+        { type: "trajectory", assertions: [{ type: "final_status", status: "completed" }] },
+      ],
     },
   ];
   await writeFile(
@@ -162,20 +172,15 @@ it("grades supported deterministic graders through the CLI on pass and failure p
     loadEval: () => Promise.resolve(evalApi),
     createExecutor: () => executor,
   };
-  const exitCode = await main(
-    ["eval", "run", suitePath, "--out", output],
-    context(),
-    [createEvalCommand(dependencies)],
-  );
+  const exitCode = await main(["eval", "run", suitePath, "--out", output], context(), [
+    createEvalCommand(dependencies),
+  ]);
   const report = parseJson(
     evalApi.EvalReportSchema,
     await readFile(join(output, "eval-report.json"), "utf8"),
   );
   const gradeCodes = new Map(
-    report.trials.map((trial) => [
-      trial.taskId,
-      trial.graders.flatMap((grader) => grader.codes),
-    ]),
+    report.trials.map((trial) => [trial.taskId, trial.graders.flatMap((grader) => grader.codes)]),
   );
 
   expect(exitCode).toBe(ExitCode.ok);

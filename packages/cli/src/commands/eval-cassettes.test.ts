@@ -43,10 +43,10 @@ async function setup(): Promise<{ suitePath: string; context: CliContext; output
   return { suitePath, context, output: join(root, "reports") };
 }
 
-function responseModel(calls: { count: number }): ModelPort {
+function responseModel(onCall: () => void): ModelPort {
   return {
     complete: () => {
-      calls.count += 1;
+      onCall();
       return Promise.resolve({
         provider: "synthetic",
         model: "synthetic",
@@ -76,7 +76,10 @@ it("records and replays two variants across five trials without a provider durin
   const recordDependencies: EvalCommandDependencies = {
     createExecutor: (api) =>
       new api.InProcessExecutor({
-        model: () => responseModel(providerCalls),
+        model: () =>
+          responseModel(() => {
+            providerCalls.count += 1;
+          }),
       }),
   };
   const recordExit = await main(
