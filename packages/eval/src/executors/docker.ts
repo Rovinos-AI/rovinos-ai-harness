@@ -17,6 +17,7 @@ import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from ".
 import { appendTrialProcessOutput } from "../execution-capture.js";
 import { dockerBaseArgs } from "./docker-args.js";
 import { runDockerHuman } from "./docker-human.js";
+import { executionMetricsFromEvents } from "../report/metrics.js";
 
 const DockerMemorySchema = z
   .string()
@@ -158,6 +159,7 @@ async function readRunResult(
       workspaceDir: prepared.workspaceDir,
       durationMs,
       usage: state.usage,
+      metrics: executionMetricsFromEvents(events, state.steps),
     });
   } catch {
     return TrialResultSchema.parse({

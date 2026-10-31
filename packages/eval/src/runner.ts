@@ -3,7 +3,13 @@ import { createHash } from "node:crypto";
 import { mkdir, open, rm } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { EvalSuiteSchema } from "./schema.js";
-import { EvalVariantSchema, TrialResultSchema, TrialSpecSchema } from "./trial.js";
+import {
+  EvalTrialRecordSchema,
+  EvalVariantSchema,
+  TrialResultSchema,
+  TrialSpecSchema,
+  evalSuiteCode,
+} from "./trial.js";
 import type { EvalVariant, TrialResult, TrialSpec } from "./trial.js";
 import { systemClock, type TrialExecutor } from "./executor.js";
 import type { Clock } from "@rovinos/core";
@@ -74,6 +80,19 @@ function outputPaths(outDir: string, taskId: string, variantId: string, trialInd
     pathComponent(variantId),
     String(trialIndex),
   );
+}
+
+function stringifyTrialRecord(trial: TrialSpec, result: TrialResult): string {
+  const record = EvalTrialRecordSchema.parse({
+    schemaVersion: 1,
+    suiteCode: evalSuiteCode(trial.suite),
+    taskId: trial.task.id,
+    variantId: trial.variantId,
+    trialIndex: trial.trialIndex,
+    seed: trial.seed,
+    result,
+  });
+  return `${JSON.stringify(record)}\n`;
 }
 
 function makePlan(
@@ -174,7 +193,8 @@ export async function runEval(
         });
       }
       results.set(index, result);
-      writeChain = writeChain.then(() => output.appendFile(`${JSON.stringify(result)}\n`, "utf8"));
+      const line = stringifyTrialRecord(trial, result);
+      writeChain = writeChain.then(() => output.appendFile(line, "utf8"));
       await writeChain;
     }
   }

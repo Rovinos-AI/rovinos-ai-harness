@@ -14,6 +14,7 @@ import {
 } from "../execution-capture.js";
 import { SimulatedHuman } from "../human.js";
 import { createProviderCaptureAdapter } from "../trajectory.js";
+import { executionMetricsFromEvents } from "../report/metrics.js";
 
 /** Factories for isolated model, tool, and policy ports. */
 export interface InProcessExecutorOptions extends TrialExecutionDependencies {
@@ -101,6 +102,7 @@ function trialResult(
     workspaceDir: prepared.workspaceDir,
     durationMs: Math.max(0, Math.floor(clock.now() - startedAt)),
     usage: run.state.usage,
+    metrics: executionMetricsFromEvents(run.events, run.state.steps),
     approvals: human?.counts ?? { approved: 0, denied: 0, edited: 0 },
     unsafeAutoApprove: human?.unsafeAutoApprove ?? false,
     exitCode: run.status === "completed" && !maxResumesExceeded ? 0 : 1,

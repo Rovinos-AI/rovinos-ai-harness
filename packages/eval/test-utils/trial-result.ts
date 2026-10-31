@@ -11,6 +11,13 @@ export function completedTrialResult(
     workspaceDir: "/synthetic/workspace",
     durationMs: 0,
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+    metrics: {
+      steps: 0,
+      repairAttempts: 0,
+      fallbackDepth: 0,
+      deniedToolCalls: 0,
+      budgetExceeded: false,
+    },
     approvals: { approved: 0, denied: 0, edited: 0 },
     unsafeAutoApprove: false,
     ...overrides,
