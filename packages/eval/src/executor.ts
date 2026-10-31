@@ -14,7 +14,7 @@ import {
   StoreConfigSchema,
   VaultConfigSchema,
 } from "@rovinos/schemas";
-import type { RunBudgetsSchema } from "@rovinos/schemas";
+import type { Event, ModelsConfig, RunBudgetsSchema, SecretRef } from "@rovinos/schemas";
 import { z } from "zod";
 import type { Clock, RuntimeConfig } from "@rovinos/core";
 import type { EvalTask } from "./schema.js";
@@ -68,6 +68,11 @@ export interface TrialExecutionDependencies {
   readonly randomBytes?: (size: number) => Uint8Array;
   /** Preserve a caller-configured external pipeline; defaults to memory-only eval telemetry. */
   readonly exportTelemetry?: boolean;
+  /** Provider configuration and secret resolver used for live model evaluations. */
+  readonly models?: ModelsConfig;
+  readonly secretResolver?: {
+    resolve(ref: SecretRef, signal?: AbortSignal): Promise<{ reveal(): string }>;
+  };
 }
 
 /** System clock used for elapsed-time measurements. */
@@ -89,6 +94,8 @@ class TrialSetupError extends HarnessError {
 export interface TrialExecutor {
   /** Runs the trial and returns only metadata about its outcome. */
   run(trial: TrialSpec): Promise<TrialResult>;
+  /** Returns tokenized events kept in memory for grading and cassette recording. */
+  eventsFor?(trial: TrialSpec): Promise<readonly Event[]> | readonly Event[];
 }
 
 function runtimeConfig(config: TrialConfig): RuntimeConfig {
@@ -108,10 +115,16 @@ function trialBudgets(task: EvalTask, variant: EvalVariant): z.input<typeof RunB
   return { ...task.budgets, ...variant.budgets };
 }
 
-function configForTrial(task: EvalTask, variant: EvalVariant, keyId: string): TrialConfig {
+function configForTrial(
+  task: EvalTask,
+  variant: EvalVariant,
+  keyId: string,
+  models?: ModelsConfig,
+): TrialConfig {
   const budgets = trialBudgets(task, variant);
   const policyFile = variant.policyFile ?? task.policyFile;
   const contextStrategy = variant.contextStrategy ?? task.contextStrategy;
+  const parsedModels = ModelsConfigSchema.parse(models ?? {});
   return TrialConfigSchema.parse({
     run: RunConfigSchema.parse({ budgets }),
     roles: contextStrategy === undefined ? [] : [{ id: "eval", tools: "*", contextStrategy }],
@@ -121,7 +134,11 @@ function configForTrial(task: EvalTask, variant: EvalVariant, keyId: string): Tr
       keys: [{ id: keyId, secret: "env:HARNESS_EVAL_KEY" }],
     }),
     models: ModelsConfigSchema.parse({
-      routing: { default: variant.models ?? task.models ?? [] },
+      ...parsedModels,
+      routing: {
+        ...parsedModels.routing,
+        default: variant.models ?? task.models ?? parsedModels.routing.default,
+      },
     }),
     policy: PolicyConfigSchema.parse(policyFile === undefined ? {} : { file: "policy.yaml" }),
     pii: PiiConfigSchema.parse({}),
@@ -174,7 +191,7 @@ export async function prepareTrial(
   }
 
   const key = secretForTrial(dependencies.randomBytes ?? systemRandomBytes);
-  const config = configForTrial(trial.task, trial.variant, keyIdFor(trial));
+  const config = configForTrial(trial.task, trial.variant, keyIdFor(trial), dependencies.models);
   const configPath = join(workDir, "harness.config.json");
   await writeFile(configPath, `${JSON.stringify(config)}\n`, { encoding: "utf8", flag: "wx" });
   const evalOptionsPath = join(workDir, "eval.options.json");
