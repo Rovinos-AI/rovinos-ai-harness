@@ -26,6 +26,21 @@ function addFlag(payload: unknown, key: string): unknown {
 }
 
 describe("event schema upcasting", () => {
+  it("upcasts v1 model requests without inventing hashes of unrecorded parameters", () => {
+    const raw = {
+      ...envelope,
+      type: "model_request",
+      requestId: "00000000000000000000000002",
+      provider: "synthetic",
+      model: "synthetic",
+      requestHash: "c".repeat(64),
+      messages: [{ role: "user", parts: [{ type: "text", text: "<EMAIL_1>" }] }],
+    };
+    expect(upcastEvent(raw)).toEqual({ ...raw, v: 2, requestParametersHash: null });
+    expect(raw).not.toHaveProperty("requestParametersHash");
+    expect(() => upcastEvent({ ...raw, unexpected: true })).toThrow();
+  });
+
   it("applies every consecutive upcaster in a 1-to-3 chain", () => {
     const upcasters: Readonly<Record<number, EventUpcaster>> = {
       1: (payload) => addFlag(payload, "first"),

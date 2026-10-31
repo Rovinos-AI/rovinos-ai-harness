@@ -26,6 +26,7 @@ export const eventSamples = [
   {
     ...envelope,
     type: "model_request",
+    v: 2,
     requestId: id,
     provider: "test",
     model: "test",

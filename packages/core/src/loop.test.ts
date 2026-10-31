@@ -2828,7 +2828,7 @@ describe("runLoop", () => {
       const prior = await createRunHistory(store, clock, [
         {
           type: "model_request",
-          v: 1,
+          v: 2,
           requestId: modelCallId,
           provider: "test_provider",
           model: "test_model",

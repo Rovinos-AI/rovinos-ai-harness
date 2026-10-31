@@ -10,7 +10,7 @@ export const EVENT_SCHEMA_VERSIONS = {
   run_created: 1,
   run_input: 1,
   run_status_changed: 1,
-  model_request: 1,
+  model_request: 2,
   model_response: 1,
   tool_intent: 1,
   tool_execution_started: 1,
@@ -40,10 +40,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Pure migrations from event schema version n to n + 1. */
 export const UPCASTERS: EventUpcasterMap = {
+  model_request: {
+    1: modelRequestV1ToV2,
+  },
   approval_resolved: {
     1: approvalResolvedV1ToV2,
   },
 };
+
+/** Legacy logs lack the non-message inputs; retain their original full-request hash verification. */
+function modelRequestV1ToV2(payload: unknown): unknown {
+  return isRecord(payload) ? { ...payload, requestParametersHash: null } : payload;
+}
 
 /** Supplies the human decision identity missing from v1 approval resolutions. */
 function approvalResolvedV1ToV2(payload: unknown): unknown {

@@ -4,6 +4,12 @@ The GitHub Actions `gates` job runs `yarn test:replay` against the committed syn
 
 The scenario uses only a scripted model, synthetic tools, and a synthetic policy. It includes idempotent and non-idempotent tool calls, an edited approval, a policy denial, checkpoints, a crash-and-resume segment, context compaction, and a final answer. The content-free signature covers both the replay output and the isolated compaction coverage pass. Replay uses recorded model and tool results and resolves approvals from the source event log; it does not call real providers, tools, or people.
 
+## Tokenized request verification
+
+Version 2 `model_request` events include a metadata-only `requestParametersHash` covering every non-message request parameter except the volatile request ID, including tools and the stable-prefix message count. The `requestHash` combines that digest with the stored messages; the PII storage boundary recomputes it after tokenization. Replay verifies the same signature against the reconstructed request, so message, tool, and stable-prefix changes still diverge.
+
+Version 1 events upcast on read with `requestParametersHash: null` and retain their original full-request hash verification. Their missing parameters cannot be recovered, so previously tokenized v1 recordings may still diverge. Upcasting does not rewrite stored events or bypass hash checks.
+
 ## Updating the fixture
 
 When an intentional behavior change affects the golden replay:

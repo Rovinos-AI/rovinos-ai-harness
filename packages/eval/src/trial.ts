@@ -54,6 +54,18 @@ export const TrialSpecSchema = z
 /** Validated input to a trial executor. */
 export type TrialSpec = z.infer<typeof TrialSpecSchema>;
 
+/** Metadata-only counts of simulated approval decisions. */
+export const ApprovalCountsSchema = z
+  .object({
+    approved: z.number().int().nonnegative(),
+    denied: z.number().int().nonnegative(),
+    edited: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred counts of approval decisions recorded during a trial. */
+export type ApprovalCounts = z.infer<typeof ApprovalCountsSchema>;
+
 /** Metadata-only aggregate usage from a single trial. */
 export const TrialUsageSchema = z
   .object({
@@ -72,6 +84,8 @@ export const TrialResultSchema = z
     workspaceDir: z.string().min(1),
     durationMs: z.number().int().nonnegative(),
     usage: TrialUsageSchema,
+    approvals: ApprovalCountsSchema.default({ approved: 0, denied: 0, edited: 0 }),
+    unsafeAutoApprove: z.boolean().default(false),
     exitCode: z.number().int().optional(),
     errorCode: Code.optional(),
   })
