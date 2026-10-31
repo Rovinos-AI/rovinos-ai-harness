@@ -88,6 +88,50 @@ afterEach(async () => {
 });
 
 describe("harness eval run", () => {
+  it("runs the variants from a validated YAML file", async () => {
+    const suitePath = await createSuite();
+    const variantsPath = join(temporaryDirectory ?? "", "variants.yaml");
+    const outputDirectory = join(temporaryDirectory ?? "", "variant-reports");
+    const trials: TrialSpec[] = [];
+    await writeFile(
+      variantsPath,
+      [
+        "variants:",
+        "  - id: baseline",
+        "    route:",
+        "      - provider: openai",
+        "        model: synthetic_a",
+        "    configOverrides:",
+        "      run:",
+        "        budgets:",
+        "          maxSteps: 15",
+        "  - id: candidate",
+        "    contextStrategy: compact",
+      ].join("\n"),
+      "utf8",
+    );
+    const { context } = createContext();
+    const command = createEvalCommand({
+      loadEval: () => Promise.resolve(evalApi),
+      createExecutor: () => createExecutor("completed", 0, trials),
+    });
+
+    const exitCode = await main(
+      ["eval", "run", suitePath, "--variants", variantsPath, "--out", outputDirectory],
+      context,
+      [command],
+    );
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(trials).toHaveLength(4);
+    expect(new Set(trials.map(({ variantId }) => variantId))).toEqual(
+      new Set(["baseline", "candidate"]),
+    );
+    expect(trials.find(({ variantId }) => variantId === "baseline")?.variant.models).toEqual([
+      { provider: "openai", model: "synthetic_a" },
+    ]);
+  });
+
   it("parses model, trial, filter, output, and telemetry options and writes reports", async () => {
     const suitePath = await createSuite();
     const outputDirectory = join(temporaryDirectory ?? "", "reports");
