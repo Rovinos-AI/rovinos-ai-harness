@@ -82,7 +82,7 @@ export const EvalTrialMetricsSchema = z
     taskId: Code,
     variantId: Code,
     trialIndex: z.number().int().nonnegative(),
-    status: z.enum(["completed", "failed", "suspended", "cancelled", "error"]),
+    status: z.enum(["completed", "failed", "suspended", "cancelled", "error", "skipped_budget"]),
     passed: z.boolean(),
     graders: z
       .array(

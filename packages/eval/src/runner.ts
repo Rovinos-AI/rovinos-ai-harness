@@ -22,6 +22,7 @@ const RunnerOptionsSchema = z
     concurrency: z.number().int().positive().default(2),
     trials: z.number().int().positive().optional(),
     seed: z.number().int().nonnegative().max(0xffff_ffff).default(0),
+    maxCostUsd: z.number().nonnegative().optional(),
   })
   .strict();
 
@@ -123,6 +124,109 @@ function makePlan(
   return trials;
 }
 
+interface TrialExecutionPlan {
+  readonly trials: readonly TrialSpec[];
+  readonly executor: TrialExecutor;
+  readonly options: z.output<typeof RunnerOptionsSchema>;
+  readonly clock: Clock;
+  readonly jsonlPath: string;
+}
+
+async function clearTrialWorkspaces(
+  trials: readonly TrialSpec[],
+  trialsRoot: string,
+): Promise<void> {
+  const root = resolve(trialsRoot);
+  await Promise.all(
+    trials.map(async (trial) => {
+      const workDir = resolve(trial.workDir);
+      if (!workDir.startsWith(`${root}${sep}`)) {
+        throw new EvalRunnerError("trial_workdir_outside_output");
+      }
+      await rm(workDir, { recursive: true, force: true });
+    }),
+  );
+}
+
+function skippedTrialResult(trial: TrialSpec): TrialResult {
+  return TrialResultSchema.parse({
+    status: "skipped_budget",
+    dbPath: join(trial.workDir, "data", "harness.db"),
+    workspaceDir: join(trial.workDir, "workspace"),
+    durationMs: 0,
+    usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+    exitCode: 6,
+  });
+}
+
+async function executeTrialPlan(plan: TrialExecutionPlan): Promise<EvalRunResult> {
+  const { trials, executor, options, clock, jsonlPath } = plan;
+  const results = new Map<number, TrialResult>();
+  const output = await open(jsonlPath, "w");
+  let writeChain = Promise.resolve();
+  let nextIndex = 0;
+  let costMicros = 0;
+  const maxCostMicros =
+    options.maxCostUsd === undefined ? undefined : options.maxCostUsd * 1_000_000;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const trial = trials[index];
+      if (trial === undefined) {
+        return;
+      }
+      if (maxCostMicros !== undefined && costMicros > maxCostMicros) {
+        const result = skippedTrialResult(trial);
+        results.set(index, result);
+        writeChain = writeChain.then(() =>
+          output.appendFile(stringifyTrialRecord(trial, result), "utf8"),
+        );
+        await writeChain;
+        continue;
+      }
+      const start = clock.now();
+      let result: TrialResult;
+      try {
+        result = TrialResultSchema.parse(await executor.run(trial));
+      } catch (error) {
+        result = TrialResultSchema.parse({
+          status: "error",
+          dbPath: join(trial.workDir, "data", "harness.db"),
+          workspaceDir: join(trial.workDir, "workspace"),
+          durationMs: Math.max(0, Math.floor(clock.now() - start)),
+          usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+          exitCode: 1,
+          errorCode: errorCodeFrom(error),
+        });
+      }
+      costMicros += result.usage.costMicros;
+      results.set(index, result);
+      writeChain = writeChain.then(() =>
+        output.appendFile(stringifyTrialRecord(trial, result), "utf8"),
+      );
+      await writeChain;
+    }
+  }
+
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(options.concurrency, trials.length) }, () => worker()),
+    );
+    await writeChain;
+  } finally {
+    await output.close();
+  }
+  return trials.map((_, index) => {
+    const result = results.get(index);
+    if (result === undefined) {
+      throw new EvalRunnerError("eval_result_missing");
+    }
+    return result;
+  });
+}
+
 /**
  * Runs all task/variant/trial combinations with bounded concurrency.
  *
@@ -153,65 +257,6 @@ export async function runEval(
   const trialsRoot = join(outDir, "trials");
   const jsonlPath = join(outDir, "trials.jsonl");
   await mkdir(trialsRoot, { recursive: true });
-
-  const root = resolve(trialsRoot);
-  await Promise.all(
-    trials.map(async (trial) => {
-      const workDir = resolve(trial.workDir);
-      if (!workDir.startsWith(`${root}${sep}`)) {
-        throw new EvalRunnerError("trial_workdir_outside_output");
-      }
-      await rm(workDir, { recursive: true, force: true });
-    }),
-  );
-
-  const results = new Map<number, TrialResult>();
-  const output = await open(jsonlPath, "w");
-  let writeChain = Promise.resolve();
-  let nextIndex = 0;
-  async function worker(): Promise<void> {
-    for (;;) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const trial = trials[index];
-      if (trial === undefined) {
-        return;
-      }
-      const start = clock.now();
-      let result: TrialResult;
-      try {
-        result = TrialResultSchema.parse(await executor.run(trial));
-      } catch (error) {
-        result = TrialResultSchema.parse({
-          status: "error",
-          dbPath: join(trial.workDir, "data", "harness.db"),
-          workspaceDir: join(trial.workDir, "workspace"),
-          durationMs: Math.max(0, Math.floor(clock.now() - start)),
-          usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
-          exitCode: 1,
-          errorCode: errorCodeFrom(error),
-        });
-      }
-      results.set(index, result);
-      const line = stringifyTrialRecord(trial, result);
-      writeChain = writeChain.then(() => output.appendFile(line, "utf8"));
-      await writeChain;
-    }
-  }
-
-  try {
-    await Promise.all(
-      Array.from({ length: Math.min(parsedOptions.concurrency, trials.length) }, () => worker()),
-    );
-    await writeChain;
-  } finally {
-    await output.close();
-  }
-  return trials.map((_, index) => {
-    const result = results.get(index);
-    if (result === undefined) {
-      throw new EvalRunnerError("eval_result_missing");
-    }
-    return result;
-  });
+  await clearTrialWorkspaces(trials, trialsRoot);
+  return executeTrialPlan({ trials, executor, options: parsedOptions, clock, jsonlPath });
 }

@@ -104,7 +104,7 @@ export type TrialExecutionMetrics = z.infer<typeof TrialExecutionMetricsSchema>;
 /** Metadata-only result returned and streamed for one trial. */
 export const TrialResultSchema = z
   .object({
-    status: z.enum(["completed", "failed", "suspended", "cancelled", "error"]),
+    status: z.enum(["completed", "failed", "suspended", "cancelled", "error", "skipped_budget"]),
     runId: Id.optional(),
     dbPath: z.string().min(1),
     workspaceDir: z.string().min(1),
