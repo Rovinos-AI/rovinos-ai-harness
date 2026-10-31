@@ -27,9 +27,7 @@ function runRequestKey(runId: string, requestId: string): string {
 
 function sha256Json(value: JsonValue): string | undefined {
   const canonical = canonicalJson(value);
-  return canonical === undefined
-    ? undefined
-    : createHash("sha256").update(canonical).digest("hex");
+  return canonical === undefined ? undefined : createHash("sha256").update(canonical).digest("hex");
 }
 
 type ApprovalRequestEvent = Extract<Event, { type: "approval_requested" }>;
@@ -46,11 +44,7 @@ interface ApprovalIndex {
   readonly successfulResults: ReadonlyMap<string, readonly SuccessfulToolResultEvent[]>;
 }
 
-function appendValue<Value>(
-  valuesByKey: Map<string, Value[]>,
-  key: string,
-  value: Value,
-): void {
+function appendValue<Value>(valuesByKey: Map<string, Value[]>, key: string, value: Value): void {
   const values = valuesByKey.get(key);
   if (values === undefined) {
     valuesByKey.set(key, [value]);
@@ -119,7 +113,11 @@ function verifySeparationOfDuties(
     return;
   }
   const requestedBy = index.runCreators.get(resolution.runId)?.requestedBy;
-  if (requestedBy === undefined || resolution.approverId === undefined || requestedBy === resolution.approverId) {
+  if (
+    requestedBy === undefined ||
+    resolution.approverId === undefined ||
+    requestedBy === resolution.approverId
+  ) {
     violations.add("approval_separation_of_duties_violation");
   }
 }
@@ -155,11 +153,13 @@ function verifyEditIntegrity(args: {
     violations.add("approval_edit_invalid");
   }
   const results = index.successfulResults.get(runCallKey(intent.runId, intent.callId)) ?? [];
-  const hashMatches = applied.success && results.every(
-    (result) =>
-      result.executedArgsHash !== undefined &&
-      sha256Json(applied.args) === result.executedArgsHash,
-  );
+  const hashMatches =
+    applied.success &&
+    results.every(
+      (result) =>
+        result.executedArgsHash !== undefined &&
+        sha256Json(applied.args) === result.executedArgsHash,
+    );
   if (results.length > 0 && !hashMatches) {
     violations.add("approval_edit_hash_mismatch");
   }

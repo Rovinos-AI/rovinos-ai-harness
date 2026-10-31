@@ -79,5 +79,3 @@ export const suite = defineSuite({
     tags: ["redteam", id],
   })),
 });
-
-export default suite;

@@ -210,7 +210,9 @@ it("grades supported deterministic graders through the CLI on pass and failure p
   expect(gradeCodes.get("trajectory_pass")).toEqual([]);
   expect(gradeCodes.get("trajectory_fail")).toEqual(["final_status_mismatch"]);
   expect(
-    report.trials.find(({ taskId }) => taskId === "file_pass")?.graders.map(({ graderId }) => graderId),
+    report.trials
+      .find(({ taskId }) => taskId === "file_pass")
+      ?.graders.map(({ graderId }) => graderId),
   ).toEqual(["approval_integrity", "file_diff", "no_denied_executed"]);
   expect(JSON.stringify(report)).not.toContain(syntheticCanary);
 });
@@ -250,16 +252,12 @@ it("reports an explicit suite-level invariant opt-out", async () => {
       ),
     eventsFor: () => [],
   };
-  const exitCode = await main(
-    ["eval", "run", suitePath, "--out", output],
-    context(),
-    [
-      createEvalCommand({
-        loadEval: () => Promise.resolve(evalApi),
-        createExecutor: () => executor,
-      }),
-    ],
-  );
+  const exitCode = await main(["eval", "run", suitePath, "--out", output], context(), [
+    createEvalCommand({
+      loadEval: () => Promise.resolve(evalApi),
+      createExecutor: () => executor,
+    }),
+  ]);
   const report = parseJson(
     evalApi.EvalReportSchema,
     await readFile(join(output, "eval-report.json"), "utf8"),

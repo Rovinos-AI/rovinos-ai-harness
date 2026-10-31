@@ -361,14 +361,11 @@ describe("evaluate", () => {
     "Sandbox.Exec",
     "sandbox.exec ",
     String.fromCodePoint(0x73, 0x430, 0x6e, 0x64, 0x62, 0x6f, 0x78, 0x2e, 0x65, 0x78, 0x65, 0x63),
-  ])(
-    "rejects policy call aliases instead of bypassing an exact deny rule: %s",
-    (toolId) => {
-      const policy = createPolicy([createRule("deny_exec", "deny", { tools: ["sandbox.exec"] })]);
+  ])("rejects policy call aliases instead of bypassing an exact deny rule: %s", (toolId) => {
+    const policy = createPolicy([createRule("deny_exec", "deny", { tools: ["sandbox.exec"] })]);
 
-      expect(() => evaluate(policy, { ...CALL, toolId })).toThrow();
-    },
-  );
+    expect(() => evaluate(policy, { ...CALL, toolId })).toThrow();
+  });
 
   it.each([
     { pointer: "/items/0", expected: "first", matches: true },

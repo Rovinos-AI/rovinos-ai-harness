@@ -27,10 +27,7 @@ function hash(value: JsonValue): string {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
-function event(
-  input: Readonly<Record<string, unknown>>,
-  id: string = runId,
-): Event {
+function event(input: Readonly<Record<string, unknown>>, id: string = runId): Event {
   const type = input.type;
   return EventSchema.parse({
     runId: id,
@@ -73,11 +70,7 @@ function toolIntent(
   });
 }
 
-function approvalRequested(
-  editableFields: string[] = ["/target"],
-  seq = 2,
-  id = runId,
-): Event {
+function approvalRequested(editableFields: string[] = ["/target"], seq = 2, id = runId): Event {
   return event(
     {
       type: "approval_requested",
@@ -122,7 +115,9 @@ function approvalResolved(
       approvalId: options.id ?? approvalId,
       decision: options.decision ?? "approve",
       decidedBy: options.decidedBy ?? "human",
-      ...(options.approverId === undefined ? { approverId: "cli.approver" } : { approverId: options.approverId }),
+      ...(options.approverId === undefined
+        ? { approverId: "cli.approver" }
+        : { approverId: options.approverId }),
       waitMs: 1,
       ...(options.edits === undefined ? {} : { edits: options.edits }),
     },
@@ -152,13 +147,7 @@ function toolResult(
 }
 
 function validAskEvents(): Event[] {
-  return [
-    runCreated(),
-    toolIntent(),
-    approvalRequested(),
-    approvalResolved(),
-    toolResult(),
-  ];
+  return [runCreated(), toolIntent(), approvalRequested(), approvalResolved(), toolResult()];
 }
 
 describe("verifyInvariants", () => {

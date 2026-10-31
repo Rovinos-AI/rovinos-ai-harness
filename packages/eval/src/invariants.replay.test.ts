@@ -4,10 +4,7 @@ import { fileURLToPath } from "node:url";
 import { EventSchema, Id, parseJson } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
-import {
-  RedTeamCassetteSchema,
-  suite,
-} from "../../../evals/redteam/suite.js";
+import { RedTeamCassetteSchema, suite } from "../../../evals/redteam/suite.js";
 import { verifyInvariants } from "./invariants.js";
 
 const cassettePath = fileURLToPath(
@@ -89,8 +86,6 @@ describe("red-team cassette replay", () => {
       });
     }
 
-    expect(verifyInvariants(cassetteEvents())).toEqual([
-      { code: "input_resolution_not_human" },
-    ]);
+    expect(verifyInvariants(cassetteEvents())).toEqual([{ code: "input_resolution_not_human" }]);
   });
 });
