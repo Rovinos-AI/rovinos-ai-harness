@@ -310,6 +310,10 @@ describe("McpConnection", () => {
         });
         await server.server.notification({
           method: "notifications/elicitation/complete",
+          params: { elicitationId: "unknown-id" },
+        });
+        await server.server.notification({
+          method: "notifications/elicitation/complete",
           params: { elicitationId: "live-url-id" },
         });
         return { content: [{ type: "text", text: response.action }] };

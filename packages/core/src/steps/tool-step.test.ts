@@ -1153,6 +1153,8 @@ describe("durable MCP input requests", () => {
     readonly channels?: readonly HumanInputChannel[];
     readonly callId?: string;
     readonly timeoutMs?: number;
+    readonly policyDecline?: boolean;
+    readonly recordTimeoutTwice?: boolean;
   }): Promise<readonly Event[]> {
     const { recorder } = createRecorder();
     const history = await createRun(recorder, []);
@@ -1179,6 +1181,10 @@ describe("durable MCP input requests", () => {
                 timeoutMs: options.timeoutMs ?? 20,
                 signal: runContext.signal,
               };
+              if (options.policyDecline === true) {
+                await runContext.elicitation?.recordLegacyPolicyDecline?.(legacyInput);
+                return { outcome: "ok", result: { action: "decline" } };
+              }
               const response = await handleLegacyLiveElicitation({
                 active: true,
                 request,
@@ -1196,6 +1202,9 @@ describe("durable MCP input requests", () => {
                     request: validatedRequest,
                   }) ?? Promise.resolve(),
               });
+              if (options.recordTimeoutTwice === true) {
+                await runContext.elicitation?.recordLegacyTimeout?.(legacyInput);
+              }
               return { outcome: "ok", result: { action: response.action } };
             },
           },
@@ -1231,11 +1240,26 @@ describe("durable MCP input requests", () => {
   });
 
   it("records a legacy live timeout as a durable timeout resolution", async () => {
-    const events = await runLegacyLiveTool({ timeoutMs: 5 });
+    const events = await runLegacyLiveTool({ timeoutMs: 5, recordTimeoutTwice: true });
 
     expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
       action: "cancel",
       decidedBy: "timeout",
+    });
+  });
+
+  it("durably records a legacy input policy decline", async () => {
+    const events = await runLegacyLiveTool({ policyDecline: true });
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "input_requested",
+      "input_resolved",
+      "tool_result",
+    ]);
+    expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+      action: "decline",
+      decidedBy: "policy",
     });
   });
 
