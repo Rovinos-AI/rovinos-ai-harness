@@ -9,6 +9,7 @@ import {
 } from "./ask-user-tool.js";
 import type { RunContext } from "../ports.js";
 import { foldRunState } from "../run-state.js";
+import type { ToolResumeContext } from "../resume-policy.js";
 
 const call = {
   callId: Id.parse("11111111111111111111111111"),
@@ -21,6 +22,14 @@ function context(overrides: Partial<RunContext> = {}): RunContext {
     runId: Id.parse("00000000000000000000000000"),
     signal: new AbortController().signal,
     ...overrides,
+  };
+}
+
+function resumeContext(): ToolResumeContext {
+  return {
+    runId: Id.parse("00000000000000000000000000"),
+    signal: new AbortController().signal,
+    toolRegistry: new AskUserTool(),
   };
 }
 
@@ -251,7 +260,7 @@ describe("agent.ask_user tool", () => {
       throw new Error("Expected the ask-user resume strategy.");
     }
 
-    await expect(strategy.onDanglingIntent(call, resumeState())).resolves.toEqual({
+    await expect(strategy.onDanglingIntent(call, resumeState(), resumeContext())).resolves.toEqual({
       kind: "rerun",
     });
   });
@@ -263,7 +272,11 @@ describe("agent.ask_user tool", () => {
     }
 
     await expect(
-      strategy.onDanglingIntent(call, resumeState({ request: true, resolution: true })),
+      strategy.onDanglingIntent(
+        call,
+        resumeState({ request: true, resolution: true }),
+        resumeContext(),
+      ),
     ).resolves.toMatchObject({
       kind: "result",
       execution: {
@@ -280,7 +293,7 @@ describe("agent.ask_user tool", () => {
     }
 
     await expect(
-      strategy.onDanglingIntent(call, resumeState({ request: true })),
+      strategy.onDanglingIntent(call, resumeState({ request: true }), resumeContext()),
     ).resolves.toMatchObject({
       kind: "result",
       execution: {
