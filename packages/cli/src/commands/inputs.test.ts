@@ -225,6 +225,32 @@ describe("inputs CLI commands", () => {
     expect(fixture.stdout.join("")).toContain("Review answer");
   });
 
+  it("rejects form answers that violate the schema", async () => {
+    const prompt = vi.fn<NonNullable<Interactive["prompt"]>>().mockResolvedValue("42");
+    const fixture = await createFixture({
+      interactive: { isTTY: true, prompt, confirm: vi.fn().mockResolvedValue(true) },
+    });
+
+    const code = await main(["inputs", "answer", requestId], fixture.context, [inputsCommand]);
+
+    expect(code).toBe(ExitCode.failure);
+    expect(fixture.stderr.join("")).toContain("input_answer_invalid");
+    expect(fixture.resolveInput).not.toHaveBeenCalled();
+  });
+
+  it("does not submit a form when the human cancels review", async () => {
+    const prompt = vi.fn<NonNullable<Interactive["prompt"]>>().mockResolvedValue('"Ada"');
+    const fixture = await createFixture({
+      interactive: { isTTY: true, prompt, confirm: vi.fn().mockResolvedValue(false) },
+    });
+
+    const code = await main(["inputs", "answer", requestId], fixture.context, [inputsCommand]);
+
+    expect(code).toBe(ExitCode.failure);
+    expect(fixture.stderr.join("")).toContain("confirmation_declined");
+    expect(fixture.resolveInput).not.toHaveBeenCalled();
+  });
+
   it("accepts URL-mode consent only after the terminal confirmation", async () => {
     const confirm = vi.fn<Interactive["confirm"]>().mockResolvedValue(true);
     const fixture = await createFixture({

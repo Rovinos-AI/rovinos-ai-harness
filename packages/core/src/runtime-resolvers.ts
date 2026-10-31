@@ -1,20 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { EventStore, RunQueue } from "@rovinos/store";
 import { HarnessError } from "@rovinos/schemas";
-import type { Runtime, RuntimeComposition } from "./runtime-config.js";
+import type {
+  Runtime,
+  RuntimeComposition,
+  RuntimeConfig,
+  RuntimeOverrides,
+} from "./runtime-config.js";
 import type { Clock } from "./recorder.js";
 import { resolveInput as resolveInputEvent } from "./human-input/resolve.js";
 import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import { withResumeWakeUp } from "./runtime-approval-wake.js";
 import { assertRuntimeOwnership } from "./runtime-lifecycle.js";
 import type { ToolPort } from "./ports.js";
+import type { Tokenizer } from "@rovinos/pii";
+import type { AuditingVaultResolver } from "@rovinos/vault";
 
 /** Creates the runtime input resolver with its configured privacy and queue dependencies. */
 export function createRuntimeInputResolver(input: {
   readonly store: EventStore;
   readonly clock: Clock;
-  readonly pii: RuntimeComposition["pii"];
-  readonly queue: RunQueue | undefined;
+  readonly pii:
+    | {
+        readonly tokenizer: Pick<Tokenizer, "tokenizeJson">;
+        readonly resolver: AuditingVaultResolver;
+      }
+    | undefined;
+  readonly queue: Pick<RunQueue, "enqueue"> | undefined;
 }): Runtime["resolveInput"] {
   return (runId, requestId, resolution) =>
     resolveInputEvent(input.store, runId, requestId, {
@@ -29,7 +41,11 @@ export function createRuntimeInputResolver(input: {
 
 /** Creates the runtime approval resolver with its ownership and resume guarantees. */
 export function createRuntimeApprovalResolver(input: {
-  readonly options: RuntimeComposition;
+  readonly options: {
+    readonly config: Pick<RuntimeConfig, "run" | "servers">;
+    readonly overrides: Pick<RuntimeOverrides, "tool" | "queue">;
+    readonly instanceHeartbeat?: RuntimeComposition["instanceHeartbeat"];
+  };
   readonly store: EventStore;
   readonly clock: Clock;
   readonly tool: ToolPort;

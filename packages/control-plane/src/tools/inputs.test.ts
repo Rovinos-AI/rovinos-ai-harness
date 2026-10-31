@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import {
+  Client,
+  InMemoryTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import type { ClientOptions } from "@modelcontextprotocol/client";
 import type { ServerContext } from "@modelcontextprotocol/server";
-import { Code, Id, Principal, type NewEvent } from "@rovinos/schemas";
+import { Code, ControlPlaneConfigSchema, Id, Principal, type NewEvent } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { ConfirmationGate } from "../confirmation-gate.js";
-import { createControlPlaneServer } from "../server.js";
+import { createControlPlaneServer, startControlPlaneHttp } from "../server.js";
 import type { ResolveInputOperation } from "./answer-input.js";
 import { findPendingInput, listInputRequests } from "./input-state.js";
 import { reviewPendingInput } from "./review-input.js";
@@ -20,6 +24,40 @@ interface Connection {
 }
 
 const connections: Connection[] = [];
+const httpToken = "synthetic-input-control-plane-token-0123456789";
+
+async function connectScoped(
+  store: InMemoryEventStore,
+  scopes: readonly string[],
+  runIds?: readonly Id[],
+) {
+  const server = await startControlPlaneHttp(store, 0, {
+    controlPlane: ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.input_test",
+            secret: "env:INPUT_TEST_TOKEN",
+            scopes,
+            ...(runIds === undefined ? {} : { runIds }),
+          },
+        ],
+      },
+    }),
+    secretResolver: { resolve: () => Promise.resolve({ reveal: () => httpToken }) },
+  });
+  const client = new Client({ name: "input-scope-test", version: "1.0.0" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(server.endpoint), {
+      requestInit: {
+        headers: {
+          authorization: `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${httpToken}`,
+        },
+      },
+    }),
+  );
+  return { client, server };
+}
 
 async function createPendingInput(
   store: InMemoryEventStore,
@@ -285,6 +323,10 @@ describe("control-plane human input tools", () => {
     const { client } = await connect(store);
 
     const listed = await client.callTool({ name: "list_pending_inputs", arguments: {} });
+    const runListed = await client.callTool({
+      name: "list_pending_inputs",
+      arguments: { runId },
+    });
     const fetched = await client.callTool({
       name: "get_input",
       arguments: { requestId },
@@ -293,6 +335,9 @@ describe("control-plane human input tools", () => {
     expect(listed.structuredContent).toMatchObject({
       inputs: [{ requestId, runId, source: "mcp_mrtr", mode: "form", round: 1 }],
     });
+    expect(runListed.structuredContent).toMatchObject({
+      inputs: [{ requestId, runId }],
+    });
     expect(JSON.stringify(listed.structuredContent)).not.toContain("Input message");
     expect(fetched.structuredContent).toMatchObject({
       requestId,
@@ -300,6 +345,69 @@ describe("control-plane human input tools", () => {
       message: "Input message <EMAIL_1>",
       schema: { properties: { name: { type: "string" } } },
     });
+  });
+
+  it("denies missing scopes and hides unknown or out-of-scope inputs", async () => {
+    const store = new InMemoryEventStore();
+    const { requestId } = await createPendingInput(store);
+    const otherRunId = Id.parse("D".repeat(26));
+    const readOnly = await connectScoped(store, ["read"]);
+    try {
+      await expect(
+        readOnly.client.callTool({ name: "get_input", arguments: { requestId } }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ text: "control_plane_scope_required" }],
+      });
+    } finally {
+      await readOnly.client.close();
+      await readOnly.server.close();
+    }
+
+    const approveOnly = await connectScoped(store, ["approve"]);
+    try {
+      await expect(
+        approveOnly.client.callTool({ name: "list_pending_inputs", arguments: {} }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ text: "control_plane_scope_required" }],
+      });
+    } finally {
+      await approveOnly.client.close();
+      await approveOnly.server.close();
+    }
+
+    const restricted = await connectScoped(store, ["read", "approve"], [otherRunId]);
+    try {
+      await expect(
+        restricted.client.callTool({ name: "get_input", arguments: { requestId } }),
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: { code: "input_not_found" },
+      });
+      await expect(
+        restricted.client.callTool({ name: "list_pending_inputs", arguments: {} }),
+      ).resolves.toMatchObject({ structuredContent: { inputs: [] } });
+      await expect(
+        restricted.client.callTool({
+          name: "list_pending_inputs",
+          arguments: { runId: otherRunId },
+        }),
+      ).resolves.toMatchObject({ structuredContent: { inputs: [] } });
+      await expect(
+        restricted.client.callTool({
+          name: "get_input",
+          arguments: { requestId: Id.parse("E".repeat(26)) },
+        }),
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: { code: "input_not_found" },
+      });
+    } finally {
+      await restricted.client.close();
+      await restricted.server.close();
+      await store.close();
+    }
   });
 
   it("limits pending-input listings to the requested run ids", async () => {

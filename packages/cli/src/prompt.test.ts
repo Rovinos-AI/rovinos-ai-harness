@@ -33,4 +33,16 @@ describe("createTerminalPrompt", () => {
     closed.input.end();
     expect(await answer).toBe(false);
   });
+
+  it("rejects a prompt when its abort signal fires", async () => {
+    const active = setup(true);
+    const controller = new AbortController();
+    if (active.prompt.prompt === undefined) {
+      throw new Error("expected terminal prompt");
+    }
+    const answer = active.prompt.prompt.bind(active.prompt)("Name?", controller.signal);
+    controller.abort();
+
+    await expect(answer).rejects.toBeInstanceOf(Error);
+  });
 });
