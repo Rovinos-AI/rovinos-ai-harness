@@ -475,7 +475,11 @@ describe("shared MCP App components", () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(tags.getAttribute("aria-invalid")).toBe("true");
 
-    tags.options.item(2).selected = false;
+    const thirdTag = tags.options.item(2);
+    if (thirdTag === null) {
+      throw new Error("Expected the third tag option");
+    }
+    thirdTag.selected = false;
     submit();
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
