@@ -85,13 +85,13 @@ interface ApprovalScenario {
   readonly policy: PolicyPort;
 }
 
-function approvalScenario(): ApprovalScenario {
+function approvalScenario(repeatApprovals = false): ApprovalScenario {
   let modelCalls = 0;
   return {
     model: {
       complete: () => {
-        const call = modelCalls === 0;
         modelCalls += 1;
+        const call = repeatApprovals || modelCalls === 1;
         return Promise.resolve({
           provider: "synthetic",
           model: "synthetic",
@@ -99,7 +99,7 @@ function approvalScenario(): ApprovalScenario {
             ? [
                 {
                   type: "tool_call" as const,
-                  callId: Id.parse("00000000000000000000000001"),
+                  callId: Id.parse(String(modelCalls).padStart(26, "0")),
                   toolId: "fake.echo",
                   args: { value: "synthetic" },
                 },
@@ -137,6 +137,7 @@ async function createRun(
   key: string,
   run: boolean,
   scenario?: ApprovalScenario,
+  ids = new SequentialIdGenerator(),
 ): Promise<void> {
   const config = parseJson(
     TrialConfigSchema,
@@ -157,7 +158,7 @@ async function createRun(
       dataDir: join(workDir, "data"),
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000),
-      ids: new SequentialIdGenerator(),
+      ids,
       model: scenario?.model ?? model(),
       ...(scenario === undefined ? {} : { tool: scenario.tool, policy: scenario.policy }),
       secretResolver: { resolve: () => Promise.resolve({ reveal: () => key }) },
@@ -176,6 +177,34 @@ async function createRun(
   } finally {
     await runtime.close();
   }
+}
+
+async function createEmptyRunStore(workDir: string, key: string): Promise<void> {
+  const config = parseJson(
+    TrialConfigSchema,
+    await readFile(join(workDir, "harness.config.json"), "utf8"),
+  );
+  const runtime = await createRuntime(
+    {
+      run: config.run,
+      roles: config.roles,
+      store: config.store,
+      keys: config.keys,
+      models: config.models,
+      policy: config.policy,
+      pii: config.pii,
+      vault: config.vault,
+    },
+    {
+      dataDir: join(workDir, "data"),
+      transientVault: false,
+      clock: new FakeClock(1_700_000_000_000),
+      ids: new SequentialIdGenerator(),
+      model: model(),
+      secretResolver: { resolve: () => Promise.resolve({ reveal: () => key }) },
+    },
+  );
+  await runtime.close();
 }
 
 afterEach(async () => {
@@ -209,19 +238,22 @@ describe("DockerExecutor", () => {
       } satisfies DockerProcessResult;
     });
 
-    const result = await new DockerExecutor(
+    const executor = new DockerExecutor(
       { image: "synthetic/harness" },
       {
         clock: { now: () => (now += 10) },
         randomBytes: (size) => new Uint8Array(size).fill(9),
       },
-    ).run(trial);
+    );
+    const result = await executor.run(trial);
+    const events = await executor.eventsFor(trial);
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeDefined();
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2, costMicros: 0 });
     expect(result.exitCode).toBe(0);
     expect(result.durationMs).toBeGreaterThan(0);
+    expect(events.some((event) => event.type === "run_created")).toBe(true);
     expect(trialLogSinks(result.dbPath)).toEqual([
       { name: "stdout", content: "synthetic container stdout" },
       { name: "stderr", content: "synthetic container stderr" },
@@ -331,6 +363,35 @@ describe("DockerExecutor", () => {
     );
   });
 
+  it("reports when the simulated human exceeds its resume limit", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const scenario = approvalScenario(true);
+    const ids = new SequentialIdGenerator();
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      await createRun(workDir, key, !options.args.includes("resume"), scenario, ids);
+      return { exitCode: 0, timedOut: false } satisfies DockerProcessResult;
+    });
+
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, {
+        rules: [],
+        default: "approve",
+        unsafeAutoApprove: true,
+        maxResumes: 1,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      errorCode: "human_max_resumes_exceeded",
+      approvals: { approved: 1 },
+    });
+  });
+
   it("does not pass telemetry export settings to a resume process by default", async () => {
     const workDir = join(await createDirectory(), "trial");
     const scenario = approvalScenario();
@@ -419,7 +480,10 @@ describe("DockerExecutor", () => {
       stderr: "",
     });
 
-    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(workDir));
+    const trial = makeTrial(workDir);
+    const executor = new DockerExecutor({ image: "synthetic/harness" });
+    const result = await executor.run(trial);
+    const events = await executor.eventsFor(trial);
 
     expect(result).toMatchObject({
       status: "error",
@@ -427,6 +491,27 @@ describe("DockerExecutor", () => {
       exitCode: 17,
       usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     });
+    expect(events).toEqual([]);
+  });
+
+  it("returns a safe result and no events when Docker creates an empty run store", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      await createEmptyRunStore(workDir, key);
+      return { exitCode: 0, timedOut: false } satisfies DockerProcessResult;
+    });
+    const trial = makeTrial(workDir);
+    const executor = new DockerExecutor({ image: "synthetic/harness" });
+
+    const result = await executor.run(trial);
+    const events = await executor.eventsFor(trial);
+
+    expect(result.status).toBe("error");
+    expect(events).toEqual([]);
   });
 
   it("enforces the wall-clock timeout and kills the named container", async () => {
