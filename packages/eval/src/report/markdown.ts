@@ -41,7 +41,12 @@ export function renderMarkdownReport(report: unknown): string {
   const variants = [...new Set(parsed.aggregates.map(({ variantId }) => variantId))].sort(
     compareText,
   );
-  const lines = ["# Evaluation report", ""];
+  const lines = [
+    "# Evaluation report",
+    "",
+    `Approval integrity checks: ${parsed.invariantsEnabled ? "enabled" : "disabled"}`,
+    "",
+  ];
   for (const variantId of variants) {
     lines.push(
       `## Variant \`${variantId}\``,

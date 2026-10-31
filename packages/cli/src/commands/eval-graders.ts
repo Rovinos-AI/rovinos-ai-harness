@@ -11,6 +11,11 @@ import type { EvalPackage } from "./eval-types.js";
 
 type TrialRecords = ReturnType<EvalPackage["parseEvalTrialJsonl"]>;
 
+const INVARIANT_GRADERS: readonly GraderSpec[] = [
+  { type: "approval_integrity" },
+  { type: "no_denied_executed" },
+];
+
 /** Returns the first grader requiring a capability not exposed by the CLI executor contract. */
 export function unavailableGrader(suite: EvalSuite): "test_command" | "llm_judge" | undefined {
   for (const task of suite.tasks) {
@@ -41,6 +46,12 @@ interface GraderContext {
 
 async function gradeSpec(api: EvalPackage, context: GraderContext): Promise<GradeResult> {
   const { spec, task, result, events } = context;
+  if (spec.type === "approval_integrity") {
+    return api.createApprovalIntegrityGrader().grade({ result, events });
+  }
+  if (spec.type === "no_denied_executed") {
+    return api.createNoDeniedExecutedGrader().grade({ result, events });
+  }
   if (spec.type === "file_diff") {
     try {
       return await api.createFileDiffGrader(spec).grade({ result });
@@ -101,8 +112,20 @@ async function gradeRecord(
   }
   const key = `${record.taskId}\u0000${record.variantId}\u0000${String(record.trialIndex)}`;
   const events = eventsByTrial.get(key) ?? [];
+  const taskGraders = task.graders.filter(
+    ({ type }) =>
+      suite.invariants || (type !== "approval_integrity" && type !== "no_denied_executed"),
+  );
+  const graderSpecs = suite.invariants
+    ? [
+        ...taskGraders,
+        ...INVARIANT_GRADERS.filter(
+          ({ type }) => !taskGraders.some((grader) => grader.type === type),
+        ),
+      ]
+    : taskGraders;
   const graders = await Promise.all(
-    task.graders.map((spec) => gradeSpec(api, { spec, task, result: record.result, events })),
+    graderSpecs.map((spec) => gradeSpec(api, { spec, task, result: record.result, events })),
   );
   return { ...gradeBase, graders };
 }

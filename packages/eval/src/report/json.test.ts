@@ -47,6 +47,7 @@ describe("eval JSON reports", () => {
 
     expect(first).toBe(second);
     expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.invariantsEnabled).toBe(true);
     expect(parsed.trials.map(({ trialIndex }) => trialIndex)).toEqual([0, 1]);
     expect(parsed.aggregates[0]).toMatchObject({
       n: 2,
@@ -54,10 +55,23 @@ describe("eval JSON reports", () => {
       passRate: 0.5,
       costMicros: { mean: 7.5, median: 7.5, p95: 10 },
     });
+
     expect(first.indexOf('"aggregates"')).toBeLessThan(first.indexOf('"schemaVersion"'));
     expect(first).not.toContain("/synthetic/private");
     expect(first).not.toContain("goal");
     expect(first).not.toContain("transcript");
+  });
+
+  it("records when a suite explicitly disables invariant checks", () => {
+    const report = buildEvalReport({
+      trials: [reportTrial()],
+      grades: [
+        { taskId: "task_one", variantId: "baseline", trialIndex: 0, graders: [reportGrade(true)] },
+      ],
+      invariantsEnabled: false,
+    });
+
+    expect(report.invariantsEnabled).toBe(false);
   });
 
   it("parses versioned trial JSONL and rejects missing grade associations", () => {

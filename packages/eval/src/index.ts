@@ -65,6 +65,10 @@ export {
 export {
   createFileDiffGrader,
   createNoCanaryLeakGrader,
+  createApprovalIntegrityGrader,
+  createNoDeniedExecutedGrader,
+  InvariantResultSchema,
+  verifyInvariants,
   buildJudgeView,
   createLlmJudgeGrader,
   createJudgeVerdictSchema,
@@ -77,6 +81,7 @@ export {
   type GradeResult,
   type Grader,
   type NoCanaryLeakGraderOptions,
+  type InvariantResult,
   type JudgeView,
   type LlmJudgeGraderOptions,
 } from "./graders/index.js";

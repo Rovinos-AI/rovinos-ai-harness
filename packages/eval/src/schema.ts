@@ -125,6 +125,8 @@ export type LlmJudgeGraderSpec = z.infer<typeof LlmJudgeGraderSpecSchema>;
 
 /** Supported eval grader contracts. */
 export const GraderSpecSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("approval_integrity") }).strict(),
+  z.object({ type: z.literal("no_denied_executed") }).strict(),
   FileDiffGraderSchema,
   z
     .object({
@@ -240,6 +242,7 @@ export type EvalTask = z.infer<typeof EvalTaskSchema>;
 export const EvalSuiteSchema = z
   .object({
     schemaVersion: z.literal(1),
+    invariants: z.boolean().default(true),
     tasks: z.array(EvalTaskSchema),
   })
   .strict()
