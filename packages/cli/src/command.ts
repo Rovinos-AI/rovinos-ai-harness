@@ -25,6 +25,8 @@ export interface Interactive {
   isTTY: boolean;
   /** Asks a yes/no question and resolves true only for an explicit yes. */
   confirm(question: string): Promise<boolean>;
+  /** Prompts for one line of user input, or stops when the optional signal aborts. */
+  prompt?(question: string, signal?: AbortSignal): Promise<string>;
 }
 
 /** Audited vault resolver override used by CLI tests. */

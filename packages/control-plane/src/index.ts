@@ -35,6 +35,10 @@ export {
   type ConfirmationRequest,
 } from "./confirmation-gate.js";
 export { RunSupervisor, type RunSupervisorOptions } from "./run-supervisor.js";
+export { registerAnswerInputTool, type ResolveInputOperation } from "./tools/answer-input.js";
+export { registerGetInputTool } from "./tools/get-input.js";
+export { registerListPendingInputsTool } from "./tools/list-pending-inputs.js";
+export { registerReviewInputTool } from "./tools/review-input.js";
 export { registerApproveTool, type ApproveToolOptions } from "./tools/approve.js";
 export {
   elicitDecision,
@@ -78,6 +82,14 @@ export {
   reviewApprovalInputSchema,
   reviewApprovalDecisionSchema,
   reviewApprovalOutputSchema,
+  inputRequestInputSchema,
+  listPendingInputsInputSchema,
+  pendingInputSummarySchema,
+  listPendingInputsOutputSchema,
+  getInputOutputSchema,
+  getInputResultSchema,
+  answerInputInputSchema,
+  inputResolutionOutputSchema,
   runLifecycleInputSchema,
   decisionOutputSchema,
   resumeRunOutputSchema,
@@ -95,6 +107,12 @@ export {
   type ReviewApprovalInput,
   type ReviewApprovalDecision,
   type ReviewApprovalOutput,
+  type InputRequestInput,
+  type PendingInputSummary,
+  type ListPendingInputsOutput,
+  type GetInputOutput,
+  type AnswerInputInput,
+  type InputResolutionOutput,
   type DecisionOutput,
   type ResumeRunOutput,
   type StartRunInput,

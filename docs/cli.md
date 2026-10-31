@@ -194,6 +194,24 @@ command exits with `approval_sweep_partial` (code `1`).
 Exit codes: `0` completed, `1` failure, `2` usage (including a malformed id), `7` for
 `approval_not_found`, `approval_already_resolved`, or a run that is no longer suspended.
 
+## `harness inputs`
+
+`harness inputs list [--run <id>]` lists pending requests with metadata only. Use
+`harness inputs show <requestId>` to inspect metadata; the tokenized message, form schema, or URL is
+included only with `--show-message`.
+
+`harness inputs answer <requestId>` presents each form field's type, default, and constraints on a
+TTY, then shows the complete answer for review before submitting. `--json <file>` supplies a
+schema-validated form answer from a JSON file instead. URL requests print the full URL and highlight
+its domain; the command asks for confirmation and does not open or fetch it. Use
+`harness inputs decline <requestId>` to decline a request. Answers and declines record the configured
+CLI principal or the value supplied with `--as <name>`.
+
+For a local run that should answer human requests immediately in the terminal, use
+`harness run --interactive` on a TTY. Pending requests remain available through `harness inputs`
+when no interactive channel is active. Unknown or already-resolved requests exit with code `7`;
+interactive commands without a TTY require a JSON answer file or exit with code `2`.
+
 ## `harness policy`
 
 `harness policy test --policy <file> --calls <jsonl> [--expect <jsonl>] [--explain]`

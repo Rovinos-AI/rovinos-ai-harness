@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   HarnessError,
+  Code,
   JsonValue,
   ServeResultSchema,
   type Id,
@@ -176,6 +177,13 @@ export function createControlPlaneOperations(runtime: Runtime): ControlPlaneOper
           approverId,
           ...(reason === undefined ? {} : { reason }),
         },
+      });
+    },
+    resolveInput: async ({ runId, requestId, action, answer, principal }) => {
+      await runtime.resolveInput(runId, requestId, {
+        action,
+        ...(answer === undefined ? {} : { answer }),
+        principal: Code.parse(principal),
       });
     },
   };
