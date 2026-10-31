@@ -102,6 +102,13 @@ export {
   type RunConsoleList,
   type RunConsoleRun,
 } from "./run-console.js";
+export {
+  InputSummarySchema,
+  InputListResultSchema,
+  InputShowResultSchema,
+  InputResolveResultSchema,
+  type InputSummary,
+} from "./cli/inputs.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./config/keys.js";
 export { isSecretKeyName } from "./secret-key-name.js";

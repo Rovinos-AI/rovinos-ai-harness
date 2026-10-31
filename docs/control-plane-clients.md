@@ -19,3 +19,20 @@ summary; they do not return app HTML. App-only approval, input, and duplicated
 run-inspection tools are omitted unless the exact MCP Apps extension and MIME
 type are advertised. Other than the SDK v2 clients and the reference host
 covered by repository tests, third-party client behavior is **unverified**.
+
+## Human input
+
+`list_pending_inputs` requires `read` scope and returns request metadata only.
+`get_input` requires `approve` scope and returns the tokenized message and form or
+URL details. `answer_input` is app-only; `review_input` is model-visible but
+requires a human elicitation before resolving the pending request. It uses the
+connected client's per-request form or URL capability and reports CLI
+instructions when that mode is unavailable.
+
+The relay identifies the original server and run in the elicitation message.
+Its sealed request state binds the retry to the authenticated token and input
+request, expires after five minutes, and is consumed once. The SDK's
+2025-11-25 legacy shim and 2026-07-28 multi-round-trip flow use the same
+human-resolution path. Answers record the authenticated token principal when
+available, or the local control-plane principal for an unauthenticated local
+connection.

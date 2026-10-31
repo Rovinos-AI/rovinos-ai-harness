@@ -12,8 +12,7 @@ import {
 } from "./runtime-lifecycle.js";
 import { composeAbortSignals, watchCancellation } from "./runtime-cancellation.js";
 import { cancelRun } from "./cancel.js";
-import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
-import { withResumeWakeUp } from "./runtime-approval-wake.js";
+import { createRuntimeApprovalResolver, createRuntimeInputResolver } from "./runtime-resolvers.js";
 import type { ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
@@ -59,14 +58,6 @@ class RunInputMissingError extends HarnessError {
 
   constructor() {
     super("The run input is unavailable.");
-  }
-}
-
-class ApprovalEditUnavailableError extends HarnessError {
-  readonly code = "approval_edit_unavailable";
-
-  constructor() {
-    super("approval_edit_unavailable");
   }
 }
 
@@ -247,7 +238,7 @@ function composeRuntime(
     readonly scopes: RunScopeRegistry;
   },
 ): Runtime {
-  const { config, clock, ids, store, keys, vault, vaultResolver, scopes } = options;
+  const { clock, ids, store, keys, vault, vaultResolver, scopes } = options;
   const tool = createRuntimeToolPort(options);
   const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);
@@ -285,28 +276,13 @@ function composeRuntime(
       assertRuntimeOwnership(options.instanceHeartbeat?.signal);
       return appCallbacks.onAppContent(content);
     },
-    resolveApproval: async (runId, approvalId, decision, resolveOptions) => {
-      assertRuntimeOwnership(options.instanceHeartbeat?.signal);
-      if (
-        decision === "edit" &&
-        options.overrides.tool === undefined &&
-        (config.servers?.length ?? 0) === 0
-      ) {
-        throw new ApprovalEditUnavailableError();
-      }
-      return withResumeWakeUp(options.overrides.queue, config.run.autoResume, runId, () =>
-        resolveApprovalEvent(
-          store,
-          runId,
-          approvalId,
-          decision,
-          resolveOptions?.edits,
-          clock,
-          tool,
-          resolveOptions?.metadata,
-        ),
-      );
-    },
+    resolveApproval: createRuntimeApprovalResolver({ options, store, clock, tool }),
+    resolveInput: createRuntimeInputResolver({
+      store,
+      clock,
+      pii: options.pii,
+      queue: options.overrides.queue,
+    }),
     close: () =>
       closeRuntimeResources({
         store,

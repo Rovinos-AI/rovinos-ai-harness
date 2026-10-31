@@ -55,6 +55,7 @@ import type { RunLoopResult } from "./loop.js";
 import type { CancelRunResult } from "./cancel.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ApprovalDecision, ApprovalResolutionMetadata } from "./approvals.js";
+import type { InputResolution } from "./human-input/resolve.js";
 import type { AppContentTokenize, RuntimeAppContent, RuntimeAppCallbacks } from "./runtime-apps.js";
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
@@ -204,6 +205,12 @@ export interface Runtime {
       readonly metadata?: ApprovalResolutionMetadata;
     },
   ): Promise<Extract<Event, { type: "approval_resolved" }>>;
+  /** Resolves a pending human input with runtime-owned validation and tokenization. */
+  resolveInput(
+    runId: Id,
+    requestId: Id,
+    resolution: InputResolution,
+  ): Promise<Extract<Event, { type: "input_resolved" }>>;
   /** Returns whether the folded state currently contains a pending approval. */
   hasPendingApproval(runId: Id): Promise<boolean>;
   /** Tokenizes app-originated JSON at the model-input boundary. */
