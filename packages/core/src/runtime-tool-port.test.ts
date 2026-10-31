@@ -51,6 +51,20 @@ describe("composeToolPorts", () => {
     expect(error).toMatchObject({ code: "tool_id_collision", toolId: webFetchId });
   });
 
+  it("prefers an additional spec over a generic existing description", async () => {
+    const additional = toolPort(webFetchId);
+    const existing = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null })),
+    };
+    const composed = composeToolPorts(additional, existing, { preferAdditionalSpecs: true });
+
+    await composed.execute(call, context);
+
+    expect(additional.execute).toHaveBeenCalledOnce();
+    expect(existing.execute).not.toHaveBeenCalled();
+  });
+
   it("forwards preparation and schema validation to the port owning each tool", async () => {
     const additional = {
       ...toolPort(webFetchId),

@@ -110,6 +110,7 @@ async function makePendingInput(
     readonly separationOfDuties?: boolean;
     readonly requestedBy?: string;
     readonly withoutToolIntent?: boolean;
+    readonly withoutSchema?: boolean;
     readonly schema?: InputRequest["schema"];
   } = {},
   store = new InMemoryEventStore(),
@@ -174,7 +175,10 @@ async function makePendingInput(
       round: 1,
       mode,
       ...(mode === "form"
-        ? { schema: options.schema ?? form, message: "Contact <EMAIL_1>" }
+        ? {
+            ...(options.withoutSchema === true ? {} : { schema: options.schema ?? form }),
+            message: "Contact <EMAIL_1>",
+          }
         : { url: "https://example.test", message: "Confirm <EMAIL_1>" }),
       ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
     },
@@ -263,6 +267,23 @@ describe("resolveInput", () => {
       }),
     ).rejects.toBeInstanceOf(InputAnswerInvalidError);
     expect((await readEvents(store)).some((event) => event.type === "input_resolved")).toBe(false);
+  });
+
+  it("accepts a JSON answer for a schema-less agent question", async () => {
+    const store = await makePendingInput({
+      source: "agent",
+      withoutSchema: true,
+    });
+
+    const resolution = await resolveInput(store, runId, requestId, {
+      action: "accept",
+      answer: "Ada",
+      principal: Code.parse("cli.human"),
+      tokenizer: tokenizer(),
+      clock: { now: () => 500 },
+    });
+
+    expect(resolution.answer).toBe("Ada");
   });
 
   it("validates tokenized defaults and enums against their protected original values", async () => {

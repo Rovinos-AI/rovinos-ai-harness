@@ -84,6 +84,7 @@ describe("Event", () => {
     expect(
       Event.safeParse({ ...resolution, action: "decline", answer: { private: "value" } }).success,
     ).toBe(false);
+    expect(Event.safeParse({ ...resolution, decidedBy: "model" }).success).toBe(false);
   });
 
   it("ties input-request event mode to its corresponding payload", () => {

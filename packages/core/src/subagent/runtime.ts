@@ -101,6 +101,7 @@ export async function resolveRuntimeRoles(
     registeredTools: [
       ...(tool.getToolSpecs?.().map((spec) => spec.toolId) ?? []),
       Code.parse("agent.spawn"),
+      Code.parse("agent.ask_user"),
     ],
     contextStrategies,
     configDirectory: roleConfigDirectory,
