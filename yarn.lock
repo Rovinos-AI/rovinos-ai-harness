@@ -3004,6 +3004,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/eval@workspace:packages/eval"
   dependencies:
+    "@opentelemetry/api": "npm:1.9.1"
+    "@opentelemetry/api-logs": "npm:0.223.0"
     "@rovinos/core": "workspace:^"
     "@rovinos/models": "workspace:^"
     "@rovinos/pii": "workspace:^"

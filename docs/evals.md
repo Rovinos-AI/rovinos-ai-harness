@@ -59,3 +59,15 @@ user, and have configurable memory, CPU, and process-count limits. Generated con
 contain only secret references; each trial receives a fresh key through the
 executor boundary. The runner is a package API; the shipped `harness eval` command
 is tracked separately.
+
+Root run spans created by either executor include the suite code, task code, and
+zero-based trial index. These attributes are omitted from ordinary runs. In-process
+evals default to an in-memory trace provider; set `exportTelemetry: true` only when
+the caller has configured its explicit export pipeline. The Docker executor captures
+container stdout/stderr and the grader checks `telemetry.json` in the trial directory
+when a collector writes that file. `no_canary_leak` scans all captured spans, process
+output, event and vault database bytes, and workspace files; raw captured content is
+kept out of trial results.
+
+The `--export-telemetry` CLI option is planned with `harness eval run` in task 16.8
+(issue #174); this task supplies the executor-level opt-in only.

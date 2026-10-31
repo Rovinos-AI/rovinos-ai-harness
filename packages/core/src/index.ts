@@ -145,6 +145,8 @@ export { StrategyContextPort, type StrategyContextPortOptions } from "./context/
 export { NaiveContext } from "./context/naive-context.js";
 export {
   createRuntime,
+  EvalRunMetadataSchema,
+  type EvalRunMetadata,
   type Runtime,
   type RuntimeConfig,
   type RuntimeOverrides,

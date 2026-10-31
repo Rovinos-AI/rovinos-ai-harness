@@ -16,12 +16,16 @@ vi.mock("node:child_process", async (importOriginal) => {
 function makeChild() {
   const child = new ChildProcess();
   const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
   Object.defineProperty(child, "stdin", { configurable: true, value: stdin });
+  Object.defineProperty(child, "stdout", { configurable: true, value: stdout });
+  Object.defineProperty(child, "stderr", { configurable: true, value: stderr });
   const kill = vi.spyOn(child, "kill").mockImplementation(() => {
     child.emit("close", null, "SIGTERM");
     return true;
   });
-  return { child, stdin, kill };
+  return { child, stdin, stdout, stderr, kill };
 }
 
 function options(overrides: Partial<DockerProcessOptions> = {}): DockerProcessOptions {
@@ -68,6 +72,8 @@ describe("runDockerProcess", () => {
     child.stdin.on("data", (chunk: Buffer) => {
       input += chunk.toString("utf8");
     });
+    child.stdout.write("container stdout");
+    child.stderr.write("container stderr");
     mocks.spawn.mockImplementation(
       (
         _command: string,
@@ -83,6 +89,8 @@ describe("runDockerProcess", () => {
     await expect(runDockerProcess(options())).resolves.toEqual({
       exitCode: 0,
       timedOut: false,
+      stdout: "container stdout",
+      stderr: "container stderr",
     });
 
     expect(calls[0]?.args).toEqual(options().args);

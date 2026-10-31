@@ -4,9 +4,9 @@ import { Writable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLogger } from "@rovinos/telemetry";
 import { __getLoggerDroppedFieldsForTests } from "@rovinos/telemetry/testing";
+import { createCanaries } from "@rovinos/eval";
 import { CanaryHarness } from "./harness.js";
 import { scanCommittedFixtures } from "./scanning.js";
-import { createCanaries } from "./canaries.js";
 
 function luhnValid(value: string): boolean {
   let sum = 0;

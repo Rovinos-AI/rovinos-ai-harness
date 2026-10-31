@@ -3,10 +3,15 @@ import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
 import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/core";
 import type { Id } from "@rovinos/schemas";
-import { TrialResultSchema } from "../trial.js";
+import { TrialResultSchema, evalSuiteCode } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
+import {
+  captureProcessOutput,
+  configureEvalTelemetry,
+  setTrialProcessOutput,
+} from "../execution-capture.js";
 import { SimulatedHuman } from "../human.js";
 import { createProviderCaptureAdapter } from "../trajectory.js";
 
@@ -45,7 +50,14 @@ async function executeTrialRun(runtime: Runtime, trial: TrialSpec): Promise<Exec
       : { goal: trial.task.input.goal, metadata: trial.task.input.metadata };
   const hasContextStrategy =
     trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
-  let run = await runtime.run(goal, hasContextStrategy ? { role: "eval" } : {});
+  let run = await runtime.run(goal, {
+    ...(hasContextStrategy ? { role: "eval" } : {}),
+    evalMetadata: {
+      suite: evalSuiteCode(trial.suite),
+      task: trial.task.id,
+      trial: trial.trialIndex,
+    },
+  });
   const runId = run.events[0]?.runId;
   const human =
     trial.task.human === undefined ? undefined : new SimulatedHuman(trial.task.human, runtime);
@@ -106,6 +118,7 @@ export class InProcessExecutor implements TrialExecutor {
 
   /** {@inheritDoc TrialExecutor.run} */
   async run(trial: TrialSpec): Promise<TrialResult> {
+    configureEvalTelemetry(this.options.exportTelemetry);
     const clock = this.options.clock ?? systemClock;
     const startedAt = clock.now();
     const prepared = await prepareTrial(trial, this.options);
@@ -127,11 +140,22 @@ export class InProcessExecutor implements TrialExecutor {
       },
     });
 
+    let result: TrialResult;
     try {
-      const executed = await executeTrialRun(runtime, trial);
-      return trialResult(prepared, startedAt, clock, executed);
+      const captured = await captureProcessOutput(
+        () => {
+          return executeTrialRun(runtime, trial).then((executed) =>
+            trialResult(prepared, startedAt, clock, executed),
+          );
+        },
+        (stdout, stderr) => {
+          setTrialProcessOutput(prepared.dbPath, stdout, stderr);
+        },
+      );
+      result = captured.result;
     } finally {
       await runtime.close();
     }
+    return result;
   }
 }

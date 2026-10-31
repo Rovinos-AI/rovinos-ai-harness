@@ -11,7 +11,13 @@ import {
   type RunResult,
   type JsonValue,
 } from "@rovinos/schemas";
-import type { ModelCompletion, ModelPort, ModelRequest, RunContext } from "@rovinos/core";
+import {
+  EvalRunMetadataSchema,
+  type ModelCompletion,
+  type ModelPort,
+  type ModelRequest,
+  type RunContext,
+} from "@rovinos/core";
 import { cliPrincipal, type CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 
@@ -142,6 +148,14 @@ export const runCommand: CommandModule = {
                 : { goal: input.goal, metadata: input.metadata };
             const result = await runtime.run(goal, {
               requestedBy: cliPrincipal(config, options.as),
+              ...(process.env.HARNESS_EVAL_METADATA === undefined
+                ? {}
+                : {
+                    evalMetadata: parseJson(
+                      EvalRunMetadataSchema,
+                      process.env.HARNESS_EVAL_METADATA,
+                    ),
+                  }),
             });
             const firstEvent = result.events[0];
             if (firstEvent === undefined) {

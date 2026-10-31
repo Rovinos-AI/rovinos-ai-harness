@@ -2,7 +2,6 @@
 import { HarnessError, Id, RunResultSchema } from "@rovinos/schemas";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
-import { readFakeModel } from "./run.js";
 
 class ResumeStatusError extends HarnessError {
   override readonly code: string;
@@ -44,8 +43,11 @@ export const resumeCommand: CommandModule = {
       .action(async (value: string, options: { readonly fakeModel?: string }) => {
         const runId = Id.parse(value);
         const config = await context.loadConfig();
+        const fakeModelName = options.fakeModel;
         const model =
-          options.fakeModel === undefined ? undefined : await readFakeModel(options.fakeModel);
+          fakeModelName === undefined
+            ? undefined
+            : await import("./run.js").then(({ readFakeModel }) => readFakeModel(fakeModelName));
         const runtime = await createCommandRuntime(
           context,
           config,

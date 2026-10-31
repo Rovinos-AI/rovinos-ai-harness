@@ -102,6 +102,9 @@ Owner task: `9.3`.
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
 | `harness.error.code` | Code | Optional | `@rovinos/core` |
+| `harness.eval.suite` | Code | Optional | `@rovinos/core` |
+| `harness.eval.task` | Code | Optional | `@rovinos/core` |
+| `harness.eval.trial` | integer | Optional | `@rovinos/core` |
 | `harness.event.seq` | integer | Optional | `@rovinos/core` |
 | `harness.run.continuation_of` | Id | Optional | `@rovinos/core` |
 | `harness.run.depth` | integer | Optional | `@rovinos/core` |
