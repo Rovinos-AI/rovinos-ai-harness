@@ -18,18 +18,45 @@ export function createTerminalPrompt(
     isTTY: input.isTTY === true,
     confirm: async (question) => {
       out.print(`${question} [y/N] `);
-      const lines = createInterface({ input });
-      try {
-        const answer = await new Promise<string>((resolve) => {
-          lines.once("close", () => {
-            resolve("");
-          });
-          lines.question("", resolve);
-        });
-        return /^y(?:es)?$/iu.test(answer.trim());
-      } finally {
-        lines.close();
-      }
+      const answer = await readLine(input, undefined);
+      return /^y(?:es)?$/iu.test(answer.trim());
+    },
+    prompt: async (question, signal) => {
+      out.print(question);
+      return readLine(input, signal);
     },
   };
+}
+
+function readLine(input: NodeJS.ReadableStream, signal: AbortSignal | undefined): Promise<string> {
+  const lines = createInterface({ input });
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => {
+      signal?.removeEventListener("abort", onAbort);
+      lines.close();
+    };
+    const onAbort = (): void => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(signal?.reason instanceof Error ? signal.reason : new Error("prompt_aborted"));
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    lines.once("close", () => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve("");
+      }
+    });
+    lines.question("", (answer) => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve(answer);
+      }
+    });
+  });
 }

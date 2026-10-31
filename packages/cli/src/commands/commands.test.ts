@@ -31,10 +31,11 @@ import {
   Sha256Hex,
   parseJson,
   type Event,
+  type InputRequest,
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCommandRuntime, type CliContext } from "../command.js";
+import { createCommandRuntime, type CliContext, type Interactive } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
 import { main } from "../main.js";
@@ -137,6 +138,9 @@ function createHarness(
         tool,
         processLike: shutdown,
         model: overrides?.model ?? model,
+        ...(overrides?.inputChannels === undefined
+          ? {}
+          : { inputChannels: overrides.inputChannels }),
       });
       return resumeResult === undefined
         ? runtime
@@ -250,6 +254,46 @@ afterEach(async () => {
 });
 
 describe("run, resume, and inspect CLI commands", () => {
+  it("registers the terminal input channel for interactive runs", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-interactive-"));
+    const inputPath = await createFile("input.json", '{"goal":"ask a human"}');
+    const harness = createHarness();
+    const interactive: Interactive = {
+      isTTY: true,
+      prompt: vi.fn().mockResolvedValue('"Ada"'),
+      confirm: vi.fn().mockResolvedValue(true),
+    };
+    harness.context.interactive = interactive;
+    const createRuntimeSpy = vi.spyOn(harness.context, "createRuntime");
+
+    const code = await main(["run", "--input", inputPath, "--interactive"], harness.context, [
+      runCommand,
+    ]);
+    const runtimeOverrides = createRuntimeSpy.mock.calls[0]?.[1];
+    const channel = runtimeOverrides?.inputChannels?.[0];
+    const request: InputRequest = {
+      requestId: harness.ids.next(),
+      source: "agent",
+      round: 1,
+      mode: "form",
+      message: "Input message <EMAIL_1>",
+      schema: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    };
+
+    expect(code).toBe(ExitCode.ok);
+    expect(channel).toBeDefined();
+    expect(channel?.available(request)).toBe(true);
+    await expect(channel?.present(request, new AbortController().signal)).resolves.toMatchObject({
+      action: "accept",
+      answer: { name: "Ada" },
+      principal: "cli.local",
+    });
+  });
+
   it("continues a run through a new log and exposes its continuation in inspect", async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-continue-"));
     const inputPath = await createFile("input.json", '{"goal":"original question"}');

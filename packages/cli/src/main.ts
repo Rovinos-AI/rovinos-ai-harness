@@ -26,6 +26,7 @@ import { replayCommand } from "./commands/replay.js";
 import { healthcheckCommand } from "./healthcheck.js";
 import { workerCommand } from "./commands/worker.js";
 import { piiCommand } from "./commands/pii.js";
+import { inputsCommand } from "./commands/inputs.js";
 
 /** Static command registry; later epics add their owned commands here. */
 export const COMMANDS: CommandModule[] = [
@@ -33,6 +34,7 @@ export const COMMANDS: CommandModule[] = [
   runCommand,
   resumeCommand,
   approvalsCommand,
+  inputsCommand,
   inspectCommand,
   cancelCommand,
   contextCommand,
@@ -93,14 +95,13 @@ export function createDefaultContext(program: Command, out: Output): CliContext 
   };
 }
 
-function createProgram(out: Output): Command {
+function createProgram(out: Output, inputJsonFile: boolean): Command {
   const program = new Command();
   program
     .name("harness")
     .description("Rovinos AI Harness command line interface")
     .version(HARNESS_VERSION, "-V, --version", "output version number")
     .option("-c, --config <path>", "path to harness configuration")
-    .option("--json", "write command results as JSON")
     .option("--log-level <level>", "set the log level", "info")
     .configureOutput({
       writeOut: (text) => {
@@ -110,7 +111,20 @@ function createProgram(out: Output): Command {
       outputError: () => undefined,
     })
     .exitOverride();
+  if (!inputJsonFile) {
+    program.option("--json", "write command results as JSON");
+  }
   return program;
+}
+
+function hasInputJsonFile(argv: readonly string[]): boolean {
+  const answerIndex = argv.indexOf("answer");
+  if (!argv.includes("inputs") || answerIndex === -1) {
+    return false;
+  }
+  const jsonIndex = argv.indexOf("--json", answerIndex + 1);
+  const file = jsonIndex < 0 ? undefined : argv[jsonIndex + 1];
+  return file !== undefined && !file.startsWith("-");
 }
 
 function handleCommanderError(error: CommanderError, program: Command, out: Output): ExitCode {
@@ -138,7 +152,7 @@ export async function main(
   commands: readonly CommandModule[] = COMMANDS,
 ): Promise<ExitCode> {
   const output = context?.out ?? createOutput();
-  const program = createProgram(output);
+  const program = createProgram(output, hasInputJsonFile(argv));
   const cliContext = context ?? createDefaultContext(program, output);
   output.setJsonMode(argv.includes("--json"));
 

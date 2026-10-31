@@ -20,6 +20,7 @@ import {
 } from "@rovinos/core";
 import { cliPrincipal, type CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
+import { createTerminalInputChannel } from "../human-input.js";
 
 class ScriptedModelError extends HarnessError {
   override readonly code = "fake_model_script_exhausted";
@@ -125,21 +126,32 @@ export const runCommand: CommandModule = {
       .requiredOption("--input <json-file|->", "JSON input file, or - to read standard input")
       .option("--fake-model <script.json>", "JSON array of scripted model completions")
       .option("--as <name>", "attribute this run to a CLI principal")
+      .option("--interactive", "answer human input requests in the terminal")
       .action(
         async (options: {
           readonly input: string;
           readonly fakeModel?: string;
           readonly as?: string;
+          readonly interactive?: boolean;
         }) => {
           const input = await readInput(options.input);
           const config = await context.loadConfig();
           const model =
             options.fakeModel === undefined ? undefined : await readFakeModel(options.fakeModel);
-          const runtime = await createCommandRuntime(
-            context,
-            config,
-            model === undefined ? undefined : { model },
-          );
+          if (options.interactive === true && context.interactive?.isTTY !== true) {
+            throw new RunStatusError("confirmation_required");
+          }
+          const principal = cliPrincipal(config, options.as);
+          const runtime = await createCommandRuntime(context, config, {
+            ...(model === undefined ? {} : { model }),
+            ...(options.interactive !== true
+              ? {}
+              : {
+                  inputChannels: [
+                    createTerminalInputChannel(context.interactive, context.out, principal),
+                  ],
+                }),
+          });
           try {
             // TODO(13.7): Tokenize goal content before it enters the run loop.
             const goal: JsonValue =
@@ -147,7 +159,7 @@ export const runCommand: CommandModule = {
                 ? { goal: input.goal }
                 : { goal: input.goal, metadata: input.metadata };
             const result = await runtime.run(goal, {
-              requestedBy: cliPrincipal(config, options.as),
+              requestedBy: principal,
               ...(process.env.HARNESS_EVAL_METADATA === undefined
                 ? {}
                 : {

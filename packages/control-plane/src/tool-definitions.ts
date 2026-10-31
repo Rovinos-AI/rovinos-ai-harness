@@ -22,18 +22,66 @@ import {
   getRunOutputSchema,
   listRunsInputSchema,
   listRunsOutputSchema,
+  listPendingInputsInputSchema,
+  listPendingInputsOutputSchema,
+  inputRequestInputSchema,
+  getInputResultSchema,
+  inputResolutionOutputSchema,
   resumeRunOutputSchema,
   reviewApprovalInputSchema,
   reviewApprovalOutputSchema,
   startRunInputSchema,
   startRunOutputSchema,
   runLifecycleInputSchema,
+  answerInputInputSchema,
 } from "./schemas.js";
 
 /** Returns public MCP tool definitions in the order used by `tools/list`. */
 export function toolDefinitions(): Tool[] {
   return [
     ...runToolDefinitions(),
+    ...inputToolDefinitions(),
+    ...approvalToolDefinitions(),
+    ...lifecycleToolDefinitions(),
+  ];
+}
+
+function inputToolDefinitions(): Tool[] {
+  return [
+    {
+      name: "list_pending_inputs",
+      description: "List pending human inputs using metadata only.",
+      inputSchema: objectInputSchema(listPendingInputsInputSchema),
+      outputSchema: z.toJSONSchema(listPendingInputsOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "get_input",
+      description: "Get one pending input's tokenized message and form or URL details.",
+      inputSchema: objectInputSchema(inputRequestInputSchema),
+      outputSchema: z.toJSONSchema(getInputResultSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "review_input",
+      description: "Ask a human to answer a pending input request.",
+      inputSchema: objectInputSchema(inputRequestInputSchema),
+      outputSchema: z.toJSONSchema(inputResolutionOutputSchema),
+      annotations: { openWorldHint: false },
+    },
+    {
+      name: "answer_input",
+      description: "Submit a human answer to a pending input request.",
+      inputSchema: objectInputSchema(answerInputInputSchema),
+      outputSchema: z.toJSONSchema(inputResolutionOutputSchema),
+      annotations: { openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+  ];
+}
+
+function approvalToolDefinitions(): Tool[] {
+  return [
     {
       name: "harness.approvals.get",
       description: "Load one pending approval into its human review view.",
@@ -81,6 +129,11 @@ export function toolDefinitions(): Tool[] {
       annotations: { idempotentHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
     },
+  ];
+}
+
+function lifecycleToolDefinitions(): Tool[] {
+  return [
     {
       name: "start_run",
       description: "Start a run and return its metadata.",
@@ -153,6 +206,7 @@ export function toolScope(name: string): ControlPlaneAuthScope {
   if (
     name === "list_runs" ||
     name === "get_run" ||
+    name === "list_pending_inputs" ||
     name === "harness.runs.list" ||
     name === "harness.runs.get"
   ) {
@@ -162,6 +216,9 @@ export function toolScope(name: string): ControlPlaneAuthScope {
     name === "approve" ||
     name === "deny" ||
     name === "review_approval" ||
+    name === "get_input" ||
+    name === "review_input" ||
+    name === "answer_input" ||
     name === "harness.approvals.get" ||
     name === "harness.approvals.resolve"
   ) {
