@@ -26,6 +26,7 @@ import { replayCommand } from "./commands/replay.js";
 import { healthcheckCommand } from "./healthcheck.js";
 import { workerCommand } from "./commands/worker.js";
 import { piiCommand } from "./commands/pii.js";
+import { evalCommand } from "./commands/eval.js";
 
 /** Static command registry; later epics add their owned commands here. */
 export const COMMANDS: CommandModule[] = [
@@ -46,6 +47,7 @@ export const COMMANDS: CommandModule[] = [
   replayCommand,
   healthcheckCommand,
   workerCommand,
+  evalCommand,
 ];
 
 const systemClock: Clock = { now: () => Date.now() };

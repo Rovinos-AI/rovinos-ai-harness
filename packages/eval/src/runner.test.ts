@@ -144,4 +144,34 @@ describe("runEval", () => {
 
     expect(results.map(({ durationMs }) => durationMs)).toEqual([250, 250]);
   });
+
+  it("stops launching trials after the cumulative cost exceeds the cap", async () => {
+    const outDir = await createDirectory();
+    const started: string[] = [];
+    const results = await runEval(
+      makeSuite(),
+      [{ id: "baseline" }],
+      {
+        run: (trial) => {
+          started.push(trial.task.id);
+          return Promise.resolve(resultFor(trial));
+        },
+      },
+      { outDir, concurrency: 1, maxCostUsd: 0.000002 },
+    );
+    const records = (await readFile(join(outDir, "trials.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => parseJson(EvalTrialRecordSchema, line));
+
+    expect(started).toEqual(["task_one"]);
+    expect(results.map(({ status, exitCode }) => [status, exitCode])).toEqual([
+      ["completed", 0],
+      ["skipped_budget", 6],
+    ]);
+    expect(records.map(({ taskId, result }) => [taskId, result.status])).toEqual([
+      ["task_one", "completed"],
+      ["task_two", "skipped_budget"],
+    ]);
+  });
 });

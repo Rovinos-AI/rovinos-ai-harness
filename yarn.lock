@@ -2887,6 +2887,7 @@ __metadata:
     "@rovinos/context": "workspace:^"
     "@rovinos/control-plane": "workspace:^"
     "@rovinos/core": "workspace:^"
+    "@rovinos/eval": "workspace:^"
     "@rovinos/host": "workspace:^"
     "@rovinos/mcp": "workspace:^"
     "@rovinos/pii": "workspace:^"

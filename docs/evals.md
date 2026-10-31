@@ -69,5 +69,25 @@ when a collector writes that file. `no_canary_leak` scans all captured spans, pr
 output, event and vault database bytes, and workspace files; raw captured content is
 kept out of trial results.
 
-The `--export-telemetry` CLI option is planned with `harness eval run` in task 16.8
-(issue #174); this task supplies the executor-level opt-in only.
+## Running a suite from the CLI
+
+`harness eval run <suite>` runs the suite and writes `trials.jsonl`,
+`eval-report.json`, `eval-report.md`, and `junit.xml` under `--out`. The default output
+directory is `./eval-out/<timestamp>`, where the timestamp comes from the CLI clock.
+Use `--model provider/model[,provider/model]` to create one variant per model,
+`--trials <n>` to override per-task trial counts, and `--filter <tag|taskId>` to select
+tasks. `--concurrency`, `--seed`, `--fail-under`, and `--max-cost-usd` control the run;
+the cost cap prevents new trials from starting after completed trials exceed it, and
+the command exits with code 6 when trials were skipped.
+
+`--cassette replay` is the default for in-process runs and reads
+`<suite directory>/cassettes/<taskId>/<variantId>.json`; a missing entry fails with a
+cassette miss instead of calling a live provider. `--cassette off` defaults to Docker
+isolation. `--isolation inprocess|docker` selects the executor explicitly, and
+`--export-telemetry` opts into the caller-configured telemetry exporters (off by default).
+Docker uses `ghcr.io/rovinos-ai/harness:<CLI version>` unless `HARNESS_EVAL_IMAGE`
+overrides the image.
+
+The CLI summary contains task and variant identifiers, pass rates, cost, and steps.
+With global `--json`, stdout contains one validated content-free report document;
+Markdown, JSON, JUnit, and trial JSONL files contain metadata and grader codes only.

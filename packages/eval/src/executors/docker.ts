@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createRuntime, foldRunState } from "@rovinos/core";
 import { HarnessError, type RunStatus } from "@rovinos/schemas";
+import type { Event } from "@rovinos/schemas";
 import { runDockerProcess } from "@rovinos/sandbox";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";
@@ -90,6 +91,10 @@ function codeFromTrial(trial: TrialSpec): string {
     .digest("hex")
     .slice(0, 20);
   return `harness-eval-${hash}`;
+}
+
+function trialKey(trial: TrialSpec): string {
+  return `${trial.task.id}\u0000${trial.variantId}\u0000${String(trial.trialIndex)}`;
 }
 
 function inputForTrial(trial: TrialSpec): string {
@@ -336,12 +341,50 @@ async function completeDockerTrial(options: {
  */
 export class DockerExecutor implements TrialExecutor {
   private readonly options: z.output<typeof DockerOptionsSchema>;
+  private readonly preparedTrials = new Map<string, PreparedTrial>();
 
   constructor(
     options: DockerExecutorOptions,
     private readonly dependencies: TrialExecutionDependencies = {},
   ) {
     this.options = DockerOptionsSchema.parse(options);
+  }
+
+  /** Reads the trial's tokenized event log after execution for grading and cassette recording. */
+  async eventsFor(trial: TrialSpec): Promise<readonly Event[]> {
+    const prepared = this.preparedTrials.get(trialKey(trial));
+    this.preparedTrials.delete(trialKey(trial));
+    if (prepared === undefined || !existsSync(prepared.dbPath)) {
+      return [];
+    }
+    const runtime = await createRuntime(prepared.runtimeConfig, {
+      dataDir: prepared.dataDir,
+      readOnlyStore: true,
+      transientVault: false,
+      secretResolver: {
+        resolve: (reference, signal) =>
+          reference === "env:HARNESS_EVAL_KEY"
+            ? Promise.resolve({ reveal: () => prepared.key })
+            : (this.dependencies.secretResolver?.resolve(reference, signal) ??
+              Promise.reject(
+                Object.assign(new Error("secret_unavailable"), { code: "secret_unavailable" }),
+              )),
+      },
+    });
+    try {
+      const { runs } = await runtime.store.listRuns({ limit: 1 });
+      const run = runs[0];
+      if (run === undefined) {
+        return [];
+      }
+      const events: Event[] = [];
+      for await (const event of runtime.store.read(run.runId)) {
+        events.push(event);
+      }
+      return events;
+    } finally {
+      await runtime.close();
+    }
   }
 
   /** {@inheritDoc TrialExecutor.run} */
@@ -352,6 +395,7 @@ export class DockerExecutor implements TrialExecutor {
       throw new DockerExecutorError("docker_mount_path_invalid");
     }
     const prepared = await prepareTrial(trial, this.dependencies);
+    this.preparedTrials.set(trialKey(trial), prepared);
     const name = codeFromTrial(trial);
     const dockerArgs = dockerBaseArgs(this.options, trial, name, this.dependencies.exportTelemetry);
     const args = [

@@ -22,6 +22,7 @@ const RunnerOptionsSchema = z
     concurrency: z.number().int().positive().default(2),
     trials: z.number().int().positive().optional(),
     seed: z.number().int().nonnegative().max(0xffff_ffff).default(0),
+    maxCostUsd: z.number().nonnegative().optional(),
   })
   .strict();
 
@@ -169,6 +170,9 @@ export async function runEval(
   const output = await open(jsonlPath, "w");
   let writeChain = Promise.resolve();
   let nextIndex = 0;
+  let costMicros = 0;
+  const maxCostMicros =
+    parsedOptions.maxCostUsd === undefined ? undefined : parsedOptions.maxCostUsd * 1_000_000;
   async function worker(): Promise<void> {
     for (;;) {
       const index = nextIndex;
@@ -176,6 +180,20 @@ export async function runEval(
       const trial = trials[index];
       if (trial === undefined) {
         return;
+      }
+      if (maxCostMicros !== undefined && costMicros > maxCostMicros) {
+        const result = TrialResultSchema.parse({
+          status: "skipped_budget",
+          dbPath: join(trial.workDir, "data", "harness.db"),
+          workspaceDir: join(trial.workDir, "workspace"),
+          durationMs: 0,
+          usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+          exitCode: 6,
+        });
+        results.set(index, result);
+        writeChain = writeChain.then(() => output.appendFile(stringifyTrialRecord(trial, result), "utf8"));
+        await writeChain;
+        continue;
       }
       const start = clock.now();
       let result: TrialResult;
@@ -192,6 +210,7 @@ export async function runEval(
           errorCode: errorCodeFrom(error),
         });
       }
+      costMicros += result.usage.costMicros;
       results.set(index, result);
       const line = stringifyTrialRecord(trial, result);
       writeChain = writeChain.then(() => output.appendFile(line, "utf8"));

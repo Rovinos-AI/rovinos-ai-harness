@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
+import type { Event } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
 import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/core";
 import type { Id } from "@rovinos/schemas";
@@ -18,7 +19,7 @@ import { executionMetricsFromEvents } from "../report/metrics.js";
 
 /** Factories for isolated model, tool, and policy ports. */
 export interface InProcessExecutorOptions extends TrialExecutionDependencies {
-  readonly model: (trial: TrialSpec) => ModelPort;
+  readonly model?: (trial: TrialSpec) => ModelPort;
   readonly tool?: (trial: TrialSpec) => ToolPort;
   readonly policy?: (trial: TrialSpec) => PolicyPort;
 }
@@ -35,7 +36,22 @@ function resultStatus(status: string): TrialResult["status"] {
   return "error";
 }
 
+function trialKey(trial: TrialSpec): string {
+  return `${trial.task.id}\u0000${trial.variantId}\u0000${String(trial.trialIndex)}`;
+}
+
 type RuntimeRunResult = Awaited<ReturnType<Runtime["run"]>>;
+
+async function readTokenizedEvents(runtime: Runtime, runId: Id | undefined): Promise<readonly Event[]> {
+  if (runId === undefined) {
+    return [];
+  }
+  const events: Event[] = [];
+  for await (const event of runtime.store.read(runId)) {
+    events.push(event);
+  }
+  return events;
+}
 
 interface ExecutedTrialRun {
   readonly run: RuntimeRunResult;
@@ -116,7 +132,14 @@ function trialResult(
  * @param options - Fresh factories for test tools, models, and policy per trial.
  */
 export class InProcessExecutor implements TrialExecutor {
+  private readonly trialEvents = new Map<string, readonly Event[]>();
+
   constructor(private readonly options: InProcessExecutorOptions) {}
+
+  /** Returns the tokenized event log kept in memory for grading and cassette recording. */
+  eventsFor(trial: TrialSpec): readonly Event[] {
+    return this.trialEvents.get(trialKey(trial)) ?? [];
+  }
 
   /** {@inheritDoc TrialExecutor.run} */
   async run(trial: TrialSpec): Promise<TrialResult> {
@@ -129,26 +152,36 @@ export class InProcessExecutor implements TrialExecutor {
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000 + trial.seed),
       ids: new SequentialIdGenerator(),
-      model: createProviderCaptureAdapter(this.options.model(trial), trial.task.canaries ?? []),
+      ...(this.options.model === undefined
+        ? {}
+        : {
+            model: createProviderCaptureAdapter(
+              this.options.model(trial),
+              trial.task.canaries ?? [],
+            ),
+          }),
       ...(this.options.tool === undefined ? {} : { tool: this.options.tool(trial) }),
       ...(this.options.policy === undefined ? {} : { policy: this.options.policy(trial) }),
       secretResolver: {
-        resolve: (reference) =>
+        resolve: (reference, signal) =>
           reference === "env:HARNESS_EVAL_KEY"
             ? Promise.resolve({ reveal: () => prepared.key })
-            : Promise.reject(
+            : (this.options.secretResolver?.resolve(reference, signal) ??
+              Promise.reject(
                 Object.assign(new Error("secret_unavailable"), { code: "secret_unavailable" }),
-              ),
+              )),
       },
     });
 
     let result: TrialResult;
+    let events: readonly Event[] = [];
     try {
       const captured = await captureProcessOutput(
         () => {
-          return executeTrialRun(runtime, trial).then((executed) =>
-            trialResult(prepared, startedAt, clock, executed),
-          );
+          return executeTrialRun(runtime, trial).then(async (executed) => {
+            events = await readTokenizedEvents(runtime, executed.runId);
+            return trialResult(prepared, startedAt, clock, executed);
+          });
         },
         (stdout, stderr) => {
           setTrialProcessOutput(prepared.dbPath, stdout, stderr);
@@ -158,6 +191,7 @@ export class InProcessExecutor implements TrialExecutor {
     } finally {
       await runtime.close();
     }
+    this.trialEvents.set(trialKey(trial), events);
     return result;
   }
 }

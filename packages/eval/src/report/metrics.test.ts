@@ -120,4 +120,20 @@ describe("eval report metrics", () => {
       ],
     });
   });
+
+  it("counts a cost-capped trial as a metadata-only failed status", () => {
+    const record = reportTrial({
+      result: {
+        status: "skipped_budget",
+        exitCode: 6,
+        usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+      },
+    });
+
+    expect(computeTrialMetrics(record, [])).toMatchObject({
+      status: "skipped_budget",
+      passed: false,
+      graders: [{ graderId: "trial_status", pass: false, codes: ["trial_skipped_budget"] }],
+    });
+  });
 });

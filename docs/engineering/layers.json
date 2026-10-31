@@ -75,6 +75,7 @@
     "core"
   ],
   "cli": [
+    "eval",
     "schemas",
     "telemetry",
     "crypto",
