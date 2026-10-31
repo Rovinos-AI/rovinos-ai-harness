@@ -29,13 +29,17 @@ export {
 } from "./canary.js";
 export {
   EvalCassetteModeSchema,
+  EvalTrialRecordSchema,
   EvalVariantSchema,
   TrialResultSchema,
   TrialSpecSchema,
   TrialUsageSchema,
   ApprovalCountsSchema,
+  TrialExecutionMetricsSchema,
   type EvalVariant,
+  type EvalTrialRecord,
   type ApprovalCounts,
+  type TrialExecutionMetrics,
   type TrialResult,
   type TrialSpec,
   evalSuiteCode,
@@ -92,3 +96,27 @@ export {
   type RunnerDependencies,
   type RunnerOptions,
 } from "./runner.js";
+export {
+  EvalGradeRecordSchema,
+  EvalReportInputSchema,
+  EvalTrialMetricsSchema,
+  MetricSummarySchema,
+  PassAtKSchema,
+  EvalAggregateSchema,
+  EvalReportSchema,
+  type EvalGradeRecord,
+  type EvalTrialMetrics,
+  type MetricSummary,
+  type PassAtK,
+  type EvalAggregate,
+  type EvalReport,
+} from "./report/schema.js";
+export {
+  computeTrialMetrics,
+  executionMetricsFromEvents,
+  parseEvalTrialJsonl,
+} from "./report/metrics.js";
+export { passAtK, summarize, aggregateEvalMetrics } from "./report/aggregate.js";
+export { buildEvalReport, serializeEvalReport } from "./report/json.js";
+export { renderMarkdownReport } from "./report/markdown.js";
+export { renderJunitReport } from "./report/junit.js";

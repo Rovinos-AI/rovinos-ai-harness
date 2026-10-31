@@ -31,6 +31,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "fast-xml-parser": "5.11.2",
     "vitest": "4.1.12"
   }
 }
