@@ -216,6 +216,36 @@ describe("GitHub workflows", () => {
     expect(positiveControlIndex).toBeGreaterThan(scannerIndex);
   });
 
+  it("builds, generates SBOMs, and scans PR images without signing or publishing", () => {
+    const steps = jobSteps("static");
+    const build = steps.find((step) => step.name === "Build images for PR scan and SBOM");
+    const scan = steps.find((step) => step.name === "Generate PR SBOMs and scan images");
+    const positiveControl = steps.find(
+      (step) => step.name === "Verify image vulnerability positive control",
+    );
+    const upload = steps.find(
+      (step) => step.name === "Upload image SBOM and vulnerability reports",
+    );
+    const buildCommand = build?.run ?? "";
+    const scanCommand = scan?.run ?? "";
+
+    expect(positiveControl?.if).toBe("always()");
+    expect(positiveControl?.run).toContain("scripts/security/scan-image.ts --positive-control");
+    expect(build?.if).toBe("github.event_name == 'pull_request' || github.ref_type == 'tag'");
+    expect(scan?.if).toBe("github.event_name == 'pull_request' || github.ref_type == 'tag'");
+    expect(buildCommand).toContain("type=oci,dest=$RUNNER_TEMP/harness.oci.tar");
+    expect(buildCommand).toContain("type=oci,dest=$RUNNER_TEMP/harness-sandbox.oci.tar");
+    expect(buildCommand).not.toContain("--push");
+    expect(scan?.env?.SYFT_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/u);
+    expect(scan?.env?.TRIVY_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/u);
+    expect(scanCommand).toContain("cyclonedx-json=");
+    expect(scanCommand).toContain("scripts/security/scan-image.ts");
+    expect(scanCommand).not.toContain("cosign sign");
+    expect(scanCommand).not.toContain("docker push");
+    expect(upload?.if).toBe("always()");
+    expect(upload?.with?.path).toBe("reports/image-vulnerability/");
+  });
+
   it("runs the dependency vulnerability gate nightly on main and uploads its report", () => {
     const workflow = readNightlyVulnerabilityWorkflow();
     const job = workflow.jobs["dependency-vulnerabilities"];
