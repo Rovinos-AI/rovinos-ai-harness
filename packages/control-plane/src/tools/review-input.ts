@@ -20,7 +20,11 @@ import type {
   ConfirmationGate,
   HumanInputResult,
 } from "../confirmation-gate.js";
-import { inputRequestInputSchema, inputResolutionOutputSchema } from "../schemas.js";
+import {
+  inputRequestInputSchema,
+  inputResolutionOutputSchema,
+  type InputResolutionOutput,
+} from "../schemas.js";
 import type { ResolveInputOperation } from "./answer-input.js";
 import { findInputRequest, findPendingInput } from "./input-state.js";
 
@@ -89,6 +93,7 @@ export function registerReviewInputTool(
   );
 }
 
+/** Dependencies and request data for one reviewed durable input. */
 export interface ReviewPendingInput {
   readonly context: ServerContext;
   readonly confirmationGate: ConfirmationGate;
@@ -99,9 +104,10 @@ export interface ReviewPendingInput {
   readonly principal: ControlPlanePrincipal | undefined;
   readonly runId: Id;
   readonly request: InputRequest;
+  readonly requestStateToken?: string;
 }
 
-type ReviewPendingInputResult = InputRequiredResult | ReturnType<typeof inputResult>;
+type ReviewPendingInputResult = ReturnType<typeof inputRequired> | ReturnType<typeof inputResult>;
 
 /** Reissues one pending request through the connected client and resolves its validated answer. */
 export async function reviewPendingInput(
@@ -154,19 +160,19 @@ async function requestHumanAnswer(
     if (url === undefined) {
       return undefined;
     }
-    return input.confirmationGate.requireHumanInput(input.context, confirmationRequest, {
+    return await input.confirmationGate.requireHumanInput(input.context, confirmationRequest, {
       ...base,
       answerSchema: z.object({}).strict(),
       acceptWithoutContent: true,
       createRequest: (elicitationMessage) =>
         inputRequired.elicitUrl({ url, message: elicitationMessage }),
-    });
+    }, input.requestStateToken);
   }
   const schema = input.request.schema;
   if (schema === undefined) {
     return undefined;
   }
-  return input.confirmationGate.requireHumanInput(input.context, confirmationRequest, {
+  return await input.confirmationGate.requireHumanInput(input.context, confirmationRequest, {
     ...base,
     answerSchema: formSchemaToZod(schema),
     createRequest: (elicitationMessage) =>
@@ -175,7 +181,7 @@ async function requestHumanAnswer(
         message: elicitationMessage,
         requestedSchema: elicitationFormSchema(schema),
       }),
-  });
+  }, input.requestStateToken);
 }
 
 async function resolveReviewedInput(
@@ -253,7 +259,11 @@ function inputResult(input: {
   readonly resolved: boolean;
   readonly code?: string;
   readonly text?: string;
-}) {
+}): {
+  readonly structuredContent: InputResolutionOutput;
+  readonly content: readonly [{ readonly type: "text"; readonly text: string }];
+  readonly isError?: true;
+} {
   const code = input.code === undefined ? undefined : Code.safeParse(input.code);
   const result = inputResolutionOutputSchema.parse({
     resolved: input.resolved,

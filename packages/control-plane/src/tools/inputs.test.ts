@@ -171,7 +171,7 @@ async function connect(
   if (options.captureContext !== undefined) {
     server.registerTool(
       "test_capture_context",
-      { description: "Test-only context capture", inputSchema: {} },
+      { description: "Test-only context capture", inputSchema: z.object({}) },
       (_input, requestContext) => {
         options.captureContext?.(requestContext);
         return { content: [{ type: "text", text: "captured" }] };
@@ -203,7 +203,6 @@ async function connect(
 
 function context(
   baseContext: ServerContext,
-  requestState?: unknown,
   inputResponses?: Readonly<Record<string, unknown>>,
   sessionId?: string,
 ): ServerContext {
@@ -212,11 +211,6 @@ function context(
     ...(sessionId === undefined ? {} : { sessionId }),
     mcpReq: {
       ...baseContext.mcpReq,
-      requestState: <T = unknown>() =>
-        requestState === undefined
-          ? undefined
-          : // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Mimics the SDK's caller-typed verified request-state accessor.
-            (requestState as T),
       ...(inputResponses === undefined ? {} : { inputResponses }),
     },
   };
@@ -242,7 +236,8 @@ async function reviewRequest(input: {
   readonly requestId: Id;
   readonly context: ServerContext;
   readonly resolveInput: ResolveInputOperation;
-}) {
+  readonly requestStateToken?: string;
+}): Promise<Awaited<ReturnType<typeof reviewPendingInput>>> {
   const found = await findPendingInput(input.store, input.requestId);
   if (found === undefined) {
     throw new Error("test input missing");
@@ -255,6 +250,9 @@ async function reviewRequest(input: {
     principal: undefined,
     runId: found.runId,
     request: found.request,
+    ...(input.requestStateToken === undefined
+      ? {}
+      : { requestStateToken: input.requestStateToken }),
   });
 }
 
@@ -436,18 +434,26 @@ describe("control-plane human input tools", () => {
 
       let outcome: string;
       if (invalidState === "tampered") {
-        outcome = await gate
-          .verifyRequestState(`${state}x`, context(baseContext))
-          .then(() => "verified", () => "invalid");
-      } else {
-        const verifiedState = await gate.verifyRequestState(state, context(baseContext));
         const result = await reviewRequest({
           store,
           gate,
           requestId,
-          context: context(baseContext, verifiedState, {
+          context: context(baseContext),
+          requestStateToken: `${state}x`,
+          resolveInput,
+        });
+        outcome = z
+          .object({ structuredContent: z.object({ code: z.string() }) })
+          .parse(result).structuredContent.code;
+      } else {
+        const result = await reviewRequest({
+          store,
+          gate,
+          requestId,
+          context: context(baseContext, {
             answer: { action: "accept", content: { name: "Ada" } },
           }),
+          requestStateToken: state,
           resolveInput,
         });
         outcome = z
@@ -456,7 +462,9 @@ describe("control-plane human input tools", () => {
       }
 
       expect(outcome).toBe(
-        invalidState === "tampered" ? "invalid" : "confirmation_state_mismatch",
+        invalidState === "tampered"
+          ? "confirmation_state_invalid"
+          : "confirmation_state_mismatch",
       );
       expect(resolveInput).not.toHaveBeenCalled();
       await expectInputPending(store, runId, requestId);
@@ -479,9 +487,18 @@ describe("control-plane human input tools", () => {
     const state = requestStateSchema.parse(initial).requestState;
     const secondContext = await captureContext(store);
 
-    await expect(
-      gate.verifyRequestState(state, context(secondContext, undefined, undefined, "another-token")),
-    ).rejects.toBeDefined();
+    const result = await reviewRequest({
+      store,
+      gate,
+      requestId,
+      context: context(secondContext, undefined, "another-token"),
+      requestStateToken: state,
+      resolveInput,
+    });
+    expect(result.structuredContent).toMatchObject({
+      resolved: false,
+      code: "confirmation_state_invalid",
+    });
 
     expect(resolveInput).not.toHaveBeenCalled();
     await expectInputPending(store, runId, requestId);
@@ -512,26 +529,26 @@ describe("control-plane human input tools", () => {
       resolveInput,
     });
     const state = requestStateSchema.parse(initial).requestState;
-    const verifiedState = await gate.verifyRequestState(state, context(baseContext));
     const accepted = await reviewRequest({
       store,
       gate,
       requestId: inputA.requestId,
-      context: context(baseContext, verifiedState, {
+      context: context(baseContext, {
         answer: { action: "accept", content: { name: "Ada" } },
       }),
+      requestStateToken: state,
       resolveInput,
     });
     expect(accepted.structuredContent).toEqual({ resolved: true });
 
-    const replayState = await gate.verifyRequestState(state, context(baseContext));
     const replay = await reviewRequest({
       store,
       gate,
       requestId: inputA.requestId,
-      context: context(baseContext, replayState, {
+      context: context(baseContext, {
         answer: { action: "accept", content: { name: "Ada" } },
       }),
+      requestStateToken: state,
       resolveInput,
     });
     expect(replay.structuredContent).toMatchObject({
@@ -549,14 +566,14 @@ describe("control-plane human input tools", () => {
       resolveInput,
     });
     const stateForA = requestStateSchema.parse(stateForAResponse).requestState;
-    const crossInputState = await gate.verifyRequestState(stateForA, context(baseContext));
     const crossInput = await reviewRequest({
       store,
       gate,
       requestId: inputB.requestId,
-      context: context(baseContext, crossInputState, {
+      context: context(baseContext, {
         answer: { action: "accept", content: { name: "Ada" } },
       }),
+      requestStateToken: stateForA,
       resolveInput,
     });
     expect(crossInput.structuredContent).toMatchObject({
@@ -581,14 +598,14 @@ describe("control-plane human input tools", () => {
       resolveInput,
     });
     const state = requestStateSchema.parse(initial).requestState;
-    const verifiedState = await gate.verifyRequestState(state, context(baseContext));
     const result = await reviewRequest({
       store,
       gate,
       requestId,
-      context: context(baseContext, verifiedState, {
+      context: context(baseContext, {
         answer: { action: "accept", content: { name: 42 } },
       }),
+      requestStateToken: state,
       resolveInput,
     });
 
@@ -614,12 +631,12 @@ describe("control-plane human input tools", () => {
       resolveInput,
     });
     const state = requestStateSchema.parse(initial).requestState;
-    const verifiedState = await gate.verifyRequestState(state, context(baseContext));
     const declined = await reviewRequest({
       store,
       gate,
       requestId,
-      context: context(baseContext, verifiedState, { answer: { action: "decline" } }),
+      context: context(baseContext, { answer: { action: "decline" } }),
+      requestStateToken: state,
       resolveInput,
     });
 
@@ -646,14 +663,14 @@ describe("control-plane human input tools", () => {
       resolveInput: failedResolve,
     });
     const errorState = requestStateSchema.parse(errorInitial).requestState;
-    const errorVerified = await errorGate.verifyRequestState(errorState, context(errorContext));
     const failed = await reviewRequest({
       store: errorStore,
       gate: errorGate,
       requestId: errorInput.requestId,
-      context: context(errorContext, errorVerified, {
+      context: context(errorContext, {
         answer: { action: "accept", content: { name: "Ada" } },
       }),
+      requestStateToken: errorState,
       resolveInput: failedResolve,
     });
 
