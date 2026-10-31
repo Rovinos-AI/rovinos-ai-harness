@@ -15,6 +15,7 @@ import {
 import { type AuditingVaultResolver, type VaultAuditHandler } from "@rovinos/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
+import { resolveDestination } from "./destination.js";
 import { resolveInputRetry } from "./input-retry.js";
 import { markSanitized, markSanitizedField } from "./pii-event-store.js";
 import type { Tokenizer } from "./tokenizer.js";
@@ -169,7 +170,7 @@ export class PiiToolPort implements PiiToolPortLike {
     try {
       tokenized = await this.deps.tokenizer.tokenizeJson(context.runId, call.args, {
         boundary: "tool_input",
-        destination: { tool: call.toolId },
+        destination: resolveDestination({ boundary: "tool_input", toolId: call.toolId }),
       });
     } catch (error) {
       if (error instanceof PiiBlockedError) {
@@ -188,7 +189,7 @@ export class PiiToolPort implements PiiToolPortLike {
     const stored = tokenized.actions.some(({ action }) => action === "allow")
       ? await this.deps.tokenizer.tokenizeJson(context.runId, tokenized.value, {
           boundary: "storage",
-          destination: { tool: call.toolId },
+          destination: resolveDestination({ boundary: "storage" }),
         })
       : tokenized;
     const prepared = { ...call, args: markJsonSanitized(stored.value) };
@@ -239,7 +240,7 @@ export class PiiToolPort implements PiiToolPortLike {
           tokenizeHumanInput: async (value) => {
             const tokenized = await this.deps.tokenizer.tokenizeJson(context.runId, value, {
               boundary: "ui",
-              destination: { tool: call.toolId },
+              destination: resolveDestination({ boundary: "ui" }),
             });
             for (const summary of tokenized.actions) {
               await context.recordPiiAction?.(summary);
@@ -249,7 +250,7 @@ export class PiiToolPort implements PiiToolPortLike {
             }
             const stored = await this.deps.tokenizer.tokenizeJson(context.runId, tokenized.value, {
               boundary: "storage",
-              destination: { tool: call.toolId },
+              destination: resolveDestination({ boundary: "storage" }),
             });
             for (const summary of stored.actions) {
               await context.recordPiiAction?.(summary);
@@ -338,7 +339,7 @@ async function tokenizeToolOutput(
   try {
     const tokenized = await tokenizer.tokenizeJson(context.runId, execution.result, {
       boundary: "tool_output",
-      destination: { tool: call.toolId },
+      destination: resolveDestination({ boundary: "tool_output", toolId: call.toolId }),
     });
     for (const summary of tokenized.actions) {
       await context.recordPiiAction?.(summary);
@@ -346,7 +347,7 @@ async function tokenizeToolOutput(
     const stored = tokenized.actions.some(({ action }) => action === "allow")
       ? await tokenizer.tokenizeJson(context.runId, tokenized.value, {
           boundary: "storage",
-          destination: { tool: call.toolId },
+          destination: resolveDestination({ boundary: "storage" }),
         })
       : tokenized;
     const result = {

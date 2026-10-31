@@ -100,6 +100,32 @@ afterEach(async () => {
 });
 
 describe("createRuntime PII composition", () => {
+  it("logs the code when a local model-input allow rule is ignored", () => {
+    const warnings: string[] = [];
+    const scopes = new RunScopeRegistry();
+
+    createRuntimePii({
+      config: PiiConfigSchema.parse({
+        rules: [
+          {
+            entities: ["email"],
+            boundaries: ["model_input"],
+            destinations: ["local"],
+            action: "allow",
+          },
+        ],
+      }),
+      vault: new InMemoryVault(),
+      scopes,
+      scopeOf: scopes.scopeOf,
+      policyVersion: Code.parse("test.policy"),
+      clock: { now: () => 0 },
+      onWarning: (code) => warnings.push(code),
+    });
+
+    expect(warnings).toEqual(["pii_local_allow_ignored"]);
+  });
+
   it("rejects replay-only tokenization bypass unless replay ports and isolated storage are supplied", async () => {
     const incompleteOverrides = [
       {
@@ -209,6 +235,7 @@ describe("createRuntime PII composition", () => {
       },
     });
     const pii = PiiConfigSchema.parse({
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
