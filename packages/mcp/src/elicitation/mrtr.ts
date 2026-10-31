@@ -7,9 +7,11 @@ import type { ValidatedInputRequest } from "./validate.js";
 export interface ElicitationInputRequired {
   readonly callId: Id;
   readonly serverId: Code;
+  readonly source?: "mcp_mrtr" | "mcp_legacy";
   readonly round: number;
   readonly inputRequests: readonly ValidatedInputRequest[];
   readonly sensitiveInputKeys: readonly string[];
+  readonly policyDeclinedInputKeys?: readonly string[];
   readonly maxPerRun: number;
   readonly signal?: AbortSignal;
   readonly requestState?: string;
@@ -27,13 +29,32 @@ export type ElicitationInputOutcome =
 /** Core-owned durable handler for MCP multi-round-trip input requests. */
 export interface ElicitationPort {
   handleInputRequired(input: ElicitationInputRequired): Promise<ElicitationInputOutcome>;
+  /** Records and presents one legacy live request, returning its durable human resolution. */
+  handleLegacyLive?(input: LegacyElicitationInput): Promise<InputResponse | undefined>;
+  /** Records a timeout resolution for a legacy request that received no channel answer. */
+  recordLegacyTimeout?(input: LegacyElicitationInput): Promise<void>;
+  /** Records a request and policy decline without presenting it to a human. */
+  recordLegacyPolicyDecline?(input: LegacyElicitationInput): Promise<void>;
+  /** Notifies the run loop that a known legacy URL elicitation completed server-side. */
+  onLegacyComplete?(input: Omit<LegacyElicitationInput, "request" | "timeoutMs" | "signal">): void;
 }
 
 /** Retry material supplied by the resume planner for the same MCP tool call. */
 export interface ElicitationRetry {
   readonly inputResponses: Readonly<Record<string, InputResponse>>;
   readonly round: number;
+  readonly source?: "mcp_mrtr" | "mcp_legacy";
   readonly requestState?: string;
+}
+
+/** Legacy live request presented while its originating server tool call is in flight. */
+export interface LegacyElicitationInput {
+  readonly callId: Id;
+  readonly serverId: Code;
+  readonly elicitationId: string;
+  readonly request: ValidatedInputRequest;
+  readonly timeoutMs: number;
+  readonly signal: AbortSignal;
 }
 
 /** Creates the wire response shape for a human resolution. */

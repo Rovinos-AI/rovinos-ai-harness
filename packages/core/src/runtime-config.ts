@@ -22,6 +22,7 @@ import {
   type ServersConfig,
   type StoreConfig,
   type DeploymentConfig,
+  type ElicitationConfig,
   type VaultConfig,
 } from "@rovinos/schemas";
 import { z } from "zod";
@@ -48,6 +49,7 @@ import type {
   ToolPort,
 } from "./ports.js";
 import type { Clock } from "./recorder.js";
+import type { HumanInputChannel } from "./human-input/channels.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { CancelRunResult } from "./cancel.js";
@@ -91,6 +93,8 @@ export interface RuntimeOverrides {
   /** Policy evaluator replacing the policy document configured for the runtime. */
   readonly policy?: PolicyPort;
   readonly context?: ContextPort;
+  /** Channels allowed to answer live MCP elicitation requests. */
+  readonly inputChannels?: readonly HumanInputChannel[];
   /** Shared token-scope registry used by the runtime and its tool adapters. */
   readonly scopeRegistry?: RunScopeRegistry;
   readonly processLike?: ShutdownProcessLike;
@@ -112,6 +116,7 @@ export interface RuntimeConfig {
   readonly keys?: KeysConfig | undefined;
   readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
   readonly servers?: ServersConfig;
+  readonly elicitation?: ElicitationConfig;
   readonly controlPlane?: ControlPlaneConfig | undefined;
 }
 

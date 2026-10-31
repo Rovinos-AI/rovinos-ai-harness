@@ -48,7 +48,7 @@ export class InputPresentationFailedError extends HarnessError {
 export interface HumanInputBrokerOptions {
   readonly store: EventStore;
   readonly channels: readonly HumanInputChannel[];
-  readonly tokenizer: Pick<Tokenizer, "tokenizeJson">;
+  readonly tokenizer?: Pick<Tokenizer, "tokenizeJson">;
   readonly resolver?: InputResolutionDependencies["resolver"];
   readonly clock?: Clock;
   readonly queue?: Pick<RunQueue, "enqueue">;
@@ -214,6 +214,21 @@ export class HumanInputBroker {
     requestId: Id,
     signal: AbortSignal,
   ): Promise<Extract<Event, { type: "input_resolved" }>> {
+    const winner = await this.collect(runId, requestId, signal);
+    return resolveInput(this.options.store, runId, requestId, {
+      ...winner,
+      ...(this.options.tokenizer === undefined ? {} : { tokenizer: this.options.tokenizer }),
+      ...(this.options.resolver === undefined ? {} : { resolver: this.options.resolver }),
+      ...(this.options.clock === undefined ? {} : { clock: this.options.clock }),
+      ...(this.options.expiresAfterMs === undefined
+        ? {}
+        : { expiresAfterMs: this.options.expiresAfterMs }),
+      ...(this.options.queue === undefined ? {} : { queue: this.options.queue }),
+    });
+  }
+
+  /** Collects a validated channel response without resolving it in a separate event writer. */
+  async collect(runId: Id, requestId: Id, signal: AbortSignal): Promise<InputResolution> {
     const events = await readRunEvents(this.options.store, runId);
     const requestEvent = pendingRequest(events, requestId);
     const request = humanRequest(requestEvent);
@@ -248,15 +263,6 @@ export class HumanInputBroker {
       eligible,
     });
     signal.throwIfAborted();
-    return resolveInput(this.options.store, runId, requestId, {
-      ...winner,
-      tokenizer: this.options.tokenizer,
-      ...(this.options.resolver === undefined ? {} : { resolver: this.options.resolver }),
-      ...(this.options.clock === undefined ? {} : { clock: this.options.clock }),
-      ...(this.options.expiresAfterMs === undefined
-        ? {}
-        : { expiresAfterMs: this.options.expiresAfterMs }),
-      ...(this.options.queue === undefined ? {} : { queue: this.options.queue }),
-    });
+    return winner;
   }
 }

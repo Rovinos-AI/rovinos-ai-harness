@@ -62,11 +62,13 @@ function hasUnsentResolvedInputRound(options: {
   readonly latestRound: number;
   readonly latestInputs: readonly InputRequestedEvent[];
   readonly initialAttempt: number;
+  readonly legacyRetryAllowed: boolean;
 }): boolean {
-  const { state, intent, latestRound, latestInputs, initialAttempt } = options;
+  const { state, intent, latestRound, latestInputs, initialAttempt, legacyRetryAllowed } = options;
   return (
     latestInputs.length > 0 &&
     latestInputs.every(({ requestId }) => state.resolvedInputs.has(requestId)) &&
+    (legacyRetryAllowed || latestInputs.every(({ source }) => source !== "mcp_legacy")) &&
     (state.toolExecutionAttempts.get(intent.callId) ?? 0) <= initialAttempt + latestRound - 1
   );
 }
@@ -110,6 +112,7 @@ export function planDanglingIntents(
         latestRound,
         latestInputs,
         initialAttempt,
+        legacyRetryAllowed: intent.idempotent && description.idempotent,
       })
     ) {
       return { kind: "retry_input", callId: intent.callId };

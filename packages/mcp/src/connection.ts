@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import type {
-  Client,
-  CallToolRequest,
-  CallToolRequestOptions,
-  CallToolResult,
-  Transport,
+import {
+  type Client,
+  type CallToolRequest,
+  type CallToolRequestOptions,
+  type CallToolResult,
+  type Transport,
 } from "@modelcontextprotocol/client";
 import type { ServerConfig } from "@rovinos/schemas";
 import {
@@ -15,7 +15,10 @@ import {
 } from "./errors.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
-import { invokeMcpTool } from "./mcp-call.js";
+import {
+  LegacyConnectionElicitation,
+  type LegacyElicitationCallbacks,
+} from "./legacy-connection.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
@@ -24,12 +27,13 @@ import {
   type CachedToolList,
   ListToolsResultSchema,
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
-  RECONNECT_BACKOFF_MS,
   ClientCredentialsExtensionSupport,
   createConfiguredTransport,
   createMcpClient,
   defaultSleep,
   getOrCreateValidator,
+  invokeConnectionTool,
+  reconnectWithBackoff,
   runWithSafeAuthLogging,
 } from "./connection-helpers.js";
 
@@ -43,6 +47,7 @@ interface ConnectionToolCall {
   readonly options?: CallToolRequestOptions;
   readonly toolDefinition?: McpTool;
   readonly inputRetry?: ElicitationRetry;
+  readonly legacyElicitation?: LegacyElicitationCallbacks;
 }
 
 /**
@@ -60,6 +65,7 @@ export class McpConnection {
   #protocolEra: "legacy" | "modern" | undefined;
   #cachedTools: CachedToolList | undefined;
   readonly #clientCredentialsExtension = new ClientCredentialsExtensionSupport();
+  readonly #legacyElicitation = new LegacyConnectionElicitation();
   #oauthProvider: McpOAuthProvider | undefined;
   #closed = false;
   #connectGeneration = 0;
@@ -172,6 +178,7 @@ export class McpConnection {
         },
       );
       client = activeClient;
+      this.#legacyElicitation.register(activeClient, this.#config.elicitation.enabled);
       await runWithSafeAuthLogging(
         this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
         () =>
@@ -221,6 +228,7 @@ export class McpConnection {
     const previousClient = this.#client;
     this.#client = undefined;
     this.#currentTransport = undefined;
+    this.#legacyElicitation.clear();
     await previousClient?.close().catch(() => undefined);
   }
 
@@ -323,6 +331,13 @@ export class McpConnection {
    * @returns The remote tool result.
    */
   async callTool(request: ConnectionToolCall): Promise<CallToolResult> {
+    if (this.#config.elicitation.enabled && this.#protocolEra !== "modern") {
+      return this.#legacyElicitation.serialize(() => this.#callTool(request));
+    }
+    return this.#callTool(request);
+  }
+
+  async #callTool(request: ConnectionToolCall): Promise<CallToolResult> {
     const { params, inputSchema, options, toolDefinition, inputRetry } = request;
     try {
       const validate = getOrCreateValidator(inputSchema);
@@ -332,6 +347,7 @@ export class McpConnection {
     }
 
     await this.#ensureReady(options?.signal);
+    this.#legacyElicitation.bind(request.legacyElicitation);
     try {
       return await this.#invoke(params, options, toolDefinition, inputRetry);
     } catch (error) {
@@ -340,6 +356,7 @@ export class McpConnection {
         throw new McpConnectionError("mcp_auth_required");
       }
       if (error instanceof McpProtocolError) {
+        this.#legacyElicitation.trackError(error, request.legacyElicitation);
         throw error;
       }
       const isLoss = isConnectionLossError(error) || this.#state === "unavailable";
@@ -357,10 +374,13 @@ export class McpConnection {
         return await this.#invoke(params, options, toolDefinition, inputRetry);
       } catch (retryError) {
         if (retryError instanceof McpProtocolError) {
+          this.#legacyElicitation.trackError(retryError, request.legacyElicitation);
           throw retryError;
         }
         throw new McpConnectionError("mcp_connection_lost");
       }
+    } finally {
+      this.#legacyElicitation.bind(undefined);
     }
   }
 
@@ -370,22 +390,15 @@ export class McpConnection {
     toolDefinition?: McpTool,
     inputRetry?: ElicitationRetry,
   ): Promise<CallToolResult> {
-    const client = this.#client;
-    if (client === undefined || this.#state !== "ready") {
-      throw new McpConnectionError("mcp_connection_lost");
-    }
-    return runWithSafeAuthLogging(
-      this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
-      () =>
-        invokeMcpTool({
-          client,
-          server: this.#config,
-          params,
-          ...(options === undefined ? {} : { requestOptions: options }),
-          ...(toolDefinition === undefined ? {} : { toolDefinition }),
-          ...(inputRetry === undefined ? {} : { inputRetry }),
-        }),
-    );
+    return invokeConnectionTool({
+      config: this.#config,
+      client: this.#client,
+      state: this.#state,
+      params,
+      ...(options === undefined ? {} : { requestOptions: options }),
+      ...(toolDefinition === undefined ? {} : { toolDefinition }),
+      ...(inputRetry === undefined ? {} : { inputRetry }),
+    });
   }
 
   async #ensureReady(signal?: AbortSignal): Promise<void> {
@@ -398,32 +411,13 @@ export class McpConnection {
     await this.#reconnect(signal);
   }
 
-  /** Throws when the connection was closed or the caller gave up, before and after each wait. */
-  #assertMayReconnect(signal?: AbortSignal): void {
-    if (this.#closed) {
-      throw new McpConnectionError("mcp_connection_lost");
-    }
-    if (signal?.aborted === true) {
-      throw new McpConnectionError("mcp_connect_timeout");
-    }
-  }
-
-  async #reconnect(signal?: AbortSignal): Promise<void> {
-    let lastError: unknown;
-    for (const delay of RECONNECT_BACKOFF_MS) {
-      this.#assertMayReconnect(signal);
-      await (this.#dependencies.sleep ?? defaultSleep)(delay);
-      this.#assertMayReconnect(signal);
-      try {
-        await this.connect(signal);
-        return;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw lastError instanceof McpConnectionError
-      ? lastError
-      : new McpConnectionError("mcp_connect_failed");
+  #reconnect(signal?: AbortSignal): Promise<void> {
+    return reconnectWithBackoff({
+      isClosed: () => this.#closed,
+      signal,
+      sleep: this.#dependencies.sleep ?? defaultSleep,
+      connect: (connectSignal) => this.connect(connectSignal),
+    });
   }
 
   /** Closes the SDK client and marks the connection unavailable. */

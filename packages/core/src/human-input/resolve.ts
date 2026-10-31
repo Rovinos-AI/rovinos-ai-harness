@@ -114,13 +114,16 @@ interface PendingInputResolutionOptions {
   readonly runId: Id;
   readonly requestId: Id;
   readonly resolution:
-    InputResolution | { readonly action: "cancel"; readonly decidedBy: "expiry" };
+    | InputResolution
+    | { readonly action: "cancel"; readonly decidedBy: "expiry" | "timeout" }
+    | { readonly action: "decline"; readonly decidedBy: "policy" };
   readonly dependencies: InputResolutionDependencies;
 }
 
 interface RecordInputResolutionOptions {
   readonly store: EventStore;
   readonly runId: Id;
+  readonly recorder?: RunRecorder;
   readonly requestId: Id;
   readonly request: InputRequestedEvent;
   readonly response: InputResponse;
@@ -136,13 +139,15 @@ interface RecordInputResolutionOptions {
 async function recordInputResolution(
   options: RecordInputResolutionOptions,
 ): Promise<Extract<Event, { type: "input_resolved" }>> {
-  const recorder = new RunRecorder(
-    options.store,
-    options.runId,
-    options.lastEvent.segmentId,
-    options.state.nextSeq,
-    { now: () => options.resolvedAt },
-  );
+  const recorder =
+    options.recorder ??
+    new RunRecorder(
+      options.store,
+      options.runId,
+      options.lastEvent.segmentId,
+      options.state.nextSeq,
+      { now: () => options.resolvedAt },
+    );
   ensureTracing();
   const event = await recorder.withStepSpan(
     INPUT_WAIT_SPAN,
