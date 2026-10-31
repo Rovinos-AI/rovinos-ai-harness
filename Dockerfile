@@ -33,14 +33,17 @@ RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store
        done \
     && cp -a packages/cli/dist /out/
 
-FROM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS runtime
+FROM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS runtime-os-audit
 
 WORKDIR /app
 RUN groupadd --gid 10001 harness \
     && useradd --uid 10001 --gid harness --no-create-home --shell /usr/sbin/nologin harness \
     && mkdir -p /var/lib/harness/event-store /var/lib/harness/vault \
-    && chown -R 10001:10001 /var/lib/harness /app \
-    && rm -rf /usr/bin/apt /usr/bin/apt-get /usr/bin/apt-cache /usr/bin/apt-cdrom /usr/bin/apt-config \
+    && chown -R 10001:10001 /var/lib/harness /app
+
+FROM runtime-os-audit AS runtime
+
+RUN rm -rf /usr/bin/apt /usr/bin/apt-get /usr/bin/apt-cache /usr/bin/apt-cdrom /usr/bin/apt-config \
       /usr/bin/dpkg* /usr/sbin/dpkg* /usr/lib/apt /usr/lib/dpkg \
       /var/lib/apt /var/lib/dpkg /var/cache/apt \
       /usr/share/doc/apt /usr/share/doc/dpkg /usr/share/man/man1/apt* \

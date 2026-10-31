@@ -2,12 +2,16 @@
 
 ## Pull requests
 
-For pull requests and release tags, the `static` job builds the harness and sandbox images into local
-Docker archives. It does not push images, sign them, or publish anything. Pinned Syft and Trivy
-containers read those archives without mounting the Docker socket. Syft writes a CycloneDX JSON SBOM
-for each image. Trivy writes a JSON vulnerability report that
-`scripts/security/scan-image.ts` normalizes and evaluates with the shared policy evaluator from
-`scripts/security/vuln-policy.ts`.
+For pull requests and release tags, the independent `image-scan` job builds the harness and sandbox
+images into local Docker archives. Unit tests do not wait for this job. It does not push images, sign
+them, or publish anything. Pinned Syft and Trivy containers read those archives without mounting the
+Docker socket. Syft writes a CycloneDX JSON SBOM for each final image. Trivy scans the named
+`runtime-os-audit` build stage for OS packages before the final runtime removes the Debian package
+database, and scans the final image for language packages. The audit stage and final stage share the
+same runtime base and setup. Trivy's OS report must contain at least one OS package; otherwise
+`scripts/security/scan-image.ts` fails with `image_os_packages_missing`. Scanner findings are
+normalized and evaluated with the shared policy evaluator from `scripts/security/vuln-policy.ts`.
+The required `gates` job checks that `image-scan` succeeded before running downstream gates.
 
 The image policy is [`config/image-vuln-policy.json`](../../config/image-vuln-policy.json). Fixable
 HIGH and CRITICAL findings block the job; unknown severities fail closed, and less severe fixable
@@ -27,8 +31,9 @@ image digest from BuildKit's metadata and runs `cosign sign` on `image@sha256:..
 Cosign uses GitHub Actions keyless signing with the workflow OIDC identity; no signing key is stored
 in the repository. BuildKit attaches an SPDX in-toto SBOM attestation to the image index. The
 workflow moves `latest` tags only after signing the versioned images. The release workflow waits for
-the reusable CI workflow, whose static job builds and scans both Dockerfiles before publishing
-starts. This is a pre-publish scan of the same image build inputs, not a rescan of the pushed digest.
+the reusable CI workflow, whose independent `image-scan` job builds and scans both Dockerfiles before
+publishing starts. This is a pre-publish scan of the same image build inputs, not a rescan of the
+pushed digest.
 
 To verify a published release image, pass its registry reference and immutable digest:
 

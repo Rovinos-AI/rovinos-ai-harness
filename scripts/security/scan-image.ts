@@ -22,10 +22,16 @@ const trivyVulnerabilitySchema = z.object({
   Severity: z.string().optional(),
 });
 
+const trivyPackageSchema = z.object({
+  Name: z.string().min(1),
+});
+
 const trivyReportSchema = z.object({
   Results: z
     .array(
       z.object({
+        Class: z.string().optional(),
+        Packages: z.array(trivyPackageSchema).nullable().optional(),
         Vulnerabilities: z.array(trivyVulnerabilitySchema).nullable().optional(),
       }),
     )
@@ -46,6 +52,7 @@ const imageScanReportSchema = z
 const imageScanErrorCodeSchema = z.enum([
   "scanner_report_invalid",
   "positive_control_undetected",
+  "image_os_packages_missing",
   "image_scan_failed",
 ]);
 const maxTrivyReportBytes = 16 * 1024 * 1024;
@@ -73,7 +80,7 @@ export function imageScanErrorCode(error: unknown): ImageScanErrorCode {
 /** Parses Trivy JSON into the shared normalized finding contract. */
 export function parseTrivyReport(output: string): Finding[] {
   try {
-    const report = parseJson(trivyReportSchema, output, { maxBytes: maxTrivyReportBytes });
+    const report = parseTrivyReportDocument(output);
     return (report.Results ?? []).flatMap((result) =>
       (result.Vulnerabilities ?? []).map((vulnerability) => {
         const fixedIn = vulnerability.FixedVersion?.trim();
@@ -91,6 +98,25 @@ export function parseTrivyReport(output: string): Finding[] {
     );
   } catch {
     throw new ImageScanError("scanner_report_invalid");
+  }
+}
+
+function parseTrivyReportDocument(output: string): z.infer<typeof trivyReportSchema> {
+  try {
+    return parseJson(trivyReportSchema, output, { maxBytes: maxTrivyReportBytes });
+  } catch {
+    throw new ImageScanError("scanner_report_invalid");
+  }
+}
+
+/** Fails closed when a Trivy report contains no operating-system packages. */
+export function requireOsPackageInventory(output: string): void {
+  const report = parseTrivyReportDocument(output);
+  const hasOsPackages = (report.Results ?? []).some(
+    (result) => result.Class === "os-pkgs" && (result.Packages?.length ?? 0) > 0,
+  );
+  if (!hasOsPackages) {
+    throw new ImageScanError("image_os_packages_missing");
   }
 }
 
@@ -164,9 +190,13 @@ function runPositiveControl(): void {
   process.stdout.write("Image vulnerability positive control detected and blocked.\n");
 }
 
-function runReport(reportPath: string, image: string): void {
+function runReport(reportPath: string, image: string, requireOsPackages: boolean): void {
   try {
-    const findings = parseTrivyReport(readFileSync(reportPath, "utf8"));
+    const scannerOutput = readFileSync(reportPath, "utf8");
+    if (requireOsPackages) {
+      requireOsPackageInventory(scannerOutput);
+    }
+    const findings = parseTrivyReport(scannerOutput);
     const report = makeReport(image, findings, readPolicy(), Date.now());
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     const summaryPath = process.env.GITHUB_STEP_SUMMARY;
@@ -203,8 +233,9 @@ function main(): void {
       runPositiveControl();
       return;
     }
+    const requireOsPackages = args.length === 5 && args[4] === "--require-os-packages";
     if (
-      args.length !== 4 ||
+      (args.length !== 4 && !requireOsPackages) ||
       args[0] !== "--report" ||
       args[2] !== "--image" ||
       args[1] === undefined ||
@@ -212,7 +243,7 @@ function main(): void {
     ) {
       throw new ImageScanError("image_scan_failed");
     }
-    runReport(args[1], args[3]);
+    runReport(args[1], args[3], requireOsPackages);
   } catch (error) {
     process.stderr.write(`${imageScanErrorCode(error)}\n`);
     process.exitCode = 1;

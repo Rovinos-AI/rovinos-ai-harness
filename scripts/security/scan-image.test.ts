@@ -9,6 +9,7 @@ import {
   imageScanErrorCode,
   ImageScanError,
   parseTrivyReport,
+  requireOsPackageInventory,
 } from "./scan-image.ts";
 import { FindingSchema, VulnerabilityPolicySchema } from "./vuln-policy.ts";
 
@@ -85,6 +86,26 @@ describe("parseTrivyReport", () => {
     expect(() => parseTrivyReport('{"Results":[{"Vulnerabilities":[{}]}]}')).toThrow(
       expect.objectContaining({ code: "scanner_report_invalid" }),
     );
+  });
+
+  it("fails closed when the OS package inventory is empty", () => {
+    expect(() => {
+      requireOsPackageInventory(
+        JSON.stringify({
+          Results: [{ Class: "os-pkgs", Packages: [], Vulnerabilities: [] }],
+        }),
+      );
+    }).toThrow(expect.objectContaining({ code: "image_os_packages_missing" }));
+  });
+
+  it("accepts a populated OS package inventory without requiring vulnerabilities", () => {
+    expect(() => {
+      requireOsPackageInventory(
+        JSON.stringify({
+          Results: [{ Class: "os-pkgs", Packages: [{ Name: "libc6" }], Vulnerabilities: [] }],
+        }),
+      );
+    }).not.toThrow();
   });
 });
 
