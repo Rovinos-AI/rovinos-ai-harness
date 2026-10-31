@@ -48,6 +48,7 @@ describe("eval JSON reports", () => {
     expect(first).toBe(second);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.trials.map(({ trialIndex }) => trialIndex)).toEqual([0, 1]);
+    expect(parsed.trials.map(({ seed }) => seed)).toEqual([1, 1]);
     expect(parsed.aggregates[0]).toMatchObject({
       n: 2,
       passes: 1,
