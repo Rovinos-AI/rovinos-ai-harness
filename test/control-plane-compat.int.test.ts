@@ -165,6 +165,7 @@ async function resolveInReferenceHost(
   if (browser === undefined) {
     throw new Error("Playwright browser was not initialized.");
   }
+  let appCallCompleted = false;
   const host = await createReferenceHost(
     {
       apps: [
@@ -188,8 +189,13 @@ async function resolveInReferenceHost(
       hasPendingApproval: () => true,
       isIdOwnedByRun: () => true,
       toolInput: { approvalId, payload },
-      onAppCall: (call: AppCall) =>
-        client.callTool({ name: call.toolName, arguments: call.arguments }),
+      onAppCall: async (call: AppCall) => {
+        try {
+          return await client.callTool({ name: call.toolName, arguments: call.arguments });
+        } finally {
+          appCallCompleted = true;
+        }
+      },
       onTelemetryEmit: () => Promise.resolve({ content: [] }),
     },
   );
@@ -201,6 +207,9 @@ async function resolveInReferenceHost(
     const actionButtons = frame.locator('nav[aria-label="Approval actions"] button');
     await actionButtons.first().waitFor({ state: "visible", timeout: 10_000 });
     await frame.getByRole("button", { name: "Approve", exact: true }).click();
+    await vi.waitFor(() => {
+      expect(appCallCompleted).toBe(true);
+    });
   } finally {
     await context.close();
     await host.close();
