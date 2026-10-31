@@ -60,6 +60,41 @@ export function explainPiiPolicy(
 }
 
 /**
+ * Explains the effective action after applying the model-input raw-value guard.
+ *
+ * @param policy - A validated PII policy.
+ * @param context - The entity, boundary, and destination being evaluated.
+ * @param allowRawToLocalModels - Whether local model destinations may receive raw values.
+ * @returns The policy explanation with unsafe model-input allows downgraded to tokenization.
+ */
+export function resolvePiiPolicyAction(
+  policy: PiiPolicy,
+  context: PiiPolicyContext,
+  allowRawToLocalModels = false,
+): PiiPolicyExplanation {
+  const explanation = explainPiiPolicy(policy, context);
+  if (
+    context.boundary === "model_input" &&
+    (context.destination === "hosted" ||
+      (context.destination === "local" && !allowRawToLocalModels)) &&
+    explanation.action === "allow"
+  ) {
+    return { ...explanation, action: "tokenize" };
+  }
+  return explanation;
+}
+
+/** Returns whether a policy contains an allow rule that can match local model input. */
+export function hasLocalModelAllowRule(policy: Pick<PiiPolicy, "rules">): boolean {
+  return policy.rules.some(
+    (rule) =>
+      rule.action === "allow" &&
+      matchesSelector(rule.boundaries, "model_input") &&
+      matchesDestinationSelector(rule.destinations, "local"),
+  );
+}
+
+/**
  * Evaluates a validated PII policy using first-match rule precedence.
  *
  * @param policy - A validated PII policy.

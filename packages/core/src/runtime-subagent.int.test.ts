@@ -1523,6 +1523,7 @@ describe("runtime subagent spawning", () => {
       reopened = await createRuntime(config, {
         dataDir: directory,
         model: new SpawnModel(),
+        tool: runtimePiiTool([]),
         secretResolver,
       });
       await expect(

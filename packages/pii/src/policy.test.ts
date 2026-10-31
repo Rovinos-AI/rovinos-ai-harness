@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { PiiPolicySchema } from "@rovinos/schemas";
-import { evaluatePiiPolicy, explainPiiPolicy } from "./index.js";
+import {
+  evaluatePiiPolicy,
+  explainPiiPolicy,
+  hasLocalModelAllowRule,
+  resolvePiiPolicyAction,
+} from "./index.js";
 
 describe("PII policy evaluation", () => {
   const context = {
@@ -115,5 +120,58 @@ describe("PII policy evaluation", () => {
     expect(evaluatePiiPolicy(policy, context)).toBe("redact");
     expect(policy).toEqual(originalPolicy);
     expect(context).toEqual(originalContext);
+  });
+
+  it("downgrades local model-input allows unless explicitly opted in", () => {
+    const policy = PiiPolicySchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+      ],
+    });
+    const localContext = {
+      entity: "email",
+      boundary: "model_input",
+      destination: "local",
+    } as const;
+
+    expect(resolvePiiPolicyAction(policy, localContext)).toEqual({
+      action: "tokenize",
+      ruleIndex: 0,
+    });
+    expect(resolvePiiPolicyAction(policy, localContext, true)).toEqual({
+      action: "allow",
+      ruleIndex: 0,
+    });
+    const hostedPolicy = PiiPolicySchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["hosted"],
+          action: "allow",
+        },
+      ],
+    });
+    expect(
+      resolvePiiPolicyAction(hostedPolicy, { ...localContext, destination: "hosted" }, true),
+    ).toEqual({ action: "tokenize", ruleIndex: 0 });
+    expect(hasLocalModelAllowRule(policy)).toBe(true);
+
+    const toolPolicy = PiiPolicySchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["tool_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+      ],
+    });
+    expect(hasLocalModelAllowRule(toolPolicy)).toBe(false);
   });
 });

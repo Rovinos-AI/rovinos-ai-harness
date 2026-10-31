@@ -1165,6 +1165,8 @@ describe("MCP runtime", () => {
       {
         run: RunConfigSchema.parse({}),
         pii: PiiConfigSchema.parse({
+          // Exercise raw local-model input before verifying hosted fallback sanitization.
+          allowRawToLocalModels: true,
           rules: [
             {
               entities: ["email"],
@@ -2781,14 +2783,18 @@ describe("retention", () => {
       await store.close();
     }
 
-    const runtime = await createRuntime(await current.context.loadConfig(), {
-      dataDir: current.dataDirectory,
-      clock: current.clock,
-      ids: current.ids,
-      roleConfigDirectory: current.directory,
-      secretResolver: new CompositeSecretResolver(),
-      sandboxBackend: unusedSandboxBackend,
-    });
+    const config = await current.context.loadConfig();
+    const runtime = await createRuntime(
+      { ...config, pii: PiiConfigSchema.parse({ ...config.pii, detokenize: [] }) },
+      {
+        dataDir: current.dataDirectory,
+        clock: current.clock,
+        ids: current.ids,
+        roleConfigDirectory: current.directory,
+        secretResolver: new CompositeSecretResolver(),
+        sandboxBackend: unusedSandboxBackend,
+      },
+    );
     try {
       await expect(
         runtime.vault.resolve(runId, Token.parse("<EMAIL_1>"), { boundary: "ui" }),
@@ -2919,6 +2925,7 @@ describe("SDK", () => {
     const harness = await createHarness({
       config: HarnessConfigSchema.parse({
         ...config,
+        pii: PiiConfigSchema.parse({ ...config.pii, detokenize: [] }),
         sandbox: {},
         policy: { ...config.policy, file: join(current.directory, "policy.yaml") },
       }),
@@ -3021,6 +3028,8 @@ describe("invariants", () => {
       },
     });
     const pii = PiiConfigSchema.parse({
+      // Exercise raw local-model input before verifying hosted fallback sanitization.
+      allowRawToLocalModels: true,
       rules: [
         {
           entities: ["email"],
@@ -3099,6 +3108,84 @@ describe("invariants", () => {
         persistedEvents.push(event);
       }
       expect(JSON.stringify(persistedEvents)).not.toContain(canary);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("tokenizes local model input by default", async () => {
+    const canary = "e2e-default-local-model@example.test";
+    const localRequests: ModelRequest[] = [];
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        keys: KeysConfigSchema.parse({
+          currentKeyId: "default-local-model-test",
+          keys: [{ id: "default-local-model-test", secret: KEY_REF }],
+        }),
+        pii: PiiConfigSchema.parse({
+          rules: [
+            {
+              entities: ["email"],
+              boundaries: ["model_input"],
+              destinations: ["local"],
+              action: "allow",
+            },
+          ],
+        }),
+        models: ModelsConfigSchema.parse({
+          providers: [
+            {
+              id: "local",
+              kind: "openai_compatible",
+              baseUrl: "http://127.0.0.1:1234",
+              trust: "local",
+            },
+          ],
+          routing: { default: [{ provider: "local", model: "local-model" }] },
+        }),
+      },
+      {
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        sandboxBackend: unusedSandboxBackend,
+        policy: {
+          version: Code.parse("default_local_policy"),
+          decide: () => ({
+            decision: "allow",
+            ruleId: Code.parse("default_local_allow"),
+            reason: Code.parse("synthetic_allowed"),
+            editable: [],
+          }),
+        },
+        providerAdapters: [
+          {
+            provider: "local",
+            kind: "openai",
+            complete: (request) => {
+              localRequests.push(request);
+              return Promise.resolve({
+                parts: [{ type: "text", text: "completed" }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: "stop",
+                latencyMs: 0,
+              });
+            },
+          },
+        ],
+        secretResolver: {
+          resolve: () => Promise.resolve({ reveal: () => Buffer.alloc(32, 31).toString("base64") }),
+        },
+      },
+    );
+
+    try {
+      const result = await runtime.run(canary);
+
+      expect(result.status).toBe("completed");
+      expect(localRequests).toHaveLength(1);
+      expect(JSON.stringify(localRequests[0]?.messages)).toContain("<EMAIL_1>");
+      expect(JSON.stringify(localRequests[0]?.messages)).not.toContain(canary);
     } finally {
       await runtime.close();
     }
