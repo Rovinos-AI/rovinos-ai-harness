@@ -16,12 +16,16 @@ import {
   APP_TELEMETRY_TOOL_NAME,
   Code,
   FakeClock,
+  PiiPolicySchema,
   SequentialIdGenerator,
   UNREGISTERED_TOOL_ID,
+  type Detection,
   type Event,
   type JsonValue,
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
+import { InMemoryVault } from "@rovinos/vault";
+import { Tokenizer } from "@rovinos/pii";
 import { PolicyEngine } from "@rovinos/policy";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -29,6 +33,8 @@ import * as telemetry from "@rovinos/telemetry";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
 import { applyResolvedApprovals } from "../approvals.js";
+import { expireInput, resolveInput } from "../human-input/resolve.js";
+import { AskUserTool } from "../builtin/ask-user-tool.js";
 import { NaiveContext } from "../context/naive-context.js";
 import { planDanglingIntents } from "../resume-policy.js";
 import { foldRunState, type ApprovalRequestedEvent, type ToolIntentEvent } from "../run-state.js";
@@ -52,7 +58,30 @@ const callIds = {
   unknown: "55555555555555555555555555",
 } as const;
 const configHash = "a".repeat(64);
+const answerEmail = "ask-user-answer@example.test";
 let nextSpanId = 0;
+
+function askUserTokenizer(): Tokenizer {
+  const detect = (text: string): readonly Detection[] => {
+    const start = text.indexOf(answerEmail);
+    return start < 0
+      ? []
+      : [
+          {
+            entityType: "email",
+            start,
+            end: start + answerEmail.length,
+            confidence: 1,
+            detectorId: "test.email",
+          },
+        ];
+  };
+  return new Tokenizer({
+    detectors: { detect },
+    policy: PiiPolicySchema.parse({}),
+    vault: new InMemoryVault(),
+  });
+}
 
 class TestSpan implements Span {
   static latest: TestSpan | undefined;
@@ -1181,6 +1210,7 @@ describe("durable MCP input requests", () => {
                   sensitiveInputKeys: [],
                   requestState: "opaque-state-\u0000",
                 });
+
                 return outcome?.kind === "suspend"
                   ? {
                       outcome: "ok",
@@ -1581,5 +1611,168 @@ describe("durable MCP input requests", () => {
       round: 1,
     });
     expect(completedState.pendingToolCalls.size).toBe(0);
+  });
+});
+
+describe("durable agent.ask_user requests", () => {
+  it("expires unanswered questions as cancelled", async () => {
+    const { recorder, store } = createRecorder();
+    const history = await createRun(recorder, []);
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, new AskUserTool(), history),
+      calls: [
+        {
+          callId: callIds.nonIdempotent,
+          toolId: "agent.ask_user",
+          args: { question: "Continue?", expiresInMs: 0 },
+        },
+      ],
+    });
+    const request = events.find((event) => event.type === "input_requested");
+    if (request?.type !== "input_requested") {
+      throw new Error("Expected an agent input request.");
+    }
+
+    const resolution = await expireInput(store, runId, request.requestId, {
+      tokenizer: askUserTokenizer(),
+      clock: new FakeClock(100),
+      expiresAfterMs: 604_800_000,
+    });
+
+    expect(resolution).toMatchObject({ action: "cancel", decidedBy: "expiry" });
+    expect(resolution).not.toHaveProperty("approverId");
+  });
+
+  it("suspends, resolves from another process, and resumes with a validated tokenized answer", async () => {
+    const { recorder, store } = createRecorder();
+    const history = await createRun(recorder, []);
+    const tool = new AskUserTool();
+    const question = {
+      callId: callIds.nonIdempotent,
+      toolId: "agent.ask_user",
+      args: {
+        question: "Which email address should I use?",
+        schema: {
+          type: "object",
+          properties: { email: { type: "string", format: "email" } },
+          required: ["email"],
+        },
+        expiresInMs: 1_000,
+      },
+    };
+    const initialEvents = await toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      calls: [question],
+    });
+
+    expect(initialEvents.map(({ type }) => type)).toEqual([
+      "tool_intent",
+      "input_requested",
+      "run_status_changed",
+      "checkpoint_written",
+    ]);
+    const request = initialEvents.find((event) => event.type === "input_requested");
+    if (request?.type !== "input_requested") {
+      throw new Error("Expected an agent input request.");
+    }
+    expect(request).toMatchObject({
+      source: "agent",
+      callId: callIds.nonIdempotent,
+      inputKey: "answer",
+      round: 1,
+      mode: "form",
+      message: "Which email address should I use?",
+      expiresAt: 1_100,
+    });
+    expect(initialEvents).toContainEqual(
+      expect.objectContaining({
+        type: "run_status_changed",
+        to: "suspended",
+        reason: "awaiting_input",
+      }),
+    );
+
+    await expect(
+      resolveInput(store, runId, request.requestId, {
+        action: "accept",
+        answer: { email: "not-an-email" },
+        principal: Code.parse("cli.human"),
+        tokenizer: askUserTokenizer(),
+        clock: new FakeClock(150),
+      }),
+    ).rejects.toMatchObject({ code: "input_answer_invalid" });
+
+    const resolution = await resolveInput(store, runId, request.requestId, {
+      action: "accept",
+      answer: { email: answerEmail },
+      principal: Code.parse("cli.human"),
+      tokenizer: askUserTokenizer(),
+      clock: new FakeClock(150),
+    });
+    expect(resolution).toMatchObject({
+      action: "accept",
+      approverId: "cli.human",
+      answer: { email: "<EMAIL_1>" },
+    });
+
+    const resumedSegmentId = "77777777777777777777777777";
+    const resumeClock = new FakeClock(200);
+    const resumeIds = new SequentialIdGenerator();
+    const resumeRecorder = new RunRecorder(
+      store,
+      runId,
+      resumedSegmentId,
+      await store.head(runId),
+      resumeClock,
+    );
+    await resumeRecorder.withStepSpan(RUN_SPAN, {}, () =>
+      resumeRecorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "suspended",
+        to: "running",
+        reason: "resumed",
+      }),
+    );
+    const durableEvents: Event[] = [];
+    for await (const event of store.read(runId)) {
+      durableEvents.push(event);
+    }
+    const state = foldRunState(durableEvents);
+    const resumedEvents = await applyDanglingIntents(
+      {
+        recorder: resumeRecorder,
+        tool,
+        clock: resumeClock,
+        runId,
+        ids: resumeIds,
+        checkpointer: new Checkpointer({
+          recorder: resumeRecorder,
+          runId,
+          context: new NaiveContext(),
+          ids: resumeIds,
+          clock: resumeClock,
+        }),
+        signal: new AbortController().signal,
+        history: durableEvents,
+      },
+      state,
+      planDanglingIntents(state, tool),
+    );
+
+    expect(resumedEvents).toContainEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        callId: callIds.nonIdempotent,
+        outcome: "ok",
+        result: { action: "accept", answer: { email: "<EMAIL_1>" } },
+      }),
+    );
+    const finalEvents: Event[] = [];
+    for await (const event of store.read(runId)) {
+      finalEvents.push(event);
+    }
+    expect(JSON.stringify(finalEvents)).not.toContain(answerEmail);
+    expect(foldRunState(finalEvents).pendingToolCalls.size).toBe(0);
   });
 });

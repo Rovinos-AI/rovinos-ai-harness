@@ -75,8 +75,11 @@ export function validateInputResponse(request: InputRequest, response: unknown):
     }
     return parsed.data;
   }
-  if (request.schema === undefined || parsed.data.answer === undefined) {
+  if (parsed.data.answer === undefined) {
     throw new InputAnswerInvalidError();
+  }
+  if (request.schema === undefined) {
+    return { action: "accept", answer: JsonValueSchema.parse(parsed.data.answer) };
   }
   const answer = formSchemaToZod(request.schema).safeParse(parsed.data.answer);
   if (!answer.success || !JsonValueSchema.safeParse(answer.data).success) {

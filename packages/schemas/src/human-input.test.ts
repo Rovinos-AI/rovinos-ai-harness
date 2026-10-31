@@ -386,17 +386,32 @@ describe("InputRequestSchema", () => {
     expect(InputRequestSchema.safeParse({ ...request, url: "not a URL" }).success).toBe(false);
   });
 
-  it.each([
-    [
-      "form without schema",
-      {
+  it("accepts a schema-less form request from the agent", () => {
+    expect(
+      InputRequestSchema.safeParse({
         requestId: "00000000000000000000000001",
         source: "agent",
-        round: 0,
+        callId: "00000000000000000000000002",
+        inputKey: "answer",
+        round: 1,
+        mode: "form",
+        message: "What should I do?",
+      }).success,
+    ).toBe(true);
+    expect(
+      InputRequestSchema.safeParse({
+        requestId: "00000000000000000000000001",
+        source: "mcp_mrtr",
+        callId: "00000000000000000000000002",
+        serverId: "mcp.server",
+        round: 1,
         mode: "form",
         message: "Enter a value.",
-      },
-    ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
     [
       "form with URL",
       {

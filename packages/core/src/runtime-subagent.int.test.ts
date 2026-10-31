@@ -23,6 +23,7 @@ import { PiiToolPort, Tokenizer } from "@rovinos/pii";
 import { InMemoryWorkspace, OffloadedStub } from "@rovinos/context";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
+import { HumanInputBroker } from "./human-input/broker.js";
 import type { RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
@@ -624,6 +625,112 @@ describe("runtime subagent spawning", () => {
         inputTokens: 2,
         outputTokens: 2,
       });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("suspends the parent while a child asks a human and lists the request by child run id", async () => {
+    const store = new InMemoryEventStore();
+    let childQuestionAsked = false;
+    const model: ModelPort = {
+      complete: (request) => {
+        if (request.role === "worker" && childQuestionAsked) {
+          return Promise.resolve(completion([{ type: "text", text: "Child finished." }]));
+        }
+        if (request.role === "worker") {
+          childQuestionAsked = true;
+        }
+        return Promise.resolve(
+          completion([
+            {
+              type: "tool_call",
+              callId: request.role === "worker" ? childCallId : spawnCallId,
+              toolId: Code.parse(request.role === "worker" ? "agent.ask_user" : "agent.spawn"),
+              args:
+                request.role === "worker"
+                  ? { question: "Which option should I choose?" }
+                  : { role: "worker", goal: "ask a human" },
+            },
+          ]),
+        );
+      },
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({ enabled: false }),
+        models: ModelsConfigSchema.parse({
+          routing: {
+            default: [{ provider: "local", model: "parent" }],
+            roles: { worker: [{ provider: "local", model: "worker" }] },
+          },
+        }),
+        roles: [
+          {
+            id: "worker",
+            route: "worker",
+            tools: ["agent.ask_user"],
+            maxDepth: 2,
+            maxChildren: 1,
+          },
+        ],
+      },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(4),
+        ids: new SequentialIdGenerator(),
+        model,
+        tool: runtimePiiTool([]),
+        scopeRegistry: new RunScopeRegistry(),
+        policy: allowAllPolicy,
+      },
+    );
+    try {
+      const parent = await runtime.run("delegate a question");
+      const parentId = parent.events[0]?.runId;
+      const spawn = parent.events.find((event) => event.type === "subagent_spawned");
+      if (parentId === undefined || spawn?.type !== "subagent_spawned") {
+        throw new Error("Expected the parent run to announce its child.");
+      }
+
+      const parentEvents = await eventsFor(store, parentId);
+      const childEvents = await eventsFor(store, spawn.childRunId);
+      const request = childEvents.find((event) => event.type === "input_requested");
+      const childToolResults = childEvents.filter(
+        (event): event is Extract<Event, { type: "tool_result" }> => event.type === "tool_result",
+      );
+      expect(
+        childToolResults.map(({ toolId, outcome, errorCode }) => ({ toolId, outcome, errorCode })),
+      ).toEqual([]);
+      expect(childEvents.map(({ type }) => type)).toContain("input_requested");
+      if (request?.type !== "input_requested") {
+        throw new Error("Expected the child to ask for human input.");
+      }
+      const broker = new HumanInputBroker({
+        store,
+        channels: [],
+        tokenizer: new Tokenizer({
+          detectors: detector(),
+          policy: PiiConfigSchema.parse({ enabled: false }),
+          vault: new InMemoryVault(),
+        }),
+      });
+
+      expect(parent.status).toBe("suspended");
+      expect(parentEvents.findLast((event) => event.type === "run_status_changed")).toMatchObject({
+        type: "run_status_changed",
+        to: "suspended",
+        reason: "awaiting_subagent",
+      });
+      expect(request).toMatchObject({ runId: spawn.childRunId, source: "agent" });
+      await expect(broker.listPending(spawn.childRunId)).resolves.toContainEqual(
+        expect.objectContaining({ requestId: request.requestId, source: "agent" }),
+      );
+      expect(
+        parentEvents.some((event) => event.type === "tool_result" && event.callId === spawnCallId),
+      ).toBe(false);
     } finally {
       await runtime.close();
     }
