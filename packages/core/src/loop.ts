@@ -69,6 +69,11 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly snapshotKeep?: number;
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly role?: Code;
+  readonly evalMetadata?: {
+    readonly suite: Code;
+    readonly task: Code;
+    readonly trial: number;
+  };
   readonly provider?: Code;
   readonly modelName?: Code;
   /** Optional role result contract enforced on the child's final model call. */

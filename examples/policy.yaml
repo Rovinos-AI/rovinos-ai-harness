@@ -3,6 +3,13 @@
 version: 1
 defaultDecision: ask
 rules:
+  - id: allow_agent_ask_user
+    description: Allow the agent to ask the human questions
+    match:
+      tools:
+        - agent.ask_user
+    decision: allow
+    reason: agent_question
   - id: ask_email_send
     description: Ask before sending to a tokenized email address
     match:

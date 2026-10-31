@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
 import { createRuntime, foldRunState } from "@rovinos/core";
 import { HarnessError, type RunStatus } from "@rovinos/schemas";
 import { runDockerProcess } from "@rovinos/sandbox";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";
-import { TrialResultSchema } from "../trial.js";
-import type { ApprovalCounts, TrialResult, TrialSpec } from "../trial.js";
+import {
+  TrialResultSchema,
+  type ApprovalCounts,
+  type TrialResult,
+  type TrialSpec,
+} from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
+import { appendTrialProcessOutput } from "../execution-capture.js";
+import { dockerBaseArgs } from "./docker-args.js";
 import { runDockerHuman } from "./docker-human.js";
 
 const DockerMemorySchema = z
@@ -169,45 +174,6 @@ async function readRunResult(
   }
 }
 
-function dockerBaseArgs(
-  options: z.output<typeof DockerOptionsSchema>,
-  name: string,
-  workDir: string,
-): string[] {
-  return [
-    "run",
-    "--rm",
-    "--cap-drop",
-    "ALL",
-    "--security-opt",
-    "no-new-privileges:true",
-    "--read-only",
-    "--tmpfs",
-    `/tmp:size=${options.tmpfsSize},noexec,nosuid,nodev`,
-    "--user",
-    options.user,
-    "--memory",
-    options.memory,
-    "--cpus",
-    String(options.cpus),
-    "--pids-limit",
-    String(options.pidsLimit),
-    "--name",
-    name,
-    "--network",
-    options.network,
-    "--mount",
-    `type=bind,source=${resolvePath(workDir)},target=/harness`,
-    "--workdir",
-    "/harness",
-    "--env",
-    "HARNESS_DATA_DIR=/harness/data",
-    "--env",
-    "HARNESS_EVAL_KEY",
-    options.image,
-  ];
-}
-
 interface DockerInvocation {
   readonly options: z.output<typeof DockerOptionsSchema>;
   readonly prepared: PreparedTrial;
@@ -218,7 +184,7 @@ interface DockerInvocation {
 
 async function runDocker(invocation: DockerInvocation): Promise<DockerProcessResult> {
   try {
-    return await runDockerProcess({
+    const outcome = await runDockerProcess({
       dockerPath: invocation.options.dockerPath,
       args: invocation.args,
       input: invocation.input,
@@ -226,6 +192,12 @@ async function runDocker(invocation: DockerInvocation): Promise<DockerProcessRes
       containerName: invocation.name,
       env: { ...process.env, HARNESS_EVAL_KEY: invocation.prepared.key },
     });
+    appendTrialProcessOutput(
+      invocation.prepared.dbPath,
+      outcome.stdout ?? "",
+      outcome.stderr ?? "",
+    );
+    return outcome;
   } catch {
     throw new DockerExecutorError("docker_process_failed");
   }
@@ -379,7 +351,7 @@ export class DockerExecutor implements TrialExecutor {
     }
     const prepared = await prepareTrial(trial, this.dependencies);
     const name = codeFromTrial(trial);
-    const dockerArgs = dockerBaseArgs(this.options, name, trial.workDir);
+    const dockerArgs = dockerBaseArgs(this.options, trial, name, this.dependencies.exportTelemetry);
     const args = [
       ...dockerArgs,
       "node",

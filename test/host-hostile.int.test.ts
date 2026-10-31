@@ -10,7 +10,8 @@ import { createTestMetricCollector } from "@rovinos/telemetry/testing";
 import { createReferenceHost, type ReferenceHost } from "@rovinos/host";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { z } from "zod";
-import { createCanaries, type CanarySet } from "./canary/canaries.js";
+import { createCanaries } from "@rovinos/eval";
+import type { CanarySet } from "@rovinos/eval";
 import { createCanaryTelemetry, type CanaryTelemetry } from "./canary/telemetry.js";
 
 declare global {

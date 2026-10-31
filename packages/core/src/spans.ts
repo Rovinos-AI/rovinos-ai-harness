@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { attr, defineSpan } from "@rovinos/telemetry";
 import type { SpanDefinition, SpanDefinitionShape } from "@rovinos/telemetry";
-import type { Id } from "@rovinos/schemas";
+import type { Code, Id } from "@rovinos/schemas";
 
 const commonAttributes = {
   "harness.run.id": attr.id(),
@@ -17,6 +17,9 @@ export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     "harness.run.parent_id": attr.optional(attr.id()),
     "harness.run.continuation_of": attr.optional(attr.id()),
     "harness.run.depth": attr.optional(attr.int()),
+    "harness.eval.suite": attr.optional(attr.code()),
+    "harness.eval.task": attr.optional(attr.code()),
+    "harness.eval.trial": attr.optional(attr.nonnegativeInt()),
   },
   { taskId: "4.1", packageName: "@rovinos/core" },
 );
@@ -26,10 +29,18 @@ export function runSpanAttributes(options: {
   readonly parentRunId?: Id;
   readonly continuationOf?: Id;
   readonly depth?: number;
+  readonly evalMetadata?: {
+    readonly suite: Code;
+    readonly task: Code;
+    readonly trial: number;
+  };
 }): {
   readonly "harness.run.parent_id"?: Id;
   readonly "harness.run.continuation_of"?: Id;
   readonly "harness.run.depth": number;
+  readonly "harness.eval.suite"?: Code;
+  readonly "harness.eval.task"?: Code;
+  readonly "harness.eval.trial"?: number;
 } {
   return {
     ...(options.parentRunId === undefined ? {} : { "harness.run.parent_id": options.parentRunId }),
@@ -37,6 +48,13 @@ export function runSpanAttributes(options: {
       ? {}
       : { "harness.run.continuation_of": options.continuationOf }),
     "harness.run.depth": options.depth ?? 0,
+    ...(options.evalMetadata === undefined
+      ? {}
+      : {
+          "harness.eval.suite": options.evalMetadata.suite,
+          "harness.eval.task": options.evalMetadata.task,
+          "harness.eval.trial": options.evalMetadata.trial,
+        }),
   };
 }
 

@@ -4,8 +4,8 @@ import type { ModelRequest } from "@rovinos/schemas";
 import { AdapterRegistry, ModelGateway, type ProviderAdapter } from "@rovinos/models";
 import { validateWithTokens } from "@rovinos/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
+import { createCanaries } from "@rovinos/eval";
 import { z } from "zod";
-import { createCanaries } from "./canary/canaries.js";
 
 const runId = "00000000000000000000000001";
 

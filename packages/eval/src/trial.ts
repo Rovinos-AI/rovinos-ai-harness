@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from "node:crypto";
 import { Code, Id, ModelRefSchema } from "@rovinos/schemas";
 import { z } from "zod";
 import { EvalSuiteSchema, EvalTaskSchema } from "./schema.js";
+import type { EvalSuite } from "./schema.js";
 
 /** Supported modes for an executor's cassette-aware model factory. */
 export const EvalCassetteModeSchema = z.enum(["record", "replay", "auto"]);
@@ -53,6 +55,16 @@ export const TrialSpecSchema = z
 
 /** Validated input to a trial executor. */
 export type TrialSpec = z.infer<typeof TrialSpecSchema>;
+
+/**
+ * Derive a stable, content-free suite code from the suite's ordered task identifiers.
+ *
+ * @param suite - Validated suite used by the trial.
+ */
+export function evalSuiteCode(suite: EvalSuite): z.infer<typeof Code> {
+  const taskIds = suite.tasks.map(({ id }) => id).join("\u0000");
+  return Code.parse(`eval_${createHash("sha256").update(taskIds).digest("hex").slice(0, 16)}`);
+}
 
 /** Metadata-only counts of simulated approval decisions. */
 export const ApprovalCountsSchema = z

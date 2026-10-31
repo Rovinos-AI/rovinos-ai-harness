@@ -6,6 +6,7 @@ import type { SandboxBackend } from "@rovinos/sandbox";
 import { z } from "zod";
 import { TrialUsageSchema } from "../trial.js";
 import type { TrialResult } from "../trial.js";
+import type { CanarySink } from "../canary.js";
 
 /** Metadata-only result returned by every grader. */
 export const GradeResultSchema = z
@@ -32,6 +33,10 @@ export interface GradeContext {
   readonly backend?: SandboxBackend;
   /** Audited token resolution used only when schema validation is configured for tokens. */
   readonly tokenValidation?: Omit<ValidateWithTokensOptions, "runId">;
+  /** In-memory exporter content or collector output captured for privacy grading. */
+  readonly telemetry?: readonly CanarySink[];
+  /** Captured process output; content is never copied into grade results. */
+  readonly logs?: readonly CanarySink[];
 }
 
 /** Deterministic grader over one trial's artifacts. */

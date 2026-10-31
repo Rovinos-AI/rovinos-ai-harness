@@ -18,6 +18,8 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api-logs": "0.223.0",
     "@rovinos/core": "workspace:^",
     "@rovinos/models": "workspace:^",
     "@rovinos/pii": "workspace:^",

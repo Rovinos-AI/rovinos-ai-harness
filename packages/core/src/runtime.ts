@@ -47,10 +47,12 @@ import type {
 export type {
   Runtime,
   RuntimeConfig,
+  EvalRunMetadata,
   RuntimeOverrides,
   RuntimeResumeOptions,
   RuntimeRunHandle,
 } from "./runtime-config.js";
+export { EvalRunMetadataSchema } from "./runtime-config.js";
 
 class RunInputMissingError extends HarnessError {
   readonly code = "run_input_missing";

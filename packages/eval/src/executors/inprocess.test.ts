@@ -11,6 +11,13 @@ import { defineSuite } from "../load.js";
 import { InProcessExecutor } from "./inprocess.js";
 import type { TrialSpec } from "../trial.js";
 import { runEval } from "../runner.js";
+import {
+  appendTrialProcessOutput,
+  captureProcessOutput,
+  configureEvalTelemetry,
+  evalTelemetrySinks,
+  trialLogSinks,
+} from "../execution-capture.js";
 
 const directories: string[] = [];
 
@@ -59,6 +66,103 @@ afterEach(async () => {
 });
 
 describe("InProcessExecutor", () => {
+  it("uses only the eval in-memory trace provider by default", async () => {
+    expect(configureEvalTelemetry()).toBe("memory");
+    const executor = new InProcessExecutor({
+      model: () => ({
+        complete: () =>
+          Promise.resolve({
+            provider: "synthetic",
+            model: "synthetic",
+            parts: [{ type: "text", text: "done" }],
+            providerBlobs: null,
+            usage: { inputTokens: 1, outputTokens: 1 },
+            finishReason: "stop",
+            latencyMs: 0,
+            schemaValid: true,
+            repairAttempts: 0,
+            fallbackDepth: 0,
+          }),
+      }),
+    });
+    await executor.run(makeTrial(join(await createDirectory(), "trial")));
+
+    expect(
+      evalTelemetrySinks().some(({ content }) => String(content).includes('"harness.run"')),
+    ).toBe(true);
+    expect(configureEvalTelemetry()).toBe("memory");
+    expect(configureEvalTelemetry(true)).toBe("caller_managed");
+  });
+
+  it("captures in-process stdout and stderr per trial without emitting them", async () => {
+    const canary = "synthetic-process-output@example.test";
+    const executor = new InProcessExecutor({
+      model: () => ({
+        complete: () => {
+          process.stderr.write(canary);
+          return Promise.resolve({
+            provider: "synthetic",
+            model: "synthetic",
+            parts: [{ type: "text", text: "done" }],
+            providerBlobs: null,
+            usage: { inputTokens: 1, outputTokens: 1 },
+            finishReason: "stop",
+            latencyMs: 0,
+            schemaValid: true,
+            repairAttempts: 0,
+            fallbackDepth: 0,
+          });
+        },
+      }),
+    });
+
+    const result = await executor.run(makeTrial(join(await createDirectory(), "trial")));
+
+    expect(trialLogSinks(result.dbPath)).toContainEqual({
+      name: "stderr",
+      content: canary,
+    });
+  });
+
+  it("accumulates stdout and stderr from each Docker resume process", () => {
+    const dbPath = "/synthetic/docker-resume-output.db";
+
+    appendTrialProcessOutput(dbPath, "initial stdout", "initial stderr");
+    appendTrialProcessOutput(dbPath, "resume stdout", "resume stderr");
+
+    expect(trialLogSinks(dbPath)).toEqual([
+      { name: "stdout", content: "initial stdout\nresume stdout" },
+      { name: "stderr", content: "initial stderr\nresume stderr" },
+    ]);
+  });
+
+  it("captures byte output and invokes write callbacks", async () => {
+    const captured: string[] = [];
+    const result = await captureProcessOutput(
+      async () => {
+        await new Promise<void>((resolve) => {
+          process.stdout.write("captured stdout", "utf8", () => {
+            resolve();
+          });
+        });
+        await new Promise<void>((resolve) => {
+          process.stderr.write(Buffer.from("captured stderr"), () => {
+            resolve();
+          });
+        });
+        return "completed";
+      },
+      (stdout, stderr) => captured.push(stdout, stderr),
+    );
+
+    expect(result).toMatchObject({
+      result: "completed",
+      stdout: "captured stdout",
+      stderr: "captured stderr",
+    });
+    expect(captured).toEqual(["captured stdout", "captured stderr"]);
+  });
+
   it("runs a fake model/tool scenario and persists an isolated run", async () => {
     let modelCalls = 0;
     let toolCalls = 0;

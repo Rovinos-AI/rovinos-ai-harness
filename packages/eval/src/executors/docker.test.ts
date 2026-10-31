@@ -10,7 +10,10 @@ import type { DockerProcessOptions, DockerProcessResult } from "@rovinos/sandbox
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineSuite } from "../load.js";
 import { TrialConfigSchema } from "../executor.js";
+import { evalSuiteCode } from "../trial.js";
 import type { TrialSpec } from "../trial.js";
+import { createNoCanaryLeakGrader } from "../graders/no-canary-leak.js";
+import { trialLogSinks } from "../execution-capture.js";
 
 const mocks = vi.hoisted(() => ({ runDockerProcess: vi.fn() }));
 
@@ -178,6 +181,7 @@ async function createRun(
 afterEach(async () => {
   mocks.runDockerProcess.mockReset();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   await Promise.all(
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
@@ -187,6 +191,7 @@ describe("DockerExecutor", () => {
   it("uses the isolated database to collect run status and usage", async () => {
     const root = await createDirectory();
     const workDir = join(root, "trial");
+    const trial = makeTrial(workDir);
     let invocation: DockerProcessOptions | undefined;
     let now = 0;
     mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
@@ -196,7 +201,12 @@ describe("DockerExecutor", () => {
         throw new Error("synthetic_key_missing");
       }
       await createRun(workDir, key, true);
-      return { exitCode: 0, timedOut: false } satisfies DockerProcessResult;
+      return {
+        exitCode: 0,
+        timedOut: false,
+        stdout: "synthetic container stdout",
+        stderr: "synthetic container stderr",
+      } satisfies DockerProcessResult;
     });
 
     const result = await new DockerExecutor(
@@ -205,14 +215,26 @@ describe("DockerExecutor", () => {
         clock: { now: () => (now += 10) },
         randomBytes: (size) => new Uint8Array(size).fill(9),
       },
-    ).run(makeTrial(workDir));
+    ).run(trial);
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeDefined();
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2, costMicros: 0 });
     expect(result.exitCode).toBe(0);
     expect(result.durationMs).toBeGreaterThan(0);
+    expect(trialLogSinks(result.dbPath)).toEqual([
+      { name: "stdout", content: "synthetic container stdout" },
+      { name: "stderr", content: "synthetic container stderr" },
+    ]);
     expect(invocation?.env.HARNESS_EVAL_KEY).toBe(Buffer.alloc(32, 9).toString("base64"));
+    expect(invocation?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+    expect(invocation?.args).toContain(
+      `HARNESS_EVAL_METADATA=${JSON.stringify({
+        suite: evalSuiteCode(trial.suite),
+        task: trial.task.id,
+        trial: trial.trialIndex,
+      })}`,
+    );
     // threat: T-02, T-07, T-08, T-16
     expect(invocation?.args).toEqual(
       expect.arrayContaining([
@@ -239,6 +261,24 @@ describe("DockerExecutor", () => {
     );
     expect(invocation?.input).toBe(JSON.stringify({ goal: "A synthetic goal." }));
     expect(JSON.stringify(invocation?.args)).not.toContain("A synthetic goal.");
+  });
+
+  it("passes explicit telemetry export settings only with the opt-in", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    let args: readonly string[] = [];
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.synthetic:4318");
+    mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
+      args = options.args;
+      return Promise.resolve({ exitCode: 0, timedOut: false, stdout: "", stderr: "" });
+    });
+
+    await new DockerExecutor({ image: "synthetic/harness" }, { exportTelemetry: true }).run(
+      makeTrial(workDir),
+    );
+
+    expect(args).toContain("--env");
+    expect(args).toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+    expect(JSON.stringify(args)).not.toContain("collector.synthetic");
   });
 
   it("resolves and resumes approvals through the simulated human", async () => {
@@ -275,6 +315,72 @@ describe("DockerExecutor", () => {
     expect(invocations).toHaveLength(2);
     expect(invocations[1]?.args).toContain("resume");
     expect(invocations[1]?.args.at(-1)).toBe(result.runId);
+    expect(invocations[1]?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+    expect(invocations[1]?.args).toContain(
+      `HARNESS_EVAL_METADATA=${JSON.stringify({
+        suite: evalSuiteCode(
+          makeTrial(workDir, {
+            rules: [],
+            default: "approve",
+            unsafeAutoApprove: true,
+          }).suite,
+        ),
+        task: "docker_task",
+        trial: 0,
+      })}`,
+    );
+  });
+
+  it("does not pass telemetry export settings to a resume process by default", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const scenario = approvalScenario();
+    const invocations: DockerProcessOptions[] = [];
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.synthetic:4318");
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      invocations.push(options);
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      await createRun(workDir, key, !options.args.includes("resume"), scenario);
+      return { exitCode: 0, timedOut: false } satisfies DockerProcessResult;
+    });
+
+    await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, { rules: [], default: "approve", unsafeAutoApprove: true }),
+    );
+
+    expect(invocations).toHaveLength(2);
+    expect(invocations[1]?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+    expect(JSON.stringify(invocations[1]?.args)).not.toContain("collector.synthetic");
+  });
+
+  it("includes resumed Docker output in the no-canary leak scan", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const scenario = approvalScenario();
+    const canary = "synthetic-resume-output@example.test";
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      const isResume = options.args.includes("resume");
+      await createRun(workDir, key, !isResume, scenario);
+      return {
+        exitCode: 0,
+        timedOut: false,
+        stdout: isResume ? canary : "",
+        stderr: "",
+      } satisfies DockerProcessResult;
+    });
+
+    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
+      makeTrial(workDir, { rules: [], default: "approve", unsafeAutoApprove: true }),
+    );
+    const grade = await createNoCanaryLeakGrader({ canaries: [canary] }).grade({ result });
+
+    expect(trialLogSinks(result.dbPath)).toContainEqual({ name: "stdout", content: canary });
+    expect(grade.codes).toContain("canary_in_logs");
   });
 
   it("reports a timeout if the Docker resume process times out", async () => {
@@ -306,7 +412,12 @@ describe("DockerExecutor", () => {
 
   it("returns a safe error when Docker exits without creating a run", async () => {
     const workDir = join(await createDirectory(), "trial");
-    mocks.runDockerProcess.mockResolvedValue({ exitCode: 17, timedOut: false });
+    mocks.runDockerProcess.mockResolvedValue({
+      exitCode: 17,
+      timedOut: false,
+      stdout: "",
+      stderr: "",
+    });
 
     const result = await new DockerExecutor({ image: "synthetic/harness" }).run(makeTrial(workDir));
 
@@ -323,7 +434,7 @@ describe("DockerExecutor", () => {
     let containerName: string | undefined;
     mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
       containerName = options.containerName;
-      return Promise.resolve({ exitCode: null, timedOut: true });
+      return Promise.resolve({ exitCode: null, timedOut: true, stdout: "", stderr: "" });
     });
 
     const pending = new DockerExecutor({
@@ -341,7 +452,7 @@ describe("DockerExecutor", () => {
     let args: string[] = [];
     mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
       args = [...options.args];
-      return Promise.resolve({ exitCode: 1, timedOut: false });
+      return Promise.resolve({ exitCode: 1, timedOut: false, stdout: "", stderr: "" });
     });
 
     await new DockerExecutor({

@@ -21,17 +21,23 @@ export class ToolPortCollisionError extends HarnessError {
 }
 
 /** Routes a built-in tool alongside an existing runtime tool port. */
-export function composeToolPorts(additional: ToolPort, existing: ToolPort): ToolPort {
+export function composeToolPorts(
+  additional: ToolPort,
+  existing: ToolPort,
+  options: { readonly preferAdditionalSpecs?: boolean } = {},
+): ToolPort {
   const ports = [additional, existing];
   const advertised = ports.map(
     (port) => new Set((port.getToolSpecs?.() ?? []).map(({ toolId }) => toolId)),
   );
   const toolIds = new Set(advertised.flatMap((toolIdsForPort) => [...toolIdsForPort]));
   for (const toolId of toolIds) {
-    const owners = ports.filter(
-      (port, index) =>
-        advertised[index]?.has(toolId) === true || port.describe(toolId) !== undefined,
-    );
+    const owners = ports.filter((port, index) => {
+      const advertisesTool = advertised[index]?.has(toolId) === true;
+      const shadowedByAdditionalSpec =
+        options.preferAdditionalSpecs === true && index > 0 && advertised[0]?.has(toolId) === true;
+      return advertisesTool || (!shadowedByAdditionalSpec && port.describe(toolId) !== undefined);
+    });
     if (owners.length > 1) {
       throw new ToolPortCollisionError(toolId);
     }

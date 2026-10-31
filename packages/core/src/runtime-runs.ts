@@ -16,7 +16,13 @@ import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation, loadContinuationChain } from "./continue.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
-import type { Runtime, RuntimeComposition, RuntimeRunHandle } from "./runtime-config.js";
+import type {
+  EvalRunMetadata,
+  Runtime,
+  RuntimeComposition,
+  RuntimeRunHandle,
+} from "./runtime-config.js";
+import { EvalRunMetadataSchema } from "./runtime-config.js";
 import { configHash } from "./runtime-ids.js";
 import { QuotaService } from "./quotas.js";
 import type { QuotaIdentity } from "./quotas.js";
@@ -104,6 +110,7 @@ export interface RuntimeRunOptions {
   readonly rootSpanParent?: Context;
   readonly role?: Code;
   readonly requestedBy?: Principal;
+  readonly evalMetadata?: EvalRunMetadata;
   readonly onStarted?: () => void;
   readonly onProgress?: (progress: ModelProgress) => void;
 }
@@ -122,6 +129,10 @@ export function startRun(
 ): Promise<RunLoopResult> {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
   const runId = options.runId ?? ids.next();
+  const evalMetadata =
+    options.evalMetadata === undefined
+      ? undefined
+      : EvalRunMetadataSchema.parse(options.evalMetadata);
   const quotaService = new QuotaService(config.quotas ?? [], store, clock);
   const quotaIdentity: QuotaIdentity = {
     ...(options.role === undefined ? {} : { role: options.role }),
@@ -167,6 +178,7 @@ export function startRun(
           }),
       ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
       ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+      ...(evalMetadata === undefined ? {} : { evalMetadata }),
     });
   });
 }

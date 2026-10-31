@@ -34,11 +34,11 @@ export function refineInputRequestPayload(
   context: z.RefinementCtx,
 ): void {
   if (request.mode === "form") {
-    if (request.schema === undefined) {
+    if (request.schema === undefined && request.source !== "agent") {
       context.addIssue({
         code: "custom",
         path: ["schema"],
-        message: "Form-mode requests require a form schema.",
+        message: "MCP form-mode requests require a form schema.",
         params: { errorCode: "input_request_payload_invalid" },
       });
     }

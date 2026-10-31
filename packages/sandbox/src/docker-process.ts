@@ -19,6 +19,8 @@ export class DockerProcessError extends HarnessError {
 export interface DockerProcessResult {
   readonly exitCode: number | null;
   readonly timedOut: boolean;
+  readonly stdout?: string;
+  readonly stderr?: string;
 }
 
 /** Arguments for running one named Docker container with bounded time. */
@@ -37,7 +39,7 @@ function completion(child: ChildProcess): Promise<DockerProcessResult> {
       reject(new DockerProcessError());
     });
     child.once("close", (exitCode) => {
-      resolve({ exitCode, timedOut: false });
+      resolve({ exitCode, timedOut: false, stdout: "", stderr: "" });
     });
   });
 }
@@ -83,7 +85,7 @@ function stopContainer(dockerPath: string, containerName: string): Promise<void>
 }
 
 /**
- * Runs Docker using argv only, discards process output, and kills a timed-out container.
+ * Runs Docker using argv only, captures container output, and kills a timed-out container.
  *
  * @param options - Executable, arguments, input, timeout, and isolated container name.
  * @returns The process exit code and whether the timeout elapsed.
@@ -96,19 +98,31 @@ export async function runDockerProcess(
     child = spawn(options.dockerPath, [...options.args], {
       env: options.env,
       shell: false,
-      stdio: ["pipe", "ignore", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
   } catch {
     throw new DockerProcessError();
   }
-  const exited = completion(child);
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    stdout.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    stderr.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  const getOutput = (): Pick<DockerProcessResult, "stdout" | "stderr"> => ({
+    stdout: Buffer.concat(stdout).toString("utf8"),
+    stderr: Buffer.concat(stderr).toString("utf8"),
+  });
+  const exited = completion(child).then((result) => ({ ...result, ...getOutput() }));
   child.stdin?.end(options.input);
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const result = await Promise.race([
     exited,
     new Promise<DockerProcessResult>((resolve) => {
       timeout = setTimeout(() => {
-        resolve({ exitCode: null, timedOut: true });
+        resolve({ exitCode: null, timedOut: true, ...getOutput() });
       }, options.timeoutMs);
     }),
   ]).finally(() => {

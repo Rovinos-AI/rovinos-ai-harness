@@ -20,3 +20,7 @@ The approval-screen unit tests inject synthetic canaries in invalid payloads and
 errors, checking that the DOM error state and telemetry contain only fixed status text/codes.
 Hostile markup remains text, token display does not call approval/reveal tools, and no
 payload is written to browser storage.
+
+Eval trials reuse the seeded canary generator and scanner from `@rovinos/eval`. The
+`no_canary_leak` grader checks event/vault databases, telemetry, workspaces, and captured
+stdout/stderr; workspace values already present in the original fixture are allowed.

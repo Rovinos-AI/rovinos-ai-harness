@@ -6,11 +6,12 @@ import type { Runtime, ToolPort } from "@rovinos/core";
 import { FileCassetteStore } from "@rovinos/models";
 import { Code, Id, Sha256Hex, SequentialIdGenerator } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
+import { createCanaries, scanForCanaries } from "@rovinos/eval";
+import type { CanarySet } from "@rovinos/eval";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { createCanaries, type CanarySet } from "./canaries.js";
 import { captureCliOutput } from "./cli-output.js";
 import { readDatabaseSinks } from "./scanning.js";
 import {
@@ -330,13 +331,10 @@ export class CanaryHarness {
         { name: "vault-db", path: this.vaultDatabasePath },
       ])),
     ];
-    return [
-      ...new Set(
-        this.canaries.strings.flatMap((canary) =>
-          sinks.filter(([, content]) => content.includes(canary)).map(([name]) => name),
-        ),
-      ),
-    ];
+    return scanForCanaries(
+      this.canaries.strings,
+      sinks.map(([name, content]) => ({ name, content })),
+    );
   }
 
   /** Confirm every seeded value resolves from the runtime's read-only audited vault. */

@@ -18,6 +18,16 @@ export {
   type TrajectoryAssertion,
 } from "./schema.js";
 export {
+  createCanaries,
+  scanForCanaries,
+  CanarySetSchema,
+  CanarySinkSchema,
+  CanaryValueSchema,
+  type CanarySet,
+  type CanarySink,
+  type CanaryValue,
+} from "./canary.js";
+export {
   EvalCassetteModeSchema,
   EvalVariantSchema,
   TrialResultSchema,
@@ -28,6 +38,7 @@ export {
   type ApprovalCounts,
   type TrialResult,
   type TrialSpec,
+  evalSuiteCode,
 } from "./trial.js";
 export {
   TrialConfigSchema,
@@ -49,6 +60,7 @@ export {
 } from "./executors/docker.js";
 export {
   createFileDiffGrader,
+  createNoCanaryLeakGrader,
   buildJudgeView,
   createLlmJudgeGrader,
   createJudgeVerdictSchema,
@@ -56,9 +68,11 @@ export {
   createSchemaValidGrader,
   createTestCommandGrader,
   GradeResultSchema,
+  NoCanaryLeakGraderOptionsSchema,
   type GradeContext,
   type GradeResult,
   type Grader,
+  type NoCanaryLeakGraderOptions,
   type JudgeView,
   type LlmJudgeGraderOptions,
 } from "./graders/index.js";

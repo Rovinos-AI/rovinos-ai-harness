@@ -145,6 +145,8 @@ export { StrategyContextPort, type StrategyContextPortOptions } from "./context/
 export { NaiveContext } from "./context/naive-context.js";
 export {
   createRuntime,
+  EvalRunMetadataSchema,
+  type EvalRunMetadata,
   type Runtime,
   type RuntimeConfig,
   type RuntimeOverrides,
@@ -191,6 +193,14 @@ export {
   type WorkerJobOutcome,
   type WorkerOptions,
 } from "./worker.js";
+export {
+  ASK_USER_TOOL_SPEC,
+  AskUserInputSchema,
+  AskUserOutputSchema,
+  AskUserTool,
+  type AskUserInput,
+  type AskUserOutput,
+} from "./builtin/ask-user-tool.js";
 export { AgentSpawnInputSchema, AgentSpawnTool } from "./subagent/spawn-tool.js";
 export {
   restrictToolPort,

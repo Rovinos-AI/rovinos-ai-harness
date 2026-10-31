@@ -36,7 +36,7 @@ export const TrajectoryAssertionSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("no_raw_pii_at_model_input"),
-      canaries: z.array(z.string()).optional(),
+      canaries: z.array(z.string().min(1)).optional(),
     })
     .strict(),
   z.object({ type: z.literal("final_status"), status: Code }).strict(),

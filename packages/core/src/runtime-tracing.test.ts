@@ -228,6 +228,55 @@ describe("runtime tracing fallback", () => {
     }
   });
 
+  it("adds eval identifiers only to eval root run spans", async () => {
+    trace.disable();
+    otelContext.disable();
+    const collector = createTestSpanCollector();
+    trace.setGlobalTracerProvider(collector.provider);
+    otelContext.setGlobalContextManager(createTestContextManager());
+    const runtime = await createRuntime(config, {
+      store: new InMemoryEventStore(),
+      model: new FakeModelPort([completion(), completion()]),
+    });
+
+    try {
+      const ordinaryRun = await runtime.run("ordinary run");
+      const evalRun = await runtime.run("eval run", {
+        evalMetadata: {
+          suite: Code.parse("eval_suite"),
+          task: Code.parse("synthetic_task"),
+          trial: 0,
+        },
+      });
+      await collector.provider.forceFlush();
+      const ordinaryRunId = ordinaryRun.events[0]?.runId;
+      const evalRunId = evalRun.events[0]?.runId;
+      const spans = collector.getFinishedSpans();
+      const ordinarySpan = spans.find(
+        ({ name, attributes }) =>
+          name === "harness.run" && attributes["harness.run.id"] === ordinaryRunId,
+      );
+      const evalSpan = spans.find(
+        ({ name, attributes }) =>
+          name === "harness.run" && attributes["harness.run.id"] === evalRunId,
+      );
+
+      expect(ordinarySpan?.attributes).not.toHaveProperty("harness.eval.suite");
+      expect(evalSpan?.attributes).toMatchObject({
+        "harness.eval.suite": "eval_suite",
+        "harness.eval.task": "synthetic_task",
+        "harness.eval.trial": 0,
+      });
+    } finally {
+      await runtime.close();
+      await collector.provider.shutdown();
+      trace.disable();
+      otelContext.disable();
+      trace.setGlobalTracerProvider(createTestTracerProvider());
+      otelContext.setGlobalContextManager(createTestContextManager());
+    }
+  });
+
   it("fails closed when a resumable run has no recorded model request", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(1_000);
