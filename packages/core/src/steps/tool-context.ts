@@ -8,7 +8,8 @@ import type { Tokenizer } from "@rovinos/pii";
 import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { HumanInputChannel } from "../human-input/channels.js";
 import { toolRunContext } from "./prepare-tool.js";
-import { createAgentAskUserHandler, createMcpElicitationPort } from "./input-step.js";
+import { createMcpElicitationPort } from "./input-step.js";
+import { createAgentAskUserHandler } from "./ask-user-step.js";
 
 interface ToolContextOptions {
   readonly recorder: RunRecorder;

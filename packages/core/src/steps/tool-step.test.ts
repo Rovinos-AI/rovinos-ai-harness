@@ -32,7 +32,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as telemetry from "@rovinos/telemetry";
 import { handleLegacyLiveElicitation } from "@rovinos/mcp";
 import type { HumanInputChannel } from "../human-input/channels.js";
-import { RunRecorder, type EventPartial } from "../recorder.js";
+import { RunEventRecordingError, RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
 import { applyResolvedApprovals } from "../approvals.js";
 import { expireInput, resolveInput } from "../human-input/resolve.js";
@@ -44,6 +44,7 @@ import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
 import type { PolicyPort, RunContext, ToolPort } from "../ports.js";
 import { modelToolOptions } from "./model-step.js";
+import { createAgentAskUserHandler } from "./ask-user-step.js";
 import {
   applyApprovalDecision,
   applyDanglingIntents,
@@ -1789,6 +1790,94 @@ describe("durable MCP input requests", () => {
 });
 
 describe("durable agent.ask_user requests", () => {
+  it("uses the default expiry for a durable question without an explicit expiry", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, [
+      { callId: callIds.nonIdempotent, toolId: "agent.ask_user", idempotent: false },
+    ]);
+    const dependencies = toolStepDependencies(recorder, new AskUserTool(), history);
+    const events: Event[] = [];
+    const askUser = createAgentAskUserHandler({
+      callId: callIds.nonIdempotent,
+      clock: dependencies.clock,
+      events,
+      history,
+      ids: dependencies.ids,
+      recorder,
+      checkpointer: dependencies.checkpointer,
+      signal: dependencies.signal,
+    });
+
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await askUser({ question: "Continue?" });
+      const event = history[0];
+      if (event === undefined) {
+        throw new Error("Expected run events.");
+      }
+      return event;
+    });
+
+    expect(events.find((event) => event.type === "input_requested")).toMatchObject({
+      type: "input_requested",
+      expiresAt: 604_800_100,
+    });
+  });
+
+  it("rejects a durable question when its call is aborted", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, [
+      { callId: callIds.nonIdempotent, toolId: "agent.ask_user", idempotent: false },
+    ]);
+    const dependencies = toolStepDependencies(recorder, new AskUserTool(), history);
+    const controller = new AbortController();
+    controller.abort();
+    const askUser = createAgentAskUserHandler({
+      callId: callIds.nonIdempotent,
+      clock: dependencies.clock,
+      events: [],
+      history,
+      ids: dependencies.ids,
+      recorder,
+      checkpointer: dependencies.checkpointer,
+      signal: controller.signal,
+    });
+
+    await expect(askUser({ question: "Continue?" })).resolves.toMatchObject({
+      outcome: "error",
+      errorCode: "input_request_invalid",
+    });
+  });
+
+  it("wraps failures while recording a durable question", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, [
+      { callId: callIds.nonIdempotent, toolId: "agent.ask_user", idempotent: false },
+    ]);
+    const dependencies = toolStepDependencies(recorder, new AskUserTool(), history);
+    const askUser = createAgentAskUserHandler({
+      callId: callIds.nonIdempotent,
+      clock: dependencies.clock,
+      events: [],
+      history,
+      ids: dependencies.ids,
+      recorder,
+      checkpointer: dependencies.checkpointer,
+      signal: dependencies.signal,
+    });
+    vi.spyOn(recorder, "recordBatch").mockRejectedValue(new Error("synthetic recorder failure"));
+
+    await expect(
+      recorder.withStepSpan(RUN_SPAN, {}, async () => {
+        await askUser({ question: "Continue?" });
+        const event = history[0];
+        if (event === undefined) {
+          throw new Error("Expected run events.");
+        }
+        return event;
+      }),
+    ).rejects.toBeInstanceOf(RunEventRecordingError);
+  });
+
   it("expires unanswered questions as cancelled", async () => {
     const { recorder, store } = createRecorder();
     const history = await createRun(recorder, []);
