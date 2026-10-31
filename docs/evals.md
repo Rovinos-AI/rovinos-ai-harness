@@ -91,16 +91,25 @@ isolation: `--isolation docker --cassette off` fails before trials start with
 `eval_docker_live_model_unavailable`. Network access and credential forwarding are
 tracked separately in [issue #660](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/660).
 
-`harness eval run` also refuses suites that use the `test_command` or `llm_judge` graders before
-any trial starts, with a typed code. This is tracked in
-[issue #661](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/661).
+In-process trials run `test_command` graders through the trial's sandbox backend,
+using argv only, a 60-second timeout, and the same isolated project workspace as
+the run. Fixtures are copied into that workspace before execution.
+The development in-process backend is not an isolation boundary: its resource and
+network restrictions are limited. Use a configured sandbox runner for enforcement.
+
+`llm_judge` uses the configured model gateway, the grader's model and vote count,
+and the trial's cassette mode. Judge cassettes are stored separately as
+`cassettes/<task>/<variant>.judge.json`. Replay constructs no live providers and
+resolves no provider credentials; a missing judge cassette reports `judge_error`
+and `cassette_miss`. Only structured verdicts are recorded, never judge reasoning.
+Judge tokens and cost are included once in trial usage and reports, and count
+toward `--max-cost-usd` before the worker schedules its next trial. Trials already
+in flight may exceed the cap.
+
+Docker judge suites fail before execution with `eval_llm_judge_docker_unavailable`.
+The general Docker restrictions above remain in place; this integration does not
+enable Docker networking or credential forwarding.
 
 The CLI summary contains task and variant identifiers, pass rates, cost, and steps.
 With global `--json`, stdout contains one validated content-free report document;
 Markdown, JSON, JUnit, and trial JSONL files contain metadata and grader codes only.
-
-The CLI currently rejects `test_command` and `llm_judge` graders before launching
-trials with `eval_test_command_context_unavailable` and
-`eval_llm_judge_context_unavailable`. The executor interface does not expose a
-trial-scoped sandbox backend or cassette-aware model gateway to the post-run grader
-phase; adding those capabilities requires a separate executor/grader integration.

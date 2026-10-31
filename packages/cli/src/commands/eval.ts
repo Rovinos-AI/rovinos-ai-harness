@@ -12,11 +12,12 @@ import {
   createDefaultExecutor,
   collectTrialEvents,
   type EvalExecutorDependencies,
+  type EvalExecutorOptions,
 } from "./eval-executor.js";
 import { recordCassettes } from "./eval-cassettes.js";
 import { writeReportFiles, writeSummaryTable } from "./eval-report-output.js";
 import type { EvalPackage } from "./eval-types.js";
-import { gradeRecords, unavailableGrader } from "./eval-graders.js";
+import { gradingExecutor } from "./eval-graders.js";
 
 /** Dependencies replaceable by focused CLI tests; the package is loaded only on command execution. */
 export interface EvalCommandDependencies extends EvalExecutorDependencies {
@@ -49,10 +50,13 @@ interface EvalRunCommandArgs {
   readonly dependencies: EvalCommandDependencies;
 }
 
-function executionModes(options: EvalOptions) {
+function executionModes(options: EvalOptions, suite: EvalSuite) {
   const cassette = options.cassette ?? (options.isolation === "docker" ? "off" : "replay");
   const isolation = options.isolation ?? (cassette === "off" ? "docker" : "inprocess");
   if (isolation === "docker") {
+    if (suite.tasks.some((task) => task.graders.some((grader) => grader.type === "llm_judge"))) {
+      throw new EvalCliError("eval_llm_judge_docker_unavailable");
+    }
     throw new EvalCliError(
       cassette === "replay"
         ? "eval_docker_cassette_replay_unavailable"
@@ -96,29 +100,44 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   const config = await context.loadConfig();
   const absoluteSuitePath = resolve(suitePath);
   const suite = filterSuite(api, await api.loadSuite(absoluteSuitePath), options.filter);
-  const grader = unavailableGrader(suite);
-  if (grader === "test_command") {
-    throw new EvalCliError("eval_test_command_context_unavailable");
-  }
-  if (grader === "llm_judge") {
-    throw new EvalCliError("eval_llm_judge_context_unavailable");
-  }
-  const { cassette, isolation } = executionModes(options);
+  const { cassette, isolation } = executionModes(options, suite);
   const failUnder = parseFailUnder(options);
   const variants = createVariants(api, options.model, cassette, config);
   const outDir = resolve(
     options.out ?? join(process.cwd(), "eval-out", String(context.clock.now())),
   );
-  const executor = await (dependencies.createExecutor ?? createDefaultExecutor)(api, {
+  const executorOptions: EvalExecutorOptions = {
     isolation,
     cassette,
     suiteDirectory: dirname(absoluteSuitePath),
     config,
     exportTelemetry: options.exportTelemetry ?? false,
     context,
-  });
+  };
+  const baseExecutor = await (dependencies.createExecutor ?? createDefaultExecutor)(
+    api,
+    executorOptions,
+  );
+  const { executor, grades } = gradingExecutor(api, baseExecutor, executorOptions);
   const results = await runTrialPlan({ api, suite, variants, executor, outDir, options });
   const records = api.parseEvalTrialJsonl(await readFile(join(outDir, "trials.jsonl"), "utf8"));
+  for (const record of records) {
+    if (
+      !grades.some(
+        (grade) =>
+          grade.taskId === record.taskId &&
+          grade.variantId === record.variantId &&
+          grade.trialIndex === record.trialIndex,
+      )
+    ) {
+      grades.push({
+        taskId: record.taskId,
+        variantId: record.variantId,
+        trialIndex: record.trialIndex,
+        graders: [],
+      });
+    }
+  }
   const eventsByTrial = await collectTrialEvents({
     api,
     suite,
@@ -129,7 +148,6 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   if (cassette === "record") {
     await recordCassettes(dirname(absoluteSuitePath), records, eventsByTrial);
   }
-  const grades = await gradeRecords(api, suite, records, eventsByTrial);
   const report = api.buildEvalReport({ trials: records, grades });
   await writeReportFiles(api, outDir, report);
   writeSummaryTable(context, report);

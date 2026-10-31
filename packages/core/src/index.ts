@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+export { createConfiguredModelPort, type RuntimeModelOverrides } from "./runtime-model.js";
 export {
   canTransition,
   RUN_TRIGGERS,

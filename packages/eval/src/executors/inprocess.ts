@@ -5,7 +5,7 @@ import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/c
 import { TrialResultSchema, evalSuiteCode } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
-import type { TrialExecutionDependencies, TrialExecutor } from "../executor.js";
+import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
 import {
   captureProcessOutput,
   configureEvalTelemetry,
@@ -14,6 +14,10 @@ import {
 import { SimulatedHuman } from "../human.js";
 import { createProviderCaptureAdapter } from "../trajectory.js";
 import { executionMetricsFromEvents } from "../report/metrics.js";
+import { cp } from "node:fs/promises";
+import { join } from "node:path";
+import { ensureRunWorkspace } from "@rovinos/sandbox";
+import type { GradeContext } from "../graders/types.js";
 
 /** Factories for isolated model, tool, and policy ports. */
 export interface InProcessExecutorOptions extends TrialExecutionDependencies {
@@ -48,6 +52,26 @@ function failureCode(error: unknown): string | undefined {
 
 type RuntimeRunResult = Awaited<ReturnType<Runtime["run"]>>;
 
+async function prepareRuntimeWorkspace(prepared: PreparedTrial, runId: Id): Promise<string> {
+  const workspace = await ensureRunWorkspace(join(prepared.dataDir, "workspaces"), runId);
+  await cp(prepared.workspaceDir, workspace, { recursive: true });
+  return workspace;
+}
+
+async function finishWithBackend(
+  runtime: Runtime,
+  runId: Id,
+  finish: (context: GradeContext) => Promise<TrialResult>,
+  context: GradeContext,
+): Promise<TrialResult> {
+  await runtime.sandboxBackend.acquireLease?.(runId);
+  try {
+    return await finish(context);
+  } finally {
+    await runtime.sandboxBackend.releaseLease?.(runId);
+  }
+}
+
 async function readTokenizedEvents(
   runtime: Runtime,
   runId: Id | undefined,
@@ -69,29 +93,32 @@ interface ExecutedTrialRun {
   readonly maxResumesExceeded: boolean;
 }
 
-async function executeTrialRun(runtime: Runtime, trial: TrialSpec): Promise<ExecutedTrialRun> {
+async function executeTrialRun(
+  runtime: Runtime,
+  trial: TrialSpec,
+  runId: Id,
+): Promise<ExecutedTrialRun> {
   const goal =
     trial.task.input.metadata === undefined
       ? { goal: trial.task.input.goal }
       : { goal: trial.task.input.goal, metadata: trial.task.input.metadata };
   const hasContextStrategy =
     trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
-  let run = await runtime.run(goal, {
+  let run = await runtime.start(goal, {
+    runId,
     ...(hasContextStrategy ? { role: "eval" } : {}),
     evalMetadata: {
       suite: evalSuiteCode(trial.suite),
       task: trial.task.id,
       trial: trial.trialIndex,
     },
-  });
-  const runId = run.events[0]?.runId;
+  }).completion;
   const human =
     trial.task.human === undefined ? undefined : new SimulatedHuman(trial.task.human, runtime);
-  if (human === undefined || runId === undefined) {
+  if (human === undefined) {
     return {
       run,
-      ...(runId === undefined ? {} : { runId }),
-      ...(human === undefined ? {} : { human }),
+      runId,
       maxResumesExceeded: false,
     };
   }
@@ -152,17 +179,28 @@ export class InProcessExecutor implements TrialExecutor {
 
   /** {@inheritDoc TrialExecutor.run} */
   async run(trial: TrialSpec): Promise<TrialResult> {
+    return this.runWithContext(trial, (context) => Promise.resolve(context.result));
+  }
+
+  /** Grades while the backend is alive, against the workspace used by the run. */
+  async runWithContext(
+    trial: TrialSpec,
+    finish: (context: GradeContext) => Promise<TrialResult>,
+  ): Promise<TrialResult> {
     configureEvalTelemetry(this.options.exportTelemetry);
     const clock = this.options.clock ?? systemClock;
     const startedAt = clock.now();
     const prepared = await prepareTrial(trial, this.options);
+    const ids = new SequentialIdGenerator();
+    const runId = ids.next();
+    const workspaceDir = await prepareRuntimeWorkspace(prepared, runId);
     let modelFailureCode: string | undefined;
     const model = this.options.model?.(trial);
     const runtime = await createRuntime(prepared.runtimeConfig, {
       dataDir: prepared.dataDir,
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000 + trial.seed),
-      ids: new SequentialIdGenerator(),
+      ids,
       ...(model === undefined
         ? {}
         : {
@@ -198,9 +236,18 @@ export class InProcessExecutor implements TrialExecutor {
     try {
       const captured = await captureProcessOutput(
         () => {
-          return executeTrialRun(runtime, trial).then(async (executed) => {
+          return executeTrialRun(runtime, trial, runId).then(async (executed) => {
             events = await readTokenizedEvents(runtime, executed.runId);
-            return trialResult(prepared, startedAt, clock, executed);
+            const outcome = TrialResultSchema.parse({
+              ...trialResult(prepared, startedAt, clock, executed),
+              workspaceDir,
+              ...(modelFailureCode === undefined ? {} : { errorCode: modelFailureCode }),
+            });
+            return finishWithBackend(runtime, runId, finish, {
+              result: outcome,
+              events,
+              backend: runtime.sandboxBackend,
+            });
           });
         },
         (stdout, stderr) => {
