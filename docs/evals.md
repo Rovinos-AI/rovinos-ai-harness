@@ -91,6 +91,10 @@ isolation: `--isolation docker --cassette off` fails before trials start with
 `eval_docker_live_model_unavailable`. Network access and credential forwarding are
 tracked separately in [issue #660](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/660).
 
+`harness eval run` also refuses suites that use the `test_command` or `llm_judge` graders before
+any trial starts, with a typed code. This is tracked in
+[issue #661](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/661).
+
 The CLI summary contains task and variant identifiers, pass rates, cost, and steps.
 With global `--json`, stdout contains one validated content-free report document;
 Markdown, JSON, JUnit, and trial JSONL files contain metadata and grader codes only.
