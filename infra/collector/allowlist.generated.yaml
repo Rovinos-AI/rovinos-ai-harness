@@ -6,7 +6,7 @@ processors:
     error_mode: "ignore"
     traces:
       span:
-        - "not (name == \"harness.app_content\" or name == \"harness.approval_wait\" or name == \"harness.checkpoint\" or name == \"harness.compaction\" or name == \"harness.input_wait\" or name == \"harness.model_call\" or name == \"harness.replay\" or name == \"harness.run\" or name == \"harness.tool_call\" or name == \"harness.ui.decision\" or name == \"harness.ui.error\" or name == \"harness.ui.interaction\" or name == \"harness.ui.render\" or name == \"harness.ui_session\" or name == \"mcp.client.call\")"
+        - "not (name == \"harness.app_content\" or name == \"harness.approval_wait\" or name == \"harness.checkpoint\" or name == \"harness.compaction\" or name == \"harness.input_wait\" or name == \"harness.model_call\" or name == \"harness.replay\" or name == \"harness.run\" or name == \"harness.tool_call\" or name == \"harness.ui.decision\" or name == \"harness.ui.error\" or name == \"harness.ui.input\" or name == \"harness.ui.interaction\" or name == \"harness.ui.render\" or name == \"harness.ui_session\" or name == \"mcp.client.call\")"
   filter/drop_span_events:
     error_mode: "ignore"
     traces:
@@ -28,6 +28,7 @@ processors:
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.policy.decision\", \"harness.policy.rule_id\", \"harness.run.id\", \"harness.subagent.completion_record_failed\"]) where span.name == \"harness.tool_call\""
       - "keep_keys(span.attributes, [\"harness.app.id\", \"harness.error.code\", \"harness.run.id\", \"harness.ui.decision\", \"harness.ui.duration_ms\", \"harness.ui.session_id\"]) where span.name == \"harness.ui.decision\""
       - "keep_keys(span.attributes, [\"harness.app.id\", \"harness.error.code\", \"harness.run.id\", \"harness.ui.duration_ms\", \"harness.ui.session_id\"]) where span.name == \"harness.ui.error\""
+      - "keep_keys(span.attributes, [\"harness.app.id\", \"harness.error.code\", \"harness.run.id\", \"harness.ui.duration_ms\", \"harness.ui.input.action\", \"harness.ui.session_id\"]) where span.name == \"harness.ui.input\""
       - "keep_keys(span.attributes, [\"harness.app.id\", \"harness.error.code\", \"harness.run.id\", \"harness.ui.duration_ms\", \"harness.ui.interaction.count\", \"harness.ui.interaction.kind\", \"harness.ui.session_id\"]) where span.name == \"harness.ui.interaction\""
       - "keep_keys(span.attributes, [\"harness.app.id\", \"harness.error.code\", \"harness.run.id\", \"harness.ui.duration_ms\", \"harness.ui.session_id\"]) where span.name == \"harness.ui.render\""
       - "keep_keys(span.attributes, [\"harness.app.id\", \"harness.error.code\", \"harness.run.id\", \"harness.ui.session_id\"]) where span.name == \"harness.ui_session\""

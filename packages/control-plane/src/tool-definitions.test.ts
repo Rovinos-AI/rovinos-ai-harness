@@ -13,6 +13,7 @@ describe("control-plane tool definitions", () => {
       get_input: "approve",
       review_input: "approve",
       answer_input: "approve",
+      "harness.inputs.answer": "approve",
       "harness.runs.list": "read",
       "harness.runs.get": "read",
       approve: "approve",
@@ -27,5 +28,17 @@ describe("control-plane tool definitions", () => {
       cancel_run: "run",
     });
     expect(toolScope("future_tool")).toBe("run");
+  });
+
+  it("links all input tools to the input MCP App resource", () => {
+    const tools = toolDefinitions();
+    for (const name of ["list_pending_inputs", "get_input", "harness.inputs.answer"]) {
+      expect(tools.find((tool) => tool.name === name)?._meta).toMatchObject({
+        ui: { resourceUri: "ui://harness/input/v1" },
+      });
+    }
+    expect(tools.find((tool) => tool.name === "harness.inputs.answer")?._meta).toMatchObject({
+      ui: { visibility: ["app"] },
+    });
   });
 });

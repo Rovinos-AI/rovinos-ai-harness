@@ -2,6 +2,8 @@
 import { parseTokenType } from "@rovinos/schemas/browser";
 import { z } from "zod";
 import { formatDate, formatMessage, getStrings } from "./strings.js";
+export { createFormFromSchema } from "./input-form.js";
+export { createUrlDisplay, getRegistrableDomain } from "./url.js";
 
 const elicitationFieldSchema = z
   .object({
@@ -327,41 +329,6 @@ export function createMeter(
   meter.setAttribute("aria-label", label);
   wrapper.append(meter);
   return wrapper;
-}
-
-/** Displays a URL as text with its hostname highlighted; no link is created. */
-export function createUrlDisplay(document: Document, value: string): HTMLElement {
-  const display = element(document, "span");
-  try {
-    const parsed = new URL(value);
-    const schemeEnd = value.indexOf("://");
-    if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || schemeEnd < 0) {
-      display.textContent = value;
-      return display;
-    }
-    const authorityStart = schemeEnd + 3;
-    const authority = value.slice(authorityStart).split(/[/?#]/u, 1)[0] ?? "";
-    const hostStartInAuthority = authority.lastIndexOf("@") + 1;
-    const domainOffset = authority
-      .slice(hostStartInAuthority)
-      .toLowerCase()
-      .lastIndexOf(parsed.hostname.toLowerCase());
-    if (domainOffset < 0) {
-      display.textContent = value;
-      return display;
-    }
-    const domainStart = authorityStart + hostStartInAuthority + domainOffset;
-    const domainEnd = domainStart + parsed.hostname.length;
-    const domain = element(document, "strong", parsed.hostname);
-    display.append(
-      element(document, "span", value.slice(0, domainStart)),
-      domain,
-      element(document, "span", value.slice(domainEnd)),
-    );
-  } catch {
-    display.textContent = value;
-  }
-  return display;
 }
 
 /** Creates a native confirmation dialog with keyboard-operable actions. */

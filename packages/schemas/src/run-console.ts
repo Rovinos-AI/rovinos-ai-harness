@@ -13,6 +13,7 @@ export const RunConsoleRunSchema = z
     lastSeq: z.number().int().nonnegative(),
     steps: z.number().int().nonnegative(),
     pendingApprovals: z.number().int().nonnegative(),
+    pendingInputs: z.number().int().nonnegative().default(0),
   })
   .strict();
 
@@ -47,6 +48,7 @@ export const RunConsoleDetailSchema = z.object({
     })
     .strict(),
   pendingApprovals: z.array(RunConsolePendingApprovalSchema),
+  pendingInputs: z.number().int().nonnegative().default(0),
 });
 
 /** Inferred safe list output for the runs console. */

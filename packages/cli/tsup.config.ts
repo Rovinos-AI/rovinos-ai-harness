@@ -80,6 +80,10 @@ export default defineConfig({
         fileURLToPath(new URL("./dist/assets/runs-console.html", import.meta.url)),
       ),
       cp(
+        fileURLToPath(new URL("../approval-app/dist/input.html", import.meta.url)),
+        fileURLToPath(new URL("./dist/assets/input.html", import.meta.url)),
+      ),
+      cp(
         fileURLToPath(new URL("../host/dist/web/index.html", import.meta.url)),
         fileURLToPath(new URL("./dist/assets/web/index.html", import.meta.url)),
       ),
