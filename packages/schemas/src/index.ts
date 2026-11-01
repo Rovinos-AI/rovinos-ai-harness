@@ -48,6 +48,12 @@ export {
 } from "./approval-tools.js";
 export { ToolBinaryPayloadSchema, type ToolBinaryPayload } from "./tool-binary.js";
 export {
+  createVerdictSchema,
+  VerdictCriterionSchema,
+  VerdictSchema,
+  type Verdict,
+} from "./verdict.js";
+export {
   MessageSchema,
   ModelRequestSchema,
   ModelResponseSchema,
