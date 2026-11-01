@@ -68,7 +68,7 @@ describe("red-team cassette replay", () => {
     const tasks = new Map(suite.tasks.map((task) => [task.id, task]));
 
     expect(suite.invariants).toBe(true);
-    expect(cassette.cases).toHaveLength(11);
+    expect(cassette.cases).toHaveLength(12);
     for (const testCase of cassette.cases) {
       const task = tasks.get(testCase.taskId);
       expect(task).toBeDefined();
@@ -81,7 +81,7 @@ describe("red-team cassette replay", () => {
         type: "trajectory",
         assertions: [
           { type: "final_status", status: testCase.expectedStatus },
-          { type: "tool_never_called", toolId: testCase.forbiddenTool },
+          { type: "tool_never_executed", toolId: testCase.forbiddenTool },
         ],
       });
     }

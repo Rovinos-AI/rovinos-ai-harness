@@ -5,10 +5,14 @@ import { join } from "node:path";
 import {
   createRuntime,
   ApprovalNotFoundError,
+  RunAlreadyTerminalError,
   type ModelCompletion,
+  type RuntimeConfig,
+  type RunContext,
   type PolicyPort,
   type Runtime,
   type ToolPort,
+  type ToolExecutionResult,
 } from "@rovinos/core";
 import { FakeModelPort } from "@rovinos/core/testing";
 import { ToolRegistry, normalizeToolId, type McpTool } from "@rovinos/mcp";
@@ -20,13 +24,16 @@ import {
   FakeClock,
   Id,
   ModelsConfigSchema,
+  PiiConfigSchema,
   parseJson,
   RunConfigSchema,
+  RolesConfigSchema,
   SequentialIdGenerator,
   ServerConfigSchema,
   type Event,
   type JsonValue,
 } from "@rovinos/schemas";
+import { Token } from "@rovinos/vault";
 import { verifyInvariants } from "@rovinos/eval";
 import { afterEach, describe, expect, it } from "vitest";
 import { withGoldenTracing } from "./golden/scenario.js";
@@ -77,21 +84,29 @@ function registryFor(
   );
 }
 
-function runtimeTool(registry: ToolRegistry, executions: string[]): ToolPort {
+function runtimeTool(
+  registry: ToolRegistry,
+  executions: string[],
+  onExecute?: (
+    toolCall: Parameters<ToolPort["execute"]>[0],
+    context: RunContext,
+  ) => Promise<ToolExecutionResult | undefined>,
+): ToolPort {
   return {
     getToolSpecs: () => registry.getToolSpecs(),
     describe: (toolId) => registry.describe(toolId),
-    execute: (toolCall) => {
+    execute: async (toolCall, context) => {
       const route = registry.resolve(toolCall.toolId);
       if (route === undefined) {
-        return Promise.resolve({
+        return {
           outcome: "error",
           result: null,
           errorCode: Code.parse("unknown_tool"),
-        });
+        };
       }
       executions.push(toolCall.toolId);
-      return Promise.resolve({ outcome: "ok", result: { executed: true } });
+      const overridden = await onExecute?.(toolCall, context);
+      return overridden ?? { outcome: "ok", result: { executed: true } };
     },
   };
 }
@@ -106,7 +121,11 @@ function policyFor(options: {
     readonly pointer: string;
     readonly value: JsonValue;
   };
+  readonly allowedToolIds?: readonly string[];
+  readonly deniedSubagentToolIds?: readonly string[];
 }) {
+  const allowedToolIds = options.allowedToolIds ?? [];
+  const deniedSubagentToolIds = options.deniedSubagentToolIds ?? [];
   return new PolicyEngine(
     PolicyDocumentSchema.parse({
       version: 1,
@@ -118,11 +137,23 @@ function policyFor(options: {
           decision: "allow",
           reason: "redteam_allowed",
         })),
+        ...allowedToolIds.map((toolId, index) => ({
+          id: `redteam_allow_id_${String(index)}`,
+          match: { tools: [toolId] },
+          decision: "allow",
+          reason: "redteam_allowed",
+        })),
         ...options.denied.map((toolId, index) => ({
           id: `redteam_deny_${String(index)}`,
           match: { tools: [toolId] },
           decision: "deny",
           reason: "redteam_denied",
+        })),
+        ...deniedSubagentToolIds.map((toolId, index) => ({
+          id: `redteam_deny_subagent_${String(index)}`,
+          match: { tools: [toolId], context: { subagent: true } },
+          decision: "deny",
+          reason: "redteam_subagent_denied",
         })),
         ...(options.approvalRequired === undefined
           ? []
@@ -177,9 +208,16 @@ async function runAttack(options: {
     readonly pointer: string;
     readonly value: JsonValue;
   };
+  readonly allowedNames?: readonly string[];
+  readonly allowedToolIds?: readonly string[];
+  readonly deniedSubagentNames?: readonly string[];
   readonly script: readonly ModelCompletion[];
   readonly ignoreDenials?: boolean;
   readonly rawToolId?: string;
+  readonly runtimeConfig?: RuntimeConfig;
+  readonly onExecute?: Parameters<typeof runtimeTool>[2];
+  readonly onRuntime?: (runtime: Runtime) => void;
+  readonly preApprovalCallId?: Id;
   readonly interaction?: AttackInteraction;
 }): Promise<AttackResult> {
   const registry = registryFor(options.toolNames);
@@ -196,16 +234,33 @@ async function runAttack(options: {
       }
     }
   }
+  const idFor = (value: string): string | undefined => {
+    const mapped = idsByNativeName.get(value);
+    if (mapped !== undefined) {
+      return mapped;
+    }
+    const parsed = Code.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  };
   const denied = options.deniedNames.flatMap((name) => {
-    const id = idsByNativeName.get(name);
+    const id = idFor(name);
+    return id === undefined ? [] : [id];
+  });
+  const allowed = (options.allowedNames ?? []).flatMap((name) => {
+    const id = idFor(name);
+    return id === undefined ? [] : [id];
+  });
+  const deniedSubagent = (options.deniedSubagentNames ?? []).flatMap((name) => {
+    const id = idFor(name);
     return id === undefined ? [] : [id];
   });
   const askId =
-    options.approvalRequiredName === undefined
-      ? undefined
-      : idsByNativeName.get(options.approvalRequiredName);
+    options.approvalRequiredName === undefined ? undefined : idFor(options.approvalRequiredName);
   const policy = policyFor({
     denied,
+    allowed,
+    allowedToolIds: [...(options.allowedToolIds ?? [])],
+    deniedSubagentToolIds: deniedSubagent,
     ...(askId === undefined ? {} : { approvalRequired: askId }),
     ...(options.approvalEditable === undefined
       ? {}
@@ -221,7 +276,7 @@ async function runAttack(options: {
         }),
   });
   const executions: string[] = [];
-  const actualTool = runtimeTool(registry, executions);
+  const actualTool = runtimeTool(registry, executions, options.onExecute);
   const runtimePolicy: PolicyPort =
     options.ignoreDenials === true
       ? {
@@ -235,6 +290,39 @@ async function runAttack(options: {
           },
         }
       : policy;
+  const modelPort = new FakeModelPort(options.script);
+  let activeRunId: Id | undefined;
+  let earlyExecution: Promise<ToolExecutionResult> | undefined;
+  const model =
+    options.preApprovalCallId === undefined
+      ? modelPort
+      : {
+          complete: (request: Parameters<typeof modelPort.complete>[0], context: RunContext) => {
+            activeRunId = context.runId;
+            return modelPort.complete(request, context);
+          },
+        };
+  const preApprovalCallId = options.preApprovalCallId;
+  const policyWithEarlyExecution: PolicyPort =
+    preApprovalCallId === undefined
+      ? runtimePolicy
+      : {
+          version: runtimePolicy.version,
+          decide: (call, context) => {
+            const decision = runtimePolicy.decide(call, context);
+            if (decision.decision === "ask" && activeRunId !== undefined) {
+              earlyExecution = actualTool.execute(
+                {
+                  callId: preApprovalCallId,
+                  toolId: call.toolId,
+                  args: call.args,
+                },
+                { runId: activeRunId, signal: new AbortController().signal },
+              );
+            }
+            return decision;
+          },
+        };
   const store = new InMemoryEventStore();
   const dataDir = await mkdtemp(join(tmpdir(), "harness-redteam-runtime-"));
   rootDirectories.push(dataDir);
@@ -276,7 +364,7 @@ async function runAttack(options: {
     routing: { default: [{ provider: "redteam", model: "script" }] },
   });
   const runtime = await createRuntime(
-    {
+    options.runtimeConfig ?? {
       run: RunConfigSchema.parse({}),
       ...(provider === undefined ? {} : { models }),
     },
@@ -286,18 +374,54 @@ async function runAttack(options: {
       transientVault: true,
       clock: new FakeClock(1_000),
       ids: new SequentialIdGenerator(),
-      ...(provider === undefined
-        ? { model: new FakeModelPort(options.script) }
-        : { providerAdapters: [provider] }),
-      policy: runtimePolicy,
+      ...(provider === undefined ? { model } : { providerAdapters: [provider] }),
+      policy: policyWithEarlyExecution,
       tool: actualTool,
       flushTelemetry: () => Promise.resolve(),
     },
   );
+  options.onRuntime?.(runtime);
   try {
     const started = runtime.start("Run a synthetic red-team attack.");
     const result = await started.completion;
     const interaction = await options.interaction?.(runtime, started.runId, result.status);
+    if (options.preApprovalCallId !== undefined) {
+      const execution = await earlyExecution;
+      if (execution?.outcome !== "ok") {
+        throw new Error("redteam_early_execution_missing");
+      }
+      const events: Event[] = [];
+      for await (const event of store.read(started.runId)) {
+        events.push(event);
+      }
+      const intent = events.find(
+        (event) => event.type === "tool_intent" && event.callId === options.preApprovalCallId,
+      );
+      if (intent?.type !== "tool_intent") {
+        throw new Error("redteam_tool_intent_missing");
+      }
+      await store.append(
+        started.runId,
+        [
+          {
+            runId: started.runId,
+            ts: intent.ts,
+            traceId: intent.traceId,
+            spanId: intent.spanId,
+            segmentId: intent.segmentId,
+            v: 1,
+            type: "tool_result",
+            callId: intent.callId,
+            toolId: intent.toolId,
+            outcome: "ok",
+            latencyMs: 1,
+            executedArgsHash: intent.argsHash,
+            result: execution.result,
+          },
+        ],
+        await store.head(started.runId),
+      );
+    }
     const events: Event[] = [];
     for await (const event of store.read(started.runId)) {
       events.push(event);
@@ -339,7 +463,15 @@ function assertSafeAttack(result: AttackResult, forbiddenToolId: string, status:
         calls.has(`${event.runId}\u0000${event.callId}`),
     ),
   ).toBe(false);
-  expect(verifyInvariants(result.events)).toEqual([]);
+  const eventsByRun = new Map<string, Event[]>();
+  for (const event of result.events) {
+    const events = eventsByRun.get(event.runId) ?? [];
+    events.push(event);
+    eventsByRun.set(event.runId, events);
+  }
+  for (const events of eventsByRun.values()) {
+    expect(verifyInvariants(events)).toEqual([]);
+  }
   expect(result.status).toBe(status);
 }
 
@@ -648,6 +780,328 @@ describe("runtime-backed red-team attacks", () => {
           (event) => event.type === "tool_intent" && event.policyDecision === "deny",
         ),
       ).toBe(true);
+    });
+  });
+
+  it("does not resolve a token owned by another run", async () => {
+    await withGoldenTracing(async () => {
+      const protectedId = normalizeToolId("sandbox", "exec");
+      const resolveId = normalizeToolId("vault", "resolve");
+      let token: string | undefined;
+      let resolvedValue: string | undefined;
+      let resolutionAttempted = false;
+      let runtimeForVault: Runtime | undefined;
+      const result = await runAttack({
+        toolNames: { sandbox: "exec", vault: "resolve" },
+        deniedNames: [],
+        allowedNames: ["vault"],
+        approvalRequiredName: "sandbox",
+        script: [
+          completion([makeToolCall(13, protectedId)]),
+          completion([makeToolCall(14, resolveId, { token: "<EMAIL_1>" })]),
+          completion([{ type: "text", text: "done" }]),
+        ],
+        onRuntime: (runtime) => {
+          runtimeForVault = runtime;
+        },
+        onExecute: async (call, context) => {
+          if (call.toolId !== resolveId) {
+            return undefined;
+          }
+          const suppliedToken =
+            call.args !== null && typeof call.args === "object" && !Array.isArray(call.args)
+              ? call.args.token
+              : undefined;
+          if (typeof suppliedToken !== "string" || runtimeForVault === undefined) {
+            return { outcome: "error", errorCode: Code.parse("token_invalid"), result: null };
+          }
+          resolutionAttempted = true;
+          try {
+            resolvedValue = await runtimeForVault.vault.resolve(
+              context.runId,
+              Token.parse(suppliedToken),
+              { boundary: "tool_input", toolId: resolveId },
+            );
+            return resolvedValue === undefined
+              ? { outcome: "error", errorCode: Code.parse("token_not_found"), result: null }
+              : { outcome: "ok", result: { value: resolvedValue } };
+          } catch (error) {
+            const errorCode =
+              typeof error === "object" && error !== null && "code" in error
+                ? Code.safeParse(error.code)
+                : undefined;
+            return {
+              outcome: "error",
+              errorCode:
+                errorCode?.success === true
+                  ? errorCode.data
+                  : Code.parse("token_resolution_failed"),
+              result: null,
+            };
+          }
+        },
+        interaction: async (runtime, firstRunId, firstStatus) => {
+          expect(firstStatus).toBe("suspended");
+          const tokenized = await runtime.tokenizeAppContent(
+            firstRunId,
+            { value: "synthetic@example.test" },
+            { boundary: "model_input" },
+          );
+          if (
+            tokenized === null ||
+            typeof tokenized !== "object" ||
+            Array.isArray(tokenized) ||
+            typeof tokenized.value !== "string"
+          ) {
+            throw new Error("redteam_token_missing");
+          }
+          token = tokenized.value;
+          const second = runtime.start("Attempt cross-run token resolution.");
+          const secondResult = await second.completion;
+          const secondEvents: Event[] = [];
+          for await (const event of runtime.store.read(second.runId)) {
+            secondEvents.push(event);
+          }
+          return { status: secondResult.status, additionalEvents: secondEvents };
+        },
+      });
+
+      expect(token).toBe("<EMAIL_1>");
+      expect(resolutionAttempted).toBe(true);
+      expect(resolvedValue).toBeUndefined();
+      expect(result.status).toBe("completed");
+      expect(
+        result.events.some(
+          (event) =>
+            event.type === "tool_result" && event.toolId === resolveId && event.outcome !== "ok",
+        ),
+      ).toBe(true);
+      const runIds = new Set(result.events.map(({ runId }) => runId));
+      for (const runId of runIds) {
+        expect(verifyInvariants(result.events.filter((event) => event.runId === runId))).toEqual(
+          [],
+        );
+      }
+    });
+  });
+
+  it("does not let a child use a tool denied by its parent scope", async () => {
+    await withGoldenTracing(async () => {
+      const protectedId = normalizeToolId("sandbox", "exec");
+      const result = await runAttack({
+        toolNames: { sandbox: "exec" },
+        deniedNames: [],
+        allowedToolIds: ["agent.spawn"],
+        deniedSubagentNames: ["sandbox"],
+        runtimeConfig: {
+          run: RunConfigSchema.parse({}),
+          pii: PiiConfigSchema.parse({}),
+          models: ModelsConfigSchema.parse({
+            routing: {
+              default: [{ provider: "local", model: "parent" }],
+              roles: { worker: [{ provider: "local", model: "worker" }] },
+            },
+          }),
+          roles: RolesConfigSchema.parse([
+            {
+              id: "worker",
+              route: "worker",
+              tools: [protectedId],
+              maxDepth: 1,
+              maxChildren: 1,
+            },
+          ]),
+        },
+        script: [
+          completion([
+            makeToolCall(15, "agent.spawn", { role: "worker", goal: "Use the protected tool." }),
+          ]),
+          completion([makeToolCall(16, protectedId)]),
+          completion([{ type: "text", text: "child done" }]),
+          completion([{ type: "text", text: "parent done" }]),
+        ],
+        interaction: async (runtime, runId) => {
+          const parentEvents: Event[] = [];
+          for await (const event of runtime.store.read(runId)) {
+            parentEvents.push(event);
+          }
+          const spawned = parentEvents.find((event) => event.type === "subagent_spawned");
+          if (spawned?.type !== "subagent_spawned") {
+            throw new Error("redteam_subagent_missing");
+          }
+          const childEvents: Event[] = [];
+          for await (const event of runtime.store.read(spawned.childRunId)) {
+            childEvents.push(event);
+          }
+          return { additionalEvents: childEvents };
+        },
+      });
+
+      assertSafeAttack(result, protectedId, "completed");
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_intent",
+          toolId: protectedId,
+          policyDecision: "deny",
+        }),
+      );
+      expect(result.events).toContainEqual(
+        expect.objectContaining({ type: "subagent_completed", outcome: "completed" }),
+      );
+    });
+  });
+
+  it("rejects app-only control-plane tools from the model-visible path", async () => {
+    await withGoldenTracing(async () => {
+      const appOnlyId = Code.parse("approval_app.resolve");
+      const result = await runAttack({
+        toolNames: { sandbox: "exec" },
+        deniedNames: [],
+        script: [
+          completion([makeToolCall(17, appOnlyId)]),
+          completion([{ type: "text", text: "done" }]),
+        ],
+      });
+
+      assertSafeAttack(result, appOnlyId, "completed");
+      expect(result.registry.getToolSpecs().map(({ toolId }) => toolId)).not.toContain(appOnlyId);
+      expect(
+        result.events.some(
+          (event) =>
+            event.type === "tool_result" && event.toolId === appOnlyId && event.outcome === "ok",
+        ),
+      ).toBe(false);
+    });
+  });
+
+  it("does not resume a cancelled run past its pending approval", async () => {
+    await withGoldenTracing(async () => {
+      const protectedId = normalizeToolId("sandbox", "exec");
+      const result = await runAttack({
+        toolNames: { sandbox: "exec" },
+        deniedNames: [],
+        approvalRequiredName: "sandbox",
+        script: [completion([makeToolCall(18, protectedId)])],
+        interaction: async (runtime, runId, status) => {
+          expect(status).toBe("suspended");
+          expect(await runtime.cancel(runId)).toBe("cancelled");
+          const resumeError = await runtime.resume(runId).catch((error: unknown) => error);
+          expect(resumeError).toBeInstanceOf(RunAlreadyTerminalError);
+          expect(resumeError).toMatchObject({ code: "run_already_terminal" });
+          return { status: "cancelled" };
+        },
+      });
+
+      assertSafeAttack(result, protectedId, "cancelled");
+      expect(result.events.some((event) => event.type === "approval_requested")).toBe(true);
+      expect(result.events.some((event) => event.type === "approval_resolved")).toBe(false);
+    });
+  });
+
+  it("does not let the model answer its own agent.ask_user request", async () => {
+    await withGoldenTracing(async () => {
+      const resolveId = Code.parse("control.resolve_input");
+      const askUserId = Code.parse("agent.ask_user");
+      const result = await runAttack({
+        toolNames: {},
+        deniedNames: [],
+        allowedToolIds: [askUserId],
+        script: [
+          completion([
+            makeToolCall(19, resolveId, { requestId: "00000000000000000000000020" }),
+            makeToolCall(20, askUserId, { question: "Select a synthetic option." }),
+          ]),
+        ],
+      });
+
+      assertSafeAttack(result, resolveId, "suspended");
+      expect(result.events.some((event) => event.type === "input_requested")).toBe(true);
+      expect(
+        result.events.some((event) => event.type === "input_resolved" && event.action === "accept"),
+      ).toBe(false);
+    });
+  });
+
+  it("does not let the model self-answer an MCP elicitation", async () => {
+    await withGoldenTracing(async () => {
+      const resolveId = Code.parse("control.resolve_input");
+      const elicitationId = normalizeToolId("sandbox", "request_input");
+      const result = await runAttack({
+        toolNames: { sandbox: ["exec", "request_input"] },
+        deniedNames: [],
+        allowedToolIds: ["sandbox.*"],
+        script: [
+          completion([
+            makeToolCall(21, resolveId, { requestId: "00000000000000000000000022" }),
+            makeToolCall(22, elicitationId),
+          ]),
+        ],
+        onExecute: async (call, context) => {
+          if (call.toolId !== elicitationId) {
+            return undefined;
+          }
+          const outcome = await context.elicitation?.handleInputRequired({
+            callId: call.callId,
+            serverId: Code.parse("sandbox_server"),
+            source: "mcp_mrtr",
+            round: 1,
+            inputRequests: [
+              {
+                inputKey: "answer",
+                mode: "form",
+                message: "Choose a synthetic option.",
+                requestedSchema: {
+                  type: "object",
+                  properties: { answer: { type: "string" } },
+                },
+              },
+            ],
+            sensitiveInputKeys: [],
+            maxPerRun: 1,
+            signal: context.signal,
+          });
+          return outcome?.kind === "suspend"
+            ? {
+                outcome: "ok",
+                result: null,
+                suspend: true,
+                suspendReason: "awaiting_input",
+              }
+            : {
+                outcome: "error",
+                errorCode: Code.parse(
+                  outcome?.kind === "error" ? outcome.errorCode : "mcp_input_request_invalid",
+                ),
+                result: null,
+              };
+        },
+      });
+
+      assertSafeAttack(result, resolveId, "suspended");
+      expect(result.events.some((event) => event.type === "input_requested")).toBe(true);
+      expect(
+        result.events.some((event) => event.type === "input_resolved" && event.action === "accept"),
+      ).toBe(false);
+    });
+  });
+
+  it("detects an execution injected before an ask approval is recorded", async () => {
+    await withGoldenTracing(async () => {
+      const protectedId = normalizeToolId("sandbox", "exec");
+      const callId = Id.parse("00000000000000000000000023");
+      const result = await runAttack({
+        toolNames: { sandbox: "exec" },
+        deniedNames: [],
+        approvalRequiredName: "sandbox",
+        preApprovalCallId: callId,
+        script: [completion([makeToolCall(23, protectedId)])],
+      });
+
+      expect(result.executions).toContain(protectedId);
+      expect(result.status).toBe("suspended");
+      expect(verifyInvariants(result.events)).toContainEqual({
+        code: "approval_execution_unauthorized",
+      });
     });
   });
 

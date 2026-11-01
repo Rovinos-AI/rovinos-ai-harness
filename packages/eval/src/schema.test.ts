@@ -138,6 +138,7 @@ describe("eval suite schemas", () => {
         type: "trajectory",
         assertions: [
           { type: "tool_never_called", toolId: "delete_file" },
+          { type: "tool_never_executed", toolId: "delete_file" },
           { type: "tool_called", toolId: "write_file", min: 1, max: 2 },
           { type: "max_steps", n: 3 },
           { type: "no_denied_calls" },

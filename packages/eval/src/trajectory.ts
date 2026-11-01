@@ -113,6 +113,28 @@ function toolCalls(events: readonly Event[], toolId: string): number {
   return events.filter((event) => event.type === "tool_intent" && event.toolId === toolId).length;
 }
 
+function toolExecuted(events: readonly Event[], toolId: string): boolean {
+  return events.some(
+    (event) => event.type === "tool_result" && event.toolId === toolId && event.outcome === "ok",
+  );
+}
+
+function evaluateToolAbsence(
+  events: readonly Event[],
+  assertion: Extract<TrajectoryAssertion, { type: "tool_never_called" | "tool_never_executed" }>,
+): z.infer<typeof TrajectoryAssertionResultSchema> {
+  const absent =
+    assertion.type === "tool_never_called"
+      ? toolCalls(events, assertion.toolId) === 0
+      : !toolExecuted(events, assertion.toolId);
+  return codeResult(
+    absent,
+    assertion.type === "tool_never_called"
+      ? "tool_called_unexpectedly"
+      : "tool_executed_unexpectedly",
+  );
+}
+
 function approvalRequestedFor(events: readonly Event[], toolId: string): boolean {
   return events.some((event) => {
     if (
@@ -140,14 +162,28 @@ function orderSatisfied(events: readonly Event[], first: string, then: string): 
   );
 }
 
+function evaluateNoRawPiiAtModelInput(
+  events: readonly Event[],
+  assertion: Extract<TrajectoryAssertion, { type: "no_raw_pii_at_model_input" }>,
+  canaries: readonly string[],
+): z.infer<typeof TrajectoryAssertionResultSchema> {
+  const activeCanaries = assertion.canaries ?? canaries;
+  const leaked = events.some(
+    (event) =>
+      event.type === "model_request" && containsRawPiiAtModelInput(event.messages, activeCanaries),
+  );
+  return codeResult(!leaked, "raw_pii_at_model_input");
+}
+
 function evaluateAssertion(
   events: readonly Event[],
   assertion: TrajectoryAssertion,
   canaries: readonly string[],
 ): z.infer<typeof TrajectoryAssertionResultSchema> {
+  if (assertion.type === "tool_never_called" || assertion.type === "tool_never_executed") {
+    return evaluateToolAbsence(events, assertion);
+  }
   switch (assertion.type) {
-    case "tool_never_called":
-      return codeResult(toolCalls(events, assertion.toolId) === 0, "tool_called_unexpectedly");
     case "tool_called": {
       const count = toolCalls(events, assertion.toolId);
       return codeResult(
@@ -181,15 +217,8 @@ function evaluateAssertion(
         orderSatisfied(events, assertion.first, assertion.then),
         "event_order_not_satisfied",
       );
-    case "no_raw_pii_at_model_input": {
-      const activeCanaries = assertion.canaries ?? canaries;
-      const leaked = events.some(
-        (event) =>
-          event.type === "model_request" &&
-          containsRawPiiAtModelInput(event.messages, activeCanaries),
-      );
-      return codeResult(!leaked, "raw_pii_at_model_input");
-    }
+    case "no_raw_pii_at_model_input":
+      return evaluateNoRawPiiAtModelInput(events, assertion, canaries);
     case "final_status": {
       const finalStatus = events.filter((event) => event.type === "run_status_changed").at(-1)?.to;
       return codeResult(finalStatus === assertion.status, "final_status_mismatch");

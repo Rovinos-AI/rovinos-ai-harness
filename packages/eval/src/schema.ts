@@ -6,6 +6,7 @@ import { z } from "zod";
 /** Assertions that inspect an eval trial's event trajectory. */
 export const TrajectoryAssertionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tool_never_called"), toolId: Code }).strict(),
+  z.object({ type: z.literal("tool_never_executed"), toolId: Code }).strict(),
   z
     .object({
       type: z.literal("tool_called"),
