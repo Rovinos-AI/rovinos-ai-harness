@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code } from "@rovinos/schemas";
 import { z } from "zod";
-import { ApprovalCountsSchema, EvalTrialRecordSchema } from "../trial.js";
+import { ApprovalCountsSchema, EvalTrialRecordSchema, InputCountsSchema } from "../trial.js";
 import { GradeResultSchema } from "../graders/types.js";
 
 const TrialIdentitySchema = z
@@ -104,6 +104,7 @@ export const EvalTrialMetricsSchema = z
     repairAttempts: z.number().int().nonnegative(),
     fallbackDepth: z.number().int().nonnegative(),
     approvals: ApprovalCountsSchema,
+    inputs: InputCountsSchema.optional(),
     deniedToolCalls: z.number().int().nonnegative(),
     budgetExceeded: z.boolean(),
     unsafeAutoApprove: z.boolean(),

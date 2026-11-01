@@ -138,6 +138,18 @@ export const ApprovalCountsSchema = z
 /** Inferred counts of approval decisions recorded during a trial. */
 export type ApprovalCounts = z.infer<typeof ApprovalCountsSchema>;
 
+/** Metadata-only counts of durable human input actions. */
+export const InputCountsSchema = z
+  .object({
+    accepted: z.number().int().nonnegative(),
+    declined: z.number().int().nonnegative(),
+    cancelled: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred counts of input resolutions recorded during a trial. */
+export type InputCounts = z.infer<typeof InputCountsSchema>;
+
 /** Metadata-only aggregate usage from a single trial. */
 export const TrialUsageSchema = z
   .object({
@@ -178,6 +190,7 @@ export const TrialResultSchema = z
       budgetExceeded: false,
     }),
     approvals: ApprovalCountsSchema.default({ approved: 0, denied: 0, edited: 0 }),
+    inputs: InputCountsSchema.optional(),
     unsafeAutoApprove: z.boolean().default(false),
     exitCode: z.number().int().optional(),
     errorCode: Code.optional(),

@@ -5,11 +5,12 @@ import type { DockerProcessResult } from "@rovinos/sandbox";
 import type { PreparedTrial, TrialExecutionDependencies } from "../executor.js";
 import { SimulatedHuman } from "../human.js";
 import type { HumanScript } from "../schema.js";
-import type { ApprovalCounts } from "../trial.js";
+import type { ApprovalCounts, InputCounts } from "../trial.js";
 
 /** Result of applying a human script to one suspended Docker trial. */
 export interface DockerHumanResult {
   readonly approvals: ApprovalCounts;
+  readonly inputs?: InputCounts;
   readonly unsafeAutoApprove: boolean;
   readonly maxResumesExceeded: boolean;
   readonly processTimedOut: boolean;
@@ -75,6 +76,7 @@ export async function runDockerHuman(options: {
     });
     return {
       approvals: human.counts,
+      inputs: human.inputCounts,
       unsafeAutoApprove: human.unsafeAutoApprove,
       maxResumesExceeded: result.maxResumesExceeded,
       processTimedOut,

@@ -19,11 +19,16 @@ export class ReplayDivergenceError extends HarnessError {
 
   /**
    * @param seq - Sequence of the recorded request.
-   * @param hashMismatchCode - Closed category describing which hash differed.
+   * @param hashMismatchCode - Closed category describing the recorded input that differed.
    */
   constructor(
     readonly seq: number,
-    readonly hashMismatchCode: "model_request_hash_mismatch" | "tool_args_hash_mismatch",
+    readonly hashMismatchCode:
+      | "model_request_hash_mismatch"
+      | "tool_args_hash_mismatch"
+      | "input_request_mismatch"
+      | "input_round_mismatch"
+      | "input_resolution_mismatch",
   ) {
     super("The replay hash differs from the recording.");
   }

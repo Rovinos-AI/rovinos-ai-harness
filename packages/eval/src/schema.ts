@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApprovalEditsSchema } from "@rovinos/policy";
-import { Code, JsonPointerSchema, JsonValue, ModelRefSchema, parseYaml } from "@rovinos/schemas";
+import {
+  Code,
+  InputRequestSchema,
+  InputResponseSchema,
+  JsonPointerSchema,
+  JsonValue,
+  ModelRefSchema,
+  parseYaml,
+} from "@rovinos/schemas";
 import { z } from "zod";
 
 /** Assertions that inspect an eval trial's event trajectory. */
@@ -169,13 +177,24 @@ const HumanRuleSchema = z
   })
   .strict();
 
-/** Deterministic script for simulating approval decisions in an eval. */
+const HumanInputRuleSchema = InputResponseSchema.safeExtend({
+  match: z
+    .object({
+      source: InputRequestSchema.shape.source.optional(),
+      serverId: InputRequestSchema.shape.serverId,
+      mode: InputRequestSchema.shape.mode.optional(),
+    })
+    .strict(),
+}).strict();
+
+/** Deterministic human decisions; unmatched inputs decline independently of approval defaults. */
 export const HumanScriptSchema = z
   .object({
     rules: z.array(HumanRuleSchema),
     default: z.enum(["deny", "approve"]),
     maxResumes: z.number().int().positive().default(10),
     unsafeAutoApprove: z.boolean().optional(),
+    inputs: z.array(HumanInputRuleSchema).optional(),
   })
   .strict()
   .superRefine((script, context) => {
