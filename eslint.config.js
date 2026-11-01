@@ -259,11 +259,7 @@ const configuration = [
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: [
-            "evals/*/suite.ts",
-            "packages/*/tsup.config.ts",
-            "vitest.config.ts",
-          ],
+          allowDefaultProject: ["packages/*/tsup.config.ts", "vitest.config.ts"],
           defaultProject: "packages/schemas/tsconfig.test.json",
         },
         tsconfigRootDir: rootDirectory,

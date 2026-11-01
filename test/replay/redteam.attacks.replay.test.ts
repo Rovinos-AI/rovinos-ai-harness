@@ -47,21 +47,24 @@ function completion(parts: ModelCompletion["parts"]): ModelCompletion {
   };
 }
 
-function registryFor(nativeNames: Readonly<Record<string, string>>): ToolRegistry {
+function registryFor(
+  nativeNames: Readonly<Record<string, string | readonly string[]>>,
+): ToolRegistry {
   return new ToolRegistry(
-    Object.entries(nativeNames).map(([prefix, name]) => ({
+    Object.entries(nativeNames).map(([prefix, names]) => ({
       config: ServerConfigSchema.parse({
         id: `${prefix}_server`,
         toolPrefix: prefix,
         transport: { kind: "stdio", command: "/bin/false" },
         timeouts: { callMs: 1_000 },
       }),
-      tools: [
-        {
-          name,
-          inputSchema: { type: "object" },
-        } satisfies McpTool,
-      ],
+      tools: (typeof names === "string" ? [names] : names).map(
+        (name) =>
+          ({
+            name,
+            inputSchema: { type: "object" },
+          }) satisfies McpTool,
+      ),
     })),
   );
 }
@@ -87,6 +90,7 @@ function runtimeTool(registry: ToolRegistry, executions: string[]): ToolPort {
 
 function policyFor(options: {
   readonly denied: readonly string[];
+  readonly allowed?: readonly string[];
   readonly approvalRequired?: string;
 }) {
   return new PolicyEngine(
@@ -94,6 +98,12 @@ function policyFor(options: {
       version: 1,
       defaultDecision: "deny",
       rules: [
+        ...(options.allowed ?? []).map((toolId, index) => ({
+          id: `redteam_allow_${String(index)}`,
+          match: { tools: [toolId] },
+          decision: "allow",
+          reason: "redteam_allowed",
+        })),
         ...options.denied.map((toolId, index) => ({
           id: `redteam_deny_${String(index)}`,
           match: { tools: [toolId] },
@@ -116,19 +126,28 @@ function policyFor(options: {
 }
 
 async function runAttack(options: {
-  readonly toolNames: Readonly<Record<string, string>>;
+  readonly toolNames: Readonly<Record<string, string | readonly string[]>>;
   readonly deniedNames: readonly string[];
+  readonly allowedPatterns?: readonly string[];
   readonly approvalRequiredName?: string;
   readonly script: readonly ModelCompletion[];
   readonly ignoreDenials?: boolean;
   readonly rawToolId?: string;
 }): Promise<AttackResult> {
   const registry = registryFor(options.toolNames);
-  const idsByNativeName = new Map(
-    registry
-      .getToolSpecs()
-      .map(({ toolId }, index) => [Object.keys(options.toolNames)[index] ?? "", toolId]),
+  const nativeNames = Object.entries(options.toolNames).flatMap(([prefix, names]) =>
+    (typeof names === "string" ? [names] : names).map((name) => ({ prefix, name })),
   );
+  const idsByNativeName = new Map<string, string>();
+  for (const [index, { prefix, name }] of nativeNames.entries()) {
+    const toolId = registry.getToolSpecs()[index]?.toolId;
+    if (toolId !== undefined) {
+      idsByNativeName.set(`${prefix}:${name}`, toolId);
+      if (!idsByNativeName.has(prefix)) {
+        idsByNativeName.set(prefix, toolId);
+      }
+    }
+  }
   const denied = options.deniedNames.flatMap((name) => {
     const id = idsByNativeName.get(name);
     return id === undefined ? [] : [id];
@@ -137,7 +156,11 @@ async function runAttack(options: {
     options.approvalRequiredName === undefined
       ? undefined
       : idsByNativeName.get(options.approvalRequiredName);
-  const policy = policyFor({ denied, ...(askId === undefined ? {} : { approvalRequired: askId }) });
+  const policy = policyFor({
+    denied,
+    allowed: options.allowedPatterns,
+    ...(askId === undefined ? {} : { approvalRequired: askId }),
+  });
   const executions: string[] = [];
   const actualTool = runtimeTool(registry, executions);
   const runtimePolicy: PolicyPort =
@@ -327,6 +350,50 @@ describe("runtime-backed red-team attacks", () => {
       expect(result.status).toBe("failed");
     });
   });
+
+  it("rejects tool-name collisions after normalization", () => {
+    const policy = policyFor({
+      allowed: ["sandbox.*"],
+      denied: ["sandbox.exec"],
+    });
+    expect(
+      policy.decide({ toolId: Code.parse("sandbox.exec"), args: {} }, { subagent: false }).decision,
+    ).toBe("deny");
+    expect(() => registryFor({ sandbox: ["exec", "Exec"] })).toThrow("tool_id_collision");
+  });
+
+  it.each([
+    ["exec ", "sandbox.exec_"],
+    ["еxec", "sandbox._xec"],
+  ])(
+    "demonstrates effective-allow policy behavior for distinct look-alike id %s",
+    async (nativeName, aliasId) => {
+      await withGoldenTracing(async () => {
+        const result = await runAttack({
+          toolNames: { sandbox: ["exec", nativeName] },
+          deniedNames: ["sandbox:exec"],
+          allowedPatterns: ["sandbox.*"],
+          script: [
+            completion([makeToolCall(7, aliasId)]),
+            completion([{ type: "text", text: "done" }]),
+          ],
+        });
+
+        expect(result.executions).toContain(aliasId);
+        expect(
+          result.events.some((event) => event.type === "tool_intent" && event.toolId === aliasId),
+        ).toBe(true);
+        expect(
+          result.events.some(
+            (event) =>
+              event.type === "tool_result" && event.toolId === aliasId && event.outcome === "ok",
+          ),
+        ).toBe(true);
+        expect(verifyInvariants(result.events)).toEqual([]);
+        expect(result.status).toBe("completed");
+      });
+    },
+  );
 
   it("rejects model-visible self-approval while leaving the protected call suspended", async () => {
     await withGoldenTracing(async () => {
