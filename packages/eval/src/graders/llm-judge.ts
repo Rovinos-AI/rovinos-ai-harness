@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { IdGenerator } from "@rovinos/core";
 import type { ModelGateway } from "@rovinos/models";
-import { Code, ModelRequestSchema, ModelUsageSchema, parseYaml } from "@rovinos/schemas";
-import type { Event, JsonValue, ModelRequest, ModelUsage } from "@rovinos/schemas";
+import {
+  Code,
+  createVerdictSchema,
+  ModelRequestSchema,
+  ModelUsageSchema,
+  parseYaml,
+} from "@rovinos/schemas";
+import type { Event, JsonValue, ModelRequest, ModelUsage, Verdict } from "@rovinos/schemas";
 import { z } from "zod";
 import { JudgeRubricSchema, LlmJudgeGraderSpecSchema } from "../schema.js";
 import type { JudgeCriterion, LlmJudgeGraderSpec } from "../schema.js";
@@ -108,48 +114,10 @@ export function buildJudgeView(events: readonly Event[], result: TrialResult): J
   });
 }
 
-const JudgeVerdictShapeSchema = z
-  .object({
-    criteria: z.array(z.object({ id: Code, met: z.boolean() }).strict()),
-    verdict: z.enum(["pass", "fail"]),
-  })
-  .strict();
-
 /** Creates the strict output contract whose criterion ids are limited to the rubric. */
-export function createJudgeVerdictSchema(
-  criteria: readonly JudgeCriterion[],
-): z.ZodType<z.infer<typeof JudgeVerdictShapeSchema>> {
+export function createJudgeVerdictSchema(criteria: readonly JudgeCriterion[]): z.ZodType<Verdict> {
   const validatedCriteria = JudgeRubricSchema.parse(criteria);
-  const criterionIds = Object.fromEntries(validatedCriteria.map(({ id }) => [id, id]));
-  const criterionIdSchema = z.enum(criterionIds);
-  return JudgeVerdictShapeSchema.extend({
-    criteria: z
-      .array(z.object({ id: criterionIdSchema, met: z.boolean() }).strict())
-      .length(validatedCriteria.length),
-  }).superRefine((verdict, context) => {
-    const seen = new Set<string>();
-    for (const [index, criterion] of verdict.criteria.entries()) {
-      if (seen.has(criterion.id)) {
-        context.addIssue({
-          code: "custom",
-          path: ["criteria", index, "id"],
-          message: "Every rubric criterion must appear exactly once.",
-          params: { errorCode: "judge_criterion_duplicate" },
-        });
-      }
-      seen.add(criterion.id);
-    }
-    for (const [index, criterion] of validatedCriteria.entries()) {
-      if (!seen.has(criterion.id)) {
-        context.addIssue({
-          code: "custom",
-          path: ["criteria", index, "id"],
-          message: "Every rubric criterion must appear exactly once.",
-          params: { errorCode: "judge_criterion_missing" },
-        });
-      }
-    }
-  });
+  return createVerdictSchema(validatedCriteria.map(({ id }) => id));
 }
 
 function requestForJudge(

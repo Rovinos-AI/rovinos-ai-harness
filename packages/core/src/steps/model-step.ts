@@ -46,7 +46,10 @@ export interface ModelStepOptions {
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+  readonly temperature?: number;
   readonly outputSchema?: z.ZodType;
+  /** Omits a run-failure status event when a model request is nested in a tool. */
+  readonly failureMode?: "tool";
   readonly valueTransform?: ValueTransform;
   readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
   readonly includeTools?: boolean;
@@ -121,6 +124,7 @@ function requestParts(
     stablePrefixMessages: options.contextMetadata.stablePrefixMessages,
     ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
     ...(role === undefined ? {} : { role }),
+    ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
   });
   const requestParametersHash = modelRequestParametersHash(modelRequest);
   return {
@@ -180,7 +184,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
           recorded,
         });
         result = failure.result;
-        return failure.event;
+        return failure.event ?? requestEvent;
       }
 
       const prepared = await prepareCompletion(
@@ -223,7 +227,7 @@ async function recordModelFailure({
   readonly error: unknown;
   readonly span: Span;
   readonly recorded: Event[];
-}): Promise<{ readonly result: ModelStepResult; readonly event: Event }> {
+}): Promise<{ readonly result: ModelStepResult; readonly event?: Event }> {
   const code = errorCode(error);
   if (options.outputSchema !== undefined && code === "model_output_invalid") {
     const usage = readFailureUsage(error);
@@ -253,6 +257,13 @@ async function recordModelFailure({
   }
   const reason =
     code === "model_output_invalid" && options.outputSchema !== undefined ? "result_invalid" : code;
+  if (options.failureMode === "tool") {
+    span.setStatus({ code: SpanStatusCode.ERROR });
+    setActiveSpanAttribute("harness.error.code", reason);
+    return {
+      result: { outcome: "failed", code: reason, events: recorded },
+    };
+  }
   span.setStatus({ code: SpanStatusCode.ERROR });
   setActiveSpanAttribute("harness.error.code", reason);
   const event = await options.recorder.record({
