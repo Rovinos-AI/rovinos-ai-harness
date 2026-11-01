@@ -14,8 +14,9 @@ import {
   type AzureOpenAIAuth,
   type RequestSanitizer,
   type ProviderAdapter,
+  type RoutingModelGateway,
 } from "@rovinos/models";
-import type { ModelPort, IdGenerator } from "./ports.js";
+import type { IdGenerator } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import { parseRuntimeModelsConfig } from "./runtime-config.js";
 
@@ -39,6 +40,8 @@ export interface RuntimeModelOverrides {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly providerAdapters?: readonly ProviderAdapter[];
+  /** Internal adapter decoration, used for eval cassette recording. */
+  readonly decorateAdapter?: (adapter: ProviderAdapter) => ProviderAdapter;
   readonly requestSanitizer?: RequestSanitizer;
   readonly secretResolver?: {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
@@ -162,7 +165,7 @@ async function configuredAdapter(
 export async function createConfiguredModelPort(
   config: ModelsConfig | undefined,
   overrides: RuntimeModelOverrides,
-): Promise<ModelPort | undefined> {
+): Promise<RoutingModelGateway | undefined> {
   const models = parseRuntimeModelsConfig(config);
   const adapters =
     overrides.providerAdapters ??
@@ -192,7 +195,7 @@ export async function createConfiguredModelPort(
     providerStreaming[provider.id] = provider.streaming;
   }
   return createRoutingModelGateway(
-    adapters,
+    overrides.decorateAdapter === undefined ? adapters : adapters.map(overrides.decorateAdapter),
     {
       ids: overrides.ids,
       clock: overrides.clock,

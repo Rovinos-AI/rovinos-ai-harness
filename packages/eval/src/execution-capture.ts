@@ -184,5 +184,14 @@ export function appendTrialProcessOutput(dbPath: string, stdout: string, stderr:
 
 /** Return captured output sinks for a trial without exposing them in result serialization. */
 export function trialLogSinks(dbPath: string): readonly CanarySink[] {
-  return logsByDbPath.get(dbPath) ?? [];
+  const current = processOutput.getStore();
+  return [
+    ...(logsByDbPath.get(dbPath) ?? []),
+    ...(current === undefined
+      ? []
+      : [
+          { name: "stdout", content: current.stdout.join("") },
+          { name: "stderr", content: current.stderr.join("") },
+        ]),
+  ];
 }
