@@ -105,12 +105,14 @@ it("uses the active-lease index for quota-capacity lookup", async () => {
     const database = new Database(path, { readonly: true });
     const plan = database
       .prepare<[number], { detail: string }>(
-        "EXPLAIN QUERY PLAN SELECT DISTINCT e.run_id FROM run_queue AS q INDEXED BY run_queue_active_lease_idx JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > ?",
+        "EXPLAIN QUERY PLAN SELECT r.run_id FROM run_queue AS q INDEXED BY run_queue_active_lease_idx JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > ? UNION SELECT r.run_id FROM run_queue AS q INDEXED BY run_queue_run_id_idx JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE r.status = 'running'",
       )
       .all(100);
     database.close();
 
-    expect(plan.map(({ detail }) => detail).join(" ")).toContain("run_queue_active_lease_idx");
+    const details = plan.map(({ detail }) => detail).join(" ");
+    expect(details).toContain("run_queue_active_lease_idx");
+    expect(details).toContain("run_queue_run_id_idx");
   } finally {
     await queue?.close();
     await rm(directory, { recursive: true, force: true });

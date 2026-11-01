@@ -75,17 +75,18 @@ const fakePg = vi.hoisted(() => {
         rowCount: run === undefined ? 0 : 1,
       };
     }
-    if (sql.startsWith("SELECT DISTINCT r.run_id")) {
+    if (sql.startsWith("SELECT r.run_id")) {
       const now = numberValue(values, 0);
       const rows = [...eventRuns].flatMap(([runId, run]) => {
-        const leased = [...jobs.values()].some(
+        const hasQueueRow = [...jobs.values()].some(
           (job) =>
             job.run_id === runId &&
-            job.lease_owner !== null &&
-            typeof job.lease_expires_at === "number" &&
-            job.lease_expires_at > now,
+            ((job.lease_owner !== null &&
+              typeof job.lease_expires_at === "number" &&
+              job.lease_expires_at > now) ||
+              run.status === "running"),
         );
-        return leased ? [{ run_id: runId, ...run }] : [];
+        return hasQueueRow ? [{ run_id: runId, ...run }] : [];
       });
       return { rows, rowCount: rows.length };
     }

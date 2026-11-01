@@ -41,7 +41,7 @@ async function activeQuotaIdentities(
     requested_by: string | null;
     role: string | null;
   }>(
-    "SELECT DISTINCT r.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role FROM run_queue AS q JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > $1",
+    "SELECT r.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role FROM run_queue AS q JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > $1 UNION SELECT r.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role FROM run_queue AS q JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE r.status = 'running'",
     [now],
   );
   return result.rows.map((row) =>

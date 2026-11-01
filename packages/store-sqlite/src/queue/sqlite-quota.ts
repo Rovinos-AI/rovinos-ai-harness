@@ -34,7 +34,7 @@ export function createQuotaClaimGuard(
       "SELECT e.run_id, json_extract(e.meta_json, '$.requestedBy') AS requested_by, json_extract(e.meta_json, '$.quotaRole') AS role, r.status FROM events AS e JOIN runs AS r ON r.run_id = e.run_id WHERE e.run_id = ? AND e.type = 'run_created' LIMIT 1",
     );
     activeIdentitiesStatement ??= db.prepare<[number], QuotaIdentityRow>(
-      "SELECT DISTINCT e.run_id, json_extract(e.meta_json, '$.requestedBy') AS requested_by, json_extract(e.meta_json, '$.quotaRole') AS role FROM run_queue AS q INDEXED BY run_queue_active_lease_idx JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > ?",
+      "SELECT r.run_id, json_extract(e.meta_json, '$.requestedBy') AS requested_by, json_extract(e.meta_json, '$.quotaRole') AS role FROM run_queue AS q INDEXED BY run_queue_active_lease_idx JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > ? UNION SELECT r.run_id, json_extract(e.meta_json, '$.requestedBy') AS requested_by, json_extract(e.meta_json, '$.quotaRole') AS role FROM run_queue AS q INDEXED BY run_queue_run_id_idx JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE r.status = 'running'",
     );
     const activeRuns = activeIdentitiesStatement
       .all(now)
@@ -42,7 +42,12 @@ export function createQuotaClaimGuard(
     return (runId, canClaim) => {
       const row = identityStatement?.get(runId);
       const identity = quotaIdentity(runId, row);
-      const allowed = canClaim(identity, activeRuns, row?.status === "running");
+      const alreadyRunning = row?.status === "running";
+      const allowed = canClaim(
+        identity,
+        activeRuns.filter((active) => active.runId !== runId),
+        alreadyRunning,
+      );
       if (allowed && row?.status !== "running") {
         activeRuns.push(identity);
       }

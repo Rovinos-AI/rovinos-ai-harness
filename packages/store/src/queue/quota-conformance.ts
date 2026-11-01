@@ -42,27 +42,66 @@ function registerDeadLetterSlotRelease(factory: RunQueueFactoryCreator): void {
 }
 
 function registerRunningRunReclaim(factory: RunQueueFactoryCreator): void {
-  it("allows an already-running run to reclaim its job when another run fills the quota", async () => {
+  it("defers other runs while a running run reclaims its expired lease", async () => {
     const clock = new FakeClock(100);
     const instance = await factory(clock);
     try {
       const queue = instance.open();
-      const activeRun = "00000000000000000000000029";
-      const reclaimRun = "00000000000000000000000030";
-      await instance.seedRun(activeRun, { requestedBy: "cli.alice", role: "researcher" });
-      await instance.seedRun(reclaimRun, { requestedBy: "cli.alice", role: "researcher" });
-      await queue.enqueue({ kind: "start", runId: activeRun });
-      const reclaimJob = await queue.enqueue({ kind: "start", runId: reclaimRun });
-      await queue.claim("worker.active", 1, 1000);
-      await queue.claim("worker.expiring", 1, 10);
-      await instance.markRunning(activeRun);
-      await instance.markRunning(reclaimRun);
+      const runningRun = "00000000000000000000000029";
+      const queuedRun = "00000000000000000000000030";
+      await instance.seedRun(runningRun, { requestedBy: "cli.alice", role: "researcher" });
+      await instance.seedRun(queuedRun, { requestedBy: "cli.alice", role: "researcher" });
+      const runningJob = await queue.enqueue({ kind: "start", runId: runningRun });
+      const [firstClaim] = await queue.claim("worker.first", 1, 10);
+      if (firstClaim?.leaseOwner === undefined) {
+        throw new Error("Initial claim must have an owner");
+      }
+      await instance.markRunning(runningRun);
       clock.advance(10);
+      await queue.enqueue({ kind: "start", runId: queuedRun, priority: 10 });
 
       const [reclaimed] = await queue.claim("worker.reclaim", 1, 100, { canClaim });
 
-      expect(reclaimed?.runId).toBe(reclaimRun);
-      expect(reclaimed?.jobId).toBe(reclaimJob.jobId);
+      expect(reclaimed?.runId).toBe(runningRun);
+      expect(reclaimed?.jobId).toBe(runningJob.jobId);
+      expect(reclaimed?.attempts).toBe(2);
+      await expect(queue.complete(runningJob.jobId, "worker.reclaim")).resolves.toBe(true);
+      const [queued] = await queue.claim("worker.queued", 1, 100, { canClaim });
+      expect(queued?.runId).toBe(queuedRun);
+      expect(queued?.attempts).toBe(1);
+    } finally {
+      await instance.cleanup();
+    }
+  });
+
+  it("defers other runs while a running run waits for its retry", async () => {
+    const clock = new FakeClock(100);
+    const instance = await factory(clock);
+    try {
+      const queue = instance.open();
+      const retryingRun = "00000000000000000000000033";
+      const queuedRun = "00000000000000000000000034";
+      await instance.seedRun(retryingRun, { requestedBy: "cli.alice", role: "researcher" });
+      await instance.seedRun(queuedRun, { requestedBy: "cli.alice", role: "researcher" });
+      const retryJob = await queue.enqueue({ kind: "start", runId: retryingRun });
+      const [firstClaim] = await queue.claim("worker.first", 1, 100);
+      if (firstClaim?.leaseOwner === undefined) {
+        throw new Error("Initial claim must have an owner");
+      }
+      await instance.markRunning(retryingRun);
+      await queue.fail(retryJob.jobId, firstClaim.leaseOwner, "worker.retry", 50);
+      await queue.enqueue({ kind: "start", runId: queuedRun, priority: 10 });
+
+      expect(await queue.claim("worker.queued", 1, 100, { canClaim })).toEqual([]);
+      clock.advance(50);
+      const [reclaimed] = await queue.claim("worker.retry", 1, 100, { canClaim });
+
+      expect(reclaimed?.runId).toBe(retryingRun);
+      expect(reclaimed?.attempts).toBe(2);
+      await expect(queue.complete(retryJob.jobId, "worker.retry")).resolves.toBe(true);
+      const [queued] = await queue.claim("worker.queued", 1, 100, { canClaim });
+      expect(queued?.runId).toBe(queuedRun);
+      expect(queued?.attempts).toBe(1);
     } finally {
       await instance.cleanup();
     }
