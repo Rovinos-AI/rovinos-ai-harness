@@ -244,6 +244,12 @@ describe("control-plane inspection tools", () => {
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
       ui: { resourceUri: "ui://harness/runs/v1" },
     });
+    expect(tools.find(({ name }) => name === "list_pending_inputs")?._meta).toEqual({
+      ui: { resourceUri: "ui://harness/input/v1" },
+    });
+    expect(tools.find(({ name }) => name === "get_input")?._meta).toEqual({
+      ui: { resourceUri: "ui://harness/input/v1" },
+    });
     expect(
       tools
         .filter(({ name }) => name === "list_runs" || name === "get_run")
@@ -286,6 +292,9 @@ describe("control-plane inspection tools", () => {
     });
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
       ui: { resourceUri: "ui://harness/runs/v1" },
+    });
+    expect(tools.find(({ name }) => name === "harness.inputs.answer")?._meta).toEqual({
+      ui: { visibility: ["app"], resourceUri: "ui://harness/input/v1" },
     });
   });
 
@@ -763,6 +772,49 @@ describe("control-plane inspection tools", () => {
     expect(output.runs[0]?.steps).toBe(0);
     expect(readSpy).toHaveBeenCalledWith(runId, { toSeq: summary.lastSeq });
     expect(listRunsSpy).toHaveBeenCalledOnce();
+  });
+
+  it("reports pending human-input counts in run list and detail metadata", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = await addRun(store, builders);
+    const summary = (await store.listRuns({ limit: 1 })).runs[0];
+    const requestId = builders.nextRunId();
+    const callId = builders.nextRunId();
+    const intent = eventSamples.find((event) => event.type === "tool_intent");
+    const requested = eventSamples.find((event) => event.type === "input_requested");
+    const resolved = eventSamples.find((event) => event.type === "input_resolved");
+    if (
+      summary === undefined ||
+      intent?.type !== "tool_intent" ||
+      requested?.type !== "input_requested" ||
+      resolved?.type !== "input_resolved"
+    ) {
+      throw new Error("Missing pending input fixtures.");
+    }
+
+    await store.append(
+      runId,
+      [
+        { ...intent, runId, segmentId: runId, callId },
+        { ...requested, runId, segmentId: runId, requestId, callId },
+      ],
+      summary.lastSeq + 1,
+    );
+    expect((await listRuns(store, {})).runs[0]?.pendingInputs).toBe(1);
+    expect((await getRun(store, { runId }))?.pendingInputs).toBe(1);
+
+    const updatedSummary = (await store.listRuns({ limit: 1 })).runs[0];
+    if (updatedSummary === undefined) {
+      throw new Error("Missing updated run summary.");
+    }
+    await store.append(
+      runId,
+      [{ ...resolved, runId, segmentId: runId, requestId }],
+      updatedSummary.lastSeq + 1,
+    );
+    expect((await listRuns(store, {})).runs[0]?.pendingInputs).toBe(0);
+    expect((await getRun(store, { runId }))?.pendingInputs).toBe(0);
   });
 
   it("returns empty lists for an empty store and safe unknown-run text", async () => {

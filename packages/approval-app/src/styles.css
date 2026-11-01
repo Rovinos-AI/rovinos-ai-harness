@@ -203,6 +203,26 @@ textarea {
   border-radius: 0.3rem;
   padding: 0.4rem;
 }
+.input-form {
+  display: grid;
+  gap: 0.75rem;
+}
+.input-form label,
+.input-form input:not([type="checkbox"]),
+.input-form select {
+  display: block;
+  width: 100%;
+}
+.input-form label {
+  font-weight: 600;
+}
+.input-form input,
+.input-form select {
+  margin-top: 0.25rem;
+}
+.input-form [aria-invalid="true"] {
+  border-color: var(--color-text-danger);
+}
 [data-display-mode="fullscreen"] main {
   max-width: none;
 }

@@ -81,6 +81,8 @@ export interface ControlPlaneServerOptions {
     }) => void;
   };
   readonly approvalHtml?: string;
+  /** Built human-input MCP App HTML; injectable for in-memory server tests. */
+  readonly inputHtml?: string;
   /** Built runs-console MCP App HTML; injectable for in-memory server tests. */
   readonly runsConsoleHtml?: string;
   /** Optional URL shown to text-only clients as an approval fallback. */

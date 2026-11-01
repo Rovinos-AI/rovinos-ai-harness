@@ -77,6 +77,16 @@ export const UI_INTERACTION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSp
   { taskId: "3.6", packageName: "@rovinos/host" },
 );
 
+/** Registered host span definition for human input actions. */
+export const UI_INPUT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
+  "harness.ui.input",
+  {
+    ...identityShape,
+    "harness.ui.input.action": attr.enum(["accept", "decline", "cancel", "open_link", "done"]),
+  },
+  { taskId: "25.7", packageName: "@rovinos/host" },
+);
+
 function startStampedSpan(
   span: AppSpan,
   context: BoundAppSpanStampContext,
@@ -119,6 +129,11 @@ function startStampedSpan(
         },
         options,
       ).end(timing.endTime);
+      return;
+    case "ui.input":
+      UI_INPUT_SPAN.start({ ...identity, "harness.ui.input.action": span.action }, options).end(
+        timing.endTime,
+      );
   }
 }
 
