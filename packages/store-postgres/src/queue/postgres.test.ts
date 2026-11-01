@@ -67,7 +67,7 @@ const fakePg = vi.hoisted(() => {
       releaseLocks(clientId);
       return { rows: [], rowCount: 0 };
     }
-    if (sql.startsWith("SELECT run_id, meta ->>")) {
+    if (sql.startsWith("SELECT e.run_id, e.meta ->>")) {
       const runId = stringValue(values, 0);
       const run = eventRuns.get(runId);
       return {
@@ -85,7 +85,7 @@ const fakePg = vi.hoisted(() => {
             typeof job.lease_expires_at === "number" &&
             job.lease_expires_at > now,
         );
-        return run.status === "running" || leased ? [{ run_id: runId, ...run }] : [];
+        return leased ? [{ run_id: runId, ...run }] : [];
       });
       return { rows, rowCount: rows.length };
     }
@@ -361,6 +361,12 @@ const fakePg = vi.hoisted(() => {
         status: "pending",
       });
     },
+    markRunning(runId: string): void {
+      const run = eventRuns.get(runId);
+      if (run !== undefined) {
+        eventRuns.set(runId, { ...run, status: "running" });
+      }
+    },
     beforeNextLockedQuery(hook: () => void): void {
       beforeNextForUpdate = hook;
     },
@@ -429,6 +435,10 @@ const postgresFactory: RunQueueFactoryCreator = (clock: Clock) => {
     },
     seedRun(runId, identity) {
       fakePg.seedRun(runId, identity);
+      return Promise.resolve();
+    },
+    markRunning(runId) {
+      fakePg.markRunning(runId);
       return Promise.resolve();
     },
     async cleanup() {

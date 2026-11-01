@@ -16,7 +16,6 @@ import {
   EnqueueRunJobSchema,
   QueueErrorCodeSchema,
   QueueJobIdSchema,
-  RunQueueRunIdentitySchema,
   systemClock,
   WorkerIdSchema,
   hashIdempotencyKey,
@@ -37,7 +36,7 @@ import {
   retryTimestamp,
   type QueueRow,
 } from "./postgres-helpers.js";
-import { claimQuotaCandidates } from "./postgres-quota.js";
+import { claimQuotaCandidates, deadLetterExpiredQueueJobs } from "./postgres-quota.js";
 
 /** Durable Postgres run queue using row locks with `SKIP LOCKED` for exclusive claims. */
 export class PostgresRunQueue implements RunQueue {
@@ -188,38 +187,9 @@ export class PostgresRunQueue implements RunQueue {
       if (options !== undefined) {
         await client.query("SELECT pg_advisory_xact_lock(2414)");
       }
-      const expired = await client.query<QueueRow>(
-        "SELECT * FROM run_queue WHERE attempts >= max_attempts AND lease_expires_at <= $1 ORDER BY lease_expires_at, job_id FOR UPDATE SKIP LOCKED",
-        [this.now()],
-      );
-      const expiredAt = this.now();
-      for (const row of expired.rows) {
-        if (
-          row.lease_expires_at === null ||
-          numberColumn(row.lease_expires_at) > expiredAt ||
-          row.attempts < row.max_attempts
-        ) {
-          continue;
-        }
-        await client.query(
-          "INSERT INTO run_queue_dead (job_id, kind, run_id, priority, attempts, max_attempts, idempotency_key, last_error_code, created_at, dead_at) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'worker.lease_expired'), $9, $10)",
-          [
-            row.job_id,
-            row.kind,
-            row.run_id,
-            row.priority,
-            row.attempts,
-            row.max_attempts,
-            row.idempotency_key,
-            row.last_error_code,
-            numberColumn(row.created_at),
-            expiredAt,
-          ],
-        );
-        await client.query("DELETE FROM run_queue WHERE job_id = $1", [row.job_id]);
-      }
-      const claimed: RunQueueJob[] = [];
       const now = this.now();
+      await deadLetterExpiredQueueJobs(client, now);
+      const claimed: RunQueueJob[] = [];
       const leaseExpiresAt = parseQueueInput(z.number().int().nonnegative(), now + duration);
       if (options === undefined) {
         const selected = await client.query<QueueRow>(
@@ -245,9 +215,16 @@ export class PostgresRunQueue implements RunQueue {
         }
       } else {
         claimed.push(
-          ...(await claimQuotaCandidates(client, worker, count, now, leaseExpiresAt, options)).map(
-            queueJob,
-          ),
+          ...(
+            await claimQuotaCandidates({
+              client,
+              worker,
+              count,
+              now,
+              leaseExpiresAt,
+              options,
+            })
+          ).map(queueJob),
         );
       }
       return claimed;

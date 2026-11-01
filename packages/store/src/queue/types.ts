@@ -61,6 +61,7 @@ export type RunQueueRunIdentity = z.infer<typeof RunQueueRunIdentitySchema>;
 export type RunQueueClaimGuard = (
   identity: RunQueueRunIdentity,
   activeRuns: readonly RunQueueRunIdentity[],
+  alreadyRunning: boolean,
 ) => boolean;
 
 /** Optional admission check used to defer jobs that exceed configured run quotas. */

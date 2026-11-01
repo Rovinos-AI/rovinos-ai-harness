@@ -16,9 +16,6 @@ import {
   EnqueueRunJobSchema,
   QueueErrorCodeSchema,
   QueueJobIdSchema,
-  RunQueueDeadLetterSchema,
-  RunQueueJobSchema,
-  RunQueueOptionsSchema,
   systemClock,
   WorkerIdSchema,
   hashIdempotencyKey,
@@ -27,78 +24,18 @@ import {
 import { sqliteMigrationDirectory } from "../migration-directory.js";
 import { sqliteStoreError } from "../sqlite/outbox.js";
 import { createQuotaClaimGuard } from "./sqlite-quota.js";
-
-interface QueueRow {
-  job_id: string;
-  kind: string;
-  run_id: string;
-  priority: number;
-  available_at: number;
-  attempts: number;
-  max_attempts: number;
-  lease_owner: string | null;
-  lease_expires_at: number | null;
-  idempotency_key: string | null;
-  last_error_code: string | null;
-  wake_requested: number;
-  created_at: number;
-  updated_at: number;
-}
-
-interface DeadLetterRow {
-  job_id: string;
-  kind: string;
-  run_id: string;
-  attempts: number;
-  max_attempts: number;
-  idempotency_key: string | null;
-  last_error_code: string;
-  created_at: number;
-  dead_at: number;
-}
-
-const durationSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
-const limitSchema = z.number().int().min(1).max(1000);
-const SqliteQueueOptionsSchema = RunQueueOptionsSchema.extend({
-  readOnly: z.boolean().default(false),
-}).strict();
-const identifierPairSchema = z
-  .object({ jobId: QueueJobIdSchema, workerId: WorkerIdSchema })
-  .strict();
-
-function sqliteOperation<T>(operation: () => T): Promise<T> {
-  try {
-    return Promise.resolve(operation());
-  } catch (error) {
-    return Promise.reject(sqliteStoreError(error));
-  }
-}
-
-function queueJob(row: QueueRow): RunQueueJob {
-  return parseQueueInput(RunQueueJobSchema, {
-    jobId: row.job_id,
-    kind: row.kind,
-    runId: row.run_id,
-    priority: row.priority,
-    availableAt: row.available_at,
-    attempts: row.attempts,
-    maxAttempts: row.max_attempts,
-    ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
-    ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at }),
-    ...(row.idempotency_key === null ? {} : { idempotencyKey: row.idempotency_key }),
-    ...(row.last_error_code === null ? {} : { lastErrorCode: row.last_error_code }),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  });
-}
-
-function retryTimestamp(now: number, retryAfterMs: number, attempts: number): number {
-  const exponential = Math.min(
-    Number.MAX_SAFE_INTEGER - now,
-    retryAfterMs * 2 ** Math.min(attempts - 1, 52),
-  );
-  return now + Math.max(0, Math.trunc(exponential));
-}
+import {
+  SqliteQueueOptionsSchema,
+  deadLetter,
+  type DeadLetterRow,
+  durationSchema,
+  identifierPairSchema,
+  limitSchema,
+  type QueueRow,
+  queueJob,
+  retryTimestamp,
+  sqliteOperation,
+} from "./sqlite-helpers.js";
 
 /** Durable SQLite run queue using an immediate transaction for exclusive claims. */
 export class SqliteRunQueue implements RunQueue {
@@ -139,7 +76,6 @@ export class SqliteRunQueue implements RunQueue {
     this.clock = clock;
     this.ids = ids;
     this.db = new Database(path, readOnly ? { readonly: true, fileMustExist: true } : undefined);
-    this.quotaClaimGuard = createQuotaClaimGuard(this.db);
     try {
       if (!readOnly) {
         this.db.pragma("journal_mode = WAL");
@@ -150,6 +86,7 @@ export class SqliteRunQueue implements RunQueue {
           migrationDirectory: sqliteMigrationDirectory(),
         });
       }
+      this.quotaClaimGuard = createQuotaClaimGuard(this.db);
       this.enqueueStatement = this.db.prepare<
         [string, string, string, number, number, number, string | null, number, number]
       >(
@@ -251,24 +188,29 @@ export class SqliteRunQueue implements RunQueue {
             options === undefined
               ? this.selectClaimableStatement.all(now, now, count)
               : this.selectAllClaimableStatement.all(now, now);
+          const quotaClaimGuard = options === undefined ? undefined : this.quotaClaimGuard(now);
           const claimed: RunQueueJob[] = [];
           for (const row of rows) {
             if (claimed.length >= count) {
               break;
             }
-            if (options !== undefined) {
-              if (!this.quotaClaimGuard(row.run_id, now, options.canClaim)) {
-                continue;
-              }
+            if (
+              options !== undefined &&
+              quotaClaimGuard !== undefined &&
+              !quotaClaimGuard(row.run_id, options.canClaim)
+            ) {
+              continue;
             }
             this.leaseStatement.run(worker, leaseExpiresAt, now, row.job_id);
-            claimed.push(queueJob({
-              ...row,
-              lease_owner: worker,
-              lease_expires_at: leaseExpiresAt,
-              attempts: row.attempts + 1,
-              updated_at: now,
-            }));
+            claimed.push(
+              queueJob({
+                ...row,
+                lease_owner: worker,
+                lease_expires_at: leaseExpiresAt,
+                attempts: row.attempts + 1,
+                updated_at: now,
+              }),
+            );
           }
           return claimed;
         })
@@ -421,19 +363,7 @@ export class SqliteRunQueue implements RunQueue {
     return sqliteOperation(() => {
       const id = parseQueueInput(QueueJobIdSchema, jobId);
       const row = this.findDeadLetterStatement.get(id);
-      return row === undefined
-        ? undefined
-        : parseQueueInput(RunQueueDeadLetterSchema, {
-            jobId: row.job_id,
-            kind: row.kind,
-            runId: row.run_id,
-            attempts: row.attempts,
-            maxAttempts: row.max_attempts,
-            ...(row.idempotency_key === null ? {} : { idempotencyKey: row.idempotency_key }),
-            lastErrorCode: row.last_error_code,
-            createdAt: row.created_at,
-            deadAt: row.dead_at,
-          });
+      return row === undefined ? undefined : deadLetter(row);
     });
   }
 

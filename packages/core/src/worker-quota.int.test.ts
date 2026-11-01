@@ -2,19 +2,16 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  FakeClock,
-  Id,
-  QuotasConfigSchema,
-  SequentialIdGenerator,
-} from "@rovinos/schemas";
+import { FakeClock, Id, QuotasConfigSchema, SequentialIdGenerator } from "@rovinos/schemas";
 import { createEventBuilders } from "@rovinos/store/testing";
 import { SqliteEventStore, SqliteRunQueue } from "@rovinos/store-sqlite";
-import { expect, it } from "vitest";
+import * as telemetry from "@rovinos/telemetry";
+import { expect, it, vi } from "vitest";
 import { QuotaService } from "./quotas.js";
 import { Worker } from "./worker.js";
 
 it("keeps matching runs within maxConcurrentRuns across two SQLite workers", async () => {
+  const quotaRejection = vi.spyOn(telemetry, "countQuotaRejection");
   const directory = await mkdtemp(join(tmpdir(), "harness-worker-quota-"));
   const path = join(directory, "harness.db");
   const clock = new FakeClock(100);
@@ -145,6 +142,7 @@ it("keeps matching runs within maxConcurrentRuns across two SQLite workers", asy
     expect(secondRunStarted).toBe(false);
     expect((await store.listRuns({ status: "running", limit: 10 })).runs).toHaveLength(1);
     expect(maximumActiveRuns).toBe(1);
+    expect(quotaRejection).toHaveBeenCalledWith("research_team");
 
     finishFirstRun();
     await secondStarted;
@@ -159,5 +157,6 @@ it("keeps matching runs within maxConcurrentRuns across two SQLite workers", asy
     await Promise.allSettled(workerRuns);
     await Promise.all([firstQueue.close(), secondQueue.close(), store.close()]);
     await rm(directory, { recursive: true, force: true });
+    quotaRejection.mockRestore();
   }
 });

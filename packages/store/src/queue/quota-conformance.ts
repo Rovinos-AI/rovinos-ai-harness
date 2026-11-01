@@ -7,31 +7,85 @@ import type { RunQueueFactoryCreator } from "./conformance.js";
 const canClaim = (
   identity: RunQueueRunIdentity,
   activeRuns: readonly RunQueueRunIdentity[],
+  alreadyRunning: boolean,
 ): boolean =>
+  alreadyRunning ||
   identity.requestedBy !== "cli.alice" ||
   identity.role !== "researcher" ||
-  activeRuns.filter(
-    (active) => active.requestedBy === "cli.alice" && active.role === "researcher",
-  ).length < 1;
+  activeRuns.filter((active) => active.requestedBy === "cli.alice" && active.role === "researcher")
+    .length < 1;
 
-export function registerQuotaClaimConformance(factory: RunQueueFactoryCreator): void {
+function registerDeadLetterSlotRelease(factory: RunQueueFactoryCreator): void {
+  it("does not count a dead-lettered running run against concurrent capacity", async () => {
+    const clock = new FakeClock(100);
+    const instance = await factory(clock);
+    try {
+      const queue = instance.open();
+      const failedRun = "00000000000000000000000027";
+      const nextRun = "00000000000000000000000028";
+      await instance.seedRun(failedRun, { requestedBy: "cli.alice", role: "researcher" });
+      await instance.seedRun(nextRun, { requestedBy: "cli.alice", role: "researcher" });
+      const expired = await queue.enqueue({ kind: "start", runId: failedRun, maxAttempts: 1 });
+      await queue.claim("worker.first", 1, 10);
+      await instance.markRunning(failedRun);
+      clock.advance(10);
+      await queue.enqueue({ kind: "start", runId: nextRun });
+
+      const [claimed] = await queue.claim("worker.second", 1, 10, { canClaim });
+
+      expect(claimed?.runId).toBe(nextRun);
+      await expect(queue.getDeadLetter(expired.jobId)).resolves.toMatchObject({ attempts: 1 });
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
+function registerRunningRunReclaim(factory: RunQueueFactoryCreator): void {
+  it("allows an already-running run to reclaim its job when another run fills the quota", async () => {
+    const clock = new FakeClock(100);
+    const instance = await factory(clock);
+    try {
+      const queue = instance.open();
+      const activeRun = "00000000000000000000000029";
+      const reclaimRun = "00000000000000000000000030";
+      await instance.seedRun(activeRun, { requestedBy: "cli.alice", role: "researcher" });
+      await instance.seedRun(reclaimRun, { requestedBy: "cli.alice", role: "researcher" });
+      await queue.enqueue({ kind: "start", runId: activeRun });
+      const reclaimJob = await queue.enqueue({ kind: "start", runId: reclaimRun });
+      await queue.claim("worker.active", 1, 1000);
+      await queue.claim("worker.expiring", 1, 10);
+      await instance.markRunning(activeRun);
+      await instance.markRunning(reclaimRun);
+      clock.advance(10);
+
+      const [reclaimed] = await queue.claim("worker.reclaim", 1, 100, { canClaim });
+
+      expect(reclaimed?.runId).toBe(reclaimRun);
+      expect(reclaimed?.jobId).toBe(reclaimJob.jobId);
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
+function registerDeferredClaim(factory: RunQueueFactoryCreator): void {
   it("atomically defers matching runs until a claimed run finishes without consuming attempts", async () => {
     const instance = await factory(new FakeClock(100));
     try {
       const first = instance.open();
       const second = instance.open();
-      const runIds = [
-        "00000000000000000000000023",
-        "00000000000000000000000024",
-      ] as const;
-      await Promise.all(runIds.map((runId) => instance.seedRun(runId, {
-        requestedBy: "cli.alice",
-        role: "researcher",
-      })));
-      const jobs = await Promise.all(
+      const runIds = ["00000000000000000000000023", "00000000000000000000000024"] as const;
+      await Promise.all(
         runIds.map((runId) =>
-          first.enqueue({ kind: "start", runId, maxAttempts: 1 }),
+          instance.seedRun(runId, {
+            requestedBy: "cli.alice",
+            role: "researcher",
+          }),
         ),
+      );
+      const jobs = await Promise.all(
+        runIds.map((runId) => first.enqueue({ kind: "start", runId, maxAttempts: 1 })),
       );
 
       const claims = await Promise.all([
@@ -59,7 +113,9 @@ export function registerQuotaClaimConformance(factory: RunQueueFactoryCreator): 
       await instance.cleanup();
     }
   });
+}
 
+function registerNonMatchingClaim(factory: RunQueueFactoryCreator): void {
   it("claims a non-matching run while the matching quota is full", async () => {
     const instance = await factory(new FakeClock(100));
     try {
@@ -80,4 +136,12 @@ export function registerQuotaClaimConformance(factory: RunQueueFactoryCreator): 
       await instance.cleanup();
     }
   });
+}
+
+/** Register claim-time quota behavior required of every durable queue. */
+export function registerQuotaClaimConformance(factory: RunQueueFactoryCreator): void {
+  registerDeadLetterSlotRelease(factory);
+  registerRunningRunReclaim(factory);
+  registerDeferredClaim(factory);
+  registerNonMatchingClaim(factory);
 }

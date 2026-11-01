@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import Database from "better-sqlite3";
-import type { RunQueueRunIdentity } from "@rovinos/store";
-import {
-  RunQueueRunIdentitySchema,
-  parseQueueInput,
-} from "@rovinos/store/adapter-internal";
+import type Database from "better-sqlite3";
+import type { RunQueueRunIdentity, RunQueueClaimGuard } from "@rovinos/store";
+import { RunQueueRunIdentitySchema, parseQueueInput } from "@rovinos/store/adapter-internal";
 
 interface QuotaIdentityRow {
   run_id: string;
   requested_by: unknown;
   role: unknown;
+}
+
+interface CandidateQuotaIdentityRow extends QuotaIdentityRow {
+  status: string;
 }
 
 function quotaIdentity(runId: string, row: QuotaIdentityRow | undefined): RunQueueRunIdentity {
@@ -22,21 +23,30 @@ function quotaIdentity(runId: string, row: QuotaIdentityRow | undefined): RunQue
   });
 }
 
+/** Creates lazy statements so read-only queues can open without event tables. */
 export function createQuotaClaimGuard(
   db: Database.Database,
-): (runId: string, now: number, canClaim: (identity: RunQueueRunIdentity, activeRuns: readonly RunQueueRunIdentity[]) => boolean) => boolean {
-  const identityStatement = db.prepare<[string], QuotaIdentityRow>(
-    "SELECT run_id, json_extract(meta_json, '$.requestedBy') AS requested_by, json_extract(meta_json, '$.quotaRole') AS role FROM events WHERE run_id = ? AND type = 'run_created' LIMIT 1",
-  );
-  const activeIdentitiesStatement = db.prepare<[number], QuotaIdentityRow>(
-    "SELECT DISTINCT r.run_id, json_extract(e.meta_json, '$.requestedBy') AS requested_by, json_extract(e.meta_json, '$.quotaRole') AS role FROM runs AS r JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE r.status = 'running' OR EXISTS (SELECT 1 FROM run_queue AS q WHERE q.run_id = r.run_id AND q.lease_owner IS NOT NULL AND q.lease_expires_at > ?)",
-  );
-  return (runId, now, canClaim) => {
-    const identity = quotaIdentity(runId, identityStatement.get(runId));
+): (now: number) => (runId: string, canClaim: RunQueueClaimGuard) => boolean {
+  let identityStatement: Database.Statement<[string], CandidateQuotaIdentityRow> | undefined;
+  let activeIdentitiesStatement: Database.Statement<[number], QuotaIdentityRow> | undefined;
+  return (now) => {
+    identityStatement ??= db.prepare<[string], CandidateQuotaIdentityRow>(
+      "SELECT e.run_id, json_extract(e.meta_json, '$.requestedBy') AS requested_by, json_extract(e.meta_json, '$.quotaRole') AS role, r.status FROM events AS e JOIN runs AS r ON r.run_id = e.run_id WHERE e.run_id = ? AND e.type = 'run_created' LIMIT 1",
+    );
+    activeIdentitiesStatement ??= db.prepare<[number], QuotaIdentityRow>(
+      "SELECT DISTINCT e.run_id, json_extract(e.meta_json, '$.requestedBy') AS requested_by, json_extract(e.meta_json, '$.quotaRole') AS role FROM run_queue AS q INDEXED BY run_queue_active_lease_idx JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > ?",
+    );
     const activeRuns = activeIdentitiesStatement
       .all(now)
-      .filter((active) => active.run_id !== identity.runId)
       .map((active) => quotaIdentity(active.run_id, active));
-    return canClaim(identity, activeRuns);
+    return (runId, canClaim) => {
+      const row = identityStatement?.get(runId);
+      const identity = quotaIdentity(runId, row);
+      const allowed = canClaim(identity, activeRuns, row?.status === "running");
+      if (allowed && row?.status !== "running") {
+        activeRuns.push(identity);
+      }
+      return allowed;
+    };
   };
 }

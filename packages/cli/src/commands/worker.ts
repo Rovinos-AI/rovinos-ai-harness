@@ -90,11 +90,7 @@ export function createWorkerCommand(dependencies: WorkerCommandDependencies = {}
               clock: runtime.clock,
               ...(config.quotas.some((quota) => quota.maxConcurrentRuns !== undefined)
                 ? {
-                    quotaService: new QuotaService(
-                      config.quotas,
-                      runtime.store,
-                      runtime.clock,
-                    ),
+                    quotaService: new QuotaService(config.quotas, runtime.store, runtime.clock),
                   }
                 : {}),
               concurrency: concurrency.data,

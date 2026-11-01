@@ -50,6 +50,14 @@ const postgresFactory: RunQueueFactoryCreator = async (clock: Clock) => {
         0,
       );
     },
+    async markRunning(runId) {
+      const id = Id.parse(runId);
+      await store.append(
+        id,
+        [builders.runStatusChanged(id, "pending", "running")],
+        await store.head(id),
+      );
+    },
     async cleanup() {
       await Promise.all([...queues].map((queue) => queue.close()));
       await store.close();

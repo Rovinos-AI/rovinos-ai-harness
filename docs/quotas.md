@@ -36,11 +36,14 @@ recorded atomically and subsequent model calls are stopped. Concurrent runs may
 all pass the pre-call check before any response is charged, so their in-flight
 cost can overshoot a shared limit; this is not a spend reservation.
 
-At worker claim time, `maxConcurrentRuns` limits the number of matching runs in
-`running` status across workers. An already-leased run that has not yet entered
-`running` also reserves a slot, so concurrent workers cannot claim past the
-limit. A matching job that would exceed the limit stays queued without using an
-attempt; non-matching jobs can still be claimed.
+At worker claim time, `maxConcurrentRuns` limits matching runs with an active
+queue lease across workers. A lease reserves a slot before the run enters
+`running`, so concurrent workers cannot claim past the limit. Runs whose queue
+job has no active lease—including a job that was dead-lettered—do not reserve a
+slot, even if their last persisted status is `running`. A run already in
+`running` can reclaim its own expired job. A matching job that would exceed the
+limit stays queued without using an attempt; non-matching jobs can still be
+claimed.
 
 Quota rejections increment `harness.quota.rejections` with the configured quota
 code as the only attribute. Principal identities are not included in metrics.

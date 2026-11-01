@@ -157,7 +157,10 @@ export class Worker {
             quotaService === undefined
               ? undefined
               : {
-                  canClaim: (identity, activeRuns) => {
+                  canClaim: (identity, activeRuns, alreadyRunning) => {
+                    if (alreadyRunning) {
+                      return true;
+                    }
                     try {
                       quotaService.assertCanClaim(
                         {
@@ -180,12 +183,7 @@ export class Worker {
                     }
                   },
                 };
-          const jobs = await this.queue.claim(
-            this.workerId,
-            available,
-            this.leaseMs,
-            claimOptions,
-          );
+          const jobs = await this.queue.claim(this.workerId, available, this.leaseMs, claimOptions);
           if (this.isStopping()) {
             await Promise.all(jobs.map((job) => this.queue.release(job.jobId, this.workerId)));
             break;
