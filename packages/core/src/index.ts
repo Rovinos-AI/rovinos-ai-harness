@@ -193,6 +193,7 @@ export {
   type WorkerJobOutcome,
   type WorkerOptions,
 } from "./worker.js";
+export { QuotaExceededError, QuotaService } from "./quotas.js";
 export {
   ASK_USER_TOOL_SPEC,
   AskUserInputSchema,

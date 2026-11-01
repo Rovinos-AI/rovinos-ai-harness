@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { expect, it } from "vitest";
-import { SequentialIdGenerator } from "@rovinos/schemas";
+import { Id, SequentialIdGenerator } from "@rovinos/schemas";
 import type { Clock } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { SqliteEventStore } from "../sqlite/adapter.js";
 import { SqliteRunQueue } from "./sqlite.js";
 import { runQueueConformance, type RunQueueFactoryCreator } from "@rovinos/store/testing";
 
@@ -16,14 +18,31 @@ const sqliteFactory: RunQueueFactoryCreator = async (clock: Clock) => {
   const path = join(directory, `${String(nextDirectory++)}.sqlite`);
   const ids = new SequentialIdGenerator();
   const queues = new Set<SqliteRunQueue>();
+  const store = new SqliteEventStore(path);
+  const builders = createEventBuilders();
   return {
     open() {
       const queue = new SqliteRunQueue(path, {}, clock, ids);
       queues.add(queue);
       return queue;
     },
+    async seedRun(runId, identity) {
+      const id = Id.parse(runId);
+      await store.append(
+        id,
+        [
+          {
+            ...builders.runCreated(id),
+            ...(identity.requestedBy === undefined ? {} : { requestedBy: identity.requestedBy }),
+            ...(identity.role === undefined ? {} : { quotaRole: identity.role }),
+          },
+        ],
+        0,
+      );
+    },
     async cleanup() {
       await Promise.all([...queues].map((queue) => queue.close()));
+      await store.close();
       await rm(directory, { recursive: true, force: true });
     },
   };

@@ -159,12 +159,12 @@ export class QuotaService {
     return undefined;
   }
 
-  /** Reject a worker claim when the quota's active-run count has reached its limit. */
-  assertCanClaim(identity: QuotaIdentity, activeRunsByQuota: ReadonlyMap<Code, number>): void {
+  /** Reject a worker claim when the quota's active matching runs have reached its limit. */
+  assertCanClaim(identity: QuotaIdentity, activeRuns: readonly QuotaIdentity[]): void {
     for (const quota of this.matching(identity)) {
       if (
         quota.maxConcurrentRuns !== undefined &&
-        (activeRunsByQuota.get(quota.id) ?? 0) >= quota.maxConcurrentRuns
+        activeRuns.filter((active) => matches(quota, active)).length >= quota.maxConcurrentRuns
       ) {
         this.reject(quota.id);
       }

@@ -3,11 +3,17 @@ import { describe, expect, it } from "vitest";
 import { FakeClock } from "@rovinos/schemas";
 import type { Clock } from "../types.js";
 import type { RunQueue } from "./types.js";
+import { registerQuotaClaimConformance } from "./quota-conformance.js";
+
+/** Identity fields used to seed a run for queue admission tests. */
+export type RunQueueSeedIdentity = Pick<RunQueueRunIdentity, "requestedBy" | "role">;
 
 /** Isolated connections and cleanup for one queue conformance run. */
 export interface RunQueueFactory {
   /** Open a queue connection to the factory's shared database. */
   open(): RunQueue;
+  /** Persist the metadata-only run-created event used by quota admission tests. */
+  seedRun(runId: string, identity: RunQueueSeedIdentity): Promise<void>;
   /** Close connections and remove any adapter-specific test data. */
   cleanup(): Promise<void>;
 }
@@ -364,6 +370,7 @@ export function runQueueConformance(name: string, factory: RunQueueFactoryCreato
     registerEnqueueCompletionRaceConformance(factory);
     registerWakeDuringLeaseConformance(factory);
     registerClaimConformance(factory);
+    registerQuotaClaimConformance(factory);
     registerOrderingConformance(factory);
     registerLeaseConformance(factory);
     registerRetryConformance(factory);

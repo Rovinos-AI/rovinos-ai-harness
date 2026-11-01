@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
-import { SequentialIdGenerator } from "@rovinos/schemas";
+import { Id, SequentialIdGenerator } from "@rovinos/schemas";
 import type { Clock } from "@rovinos/store";
+import { createEventBuilders } from "@rovinos/store/testing";
+import { PostgresEventStore } from "../postgres/adapter.js";
 import { PostgresRunQueue } from "./postgres.js";
 import { runQueueConformance, type RunQueueFactoryCreator } from "@rovinos/store/testing";
 
@@ -26,14 +28,31 @@ const postgresFactory: RunQueueFactoryCreator = async (clock: Clock) => {
   await admin.query(`CREATE SCHEMA "${schema}"`);
   const ids = new SequentialIdGenerator();
   const queues = new Set<PostgresRunQueue>();
+  const store = new PostgresEventStore(connectionString, { schema }, undefined, clock);
+  const builders = createEventBuilders();
   return {
     open() {
       const queue = new PostgresRunQueue(connectionString, { poolSize: 3, schema }, clock, ids);
       queues.add(queue);
       return queue;
     },
+    async seedRun(runId, identity) {
+      const id = Id.parse(runId);
+      await store.append(
+        id,
+        [
+          {
+            ...builders.runCreated(id),
+            ...(identity.requestedBy === undefined ? {} : { requestedBy: identity.requestedBy }),
+            ...(identity.role === undefined ? {} : { quotaRole: identity.role }),
+          },
+        ],
+        0,
+      );
+    },
     async cleanup() {
       await Promise.all([...queues].map((queue) => queue.close()));
+      await store.close();
       await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await admin.end();
     },

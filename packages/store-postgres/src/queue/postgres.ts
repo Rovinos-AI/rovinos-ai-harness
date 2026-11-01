@@ -16,6 +16,7 @@ import {
   EnqueueRunJobSchema,
   QueueErrorCodeSchema,
   QueueJobIdSchema,
+  RunQueueRunIdentitySchema,
   systemClock,
   WorkerIdSchema,
   hashIdempotencyKey,
@@ -36,6 +37,7 @@ import {
   retryTimestamp,
   type QueueRow,
 } from "./postgres-helpers.js";
+import { claimQuotaCandidates } from "./postgres-quota.js";
 
 /** Durable Postgres run queue using row locks with `SKIP LOCKED` for exclusive claims. */
 export class PostgresRunQueue implements RunQueue {
@@ -173,11 +175,19 @@ export class PostgresRunQueue implements RunQueue {
   }
 
   /** {@inheritDoc @rovinos/store!queue/types.RunQueue.claim} */
-  async claim(workerId: string, limit: number, leaseMs: number): Promise<RunQueueJob[]> {
+  async claim(
+    workerId: string,
+    limit: number,
+    leaseMs: number,
+    options?: Parameters<RunQueue["claim"]>[3],
+  ): Promise<RunQueueJob[]> {
     const worker = parseQueueInput(WorkerIdSchema, workerId);
     const count = parseQueueInput(limitSchema, limit);
     const duration = parseQueueInput(durationSchema, leaseMs);
     return this.transaction(async (client) => {
+      if (options !== undefined) {
+        await client.query("SELECT pg_advisory_xact_lock(2414)");
+      }
       const expired = await client.query<QueueRow>(
         "SELECT * FROM run_queue WHERE attempts >= max_attempts AND lease_expires_at <= $1 ORDER BY lease_expires_at, job_id FOR UPDATE SKIP LOCKED",
         [this.now()],
@@ -208,29 +218,37 @@ export class PostgresRunQueue implements RunQueue {
         );
         await client.query("DELETE FROM run_queue WHERE job_id = $1", [row.job_id]);
       }
-      const selected = await client.query<QueueRow>(
-        "SELECT * FROM run_queue WHERE available_at <= $1 AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= $1) ORDER BY priority DESC, available_at, created_at, job_id LIMIT $2 FOR UPDATE SKIP LOCKED",
-        [this.now(), count],
-      );
       const claimed: RunQueueJob[] = [];
       const now = this.now();
       const leaseExpiresAt = parseQueueInput(z.number().int().nonnegative(), now + duration);
-      for (const row of selected.rows) {
-        if (
-          numberColumn(row.available_at) > now ||
-          row.attempts >= row.max_attempts ||
-          (row.lease_expires_at !== null && numberColumn(row.lease_expires_at) > now)
-        ) {
-          continue;
-        }
-        const result = await client.query<QueueRow>(
-          "UPDATE run_queue SET lease_owner = $1, lease_expires_at = $2, attempts = attempts + 1, updated_at = $3 WHERE job_id = $4 AND available_at <= $3 AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= $3) RETURNING *",
-          [worker, leaseExpiresAt, now, row.job_id],
+      if (options === undefined) {
+        const selected = await client.query<QueueRow>(
+          "SELECT * FROM run_queue WHERE available_at <= $1 AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= $1) ORDER BY priority DESC, available_at, created_at, job_id LIMIT $2 FOR UPDATE SKIP LOCKED",
+          [now, count],
         );
-        const updated = result.rows[0];
-        if (updated !== undefined) {
-          claimed.push(queueJob(updated));
+        for (const row of selected.rows) {
+          if (
+            numberColumn(row.available_at) > now ||
+            row.attempts >= row.max_attempts ||
+            (row.lease_expires_at !== null && numberColumn(row.lease_expires_at) > now)
+          ) {
+            continue;
+          }
+          const result = await client.query<QueueRow>(
+            "UPDATE run_queue SET lease_owner = $1, lease_expires_at = $2, attempts = attempts + 1, updated_at = $3 WHERE job_id = $4 AND available_at <= $3 AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= $3) RETURNING *",
+            [worker, leaseExpiresAt, now, row.job_id],
+          );
+          const updated = result.rows[0];
+          if (updated !== undefined) {
+            claimed.push(queueJob(updated));
+          }
         }
+      } else {
+        claimed.push(
+          ...(await claimQuotaCandidates(client, worker, count, now, leaseExpiresAt, options)).map(
+            queueJob,
+          ),
+        );
       }
       return claimed;
     });

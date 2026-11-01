@@ -23,7 +23,7 @@ export const QuotaConfigSchema = z
       .int()
       .positive()
       .optional()
-      .describe("Currently inert; enforced by workers in task 24.3."),
+      .describe("Maximum concurrent running runs matching this quota; excess jobs stay queued."),
     maxRunsPerHour: z.number().int().positive().optional(),
   })
   .strict();

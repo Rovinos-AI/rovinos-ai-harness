@@ -26,6 +26,7 @@ import {
 } from "@rovinos/store/adapter-internal";
 import { sqliteMigrationDirectory } from "../migration-directory.js";
 import { sqliteStoreError } from "../sqlite/outbox.js";
+import { createQuotaClaimGuard } from "./sqlite-quota.js";
 
 interface QueueRow {
   job_id: string;
@@ -111,6 +112,8 @@ export class SqliteRunQueue implements RunQueue {
     QueueRow
   >;
   private readonly selectClaimableStatement: Database.Statement<[number, number, number], QueueRow>;
+  private readonly selectAllClaimableStatement: Database.Statement<[number, number], QueueRow>;
+  private readonly quotaClaimGuard: ReturnType<typeof createQuotaClaimGuard>;
   private readonly leaseStatement: Database.Statement<[string, number, number, string]>;
   private readonly deadLetterStatement: Database.Statement<[string, number, number]>;
   private readonly findDeadLetterStatement: Database.Statement<[string], DeadLetterRow>;
@@ -136,6 +139,7 @@ export class SqliteRunQueue implements RunQueue {
     this.clock = clock;
     this.ids = ids;
     this.db = new Database(path, readOnly ? { readonly: true, fileMustExist: true } : undefined);
+    this.quotaClaimGuard = createQuotaClaimGuard(this.db);
     try {
       if (!readOnly) {
         this.db.pragma("journal_mode = WAL");
@@ -159,6 +163,9 @@ export class SqliteRunQueue implements RunQueue {
       );
       this.selectClaimableStatement = this.db.prepare<[number, number, number], QueueRow>(
         "SELECT * FROM run_queue WHERE available_at <= ? AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= ?) ORDER BY priority DESC, available_at, created_at, job_id LIMIT ?",
+      );
+      this.selectAllClaimableStatement = this.db.prepare<[number, number], QueueRow>(
+        "SELECT * FROM run_queue WHERE available_at <= ? AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= ?) ORDER BY priority DESC, available_at, created_at, job_id",
       );
       this.leaseStatement = this.db.prepare<[string, number, number, string]>(
         "UPDATE run_queue SET lease_owner = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ? WHERE job_id = ?",
@@ -220,7 +227,12 @@ export class SqliteRunQueue implements RunQueue {
   }
 
   /** {@inheritDoc @rovinos/store!queue/types.RunQueue.claim} */
-  claim(workerId: string, limit: number, leaseMs: number): Promise<RunQueueJob[]> {
+  claim(
+    workerId: string,
+    limit: number,
+    leaseMs: number,
+    options?: Parameters<RunQueue["claim"]>[3],
+  ): Promise<RunQueueJob[]> {
     return sqliteOperation(() => {
       const worker = parseQueueInput(WorkerIdSchema, workerId);
       const count = parseQueueInput(limitSchema, limit);
@@ -235,17 +247,30 @@ export class SqliteRunQueue implements RunQueue {
               "DELETE FROM run_queue WHERE attempts >= max_attempts AND lease_expires_at <= ?",
             )
             .run(now);
-          const rows = this.selectClaimableStatement.all(now, now, count);
-          return rows.map((row) => {
+          const rows =
+            options === undefined
+              ? this.selectClaimableStatement.all(now, now, count)
+              : this.selectAllClaimableStatement.all(now, now);
+          const claimed: RunQueueJob[] = [];
+          for (const row of rows) {
+            if (claimed.length >= count) {
+              break;
+            }
+            if (options !== undefined) {
+              if (!this.quotaClaimGuard(row.run_id, now, options.canClaim)) {
+                continue;
+              }
+            }
             this.leaseStatement.run(worker, leaseExpiresAt, now, row.job_id);
-            return queueJob({
+            claimed.push(queueJob({
               ...row,
               lease_owner: worker,
               lease_expires_at: leaseExpiresAt,
               attempts: row.attempts + 1,
               updated_at: now,
-            });
-          });
+            }));
+          }
+          return claimed;
         })
         .immediate();
     });

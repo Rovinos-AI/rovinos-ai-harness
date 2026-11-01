@@ -9,8 +9,14 @@ const fakePg = vi.hoisted(() => {
   const jobs = new Map<string, Row>();
   const dead = new Map<string, Row>();
   const migrations = new Map<string, string>();
+  const eventRuns = new Map<
+    string,
+    { requested_by: string | null; role: string | null; status: string }
+  >();
   const locks = new Map<string, number>();
+  const quotaLockWaiters: { clientId: number; resolve: () => void }[] = [];
   let nextClientId = 0;
+  let quotaLockOwner: number | undefined;
   let nextConnectionWait: (() => Promise<void>) | undefined;
   let beforeNextForUpdate: (() => void) | undefined;
 
@@ -36,6 +42,11 @@ const fakePg = vi.hoisted(() => {
         locks.delete(jobId);
       }
     }
+    if (quotaLockOwner === clientId) {
+      const next = quotaLockWaiters.shift();
+      quotaLockOwner = next?.clientId;
+      next?.resolve();
+    }
   }
 
   function handle(
@@ -55,6 +66,28 @@ const fakePg = vi.hoisted(() => {
     if (sql === "COMMIT" || sql === "ROLLBACK") {
       releaseLocks(clientId);
       return { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith("SELECT run_id, meta ->>")) {
+      const runId = stringValue(values, 0);
+      const run = eventRuns.get(runId);
+      return {
+        rows: run === undefined ? [] : [{ run_id: runId, ...run }],
+        rowCount: run === undefined ? 0 : 1,
+      };
+    }
+    if (sql.startsWith("SELECT DISTINCT r.run_id")) {
+      const now = numberValue(values, 0);
+      const rows = [...eventRuns].flatMap(([runId, run]) => {
+        const leased = [...jobs.values()].some(
+          (job) =>
+            job.run_id === runId &&
+            job.lease_owner !== null &&
+            typeof job.lease_expires_at === "number" &&
+            job.lease_expires_at > now,
+        );
+        return run.status === "running" || leased ? [{ run_id: runId, ...run }] : [];
+      });
+      return { rows, rowCount: rows.length };
     }
     if (sql.startsWith("SELECT version, checksum FROM schema_migrations")) {
       return {
@@ -140,7 +173,16 @@ const fakePg = vi.hoisted(() => {
     }
     if (sql.startsWith("SELECT * FROM run_queue WHERE available_at <=")) {
       const now = numberValue(values, 0);
-      const limit = numberValue(values, 1);
+      const skippedJobIds =
+        Array.isArray(values[1]) && values[1].every((value) => typeof value === "string")
+          ? values[1]
+          : [];
+      let limit = Number.MAX_SAFE_INTEGER;
+      if (typeof values[1] === "number") {
+        limit = numberValue(values, 1);
+      } else if (Array.isArray(values[1])) {
+        limit = 1;
+      }
       const rows = [...jobs.values()]
         .filter(
           (row) =>
@@ -151,6 +193,7 @@ const fakePg = vi.hoisted(() => {
             row.attempts < row.max_attempts &&
             (row.lease_owner === null ||
               (typeof row.lease_expires_at === "number" && row.lease_expires_at <= now)) &&
+            !skippedJobIds.includes(String(row.job_id)) &&
             !locks.has(String(row.job_id)),
         )
         .sort((left, right) => {
@@ -299,6 +342,25 @@ const fakePg = vi.hoisted(() => {
     pauseNextConnection(wait: () => Promise<void>): void {
       nextConnectionWait = wait;
     },
+    async acquireQuotaLock(clientId: number): Promise<void> {
+      if (quotaLockOwner === undefined) {
+        quotaLockOwner = clientId;
+        return;
+      }
+      if (quotaLockOwner !== clientId) {
+        await new Promise<void>((resolve) => quotaLockWaiters.push({ clientId, resolve }));
+      }
+    },
+    seedRun(
+      runId: string,
+      identity: { requestedBy?: string | undefined; role?: string | undefined },
+    ): void {
+      eventRuns.set(runId, {
+        requested_by: identity.requestedBy ?? null,
+        role: identity.role ?? null,
+        status: "pending",
+      });
+    },
     beforeNextLockedQuery(hook: () => void): void {
       beforeNextForUpdate = hook;
     },
@@ -307,8 +369,11 @@ const fakePg = vi.hoisted(() => {
       jobs.clear();
       dead.clear();
       migrations.clear();
+      eventRuns.clear();
       locks.clear();
+      quotaLockWaiters.length = 0;
       nextClientId = 0;
+      quotaLockOwner = undefined;
       nextConnectionWait = undefined;
       beforeNextForUpdate = undefined;
     },
@@ -325,8 +390,12 @@ vi.mock("pg", () => ({
       await fakePg.waitForNextConnection();
       const clientId = fakePg.newClientId();
       return {
-        query: (query: string, values: unknown[] = []) =>
-          Promise.resolve(fakePg.handle(query, values, clientId)),
+        query: async (query: string, values: unknown[] = []) => {
+          if (query.startsWith("SELECT pg_advisory_xact_lock")) {
+            await fakePg.acquireQuotaLock(clientId);
+          }
+          return fakePg.handle(query, values, clientId);
+        },
         release: () => undefined,
       };
     }
@@ -357,6 +426,10 @@ const postgresFactory: RunQueueFactoryCreator = (clock: Clock) => {
       );
       queues.add(queue);
       return queue;
+    },
+    seedRun(runId, identity) {
+      fakePg.seedRun(runId, identity);
+      return Promise.resolve();
     },
     async cleanup() {
       await Promise.all([...queues].map((queue) => queue.close()));

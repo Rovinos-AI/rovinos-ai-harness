@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError } from "@rovinos/schemas";
 import type { HarnessConfig } from "@rovinos/config";
-import type { Runtime } from "@rovinos/core";
+import { QuotaService, type Runtime } from "@rovinos/core";
 import type { RunQueue } from "@rovinos/store";
 import { z } from "zod";
 import type { CliContext, CommandModule } from "../command.js";
@@ -19,6 +19,7 @@ class WorkerCommandError extends HarnessError {
 }
 
 type WorkerRuntime = Pick<Runtime, "ids" | "clock" | "close"> & {
+  store: Pick<Runtime["store"], "readUsageLedger">;
   resume(
     runId: Parameters<Runtime["resume"]>[0],
     options: Parameters<Runtime["resume"]>[1],
@@ -87,6 +88,15 @@ export function createWorkerCommand(dependencies: WorkerCommandDependencies = {}
               queue,
               ids: runtime.ids,
               clock: runtime.clock,
+              ...(config.quotas.some((quota) => quota.maxConcurrentRuns !== undefined)
+                ? {
+                    quotaService: new QuotaService(
+                      config.quotas,
+                      runtime.store,
+                      runtime.clock,
+                    ),
+                  }
+                : {}),
               concurrency: concurrency.data,
               execute: async (job, signal) => {
                 try {

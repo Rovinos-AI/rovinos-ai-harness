@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, randomBytes } from "node:crypto";
-import { Code, HarnessError, Id, Sha256Hex } from "@rovinos/schemas";
+import { Code, HarnessError, Id, Principal, Sha256Hex } from "@rovinos/schemas";
 import { z } from "zod";
 import { systemClock, type Clock } from "../types.js";
 
@@ -45,6 +45,28 @@ export const RunQueueJobSchema = z
   .strict();
 /** Metadata-only queue job. */
 export type RunQueueJob = z.infer<typeof RunQueueJobSchema>;
+
+/** Persisted quota identity used while deciding whether a run may be claimed. */
+export const RunQueueRunIdentitySchema = z
+  .object({
+    runId: Id,
+    requestedBy: Principal.optional(),
+    role: Code.optional(),
+  })
+  .strict();
+/** Inferred identity metadata for one queued run. */
+export type RunQueueRunIdentity = z.infer<typeof RunQueueRunIdentitySchema>;
+
+/** Synchronous quota admission check executed inside the atomic claim transaction. */
+export type RunQueueClaimGuard = (
+  identity: RunQueueRunIdentity,
+  activeRuns: readonly RunQueueRunIdentity[],
+) => boolean;
+
+/** Optional admission check used to defer jobs that exceed configured run quotas. */
+export interface RunQueueClaimOptions {
+  readonly canClaim: RunQueueClaimGuard;
+}
 
 /** Result of failing a leased job. */
 export const RunQueueFailResultSchema = z.enum(["retry", "dead", "lease_lost"]);
@@ -118,7 +140,12 @@ export interface RunQueue {
   /** Insert a job or return the matching active job, preserving wake-ups during a lease. */
   enqueue(job: EnqueueRunJob): Promise<RunQueueJob>;
   /** Atomically lease up to `limit` available jobs to one worker. */
-  claim(workerId: string, limit: number, leaseMs: number): Promise<RunQueueJob[]>;
+  claim(
+    workerId: string,
+    limit: number,
+    leaseMs: number,
+    options?: RunQueueClaimOptions,
+  ): Promise<RunQueueJob[]>;
   /** Extend the current, unexpired lease when it is still owned by this worker. */
   heartbeat(jobId: string, workerId: string, leaseMs: number): Promise<boolean>;
   /** Finish a leased job, retaining it when a wake-up arrived during execution. */
