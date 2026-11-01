@@ -24,6 +24,7 @@ interface ToolContextOptions {
   readonly inputChannels?: readonly HumanInputChannel[];
   readonly tokenizer?: Pick<Tokenizer, "tokenizeJson">;
   readonly resolver?: AuditingVaultResolver;
+  readonly requestStructuredModel?: RunContext["requestStructuredModel"];
 }
 
 /** Creates the run-scoped tool context and installs durable MRTR handling when resuming. */
@@ -39,6 +40,9 @@ export function createToolExecutionContext(
       signal: options.signal,
       toolRegistry: options.tool,
       ...(options.depth === undefined ? {} : { depth: options.depth }),
+      ...(options.requestStructuredModel === undefined
+        ? {}
+        : { requestStructuredModel: options.requestStructuredModel }),
     },
     options.recorder,
     events,
