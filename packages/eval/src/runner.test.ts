@@ -19,9 +19,10 @@ async function createDirectory(): Promise<string> {
   return path;
 }
 
-function makeSuite() {
+function makeSuite(invariants?: boolean) {
   return defineSuite({
     schemaVersion: 1,
+    ...(invariants === undefined ? {} : { invariants }),
     tasks: [
       { id: "task_one", input: { goal: "Goal one." }, graders: [], tags: [], trials: 1 },
       { id: "task_two", input: { goal: "Goal two." }, graders: [], tags: [], trials: 1 },
@@ -51,6 +52,27 @@ afterEach(async () => {
 });
 
 describe("runEval", () => {
+  it("adds invariant graders to library trial suites unless explicitly disabled", async () => {
+    const observed: string[][] = [];
+    const executor: TrialExecutor = {
+      run: (trial) => {
+        observed.push(trial.suite.tasks[0]?.graders.map(({ type }) => type) ?? []);
+        return Promise.resolve(resultFor(trial));
+      },
+    };
+
+    await runEval(makeSuite(), [{ id: "baseline" }], executor, {
+      outDir: await createDirectory(),
+    });
+    expect(observed[0]).toEqual(["approval_integrity", "no_denied_executed"]);
+
+    observed.length = 0;
+    await runEval(makeSuite(false), [{ id: "baseline" }], executor, {
+      outDir: await createDirectory(),
+    });
+    expect(observed[0]).toEqual([]);
+  });
+
   it("bounds concurrency, streams results, records failures, and returns plan order", async () => {
     const outDir = await createDirectory();
     let active = 0;
