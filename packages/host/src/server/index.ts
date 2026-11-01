@@ -60,6 +60,7 @@ export {
   ingestBatch,
   UI_DECISION_SPAN,
   UI_ERROR_SPAN,
+  UI_INPUT_SPAN,
   UI_INTERACTION_SPAN,
   UI_RENDER_SPAN,
   type AppSpan,
