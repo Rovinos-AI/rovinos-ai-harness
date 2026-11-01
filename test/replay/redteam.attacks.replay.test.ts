@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createRuntime,
+  ApprovalNotFoundError,
   type ModelCompletion,
   type PolicyPort,
   type Runtime,
@@ -12,7 +13,7 @@ import {
 import { FakeModelPort } from "@rovinos/core/testing";
 import { ToolRegistry, normalizeToolId, type McpTool } from "@rovinos/mcp";
 import { ProviderResultSchema, type ProviderAdapter } from "@rovinos/models";
-import { PolicyDocumentSchema, PolicyEngine } from "@rovinos/policy";
+import { ApprovalEditError, PolicyDocumentSchema, PolicyEngine } from "@rovinos/policy";
 import { InMemoryEventStore } from "@rovinos/store";
 import {
   Code,
@@ -469,12 +470,32 @@ describe("runtime-backed red-team attacks", () => {
           if (request?.type !== "approval_requested") {
             throw new Error("redteam_approval_missing");
           }
-          await expect(
-            runtime.resolveApproval(runId, request.approvalId, "edit", {
+          const intent = events.find(
+            (event) => event.type === "tool_intent" && event.callId === request.callId,
+          );
+          if (intent?.type !== "tool_intent") {
+            throw new Error("redteam_tool_intent_missing");
+          }
+          const argsHashBefore = intent.argsHash;
+          const editError = await runtime
+            .resolveApproval(runId, request.approvalId, "edit", {
               edits: { value: "after", protected: "changed" },
               metadata: { decidedBy: "human", approverId: Code.parse("cli.redteam") },
-            }),
-          ).rejects.toBeDefined();
+            })
+            .catch((error: unknown) => error);
+          expect(editError).toBeInstanceOf(ApprovalEditError);
+          expect(editError).toMatchObject({ code: "edit_not_allowed" });
+          const eventsAfterAttempt: Event[] = [];
+          for await (const event of runtime.store.read(runId)) {
+            eventsAfterAttempt.push(event);
+          }
+          const intentAfter = eventsAfterAttempt.find(
+            (event) => event.type === "tool_intent" && event.callId === request.callId,
+          );
+          expect(intentAfter?.type === "tool_intent" ? intentAfter.argsHash : undefined).toBe(
+            argsHashBefore,
+          );
+          expect(verifyInvariants(eventsAfterAttempt)).toEqual([]);
           return { status };
         },
       });
@@ -516,13 +537,30 @@ describe("runtime-backed red-team attacks", () => {
             throw new Error("redteam_second_approval_missing");
           }
           expect(secondApproval.approvalId).not.toBe(firstApproval.approvalId);
-          await expect(
-            runtime.resolveApproval(second.runId, firstApproval.approvalId, "approve", {
+          const staleApprovalError = await runtime
+            .resolveApproval(second.runId, firstApproval.approvalId, "approve", {
               metadata: { decidedBy: "human", approverId: Code.parse("cli.redteam") },
-            }),
-          ).rejects.toBeDefined();
-          expect(secondEvents.some((event) => event.type === "approval_resolved")).toBe(false);
-          return { status: secondResult.status, additionalEvents: secondEvents };
+            })
+            .catch((error: unknown) => error);
+          expect(staleApprovalError).toBeInstanceOf(ApprovalNotFoundError);
+          expect(staleApprovalError).toMatchObject({ code: "approval_not_found" });
+          const firstEventsAfterAttempt: Event[] = [];
+          for await (const event of runtime.store.read(firstRunId)) {
+            firstEventsAfterAttempt.push(event);
+          }
+          const secondEventsAfterAttempt: Event[] = [];
+          for await (const event of runtime.store.read(second.runId)) {
+            secondEventsAfterAttempt.push(event);
+          }
+          expect(firstEventsAfterAttempt.some((event) => event.type === "approval_resolved")).toBe(
+            false,
+          );
+          expect(secondEventsAfterAttempt.some((event) => event.type === "approval_resolved")).toBe(
+            false,
+          );
+          expect(verifyInvariants(firstEventsAfterAttempt)).toEqual([]);
+          expect(verifyInvariants(secondEventsAfterAttempt)).toEqual([]);
+          return { status: secondResult.status, additionalEvents: secondEventsAfterAttempt };
         },
       });
 
