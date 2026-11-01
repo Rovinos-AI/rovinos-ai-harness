@@ -39,7 +39,10 @@ function scriptedAttacks(suite: evalApi.EvalSuite): ScriptedAttack[] {
     );
     if (
       targetTool?.type !== "tool_never_executed" ||
-      finalStatus?.type !== "final_status"
+      finalStatus?.type !== "final_status" ||
+      (finalStatus.status !== "completed" &&
+        finalStatus.status !== "failed" &&
+        finalStatus.status !== "suspended")
     ) {
       throw new Error("redteam_trajectory_missing");
     }
