@@ -162,6 +162,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/node-setup
+      - name: Build schemas for image policy
+        run: yarn build:schemas
       - name: Build images for PR scan and SBOM
         if: github.event_name == 'pull_request' || github.ref_type == 'tag'
         run: |

@@ -20,6 +20,10 @@ Findings without a fixed version are retained in the scanner report but are not 
 must identify an advisory or package, include an owner and reason, and have a future expiry date.
 Expired exceptions fail the gate. The static job also runs a recorded vulnerable-report positive
 control to confirm the parser and evaluator continue to reject a seeded fixable HIGH finding.
+Unfixable OS findings are reported but do not fail the gate. Download the
+`image-sbom-and-vulnerability-reports` artifact and inspect
+`harness.os.trivy.json` or `harness-sandbox.os.trivy.json`; corresponding policy summaries are in
+`harness.os.policy.json` and `harness-sandbox.os.policy.json`.
 SBOMs and scanner/evaluation reports are uploaded as the
 `image-sbom-and-vulnerability-reports` artifact.
 

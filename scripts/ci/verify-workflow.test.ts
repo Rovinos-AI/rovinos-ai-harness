@@ -226,6 +226,7 @@ describe("GitHub workflows", () => {
     const staticSteps = jobSteps("static");
     const steps = jobSteps("image-scan");
     const build = steps.find((step) => step.name === "Build images for PR scan and SBOM");
+    const buildSchemas = steps.find((step) => step.name === "Build schemas for image policy");
     const scan = steps.find((step) => step.name === "Generate PR SBOMs and scan images");
     const positiveControl = staticSteps.find(
       (step) => step.name === "Verify image vulnerability positive control",
@@ -235,10 +236,17 @@ describe("GitHub workflows", () => {
     );
     const buildCommand = build?.run ?? "";
     const scanCommand = scan?.run ?? "";
+    const buildSchemasIndex = steps.findIndex(
+      (step) => step.name === "Build schemas for image policy",
+    );
+    const scanIndex = steps.findIndex((step) => step.name === "Generate PR SBOMs and scan images");
 
     expect(staticSteps.some((step) => step.name === "Build images for PR scan and SBOM")).toBe(
       false,
     );
+    expect(buildSchemas?.run).toBe("yarn build:schemas");
+    expect(buildSchemasIndex).toBeGreaterThanOrEqual(0);
+    expect(buildSchemasIndex).toBeLessThan(scanIndex);
     expect(positiveControl?.if).toBe("always()");
     expect(positiveControl?.run).toContain("scripts/security/scan-image.ts --positive-control");
     expect(build?.if).toBe("github.event_name == 'pull_request' || github.ref_type == 'tag'");

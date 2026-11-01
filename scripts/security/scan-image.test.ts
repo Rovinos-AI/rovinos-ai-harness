@@ -83,6 +83,9 @@ describe("parseTrivyReport", () => {
     expect(() => parseTrivyReport("{")).toThrow(
       expect.objectContaining({ code: "scanner_report_invalid" }),
     );
+    expect(() => parseTrivyReport("")).toThrow(
+      expect.objectContaining({ code: "scanner_report_invalid" }),
+    );
     expect(() => parseTrivyReport('{"Results":[{"Vulnerabilities":[{}]}]}')).toThrow(
       expect.objectContaining({ code: "scanner_report_invalid" }),
     );
