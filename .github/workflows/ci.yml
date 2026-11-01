@@ -268,7 +268,7 @@ jobs:
           --outputFile.junit=reports/replay-junit.xml
       - name: Red-team approval-invariant replay gate
         run: >
-          yarn test:replay packages/eval/src/invariants.replay.test.ts
+          yarn test:replay test/replay/redteam.attacks.replay.test.ts
           --reporter=default --reporter=junit
           --outputFile.junit=reports/redteam-replay-junit.xml
       - name: Upload replay report
