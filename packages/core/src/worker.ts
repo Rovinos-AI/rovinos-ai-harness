@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, HarnessError } from "@rovinos/schemas";
-import { type RunQueue, type RunQueueJob } from "@rovinos/store";
+import { type RunQueue, type RunQueueClaimOptions, type RunQueueJob } from "@rovinos/store";
 import { countWorkerJob, recordWorkerQueueLag } from "@rovinos/telemetry";
 import { z } from "zod";
 import type { IdGenerator } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { RunLoopResult } from "./loop.js";
 import { RESUME_LEASE_MS } from "./resume-lease.js";
+import { QuotaExceededError, type QuotaService } from "./quotas.js";
 
 const WorkerLimitsSchema = z
   .object({
@@ -32,6 +33,7 @@ export interface WorkerOptions {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly execute: WorkerJobExecutor;
+  readonly quotaService?: Pick<QuotaService, "assertCanClaim">;
   readonly concurrency?: number;
   readonly leaseMs?: number;
   readonly pollIntervalMs?: number;
@@ -95,6 +97,7 @@ function waitForPoll(intervalMs: number, signal: AbortSignal): Promise<void> {
 export class Worker {
   readonly workerId: string;
   private readonly queue: RunQueue;
+  private readonly quotaService: Pick<QuotaService, "assertCanClaim"> | undefined;
   private readonly clock: Clock;
   private readonly execute: WorkerJobExecutor;
   private readonly concurrency: number;
@@ -123,6 +126,7 @@ export class Worker {
     this.pollIntervalMs = limits.pollIntervalMs;
     this.retryAfterMs = limits.retryAfterMs;
     this.queue = options.queue;
+    this.quotaService = options.quotaService;
     this.clock = options.clock;
     this.execute = options.execute;
     this.workerId = Code.parse(`w_${options.ids.next().toLowerCase()}`);
@@ -148,7 +152,38 @@ export class Worker {
       while (!this.stopping.signal.aborted) {
         const available = this.concurrency - this.active.size;
         if (available > 0) {
-          const jobs = await this.queue.claim(this.workerId, available, this.leaseMs);
+          const quotaService = this.quotaService;
+          const claimOptions: RunQueueClaimOptions | undefined =
+            quotaService === undefined
+              ? undefined
+              : {
+                  canClaim: (identity, activeRuns, alreadyRunning) => {
+                    if (alreadyRunning) {
+                      return true;
+                    }
+                    try {
+                      quotaService.assertCanClaim(
+                        {
+                          ...(identity.requestedBy === undefined
+                            ? {}
+                            : { requestedBy: identity.requestedBy }),
+                          ...(identity.role === undefined ? {} : { role: identity.role }),
+                        },
+                        activeRuns.map(({ requestedBy, role }) => ({
+                          ...(requestedBy === undefined ? {} : { requestedBy }),
+                          ...(role === undefined ? {} : { role }),
+                        })),
+                      );
+                      return true;
+                    } catch (error) {
+                      if (error instanceof QuotaExceededError) {
+                        return false;
+                      }
+                      throw error;
+                    }
+                  },
+                };
+          const jobs = await this.queue.claim(this.workerId, available, this.leaseMs, claimOptions);
           if (this.isStopping()) {
             await Promise.all(jobs.map((job) => this.queue.release(job.jobId, this.workerId)));
             break;

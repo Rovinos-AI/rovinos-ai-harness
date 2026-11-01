@@ -179,6 +179,7 @@ describe("SQLite schema migrations", () => {
       "0007",
       "0008",
       "0009",
+      "0010",
     ]);
     const names = db
       .prepare<[], { name: string }>(

@@ -144,10 +144,10 @@ describe("QuotaService", () => {
     const service = new QuotaService(dailyAndHourly, store, clock);
 
     expect(() => {
-      service.assertCanClaim(identity, new Map([["team", 1]]));
+      service.assertCanClaim(identity, [identity]);
     }).not.toThrow();
     expect(() => {
-      service.assertCanClaim(identity, new Map([["team", 2]]));
+      service.assertCanClaim(identity, [identity, identity]);
     }).toThrow(QuotaExceededError);
     service.recordRejection("unconfigured");
   });

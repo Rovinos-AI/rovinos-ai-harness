@@ -90,6 +90,7 @@ export {
   RunQueueJobSchema,
   RunQueueKindSchema,
   RunQueueOptionsSchema,
+  RunQueueRunIdentitySchema,
   SystemRunQueueIdGenerator,
   WorkerIdSchema,
   hashIdempotencyKey,
