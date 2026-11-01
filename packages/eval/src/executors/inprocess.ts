@@ -129,6 +129,7 @@ function trialResult(
     usage: run.state.usage,
     metrics: executionMetricsFromEvents(run.events, run.state.steps),
     approvals: human?.counts ?? { approved: 0, denied: 0, edited: 0 },
+    inputs: human?.inputCounts ?? { accepted: 0, declined: 0, cancelled: 0 },
     unsafeAutoApprove: human?.unsafeAutoApprove ?? false,
     exitCode: run.status === "completed" && !maxResumesExceeded ? 0 : 1,
     ...(errorCode === undefined ? {} : { errorCode }),

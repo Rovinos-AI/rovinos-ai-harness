@@ -22,6 +22,7 @@ import { ResolvedRunSchema } from "./resolve.js";
 import type { ResolvedRun } from "./resolve.js";
 import { buildReplayRuntime } from "./replay-runtime.js";
 import type { BuildReplayRuntimeOptions } from "./replay-runtime.js";
+import { verifyReplayedInputs } from "./ports/replay-inputs.js";
 
 const REPLAY_SPAN = defineSpan(
   "harness.replay",
@@ -89,10 +90,36 @@ function failureFrom(error: unknown, events: readonly EventValue[]): ReplayFailu
   return undefined;
 }
 
+function toolFailureFromEvents(
+  events: readonly EventValue[],
+  originalEvents: readonly EventValue[],
+): ReplayFailure | undefined {
+  const firstToolFailure = events.find(
+    (event) =>
+      event.type === "tool_result" &&
+      (event.errorCode === "replay_divergence" || event.errorCode === "replay_missing_result"),
+  );
+  if (
+    firstToolFailure?.type === "tool_result" &&
+    (firstToolFailure.errorCode === "replay_divergence" ||
+      firstToolFailure.errorCode === "replay_missing_result")
+  ) {
+    const originalIntent = originalEvents.find(
+      (event) => event.type === "tool_intent" && event.callId === firstToolFailure.callId,
+    );
+    return { seq: originalIntent?.seq ?? firstToolFailure.seq, code: firstToolFailure.errorCode };
+  }
+  return undefined;
+}
+
 function failureFromEvents(
   events: readonly EventValue[],
   originalEvents: readonly EventValue[],
 ): ReplayFailure | undefined {
+  const toolFailure = toolFailureFromEvents(events, originalEvents);
+  if (toolFailure !== undefined) {
+    return toolFailure;
+  }
   const failed = events.findLast(
     (event) => event.type === "run_status_changed" && event.to === "failed",
   );
@@ -152,14 +179,19 @@ async function runUntilTerminal({
   });
   let result = await started.completion;
   while (result.status === "suspended") {
-    const approval = result.state.pendingApprovals.values().next().value;
-    if (approval === undefined) {
-      throw new ReplayResponseMissingResultError(lastSequence(result.events));
+    const inputs = [...result.state.pendingInputs.values()];
+    if (inputs.length > 0) {
+      await human.resolveInputsAndResume(runtime, replayRunId, inputs);
+    } else {
+      const approval = result.state.pendingApprovals.values().next().value;
+      if (approval === undefined) {
+        throw new ReplayResponseMissingResultError(lastSequence(result.events));
+      }
+      await human.resolveAndResume(runtime, replayRunId, approval.callId);
     }
-    await human.resolveAndResume(runtime, replayRunId, approval.callId);
     const events = await readEvents(runtime.store, replayRunId);
     const state = foldRunState(events);
-    result = { ...result, status: state.status, state };
+    result = { ...result, events, status: state.status, state };
   }
 }
 
@@ -208,6 +240,9 @@ async function executeReplay({
     events = await readEvents(replay.runtime.store, replayRunId);
     const state = foldRunState(events);
     divergence = failureFromEvents(events, originalEvents);
+    if (divergence === undefined) {
+      verifyReplayedInputs(originalEvents, events);
+    }
     status = divergence === undefined ? state.status : "error";
   } catch (error) {
     events = await readEvents(replay.runtime.store, replayRunId);

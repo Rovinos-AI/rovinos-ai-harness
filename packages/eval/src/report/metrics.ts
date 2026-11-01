@@ -84,6 +84,7 @@ export function computeTrialMetrics(
     repairAttempts: record.result.metrics.repairAttempts,
     fallbackDepth: record.result.metrics.fallbackDepth,
     approvals: record.result.approvals,
+    inputs: record.result.inputs ?? { accepted: 0, declined: 0, cancelled: 0 },
     deniedToolCalls: record.result.metrics.deniedToolCalls,
     budgetExceeded: record.result.metrics.budgetExceeded,
     unsafeAutoApprove: record.result.unsafeAutoApprove,

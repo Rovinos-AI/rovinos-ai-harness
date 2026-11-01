@@ -3,6 +3,8 @@ import { Event as EventSchema, Id, type Event } from "@rovinos/schemas";
 import { ResolvedRunSchema } from "../resolve.js";
 import { describe, expect, it, vi } from "vitest";
 import { ReplayApprovalMissingError, ReplayHuman } from "./replay-human.js";
+import { recordInputRun } from "../input-fixture.js";
+import { InMemoryEventStore } from "@rovinos/store";
 
 const runId = Id.parse("00000000000000000000000001");
 const segmentId = Id.parse("00000000000000000000000002");
@@ -56,6 +58,51 @@ function resolved(): { readonly events: readonly Event[]; readonly resolution: E
 }
 
 describe("ReplayHuman", () => {
+  it("resolves all recorded inputs before resuming and preserves tokenized answers", async () => {
+    const { resolved: recording } = await recordInputRun({ batch: true, rounds: 1 });
+    const events = recording.runs[0]?.events ?? [];
+    const requests = events.filter((event) => event.type === "input_requested");
+    const human = new ReplayHuman(recording);
+    const runtime = {
+      resolveInput: vi.fn(() => Promise.resolve(undefined)),
+      resume: vi.fn(() => Promise.resolve(undefined)),
+      store: new InMemoryEventStore(),
+      clock: { now: () => 1 },
+    };
+    await human.resolveInputsAndResume(runtime, recording.rootRunId, requests);
+    expect(runtime.resolveInput).toHaveBeenCalledTimes(2);
+    expect(runtime.resolveInput).toHaveBeenNthCalledWith(
+      1,
+      recording.rootRunId,
+      requests[0]?.requestId,
+      { action: "accept", answer: { email: "<EMAIL_1>" }, principal: "cli.synthetic" },
+    );
+    expect(runtime.resume.mock.invocationCallOrder[0]).toBeGreaterThan(
+      runtime.resolveInput.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("rejects a changed requestState before resolving an input", async () => {
+    const { resolved: recording } = await recordInputRun({ rounds: 1 });
+    const request = recording.runs[0]?.events.find((event) => event.type === "input_requested");
+    if (request?.type !== "input_requested") {
+      throw new Error("Expected a synthetic recorded input.");
+    }
+    const runtime = {
+      resolveInput: vi.fn(() => Promise.resolve(undefined)),
+      resume: vi.fn(() => Promise.resolve(undefined)),
+      store: new InMemoryEventStore(),
+      clock: { now: () => 1 },
+    };
+    await expect(
+      new ReplayHuman(recording).resolveInputsAndResume(runtime, recording.rootRunId, [
+        { ...request, requestState: "changed.synthetic.state" },
+      ]),
+    ).rejects.toMatchObject({ code: "replay_divergence" });
+    expect(runtime.resolveInput).not.toHaveBeenCalled();
+    expect(runtime.resume).not.toHaveBeenCalled();
+  });
+
   it("resolves and resumes through the runtime approval path with recorded edits", async () => {
     const { events, resolution } = resolved();
     const human = new ReplayHuman(
