@@ -21,7 +21,7 @@ GitHub configuration: CODEOWNERS, PR and issue templates, Dependabot, and the CI
 - No secrets or tokens in workflow or config files.
 - Workflows run on `pull_request`, never `pull_request_target`, with `permissions: contents: read`, and `persist-credentials: false` on checkout.
 - Pin every third-party action to a full commit SHA, with the tag in a trailing comment.
-- CI job names are fixed: `static`, `unit`, `integration`, `gates`. Branch protection requires them by name.
+- Required CI job names are fixed: `static`, `unit`, `integration`, `gates`. Branch protection requires them by name; the `gates` job must enforce any additional required CI jobs.
 
 ## Testing
 

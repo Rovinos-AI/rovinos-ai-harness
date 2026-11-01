@@ -20,7 +20,7 @@ const stepSchema = z.looseObject({
   with: z.record(z.string(), z.unknown()).optional(),
 });
 const jobSchema = z.looseObject({
-  needs: z.string().optional(),
+  needs: z.union([z.string(), z.array(z.string())]).optional(),
   if: z.string().optional(),
   outputs: z.record(z.string(), z.string()).optional(),
   "runs-on": z.string(),
@@ -173,13 +173,19 @@ describe("GitHub workflows", () => {
   it("runs the CI jobs in order and skips draft pull requests", () => {
     const { jobs } = readWorkflow();
 
-    expect(Object.keys(jobs)).toEqual(["static", "unit", "integration", "gates"]);
+    expect(Object.keys(jobs)).toEqual(["static", "image-scan", "unit", "integration", "gates"]);
     expect(jobs.static?.if).toBe(
       "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
     );
     expect(jobs.unit?.needs).toBe("static");
+    expect(jobs["image-scan"]?.needs).toBeUndefined();
+    expect(jobs["image-scan"]?.if).toBe(
+      "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
+    );
     expect(jobs.integration?.needs).toBe("unit");
-    expect(jobs.gates?.needs).toBe("integration");
+    expect(jobs.gates?.needs).toEqual(["integration", "image-scan"]);
+    expect(jobs.gates?.if).toContain("always()");
+    expect(jobSteps("gates").find((step) => step.name === "Require CI jobs")?.if).toBe("always()");
   });
 
   it("runs static checks except for draft pull requests", () => {
@@ -214,6 +220,65 @@ describe("GitHub workflows", () => {
       (step) => step.name === "Verify vulnerable lockfile positive control",
     );
     expect(positiveControlIndex).toBeGreaterThan(scannerIndex);
+  });
+
+  it("builds, generates SBOMs, and scans PR images without signing or publishing", () => {
+    const staticSteps = jobSteps("static");
+    const steps = jobSteps("image-scan");
+    const build = steps.find((step) => step.name === "Build images for PR scan and SBOM");
+    const buildSchemas = steps.find((step) => step.name === "Build schemas for image policy");
+    const scan = steps.find((step) => step.name === "Generate PR SBOMs and scan images");
+    const positiveControl = staticSteps.find(
+      (step) => step.name === "Verify image vulnerability positive control",
+    );
+    const upload = steps.find(
+      (step) => step.name === "Upload image SBOM and vulnerability reports",
+    );
+    const buildCommand = build?.run ?? "";
+    const scanCommand = scan?.run ?? "";
+    const buildSchemasIndex = steps.findIndex(
+      (step) => step.name === "Build schemas for image policy",
+    );
+    const scanIndex = steps.findIndex((step) => step.name === "Generate PR SBOMs and scan images");
+
+    expect(staticSteps.some((step) => step.name === "Build images for PR scan and SBOM")).toBe(
+      false,
+    );
+    expect(buildSchemas?.run).toBe("yarn build:schemas");
+    expect(buildSchemasIndex).toBeGreaterThanOrEqual(0);
+    expect(buildSchemasIndex).toBeLessThan(scanIndex);
+    expect(positiveControl?.if).toBe("always()");
+    expect(positiveControl?.run).toContain("scripts/security/scan-image.ts --positive-control");
+    expect(build?.if).toBe("github.event_name == 'pull_request' || github.ref_type == 'tag'");
+    expect(scan?.if).toBe("github.event_name == 'pull_request' || github.ref_type == 'tag'");
+    expect(buildCommand).toContain("type=docker,dest=$RUNNER_TEMP/harness.tar");
+    expect(buildCommand).toContain("type=docker,dest=$RUNNER_TEMP/harness-sandbox.tar");
+    expect(buildCommand).toContain("--target runtime-os-audit");
+    expect(buildCommand).toContain("type=docker,dest=$RUNNER_TEMP/harness-os-audit.tar");
+    expect(buildCommand).toContain("type=docker,dest=$RUNNER_TEMP/harness-sandbox-os-audit.tar");
+    expect(buildCommand).not.toContain("--push");
+    expect(scan?.env?.SYFT_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/u);
+    expect(scan?.env?.TRIVY_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/u);
+    expect(scanCommand).toContain('local image_archive="$RUNNER_TEMP/$image_name.tar"');
+    expect(scanCommand).toContain('--volume "$image_archive:/image.tar:ro"');
+    expect(scanCommand).toContain("scan docker-archive:/image.tar");
+    expect(scanCommand).toContain("image --input /image.tar");
+    expect(scanCommand).toContain("--pkg-types os");
+    expect(scanCommand).toContain("--list-all-pkgs");
+    expect(scanCommand).toContain("--pkg-types library");
+    expect(scanCommand).toContain("--require-os-packages");
+    expect(scanCommand).toContain("cyclonedx-json=");
+    expect(scanCommand).toContain("scripts/security/scan-image.ts");
+    expect(scanCommand).not.toContain("cosign sign");
+    expect(scanCommand).not.toContain("docker push");
+    expect(upload?.if).toBe("always()");
+    expect(upload?.with?.path).toBe("reports/image-vulnerability/");
+
+    for (const dockerfile of ["Dockerfile", "Dockerfile.sandbox"]) {
+      const contents = readFileSync(resolve(root, dockerfile), "utf8");
+      expect(contents).toContain("AS runtime-os-audit");
+      expect(contents).toContain("FROM runtime-os-audit AS runtime");
+    }
   });
 
   it("runs the dependency vulnerability gate nightly on main and uploads its report", () => {

@@ -12,6 +12,25 @@ const lockedBaseImages = new Set(
 );
 const nonRootUserPattern = /^USER\s+[1-9]\d*(?::[1-9]\d*)?\s*$/m;
 
+function baseImages(contents: string): string[] {
+  const stages = new Set<string>();
+  const images: string[] = [];
+
+  for (const line of contents.split(/\r?\n/u)) {
+    const match = /^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?/iu.exec(line);
+    const image = match?.[1];
+    const stage = match?.[2];
+    if (image !== undefined && !stages.has(image.toLowerCase())) {
+      images.push(image);
+    }
+    if (stage !== undefined) {
+      stages.add(stage.toLowerCase());
+    }
+  }
+
+  return images;
+}
+
 describe.each(dockerfiles)("%s", (dockerfile) => {
   const contents = readFileSync(resolve(repositoryRoot, dockerfile), "utf8");
 
@@ -25,13 +44,11 @@ describe.each(dockerfiles)("%s", (dockerfile) => {
   });
 
   it("uses only base images recorded by digest in the image lock", () => {
-    const baseImages = [...contents.matchAll(/^FROM\s+(\S+)(?:\s+AS\s+\S+)?$/gim)].map(
-      ([, image]) => image,
-    );
+    const images = baseImages(contents);
 
-    expect(baseImages.length).toBeGreaterThan(0);
-    expect(baseImages.every((image) => image?.includes("@sha256:") === true)).toBe(true);
-    expect(baseImages.every((image) => lockedBaseImages.has(image ?? ""))).toBe(true);
+    expect(images.length).toBeGreaterThan(0);
+    expect(images.every((image) => image.includes("@sha256:"))).toBe(true);
+    expect(images.every((image) => lockedBaseImages.has(image))).toBe(true);
   });
 });
 
@@ -46,9 +63,7 @@ it("does not contain unused image-lock entries", () => {
   const referencedBaseImages = new Set(
     dockerfiles.flatMap((dockerfile) => {
       const contents = readFileSync(resolve(repositoryRoot, dockerfile), "utf8");
-      return [...contents.matchAll(/^FROM\s+(\S+)(?:\s+AS\s+\S+)?$/gim)].map(
-        ([, image]) => image ?? "",
-      );
+      return baseImages(contents);
     }),
   );
 

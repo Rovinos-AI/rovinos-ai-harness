@@ -147,6 +147,119 @@ jobs:
           name: dependency-vulnerability-report
           path: reports/vulnerability-report.json
           if-no-files-found: ignore
+      - name: Verify image vulnerability positive control
+        if: always()
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/security/scan-image.ts --positive-control
+
+  image-scan:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Build schemas for image policy
+        run: yarn build:schemas
+      - name: Build images for PR scan and SBOM
+        if: github.event_name == 'pull_request' || github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          docker buildx create --name ci-image-audit --driver docker-container --use
+          docker buildx inspect --bootstrap
+          docker buildx build \
+            --file Dockerfile \
+            --target runtime-os-audit \
+            --tag harness-os-audit:pr \
+            --provenance=false \
+            --output "type=docker,dest=$RUNNER_TEMP/harness-os-audit.tar" \
+            .
+          docker buildx build \
+            --file Dockerfile.sandbox \
+            --target runtime-os-audit \
+            --tag harness-sandbox-os-audit:pr \
+            --provenance=false \
+            --output "type=docker,dest=$RUNNER_TEMP/harness-sandbox-os-audit.tar" \
+            .
+          docker buildx build \
+            --file Dockerfile \
+            --tag harness:pr \
+            --provenance=false \
+            --output "type=docker,dest=$RUNNER_TEMP/harness.tar" \
+            .
+          docker buildx build \
+            --file Dockerfile.sandbox \
+            --tag harness-sandbox:pr \
+            --provenance=false \
+            --output "type=docker,dest=$RUNNER_TEMP/harness-sandbox.tar" \
+            .
+      - name: Generate PR SBOMs and scan images
+        if: github.event_name == 'pull_request' || github.ref_type == 'tag'
+        env:
+          SYFT_IMAGE: anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a
+          TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+        run: |
+          set -euo pipefail
+          mkdir -p reports/image-vulnerability
+
+          scan_image() {
+            local image_name="$1"
+            local image_archive="$RUNNER_TEMP/$image_name.tar"
+            local os_image_archive="$RUNNER_TEMP/$image_name-os-audit.tar"
+            if ! docker run --rm \
+              --volume "$os_image_archive:/image.tar:ro" \
+              --volume "$PWD/reports/image-vulnerability:/reports" \
+              "$TRIVY_IMAGE" image --input /image.tar --scanners vuln --pkg-types os \
+              --list-all-pkgs --format json \
+              --output "/reports/$image_name.os.trivy.json" --exit-code 0; then
+              return 1
+            fi
+            if ! node --experimental-strip-types --disable-warning=ExperimentalWarning \
+              scripts/security/scan-image.ts \
+              --report "reports/image-vulnerability/$image_name.os.trivy.json" \
+              --image "$image_name-os-audit" \
+              --require-os-packages \
+              > "reports/image-vulnerability/$image_name.os.policy.json"; then
+              return 1
+            fi
+            if ! docker run --rm \
+              --volume "$image_archive:/image.tar:ro" \
+              --volume "$PWD/reports/image-vulnerability:/reports" \
+              --env SYFT_CHECK_FOR_APP_UPDATE=false \
+              "$SYFT_IMAGE" scan docker-archive:/image.tar \
+              --output "cyclonedx-json=/reports/$image_name.cdx.json"; then
+              return 1
+            fi
+            if ! docker run --rm \
+              --volume "$image_archive:/image.tar:ro" \
+              --volume "$PWD/reports/image-vulnerability:/reports" \
+              "$TRIVY_IMAGE" image --input /image.tar --scanners vuln --pkg-types library \
+              --format json --output "/reports/$image_name.trivy.json" --exit-code 0; then
+              return 1
+            fi
+            if ! node --experimental-strip-types --disable-warning=ExperimentalWarning \
+              scripts/security/scan-image.ts \
+              --report "reports/image-vulnerability/$image_name.trivy.json" \
+              --image "$image_name" \
+              > "reports/image-vulnerability/$image_name.policy.json"; then
+              return 1
+            fi
+          }
+
+          scan_status=0
+          scan_image harness || scan_status=1
+          scan_image harness-sandbox || scan_status=1
+          exit "$scan_status"
+      - name: Upload image SBOM and vulnerability reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-sbom-and-vulnerability-reports
+          path: reports/image-vulnerability/
+          if-no-files-found: ignore
 
   unit:
     needs: static
@@ -244,7 +357,11 @@ jobs:
         run: docker compose --env-file infra/collector/VERSION -f infra/compose/docker-compose.test.yml down -v --remove-orphans
 
   gates:
-    needs: integration
+    needs: [integration, image-scan]
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -254,6 +371,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/node-setup
+      - name: Require CI jobs
+        if: always()
+        env:
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+          IMAGE_SCAN_RESULT: ${{ needs.image-scan.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$INTEGRATION_RESULT" != success || "$IMAGE_SCAN_RESULT" != success ]]; then
+            exit 1
+          fi
       - name: Canary release gate
         run: >
           yarn test:canary

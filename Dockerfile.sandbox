@@ -24,7 +24,7 @@ COPY . .
 RUN mise exec -- yarn build \
     && mise exec -- yarn workspaces focus @rovinos/sandbox --production
 
-FROM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS runtime
+FROM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS runtime-os-audit
 
 WORKDIR /app
 RUN groupadd --gid 10003 sandbox-shared \
@@ -33,8 +33,11 @@ RUN groupadd --gid 10003 sandbox-shared \
     && mkdir -p /workspaces \
     && chown 10002:10003 /workspaces \
     && chmod 0750 /workspaces \
-    && chown 10002:10003 /app \
-    && rm -rf /usr/bin/apt /usr/bin/apt-get /usr/bin/apt-cache /usr/bin/apt-cdrom /usr/bin/apt-config \
+    && chown 10002:10003 /app
+
+FROM runtime-os-audit AS runtime
+
+RUN rm -rf /usr/bin/apt /usr/bin/apt-get /usr/bin/apt-cache /usr/bin/apt-cdrom /usr/bin/apt-config \
       /usr/bin/dpkg* /usr/sbin/dpkg* /usr/lib/apt /usr/lib/dpkg \
       /var/lib/apt /var/lib/dpkg /var/cache/apt \
       /usr/share/doc/apt /usr/share/doc/dpkg /usr/share/man/man1/apt* \
