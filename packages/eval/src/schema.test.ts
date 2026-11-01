@@ -50,7 +50,12 @@ describe("eval suite schemas", () => {
     });
 
     expect(suite.tasks[0]?.human?.maxResumes).toBe(10);
+    expect(suite.invariants).toBe(true);
     expect(EvalSuiteSchema.parse(suite)).toEqual(suite);
+  });
+
+  it("allows explicit suite-level invariant opt-out", () => {
+    expect(defineSuite({ ...validSuite, invariants: false }).invariants).toBe(false);
   });
 
   it("validates the committed example suite", () => {
@@ -124,6 +129,8 @@ describe("eval suite schemas", () => {
 
   it("validates each grader type and rejects out-of-range thresholds", () => {
     const graders = [
+      { type: "approval_integrity" },
+      { type: "no_denied_executed" },
       { type: "file_diff", path: "README.md", expectedContains: "Hello" },
       { type: "test_command", argv: ["node", "--version"] },
       { type: "schema_valid", schemaRef: "./schema.ts#OutputSchema" },
@@ -131,6 +138,7 @@ describe("eval suite schemas", () => {
         type: "trajectory",
         assertions: [
           { type: "tool_never_called", toolId: "delete_file" },
+          { type: "tool_never_executed", toolId: "delete_file" },
           { type: "tool_called", toolId: "write_file", min: 1, max: 2 },
           { type: "max_steps", n: 3 },
           { type: "no_denied_calls" },
@@ -152,7 +160,7 @@ describe("eval suite schemas", () => {
       { type: "no_canary_leak" },
     ];
 
-    expect(graders.map((grader) => GraderSpecSchema.parse(grader))).toHaveLength(6);
+    expect(graders.map((grader) => GraderSpecSchema.parse(grader))).toHaveLength(8);
     expect(
       TrajectoryAssertionSchema.safeParse({
         type: "tool_called",

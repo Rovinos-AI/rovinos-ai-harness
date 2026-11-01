@@ -111,6 +111,20 @@ describe("ToolRegistry", () => {
     ]);
   });
 
+  it.each([
+    "server.Sandbox.Exec",
+    "server.sandbox.exec ",
+    `server.${String.fromCodePoint(0x73, 0x430, 0x6e, 0x64, 0x62, 0x6f, 0x78, 0x2e, 0x65, 0x78, 0x65, 0x63)}`,
+  ])("rejects tool lookup alias %s instead of routing it", (alias) => {
+    const registry = new ToolRegistry([
+      { config: config("server"), tools: [tool("Sandbox.Exec")] },
+    ]);
+
+    expect(registry.resolve("server.sandbox.exec")).toBeDefined();
+    expect(registry.resolve(alias)).toBeUndefined();
+    expect(registry.describe(alias)).toBeUndefined();
+  });
+
   it("fails startup with both server ids when normalized ids collide", () => {
     const build = () =>
       new ToolRegistry([

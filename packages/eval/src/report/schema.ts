@@ -23,6 +23,7 @@ export type EvalGradeRecord = z.infer<typeof EvalGradeRecordSchema>;
 /** Validated source records needed to build an evaluation report. */
 export const EvalReportInputSchema = z
   .object({
+    invariantsEnabled: z.boolean().default(true),
     trials: z.array(EvalTrialRecordSchema),
     grades: z.array(EvalGradeRecordSchema),
   })
@@ -172,6 +173,7 @@ export type EvalAggregate = z.infer<typeof EvalAggregateSchema>;
 export const EvalReportSchema = z
   .object({
     schemaVersion: z.literal(1),
+    invariantsEnabled: z.boolean().default(false),
     trials: z.array(EvalTrialMetricsSchema),
     aggregates: z.array(EvalAggregateSchema),
   })

@@ -39,6 +39,19 @@ function toolIntent(
   });
 }
 
+function toolResult(seq: number, toolId: string, outcome: "ok" | "denied") {
+  return EventSchema.parse({
+    ...envelope(seq),
+    type: "tool_result",
+    callId: runId,
+    toolId,
+    outcome,
+    latencyMs: 1,
+    ...(outcome === "denied" ? { errorCode: "policy_denied" } : {}),
+    result: null,
+  });
+}
+
 function modelRequest(seq: number, text = "") {
   return EventSchema.parse({
     ...envelope(seq),
@@ -89,6 +102,11 @@ const assertionCases: {
     assertion: { type: "tool_never_called", toolId: "delete_file" },
     passingEvents: [toolIntent(0, "read_file")],
     failingEvents: [toolIntent(0, "delete_file")],
+  },
+  {
+    assertion: { type: "tool_never_executed", toolId: "delete_file" },
+    passingEvents: [toolIntent(0, "delete_file", "deny"), toolResult(1, "delete_file", "denied")],
+    failingEvents: [toolIntent(0, "delete_file"), toolResult(1, "delete_file", "ok")],
   },
   {
     assertion: { type: "tool_called", toolId: "read_file", min: 1, max: 2 },

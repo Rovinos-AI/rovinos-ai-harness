@@ -340,6 +340,33 @@ describe("evaluate", () => {
     expect(explanation.decision).toBe(matches ? "ask" : "deny");
   });
 
+  it("does not allow nested argument smuggling through an exact pointer rule", () => {
+    const policy = createPolicy([
+      createRule("read_only", "allow", {
+        tools: ["sandbox.exec"],
+        args: [{ pointer: "/operation", op: "equals", value: "read" }],
+      }),
+    ]);
+
+    const explanation = evaluate(
+      policy,
+      createCall({ operation: { name: "read", target: "sensitive" } }, "sandbox.exec"),
+    );
+
+    expect(explanation.decision).toBe("deny");
+    expect(explanation.matched).toEqual([]);
+  });
+
+  it.each([
+    "Sandbox.Exec",
+    "sandbox.exec ",
+    String.fromCodePoint(0x73, 0x430, 0x6e, 0x64, 0x62, 0x6f, 0x78, 0x2e, 0x65, 0x78, 0x65, 0x63),
+  ])("rejects policy call aliases instead of bypassing an exact deny rule: %s", (toolId) => {
+    const policy = createPolicy([createRule("deny_exec", "deny", { tools: ["sandbox.exec"] })]);
+
+    expect(() => evaluate(policy, { ...CALL, toolId })).toThrow();
+  });
+
   it.each([
     { pointer: "/items/0", expected: "first", matches: true },
     { pointer: "/items/1", expected: "missing", matches: false },

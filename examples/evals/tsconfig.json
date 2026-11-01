@@ -6,5 +6,5 @@
     "customConditions": ["source"],
     "noEmit": true
   },
-  "include": ["basic.suite.ts"]
+  "include": ["basic.suite.ts", "../../evals/redteam/suite.ts"]
 }
