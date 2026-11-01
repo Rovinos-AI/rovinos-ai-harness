@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { HarnessError } from "@rovinos/schemas";
+import { HarnessError, parseJson } from "@rovinos/schemas";
 import { Option } from "commander";
 import type { EvalSuite } from "@rovinos/eval";
 import type { CommandModule } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
-import { createVariants, filterSuite, nonnegativeNumber, positiveInteger } from "./eval-options.js";
+import {
+  createVariants,
+  createVariantsFromFile,
+  filterSuite,
+  nonnegativeNumber,
+  positiveInteger,
+} from "./eval-options.js";
 import type { EvalOptions } from "./eval-options.js";
 import {
   createDefaultExecutor,
@@ -102,7 +108,19 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   const suite = filterSuite(api, await api.loadSuite(absoluteSuitePath), options.filter);
   const { cassette, isolation } = executionModes(options, suite);
   const failUnder = parseFailUnder(options);
-  const variants = createVariants(api, options.model, cassette, config);
+  if (options.model !== undefined && options.variants !== undefined) {
+    throw new EvalCliError("usage");
+  }
+  const variants =
+    options.variants === undefined
+      ? createVariants(api, options.model, cassette, config)
+      : createVariantsFromFile({
+          api,
+          text: await readFile(resolve(options.variants), "utf8"),
+          filePath: resolve(options.variants),
+          cassette,
+          config,
+        });
   const outDir = resolve(
     options.out ?? join(process.cwd(), "eval-out", String(context.clock.now())),
   );
@@ -160,17 +178,17 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
     : ExitCode.ok;
 }
 
-/** Registers the `harness eval run` command group. */
+/** Registers the `harness eval run` and `harness eval compare` commands. */
 export function createEvalCommand(dependencies: EvalCommandDependencies = {}): CommandModule {
   return {
     name: "eval",
     register(program, context) {
-      program
-        .command("eval")
-        .description("Run evaluation suites")
+      const evalCommand = program.command("eval").description("Run suites and compare reports");
+      evalCommand
         .command("run <suite>")
         .description("Run an evaluation suite")
         .option("--model <provider/model[,provider/model]>", "comma-separated model variants")
+        .option("--variants <file>", "load variants from a YAML file")
         .option("--trials <n>", "trials per task")
         .option("--filter <tag|taskId>", "select tasks by tag or id")
         .addOption(
@@ -208,6 +226,36 @@ export function createEvalCommand(dependencies: EvalCommandDependencies = {}): C
             );
           }
         });
+      evalCommand
+        .command("compare <report-a> <report-b>")
+        .description("Compare two evaluation reports")
+        .option("--variant-a <id>", "select a variant from report A")
+        .option("--variant-b <id>", "select a variant from report B")
+        .option("--seed <n>", "deterministic bootstrap seed", "0")
+        .action(
+          async (
+            reportAPath: string,
+            reportBPath: string,
+            options: { variantA?: string; variantB?: string; seed: string },
+          ) => {
+            const api = await (dependencies.loadEval ?? (() => import("@rovinos/eval")))();
+            const reportA = parseJson(
+              api.EvalReportSchema,
+              await readFile(resolve(reportAPath), "utf8"),
+            );
+            const reportB = parseJson(
+              api.EvalReportSchema,
+              await readFile(resolve(reportBPath), "utf8"),
+            );
+            const comparison = api.compareEvalReports(reportA, reportB, {
+              ...(options.variantA === undefined ? {} : { variantA: options.variantA }),
+              ...(options.variantB === undefined ? {} : { variantB: options.variantB }),
+              seed: positiveInteger(options.seed, true),
+            });
+            context.out.print(api.renderComparisonTable(comparison));
+            context.out.json(api.EvalComparisonReportSchema, comparison);
+          },
+        );
     },
   };
 }

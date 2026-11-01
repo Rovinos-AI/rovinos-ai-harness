@@ -117,6 +117,23 @@ function runtimeConfig(config: TrialConfig): RuntimeConfig {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function deepMerge(base: unknown, override: unknown): unknown {
+  if (!isRecord(base) || !isRecord(override)) {
+    return override;
+  }
+  const keys = new Set([...Object.keys(base), ...Object.keys(override)]);
+  return Object.fromEntries(
+    [...keys].map((key) => [
+      key,
+      key in override ? deepMerge(base[key], override[key]) : base[key],
+    ]),
+  );
+}
+
 function trialBudgets(task: EvalTask, variant: EvalVariant): z.input<typeof RunBudgetsSchema> {
   return { ...task.budgets, ...variant.budgets };
 }
@@ -131,7 +148,7 @@ function configForTrial(
   const policyFile = variant.policyFile ?? task.policyFile;
   const contextStrategy = variant.contextStrategy ?? task.contextStrategy;
   const parsedModels = ModelsConfigSchema.parse(models ?? {});
-  return TrialConfigSchema.parse({
+  const generatedConfig: Record<string, unknown> = {
     run: RunConfigSchema.parse({ budgets }),
     roles: contextStrategy === undefined ? [] : [{ id: "eval", tools: "*", contextStrategy }],
     store: StoreConfigSchema.parse({ dialect: "sqlite" }),
@@ -149,7 +166,12 @@ function configForTrial(
     policy: PolicyConfigSchema.parse(policyFile === undefined ? {} : { file: "policy.yaml" }),
     pii: PiiConfigSchema.parse({}),
     vault: VaultConfigSchema.parse({ backend: "sqlite" }),
-  });
+  };
+  return TrialConfigSchema.parse(
+    variant.configOverrides === undefined
+      ? generatedConfig
+      : deepMerge(generatedConfig, variant.configOverrides),
+  );
 }
 
 function keyIdFor(trial: TrialSpec): string {

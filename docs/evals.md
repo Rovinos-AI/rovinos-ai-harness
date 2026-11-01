@@ -80,6 +80,16 @@ tasks. `--concurrency`, `--seed`, `--fail-under`, and `--max-cost-usd` control t
 the cost cap prevents new trials from starting after completed trials exceed it, and
 the command exits with code 6 when trials were skipped.
 
+Use `--variants <file>` instead of `--model` to run a YAML-defined set of variants.
+Each file has at least two unique `variants`, with `id`, optional `route` model
+references, `contextStrategy`, `policyFile`, and `configOverrides`. Policy paths are
+relative to the variants file. Config overrides are merged into and validated against
+the loaded harness configuration before trials start; only the trial-supported fields
+(`run`, `roles`, and `models`) can be overridden, so variants cannot replace each
+trial's isolated store, vault, keys, or PII settings.
+See [`examples/evals/variants.yaml`](../examples/evals/variants.yaml) for synthetic
+routes.
+
 `--cassette replay` is the default for in-process runs and reads
 `<suite directory>/cassettes/<taskId>/<variantId>.json`; a missing entry fails with a
 cassette miss instead of calling a live provider. `--cassette off` defaults to Docker
@@ -113,3 +123,18 @@ enable Docker networking or credential forwarding.
 The CLI summary contains task and variant identifiers, pass rates, cost, and steps.
 With global `--json`, stdout contains one validated content-free report document;
 Markdown, JSON, JUnit, and trial JSONL files contain metadata and grader codes only.
+## Comparing reports
+
+`harness eval compare a/eval-report.json b/eval-report.json` compares two reports.
+If either report contains multiple variants, select one with `--variant-a <id>` or
+`--variant-b <id>`. `--seed <n>` controls the deterministic 2,000-resample bootstrap.
+The output includes per-task and overall pass rates, cost, steps, and latency, with
+mean differences (`B - A`), percentile 95% confidence intervals for numeric metrics,
+two-sided Fisher exact p-values for pass rates, and Holm-adjusted task p-values.
+The reported effect size is the difference in the metric's original units (percentage
+points for pass rate). Results with fewer than 10 trials on either side are labeled
+`inconclusive`. JSON mode emits a validated comparison report.
+
+Reports retain each trial's seed when available. Matching task/trial indexes with
+equal seeds are counted as matched, but all significance tests and bootstrap intervals
+treat the two samples as independent; no paired test is assumed.
