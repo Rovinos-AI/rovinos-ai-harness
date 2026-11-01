@@ -123,6 +123,7 @@ enable Docker networking or credential forwarding.
 The CLI summary contains task and variant identifiers, pass rates, cost, and steps.
 With global `--json`, stdout contains one validated content-free report document;
 Markdown, JSON, JUnit, and trial JSONL files contain metadata and grader codes only.
+
 ## Comparing reports
 
 `harness eval compare a/eval-report.json b/eval-report.json` compares two reports.
