@@ -15,11 +15,9 @@ import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from 
 import type { RunState } from "./run-state.js";
 import type { Clock, RunRecorder } from "./recorder.js";
 import { withRunStartup } from "./run-startup.js";
-import type { ModelStepResult } from "./steps/model-step.js";
+import { type ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
-import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
-import { toolStep } from "./steps/tool-step.js";
-import type { PreparedToolCall } from "./steps/prepare-tool.js";
+import { preflightModelBudget } from "./steps/model-preflight.js";
 import { suspendedOutcome } from "./steps/suspended-outcome.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type {
@@ -42,6 +40,7 @@ import type { ValueTransform } from "@rovinos/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
 import { modelQuotaHooks } from "./model-quota-hooks.js";
+import { runToolCalls } from "./steps/tool-call-runner.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
@@ -182,12 +181,13 @@ async function recoverInterruptedModelResponse(
     return recordRunCompleted(options.recorder, events, execution.checkpointer);
   }
   if (recovery.kind === "tool_calls") {
-    return runToolCalls(
+    return runToolCalls({
       options,
       events,
       execution,
-      recovery.calls.map((call) => ({ call })),
-    );
+      calls: recovery.calls.map((call) => ({ call })),
+      lifecycle: toolCallLifecycle(options, events, execution),
+    });
   }
   return undefined;
 }
@@ -290,7 +290,13 @@ async function finishModelStep(
     return failedEvent;
   }
   if (modelResult.preparedCalls.length > 0) {
-    return runToolCalls(options, events, execution, modelResult.preparedCalls);
+    return runToolCalls({
+      options,
+      events,
+      execution,
+      calls: modelResult.preparedCalls,
+      lifecycle: toolCallLifecycle(options, events, execution),
+    });
   }
   if (options.finalOutputSchema !== undefined) {
     return finishStructuredFinalOutput(options, events, execution);
@@ -304,6 +310,18 @@ async function finishStructuredFinalOutput(
   execution: RunLoopExecution,
 ): Promise<Event> {
   return runStructuredFinalOutput(options, events, execution);
+}
+
+function toolCallLifecycle(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+) {
+  return {
+    suspendIfShutdown: () => suspendIfShutdown(options, events, execution),
+    drainSentinelTrips: () => drainSentinelTrips(options.recorder, events),
+    checkpointAfterStep: () => checkpointAfterStep(execution.checkpointer, events),
+  };
 }
 
 async function prepareModelStep(
@@ -334,59 +352,6 @@ async function prepareModelStep(
   return stopped === undefined
     ? { context: builtContext.messages, contextMetadata, deadlineTs: preflight.deadlineTs }
     : { context: builtContext.messages, contextMetadata, ...preflight, event: stopped };
-}
-
-async function runToolCalls(
-  options: RunLoopExecutionOptions,
-  events: Event[],
-  execution: RunLoopExecution,
-  calls: readonly PreparedToolCall[],
-): Promise<Event | undefined> {
-  for (const prepared of calls) {
-    const call = prepared.call;
-    const aborted = await suspendIfShutdown(options, events, execution);
-    if (aborted !== undefined) {
-      return aborted;
-    }
-    const budget = execution.budgetTracker.checkWithOpenChildren(events, options.clock.now());
-    if (!budget.ok) {
-      return recordBudgetFailureAndCheckpoint(
-        options.recorder,
-        events,
-        budget,
-        execution.checkpointer,
-      );
-    }
-    events.push(
-      ...(await toolStep({
-        recorder: options.recorder,
-        tool: options.tool,
-        ...(options.policy === undefined ? {} : { policy: options.policy }),
-        clock: options.clock,
-        runId: execution.runId,
-        ids: options.ids,
-        checkpointer: execution.checkpointer,
-        history: events,
-        calls: [call],
-        preparedCalls: [prepared],
-        signal: options.signal,
-        depth: options.depth ?? 0,
-        ...(options.inputChannels === undefined ? {} : { inputChannels: options.inputChannels }),
-        ...(options.inputTokenizer === undefined ? {} : { tokenizer: options.inputTokenizer }),
-        ...(options.inputResolver === undefined ? {} : { resolver: options.inputResolver }),
-      })),
-    );
-    await drainSentinelTrips(options.recorder, events);
-    const stopped = await suspendIfShutdown(options, events, execution);
-    if (stopped !== undefined) {
-      return stopped;
-    }
-    const state = await checkpointAfterStep(execution.checkpointer, events);
-    if (state.status === "suspended") {
-      return suspendedOutcome(events);
-    }
-  }
-  return undefined;
 }
 
 async function suspendIfShutdown(
