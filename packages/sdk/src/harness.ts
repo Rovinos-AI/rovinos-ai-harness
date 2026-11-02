@@ -23,6 +23,7 @@ import {
   CreateHarnessOptionsSchema,
   GetRunContentOptionsSchema,
   HarnessOverridesSchema,
+  InputResolutionResultSchema,
   ListRunsFilterSchema,
   ResolveApprovalOptionsSchema,
   RequestIdInputSchema,
@@ -82,6 +83,32 @@ async function findPendingApprovalRun(
     cursor = page.nextCursor;
   } while (cursor !== undefined);
   return undefined;
+}
+
+async function findPendingInputRun(
+  runtime: Runtime,
+  requestId: ReturnType<typeof Id.parse>,
+): Promise<ReturnType<typeof Id.parse> | undefined> {
+  let cursor: string | undefined;
+  let foundRunId: ReturnType<typeof Id.parse> | undefined;
+  do {
+    const page = await runtime.store.listRuns({
+      status: "suspended",
+      limit: 100,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const summary of page.runs) {
+      if (!foldRunState(await readEvents(runtime, summary.runId)).pendingInputs.has(requestId)) {
+        continue;
+      }
+      if (foundRunId !== undefined && foundRunId !== summary.runId) {
+        throw new SdkError("sdk_input_ambiguous");
+      }
+      foundRunId = summary.runId;
+    }
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return foundRunId;
 }
 
 class HarnessClient implements Harness {
@@ -270,12 +297,24 @@ class HarnessClient implements Harness {
     });
   }
 
-  async answerInput(requestId: string, options: AnswerInputOptions): Promise<never> {
+  async answerInput(requestId: string, options: AnswerInputOptions) {
     this.assertOpen();
-    RequestIdInputSchema.parse({ requestId });
-    AnswerInputOptionsSchema.parse(options);
-    await Promise.resolve();
-    throw new SdkError("sdk_input_unavailable");
+    const parsedRequestId = RequestIdInputSchema.parse({ requestId }).requestId;
+    const parsedOptions = AnswerInputOptionsSchema.parse(options);
+    const runId = await findPendingInputRun(this.runtime, parsedRequestId);
+    if (runId === undefined) {
+      throw new SdkError("sdk_run_not_found");
+    }
+    const resolution = await this.runtime.resolveInput(runId, parsedRequestId, {
+      action: parsedOptions.action,
+      ...(parsedOptions.content === undefined ? {} : { answer: parsedOptions.content }),
+      principal: parsedOptions.principal,
+    });
+    return InputResolutionResultSchema.parse({
+      runId,
+      requestId: resolution.requestId,
+      action: resolution.action,
+    });
   }
 
   watch(runId: string, options: WatchOptions = {}): AsyncIterable<SafeEvent> {
