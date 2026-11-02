@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { logs, type Logger } from "@opentelemetry/api-logs";
+import { logs, type Logger } from "@opentelemetry/api";
 import { Code, Id } from "@rovinos/schemas";
 import { z } from "zod";
 import { countDroppedTelemetry } from "../metrics.js";

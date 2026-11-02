@@ -3,9 +3,8 @@
 import { AgentSpawnInputSchema, restrictToolPort, type ToolPort } from "@rovinos/core";
 import { Code, Id, UNREGISTERED_TOOL_ID } from "@rovinos/schemas";
 import { createTelemetrySdk, type TelemetrySdkOptions } from "@rovinos/telemetry";
-import { logs } from "@opentelemetry/api-logs";
-import { ExportResultCode } from "@opentelemetry/core";
-import { trace } from "@opentelemetry/api";
+import { completeExportSuccessfully } from "@rovinos/telemetry/testing";
+import { logs, trace } from "@opentelemetry/api";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertNoForbiddenExecution,
@@ -30,14 +29,14 @@ beforeAll(() => {
     spanExporter: {
       export: (spans, callback) => {
         exportedSpans.push(...spans);
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       shutdown: () => Promise.resolve(),
     },
     logExporter: {
       export: (records, callback) => {
         exportedLogs.push(...records);
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),

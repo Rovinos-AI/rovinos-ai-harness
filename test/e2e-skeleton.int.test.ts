@@ -23,9 +23,7 @@ import {
   type Transport,
 } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { trace } from "@opentelemetry/api";
-import { logs, SeverityNumber } from "@opentelemetry/api-logs";
-import { ExportResultCode } from "@opentelemetry/core";
+import { logs, SeverityNumber, trace } from "@opentelemetry/api";
 import Database from "better-sqlite3";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -130,6 +128,7 @@ import {
   VaultRunView,
   withSpan,
 } from "@rovinos/telemetry";
+import { completeExportSuccessfully } from "@rovinos/telemetry/testing";
 import { z } from "zod";
 import { createSandboxComposeInvocation } from "../scripts/compose/sandbox.js";
 import { runNetworkIsolationCompose } from "../scripts/ci/network-isolation.js";
@@ -457,14 +456,14 @@ beforeAll(async () => {
   const spanExporter: TelemetrySdkOptions["spanExporter"] = {
     export: (finished, callback) => {
       spans.push(...finished);
-      callback({ code: ExportResultCode.SUCCESS });
+      completeExportSuccessfully(callback);
     },
     shutdown: () => Promise.resolve(),
   };
   const logExporter: TelemetrySdkOptions["logExporter"] = {
     export: (finished, callback) => {
       records.push(...finished);
-      callback({ code: ExportResultCode.SUCCESS });
+      completeExportSuccessfully(callback);
     },
     forceFlush: () => Promise.resolve(),
     shutdown: () => Promise.resolve(),
