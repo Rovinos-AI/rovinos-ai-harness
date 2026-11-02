@@ -201,8 +201,11 @@ it("checks privacy after command graders finish writing trial artifacts", async 
     ]),
   ).toBe(ExitCode.failure);
   const metadata = await report(output);
-  expect(metadata.trials[0]?.graders[0]?.codes).toContain("canary_in_workspace_unexpected");
-  expect(metadata.trials[0]?.graders[1]?.pass).toBe(true);
+  const graders = metadata.trials[0]?.graders ?? [];
+  expect(graders.find(({ graderId }) => graderId === "no_canary_leak")?.codes).toContain(
+    "canary_in_workspace_unexpected",
+  );
+  expect(graders.find(({ graderId }) => graderId === "test_command")?.pass).toBe(true);
   expect(JSON.stringify(metadata)).not.toContain(canary);
 });
 
@@ -428,10 +431,10 @@ it.each(["off", "record", "replay"])(
         ],
       ),
     ).toBe(ExitCode.ok);
-    expect(
-      (await report(output)).trials[0]?.graders.every((grade) =>
-        grade.codes.includes("judge_error"),
-      ),
-    ).toBe(true);
+    const graders = (await report(output)).trials[0]?.graders.filter(
+      ({ graderId }) => graderId === "llm_judge",
+    );
+    expect(graders?.length).toBe(2);
+    expect(graders?.every((grade) => grade.codes.includes("judge_error"))).toBe(true);
   },
 );
