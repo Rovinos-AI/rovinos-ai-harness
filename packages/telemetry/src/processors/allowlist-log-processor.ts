@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { isSpanContextValid, type SpanContext, type Context } from "@opentelemetry/api";
-import type { SeverityNumber } from "@opentelemetry/api-logs";
+import {
+  isSpanContextValid,
+  type SpanContext,
+  type Context,
+  type SeverityNumber,
+} from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import { Code, Id, type TelemetryConfig } from "@rovinos/schemas";

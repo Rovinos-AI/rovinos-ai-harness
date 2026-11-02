@@ -20,8 +20,9 @@ it("pins multi-platform base indexes and installs only build-stage tools", () =>
     "FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS build",
   );
   expect(dockerfile).toContain(
-    "FROM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime",
+    "FROM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime-os-audit",
   );
+  expect(dockerfile).toContain("FROM runtime-os-audit AS runtime");
   expect(dockerfile).toContain("RUN mise install node npm:corepack");
   expect(dockerfile).toContain("ENV MISE_AUTO_INSTALL=false");
   expect(dockerfile).toContain("RUN mise exec -- corepack enable");

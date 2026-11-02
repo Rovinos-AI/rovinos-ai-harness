@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code } from "@rovinos/schemas";
-import type { Logger } from "@opentelemetry/api-logs";
+import type { Logger } from "@opentelemetry/api";
 import { describe, expect, it, vi } from "vitest";
 import { emitPricingMissing } from "./pricing-missing.js";
 

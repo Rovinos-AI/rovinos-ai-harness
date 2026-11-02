@@ -3,13 +3,13 @@ import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context } from "@op
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { Code, Id, type TelemetryConfig } from "@rovinos/schemas";
 import {
-  BasicTracerProvider,
+  TracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
   type ReadableSpan,
   type Span,
   type SpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
+} from "@opentelemetry/sdk-trace";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
 import { defineSpan, __resetRegistryForTests } from "../registry.js";
@@ -458,10 +458,10 @@ describe("AllowlistSpanProcessor", () => {
 
   it("sends only sanitized spans through the real SDK exporter pipeline", async () => {
     const exporter = new InMemorySpanExporter();
-    const allowlist = new AllowlistSpanProcessor(new SimpleSpanProcessor(exporter), {
+    const allowlist = new AllowlistSpanProcessor(new SimpleSpanProcessor({ exporter }), {
       telemetry: disabledTelemetry,
     });
-    const provider = new BasicTracerProvider({ spanProcessors: [allowlist] });
+    const provider = new TracerProvider({ spanProcessors: [allowlist] });
     trace.setGlobalTracerProvider(provider);
     const definition = defineTestSpan();
 

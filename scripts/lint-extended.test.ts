@@ -55,6 +55,27 @@ it("builds extended lint commands through the injected runner", () => {
   }
 });
 
+it("accepts named Docker build stages as bases after validating their source image", () => {
+  const temporaryRoot = mkdtempSync(resolve(rootDirectory, ".lint-docker-stage-fixture-"));
+
+  try {
+    const dockerfile = resolve(temporaryRoot, "Dockerfile");
+    writeFileSync(
+      dockerfile,
+      `FROM node:26-slim@sha256:${"a".repeat(64)} AS audit\nFROM audit AS runtime\n`,
+    );
+
+    expect(
+      lint("docker", [relative(rootDirectory, dockerfile)], {
+        runner: () => true,
+        pullImages: false,
+      }),
+    ).toBe(true);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 it("pulls the same pinned images used by the container lint modes", () => {
   const calls: { command: string; args: string[]; tool: string }[] = [];
 

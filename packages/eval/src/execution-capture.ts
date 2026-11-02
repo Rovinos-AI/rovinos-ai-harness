@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { trace } from "@opentelemetry/api";
-import { logs } from "@opentelemetry/api-logs";
-import type { LoggerProvider, LogRecord } from "@opentelemetry/api-logs";
+import { logs, type LoggerProvider, type LogRecord } from "@opentelemetry/api";
 import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CanarySink } from "./canary.js";
