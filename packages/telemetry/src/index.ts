@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 export { attr, getAttrMeta, isSafeAttr, type AttrMeta } from "./attr.js";
-export { SpanRegistryError, TelemetrySdkError, type SpanRegistryIssue } from "./errors.js";
+export {
+  SpanRegistryError,
+  TelemetryMetricsConfigError,
+  TelemetrySdkError,
+  type SpanRegistryIssue,
+} from "./errors.js";
 export { LogRegistryError } from "./log-registry.js";
 export {
   createLogger,
@@ -115,3 +120,7 @@ export {
   type TelemetrySdk,
   type TelemetrySdkOptions,
 } from "./sdk.js";
+export {
+  initializeTelemetryMetrics,
+  type TelemetryMetricsLifecycle,
+} from "./metrics-sdk.js";

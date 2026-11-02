@@ -7,6 +7,7 @@ describe("TelemetryConfigSchema", () => {
     expect(TelemetryConfigSchema.parse({})).toEqual({
       sentinel: { minValueLength: 6 },
       correlation: { enabled: false },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     });
   });
 
@@ -14,6 +15,7 @@ describe("TelemetryConfigSchema", () => {
     expect(TelemetryConfigSchema.parse({ correlation: { enabled: true } })).toEqual({
       sentinel: { minValueLength: 6 },
       correlation: { enabled: true },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     });
   });
 
@@ -21,6 +23,7 @@ describe("TelemetryConfigSchema", () => {
     expect(TelemetryConfigSchema.parse({ sentinel: { minValueLength: 10 } })).toEqual({
       sentinel: { minValueLength: 10 },
       correlation: { enabled: false },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     });
   });
 
@@ -28,7 +31,19 @@ describe("TelemetryConfigSchema", () => {
     expect(TelemetryConfigSchema.parse({ sentinel: { enabled: false } })).toEqual({
       sentinel: { minValueLength: 6, enabled: false },
       correlation: { enabled: false },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     });
+  });
+
+  it("supports disabled and host-owned metric pipelines with a bounded series limit", () => {
+    expect(
+      TelemetryConfigSchema.parse({
+        metrics: { enabled: false, ownership: "host", maxSeries: 25 },
+      }).metrics,
+    ).toEqual({ enabled: false, ownership: "host", maxSeries: 25 });
+    expect(
+      TelemetryConfigSchema.safeParse({ metrics: { maxSeries: 1_001 } }).success,
+    ).toBe(false);
   });
 
   it("rejects non-positive, fractional, and unknown values", () => {

@@ -478,10 +478,7 @@ describe("hostile MCP App integration", () => {
     if (telemetry !== undefined) {
       telemetry.unsafeSpanCleanup();
       await telemetry.sdk.forceFlush();
-      await Promise.all([
-        telemetry.sdk.tracerProvider.shutdown(),
-        telemetry.sdk.loggerProvider.shutdown(),
-      ]);
+      await telemetry.sdk.shutdown();
     }
     await metricCollector.provider.shutdown();
   });

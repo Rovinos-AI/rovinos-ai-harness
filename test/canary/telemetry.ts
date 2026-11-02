@@ -66,6 +66,7 @@ export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
     telemetry: {
       sentinel: { minValueLength: 6, enabled: true },
       correlation: { enabled: false },
+      metrics: { enabled: false, ownership: "harness", maxSeries: 100 },
     },
   });
   if (!trace.setGlobalTracerProvider(sdk.tracerProvider)) {
@@ -146,6 +147,7 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
     telemetry: {
       sentinel: { enabled: false, minValueLength: 6 },
       correlation: { enabled: false },
+      metrics: { enabled: false, ownership: "harness", maxSeries: 100 },
     },
   });
   const definition = defineSpan(
@@ -159,6 +161,6 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
   span.end();
   await sdk.tracerProvider.forceFlush();
   const payload = JSON.stringify(spans.map(({ name, attributes }) => ({ name, attributes })));
-  await Promise.all([sdk.tracerProvider.shutdown(), sdk.loggerProvider.shutdown()]);
+  await sdk.shutdown();
   return payload;
 }

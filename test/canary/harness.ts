@@ -212,10 +212,7 @@ export class CanaryHarness {
       });
     } catch (error) {
       telemetry.unsafeSpanCleanup();
-      await Promise.all([
-        telemetry.sdk.tracerProvider.shutdown(),
-        telemetry.sdk.loggerProvider.shutdown(),
-      ]);
+      await telemetry.sdk.shutdown();
       await rm(directory, { recursive: true, force: true });
       throw error;
     }
@@ -361,10 +358,7 @@ export class CanaryHarness {
       await this.runtime.close();
       await this.telemetry.sdk.forceFlush();
       this.telemetry.unsafeSpanCleanup();
-      await Promise.all([
-        this.telemetry.sdk.tracerProvider.shutdown(),
-        this.telemetry.sdk.loggerProvider.shutdown(),
-      ]);
+      await this.telemetry.sdk.shutdown();
     } finally {
       await rm(this.directory, { recursive: true, force: true });
     }

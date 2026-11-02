@@ -367,14 +367,22 @@ describe("assertSentinelGate", () => {
     expect(() => {
       assertSentinelGate(
         undefined,
-        { sentinel: { minValueLength: 6, enabled: false }, correlation: { enabled: false } },
+        {
+          sentinel: { minValueLength: 6, enabled: false },
+          correlation: { enabled: false },
+          metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+        },
         "production",
       );
     }).toThrow(SentinelRequiredError);
     expect(() => {
       assertSentinelGate(
         undefined,
-        { sentinel: { minValueLength: 6, enabled: false }, correlation: { enabled: false } },
+        {
+          sentinel: { minValueLength: 6, enabled: false },
+          correlation: { enabled: false },
+          metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+        },
         "test",
       );
     }).not.toThrow();
