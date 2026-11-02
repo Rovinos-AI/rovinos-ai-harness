@@ -90,8 +90,8 @@
     },
     {
       "package": "@modelcontextprotocol/inspector",
-      "version": "2.12.0",
-      "reason": "Manifest says SEE LICENSE IN LICENSE; the LICENSE file grants MIT or Apache-2.0 terms, both on the allowlist.",
+      "version": "2.13.0",
+      "reason": "Apache-2.0 with MIT-licensed contributions during MCP relicensing; docs are CC-BY-4.0; dev-only conformance CLI.",
       "expires": "2027-01-19"
     },
     {
