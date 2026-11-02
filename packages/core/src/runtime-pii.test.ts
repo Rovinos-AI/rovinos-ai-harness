@@ -100,6 +100,29 @@ afterEach(async () => {
 });
 
 describe("createRuntime PII composition", () => {
+  it("sanitizes requests before an injected model receives them", async () => {
+    const model = new FakeModelPort([completion([{ type: "text", text: "completed" }])]);
+    const runtime = await createRuntime(config(), {
+      dataDir: await dataDirectory(),
+      store: new InMemoryEventStore(),
+      transientVault: true,
+      model,
+      policy: allowAllPolicy,
+      secretResolver,
+    });
+
+    try {
+      const result = await runtime.run(email);
+
+      expect(result.status).toBe("completed");
+      expect(model.requests).toHaveLength(1);
+      expect(JSON.stringify(model.requests[0]?.request.messages)).not.toContain(email);
+      expect(JSON.stringify(model.requests[0]?.request.messages)).toContain("<EMAIL_1>");
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("logs the code when a local model-input allow rule is ignored", () => {
     const warnings: string[] = [];
     const scopes = new RunScopeRegistry();

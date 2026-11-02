@@ -15,18 +15,25 @@ gate executes through the documentation test runner:
 
 ```bash
 rm -rf .tmp/evals-tutorial
+rm -rf .tmp/evals-variants
 ```
 
 <!-- test:run -->
 
 ```bash
-node packages/cli/dist/bin.js eval run examples/evals/suite.ts --cassette replay --variants examples/evals/variants.yaml --fail-under 1.0 --out .tmp/evals-tutorial
+node packages/cli/dist/bin.js eval run examples/evals/suite.ts --cassette replay --fail-under 1.0 --out .tmp/evals-tutorial
 ```
 
 <!-- test:run -->
 
 ```bash
-sed -n '1,80p' .tmp/evals-tutorial/eval-report.md
+node packages/cli/dist/bin.js eval run examples/evals/suite.ts --cassette replay --variants examples/evals/variants.yaml --fail-under 1.0 --out .tmp/evals-variants
+```
+
+<!-- test:run -->
+
+```bash
+sed -n '1,80p' .tmp/evals-variants/eval-report.md
 ```
 
 The report includes pass rates, cost and step counts. It contains grader codes and aggregate
@@ -65,7 +72,7 @@ by the replay gate:
 <!-- test:run -->
 
 ```bash
-node packages/cli/dist/bin.js eval compare .tmp/evals-tutorial/eval-report.json .tmp/evals-tutorial/eval-report.json --variant-a baseline --variant-b candidate --seed 41
+node packages/cli/dist/bin.js eval compare .tmp/evals-variants/eval-report.json .tmp/evals-variants/eval-report.json --variant-a baseline --variant-b candidate --seed 41
 ```
 
 Remove the local report when finished:
@@ -74,6 +81,7 @@ Remove the local report when finished:
 
 ```bash
 rm -rf .tmp/evals-tutorial
+rm -rf .tmp/evals-variants
 ```
 
 ## Decisions and verification
