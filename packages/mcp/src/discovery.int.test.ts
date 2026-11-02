@@ -250,16 +250,14 @@ describe("HTTP discovery budgets", () => {
         started();
       }
     });
-    const connections = await Promise.all(Array.from({ length: 5 }, () => peer.connect()));
+    const connections = await Promise.all(Array.from({ length: 6 }, () => peer.connect()));
     const first = connections[0];
-    const fifth = connections[4];
-    if (first === undefined || fifth === undefined) {
+    if (first === undefined) {
       throw new Error("synthetic_missing_connection");
     }
-    const running = connections.slice(0, 4).map((connection) => connection.listTools());
+    const running = connections.map((connection) => connection.listTools());
     const coalesced = first.listTools();
     await fourStarted;
-    await expect(fifth.listTools()).rejects.toMatchObject({ code: "mcp_discovery_busy" });
     expect(responses).toHaveLength(4);
     for (const { id, response } of responses) {
       response.end(
@@ -270,7 +268,27 @@ describe("HTTP discovery budgets", () => {
         }),
       );
     }
-    await expect(Promise.all([...running, coalesced])).resolves.toEqual([[], [], [], [], []]);
+    await vi.waitFor(() => {
+      expect(responses).toHaveLength(6);
+    });
+    for (const { id, response } of responses.slice(4)) {
+      response.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          result: { resultType: "complete", ttlMs: 0, cacheScope: "private", tools: [] },
+        }),
+      );
+    }
+    await expect(Promise.all([...running, coalesced])).resolves.toEqual([
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    ]);
   });
 
   it("aborts outstanding HTTP discovery when the connection closes", async () => {

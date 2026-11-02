@@ -15,6 +15,7 @@ const MAX_DECODED_BYTES = 8_388_608;
 const DISCOVERY_TIMEOUT_MS = 30_000;
 const MAX_CONCURRENT_DISCOVERIES = 4;
 let activeDiscoveries = 0;
+const waitingDiscoveries = new Set<() => void>();
 const MAX_HEADER_SCAN_DEPTH = 32;
 const RESERVED_HEADER_NAMES = new Set(["traceparent", "tracestate", "baggage"]);
 const HEADER_TOKEN = /^[!#$%&'*+.^`|~\w-]+$/u;
@@ -154,13 +155,47 @@ function nextCursor(page: ListToolsResult, seen: Set<string>): string | undefine
 export async function listAllTools(
   options: ListAllToolsOptions,
 ): Promise<{ readonly tools: McpTool[]; readonly ttlMs: number | undefined }> {
+  await acquireDiscovery(options.signal);
+  try {
+    return await runDiscovery(options);
+  } finally {
+    activeDiscoveries--;
+    waitingDiscoveries.values().next().value?.();
+  }
+}
+
+function acquireDiscovery(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new McpConnectionError("mcp_discovery_cancelled"));
+      return;
+    }
+    const start = () => {
+      waitingDiscoveries.delete(start);
+      signal?.removeEventListener("abort", onAbort);
+      activeDiscoveries++;
+      resolve();
+    };
+    const onAbort = () => {
+      waitingDiscoveries.delete(start);
+      signal?.removeEventListener("abort", onAbort);
+      reject(new McpConnectionError("mcp_discovery_cancelled"));
+    };
+    if (activeDiscoveries < MAX_CONCURRENT_DISCOVERIES) {
+      start();
+    } else {
+      waitingDiscoveries.add(start);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+}
+
+async function runDiscovery(
+  options: ListAllToolsOptions,
+): Promise<{ readonly tools: McpTool[]; readonly ttlMs: number | undefined }> {
   if (options.signal?.aborted === true) {
     throw new McpConnectionError("mcp_discovery_cancelled");
   }
-  if (activeDiscoveries >= MAX_CONCURRENT_DISCOVERIES) {
-    throw new McpConnectionError("mcp_discovery_busy");
-  }
-  activeDiscoveries++;
   const deadline = new AbortController();
   const timer = setTimeout(() => {
     deadline.abort();
@@ -195,7 +230,6 @@ export async function listAllTools(
       : new McpConnectionError("mcp_list_tools_failed");
   } finally {
     clearTimeout(timer);
-    activeDiscoveries--;
   }
 }
 

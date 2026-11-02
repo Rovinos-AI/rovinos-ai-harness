@@ -141,14 +141,14 @@ pages and before invalid-header tools are excluded:
 | Each input or output schema | 1 MiB | Incremental decoded-JSON measurement, before header scanning. |
 | Total decoded data | 8 MiB | Sum of compact JSON UTF-8 bytes for validated pages, including schemas, descriptions, metadata, and cursors. |
 | Total duration | 30 seconds | One shared deadline for the traversal, never reset per page; the configured `callMs` can fail a page sooner. |
-| Concurrent discoveries | 4 per process | Excess discoveries fail immediately without a queue. Calls on the same connection share an in-flight refresh. |
+| Concurrent discoveries | 4 per process | Excess discoveries wait in a cancellable FIFO queue. Each 30-second deadline starts after admission, not while waiting. Calls on the same connection share an in-flight refresh. |
 
 Repeated cursors fail with `mcp_list_tools_failed`. Exceeding pages, observed
 tools, schema bytes, or total decoded bytes fails with
 `mcp_discovery_page_limit`, `mcp_too_many_tools`,
 `mcp_discovery_schema_limit`, or `mcp_discovery_data_limit`, respectively.
-Deadline expiry, cancellation, and concurrency rejection use
-`mcp_discovery_timeout`, `mcp_discovery_cancelled`, and `mcp_discovery_busy`.
+Deadline expiry and cancellation use
+`mcp_discovery_timeout` and `mcp_discovery_cancelled`.
 These errors contain only closed codes, never server content. Discovery fails
 for that server; partial results are not returned, registered, or cached.
 If a list-change notification invalidates an in-flight traversal, that refresh
@@ -160,6 +160,9 @@ Cancellation stays inside `@rovinos/mcp`: an optional `AbortSignal` on
 SDK request. Closing the connection also cancels discovery. No `@rovinos/sdk`
 public types are changed. Connection establishment has its own existing timeout;
 the discovery deadline begins when traversal starts.
+Queued discoveries do not consume a running slot or deadline budget. Cancelling
+a queued discovery removes it without contacting the server; later waiters keep
+their FIFO order.
 Legacy peers lack per-request stream cancellation, so cancellation or deadline
 expiry closes that connection to stop its outstanding body read; subsequent
 calls reconnect.

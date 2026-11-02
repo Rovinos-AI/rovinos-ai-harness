@@ -159,6 +159,7 @@ describe("bounded tool discovery", () => {
     const controller = new AbortController();
     const request = vi.fn(() => new Promise<ListToolsResult>(() => undefined));
     const result = discover(request, controller.signal).catch((error: unknown) => error);
+    await Promise.resolve();
     controller.abort(new Error("synthetic-private-content"));
     expect(await result).toMatchObject({ code: "mcp_discovery_cancelled" });
     await expect(discover(request, controller.signal)).rejects.toMatchObject({
@@ -171,22 +172,97 @@ describe("bounded tool discovery", () => {
     });
   });
 
-  it("allows four discoveries and rejects a fifth without starting it", async () => {
+  it("admits queued discoveries in FIFO order and removes cancelled waiters", async () => {
     const controller = new AbortController();
-    const request = vi.fn(() => new Promise<ListToolsResult>(() => undefined));
-    const running = Array.from({ length: 4 }, async () => {
-      await expect(discover(request, controller.signal)).rejects.toMatchObject({
-        code: "mcp_discovery_cancelled",
+    const started: number[] = [];
+    const release: (() => void)[] = [];
+    const request = (index: number) => () => {
+      started.push(index);
+      return new Promise<ListToolsResult>((resolve) => {
+        release.push(() => {
+          resolve({ tools: [] });
+        });
       });
-    });
+    };
+    const running = Array.from({ length: 4 }, (_, index) => discover(request(index)));
+    const cancelled = discover(request(4), controller.signal).catch((error: unknown) => error);
+    const fifth = discover(request(5));
+    const sixth = discover(request(6));
+    await Promise.resolve();
     try {
-      await expect(discover(request)).rejects.toMatchObject({ code: "mcp_discovery_busy" });
-      expect(request).toHaveBeenCalledTimes(4);
+      expect(started).toEqual([0, 1, 2, 3]);
+      controller.abort(new Error("synthetic-private-content"));
+      expect(await cancelled).toMatchObject({
+        code: "mcp_discovery_cancelled",
+        message: "mcp_discovery_cancelled",
+      });
+      release[0]?.();
+      await running[0];
+      await Promise.resolve();
+      expect(started).toEqual([0, 1, 2, 3, 5]);
+      release[1]?.();
+      await running[1];
+      await Promise.resolve();
+      expect(started).toEqual([0, 1, 2, 3, 5, 6]);
     } finally {
-      controller.abort();
-      await Promise.all(running);
+      for (const resolve of release) {
+        resolve();
+      }
+      await Promise.all([...running, fifth, sixth]);
     }
-    await expect(discover(() => Promise.resolve({ tools: [] }))).resolves.toMatchObject({
+  });
+
+  it("starts queued deadlines only after admission", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const running = Array.from({ length: 4 }, () =>
+      discover(() => new Promise<ListToolsResult>(() => undefined), controller.signal).catch(
+        (error: unknown) => error,
+      ),
+    );
+    const request = vi.fn(
+      (_cursor: string | undefined, _signal: AbortSignal) =>
+        new Promise<ListToolsResult>(() => undefined),
+    );
+    const queued = discover(request).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(request).not.toHaveBeenCalled();
+    controller.abort();
+    await Promise.all(running);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[1].aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(await queued).toMatchObject({ code: "mcp_discovery_timeout" });
+  });
+
+  it("releases an admission cancelled before traversal begins", async () => {
+    const controller = new AbortController();
+    const request = vi.fn(() => Promise.resolve({ tools: [] }));
+    const cancelled = discover(request, controller.signal).catch((error: unknown) => error);
+    controller.abort();
+    expect(await cancelled).toMatchObject({ code: "mcp_discovery_cancelled" });
+    expect(request).not.toHaveBeenCalled();
+    await expect(
+      Promise.all(Array.from({ length: 6 }, () => discover(request))),
+    ).resolves.toHaveLength(6);
+  });
+
+  it("hands a slot to the next waiter after request failure", async () => {
+    const controller = new AbortController();
+    const running = Array.from({ length: 4 }, () =>
+      discover(() => new Promise<ListToolsResult>(() => undefined), controller.signal).catch(
+        (error: unknown) => error,
+      ),
+    );
+    const failed = discover(() => Promise.reject(new Error("synthetic"))).catch(
+      (error: unknown) => error,
+    );
+    const next = discover(() => Promise.resolve({ tools: [] }));
+    controller.abort();
+    await Promise.all(running);
+    expect(await failed).toMatchObject({ code: "mcp_list_tools_failed" });
+    await expect(next).resolves.toMatchObject({
       tools: [],
     });
   });

@@ -105,7 +105,6 @@ function connectionErrorCode(code: McpConnectionError["code"]): string {
     case "mcp_connect_failed":
     case "mcp_list_tools_failed":
     case "mcp_too_many_tools":
-    case "mcp_discovery_busy":
     case "mcp_discovery_data_limit":
     case "mcp_discovery_page_limit":
     case "mcp_discovery_schema_limit":
