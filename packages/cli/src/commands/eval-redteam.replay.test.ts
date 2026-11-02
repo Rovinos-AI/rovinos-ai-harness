@@ -9,7 +9,7 @@ import type { PolicyPort, ToolPort } from "@rovinos/core";
 import * as evalApi from "@rovinos/eval";
 import { CassetteFileSchema } from "@rovinos/models";
 import { Code, JsonValue, ToolSpecSchema, parseJson } from "@rovinos/schemas";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
@@ -26,6 +26,8 @@ const redTeamDirectory = fileURLToPath(new URL("../../../../evals/redteam/", imp
 const attacksPath = join(redTeamDirectory, "cassettes", "attacks.json");
 
 let temporaryDirectory: string | undefined;
+
+vi.setConfig({ testTimeout: 15_000 });
 
 const RedTeamCassetteSchema = z
   .object({

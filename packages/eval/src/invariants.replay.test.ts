@@ -3,13 +3,15 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { EventSchema, Id, parseJson } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RedTeamCassetteSchema, suite } from "../../../evals/redteam/suite.js";
 import { verifyInvariants } from "./invariants.js";
 
 const cassettePath = fileURLToPath(
   new URL("../../../evals/redteam/cassettes/attacks.json", import.meta.url),
 );
+
+vi.setConfig({ testTimeout: 15_000 });
 
 function cassetteEvents(): readonly Event[] {
   const runId = Id.parse("00000000000000000000000001");

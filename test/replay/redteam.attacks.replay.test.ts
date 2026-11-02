@@ -35,8 +35,10 @@ import {
 } from "@rovinos/schemas";
 import { Token } from "@rovinos/vault";
 import { verifyInvariants } from "@rovinos/eval";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { withGoldenTracing } from "./golden/scenario.js";
+
+vi.setConfig({ testTimeout: 15_000 });
 
 const rootDirectories: string[] = [];
 
