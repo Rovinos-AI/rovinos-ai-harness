@@ -7,7 +7,7 @@ import { SnapshotSchema, type Snapshot } from "./snapshot.js";
 
 /** Current schema version for each event type. */
 export const EVENT_SCHEMA_VERSIONS = {
-  run_created: 1,
+  run_created: 2,
   run_input: 1,
   run_status_changed: 1,
   model_request: 2,
@@ -40,6 +40,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Pure migrations from event schema version n to n + 1. */
 export const UPCASTERS: EventUpcasterMap = {
+  run_created: {
+    1: runCreatedV1ToV2,
+  },
   model_request: {
     1: modelRequestV1ToV2,
   },
@@ -47,6 +50,11 @@ export const UPCASTERS: EventUpcasterMap = {
     1: approvalResolvedV1ToV2,
   },
 };
+
+/** Keeps v1 run metadata valid while adding the optional pinned catalog fingerprint in v2. */
+function runCreatedV1ToV2(payload: unknown): unknown {
+  return payload;
+}
 
 /** Legacy logs lack the non-message inputs; retain their original full-request hash verification. */
 function modelRequestV1ToV2(payload: unknown): unknown {

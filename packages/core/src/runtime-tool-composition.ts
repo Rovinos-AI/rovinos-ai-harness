@@ -55,7 +55,19 @@ export function createRuntimeToolPort(
   const composed = offloadingPort ?? piiTool;
   const spawnResumeStrategy = subagentTool.resumeStrategy?.bind(subagentTool);
   const innerResumeStrategy = toolWithBuiltins.resumeStrategy?.bind(toolWithBuiltins);
+  const pinToolForRun = options.tool.pinForRun;
+  const getCatalogVersion = options.tool.catalogVersion?.bind(options.tool);
+  const pinForRun =
+    pinToolForRun === undefined
+      ? undefined
+      : async (pinOptions?: Parameters<NonNullable<ToolPort["pinForRun"]>>[0]) =>
+          createRuntimeToolPort({
+            ...options,
+            tool: await pinToolForRun(pinOptions),
+          });
   return Object.assign(composed, {
+    ...(pinForRun === undefined ? {} : { pinForRun }),
+    ...(getCatalogVersion === undefined ? {} : { catalogVersion: getCatalogVersion }),
     resumeStrategy: (toolId: Code) => {
       const strategy = spawnResumeStrategy?.(toolId) ?? innerResumeStrategy?.(toolId);
       if (strategy === undefined) {

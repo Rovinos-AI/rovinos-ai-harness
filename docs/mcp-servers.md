@@ -139,6 +139,31 @@ If two discovered tools normalize to the same id, startup fails with
 `tool_id_collision`, including when both tools are from one server; the error
 contains that normalized `Code` and both server ids (which can be identical).
 
+## Catalog versions and run behavior
+
+Each run pins the fingerprint of the complete MCP catalog it was shown,
+including the normalized aliases, descriptions, input schemas, server routes,
+and execution metadata. New runs refresh discovery using each connection's
+`tools/list` TTL and list-change notifications before exposing tools. An
+already-running model request continues to see its pinned specifications;
+before dispatch, the harness refreshes discovery and rejects the call with
+`mcp_catalog_changed` if the locally observed catalog no longer matches. A
+failed refresh rejects dispatch rather than treating an old catalog as freshly
+validated.
+
+The fingerprint is stored on the run's `run_created` event. Resuming a run
+requires rediscovering the same fingerprint; a changed or unavailable catalog
+cannot execute its pending tool calls or reuse their approvals. Start a new run
+to review and use the new catalog. Tool changes do not add permissions or
+approvals automatically.
+
+This check compares local discovery snapshots, not a remote, version-bound
+execution guarantee. A server may change its behavior after `tools/list`, may
+not send a change notification, or may not enforce its advertised schema. The
+harness detects changes only when discovery observes them, and MCP does not
+provide an atomic operation that binds a tool call to the previously listed
+schema.
+
 ## Examples
 
 `examples/servers.yaml` contains a trusted internal stdio server with trace

@@ -10,7 +10,7 @@ import { continueRunLoop, type RunLoopExecutionOptions, type RunLoopResult } fro
 import { recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { LeaseLostError, RunRecorder, type EventPartial } from "./recorder.js";
 import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
-import { foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
+import { CorruptLogError, foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
 import { applyDanglingIntents } from "./steps/resume-tool-step.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
@@ -385,6 +385,17 @@ async function resumeFromHistory(
   history: ResumeHistory,
 ): Promise<RunLoopResult> {
   const { events, snapshot, state, head } = history;
+  const created = events[0];
+  if (created?.type !== "run_created") {
+    throw new CorruptLogError();
+  }
+  const pinnedTool = await options.tool.pinForRun?.({
+    resumed: true,
+    ...(created.toolCatalogVersion === undefined
+      ? {}
+      : { expectedVersion: created.toolCatalogVersion }),
+  });
+  const resumeOptions = pinnedTool === undefined ? options : { ...options, tool: pinnedTool };
   const recorder = new RunRecorder(
     options.store,
     options.runId,
@@ -399,19 +410,19 @@ async function resumeFromHistory(
   const checkpointer = new Checkpointer({
     recorder,
     runId: options.runId,
-    context: options.context,
-    ids: options.ids,
-    clock: options.clock,
-    ...(options.checkpointEveryEvents === undefined
+    context: resumeOptions.context,
+    ids: resumeOptions.ids,
+    clock: resumeOptions.clock,
+    ...(resumeOptions.checkpointEveryEvents === undefined
       ? {}
-      : { checkpointEveryEvents: options.checkpointEveryEvents }),
-    ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
-    ...(options.workspaceSnapshotter === undefined
+      : { checkpointEveryEvents: resumeOptions.checkpointEveryEvents }),
+    ...(resumeOptions.snapshotKeep === undefined ? {} : { snapshotKeep: resumeOptions.snapshotKeep }),
+    ...(resumeOptions.workspaceSnapshotter === undefined
       ? {}
-      : { workspaceSnapshotter: options.workspaceSnapshotter }),
+      : { workspaceSnapshotter: resumeOptions.workspaceSnapshotter }),
   });
   const execution: ResumeExecution = {
-    options,
+    options: resumeOptions,
     state,
     events,
     snapshot,

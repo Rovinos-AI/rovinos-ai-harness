@@ -40,6 +40,7 @@ const inputSchema = {
 interface Peer {
   readonly client: InMemoryTransport;
   readonly serverTransport: InMemoryTransport;
+  readonly server: McpServer;
 }
 
 interface Fixture {
@@ -47,6 +48,8 @@ interface Fixture {
   readonly port: McpToolPort;
   readonly calls: CallToolRequest["params"][];
   readonly receivedMeta: (Record<string, unknown> | undefined)[];
+  setTools(tools: Tool[]): void;
+  setToolsListFailure(fail: boolean): void;
   close(): Promise<void>;
 }
 
@@ -70,10 +73,15 @@ async function fixture(
   const server = new McpServer({ name: "tool-port-test", version: "1.0.0" });
   const calls: CallToolRequest["params"][] = [];
   const receivedMeta: (Record<string, unknown> | undefined)[] = [];
+  let tools: Tool[] = [{ name: "echo", inputSchema }];
+  let failToolsList = false;
   server.server.registerCapabilities({ tools: { listChanged: true } });
-  server.server.setRequestHandler("tools/list", () => ({
-    tools: [{ name: "echo", inputSchema }],
-  }));
+  server.server.setRequestHandler("tools/list", () => {
+    if (failToolsList) {
+      throw new Error("synthetic tools/list failure");
+    }
+    return { tools };
+  });
   server.server.setRequestHandler("tools/call", (request) => {
     calls.push(request.params);
     receivedMeta.push(request.params._meta);
@@ -90,7 +98,7 @@ async function fixture(
     );
   });
   await server.connect(serverTransport);
-  const peer = { client, serverTransport };
+  const peer = { client, serverTransport, server };
   const config = ServerConfigSchema.parse({
     id: "mcp_test",
     transport: { kind: "stdio", command: "not-spawned-by-test" },
@@ -142,6 +150,12 @@ async function fixture(
     port,
     calls,
     receivedMeta,
+    setTools: (updated) => {
+      tools = updated;
+    },
+    setToolsListFailure: (fail) => {
+      failToolsList = fail;
+    },
     close: async () => {
       await port.close();
       await serverTransport.close();
@@ -226,6 +240,88 @@ afterAll(() => {
 });
 
 describe("McpToolPort", () => {
+  it("pins a run to one catalog and routes new runs only through the refreshed catalog", async () => {
+    const current = await fixture();
+    const activeRun = await current.port.pinForRun();
+    try {
+      expect(activeRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.echo"]);
+      current.setTools([{ name: "replacement", inputSchema }]);
+      await current.peer.server.server.notification({ method: "notifications/tools/list_changed" });
+      await current.port.refreshCatalog();
+
+      expect(current.port.getToolSpecs().map(({ toolId }) => toolId)).toEqual([
+        "mcp_test.replacement",
+      ]);
+      expect(activeRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.echo"]);
+      await expect(activeRun.execute(call, context())).resolves.toMatchObject({
+        outcome: "error",
+        errorCode: "mcp_catalog_changed",
+      });
+      expect(current.calls).toHaveLength(0);
+
+      const newRun = await current.port.pinForRun();
+      expect(newRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual([
+        "mcp_test.replacement",
+      ]);
+      await expect(
+        newRun.execute({ ...call, toolId: "mcp_test.replacement" }, context()),
+      ).resolves.toMatchObject({ outcome: "ok" });
+      expect(current.calls.map(({ name }) => name)).toEqual(["replacement"]);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("rejects a resumed run when its persisted catalog fingerprint differs", async () => {
+    const current = await fixture();
+    try {
+      const initial = await current.port.pinForRun();
+      const activeRun = await current.port.pinForRun();
+      current.setTools([
+        {
+          name: "echo",
+          inputSchema: {
+            type: "object",
+            properties: { value: { type: "number" } },
+            required: ["value"],
+            additionalProperties: false,
+          },
+        },
+      ]);
+      await current.port.refreshCatalog();
+      await expect(activeRun.execute(call, context())).resolves.toMatchObject({
+        outcome: "error",
+        errorCode: "mcp_catalog_changed",
+      });
+      expect(current.calls).toHaveLength(0);
+      await expect(
+        current.port.pinForRun({ resumed: true, expectedVersion: initial.catalogVersion() }),
+      ).rejects.toMatchObject({ code: "mcp_catalog_changed" });
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("keeps the previous registry on refresh failure and fails dispatch closed", async () => {
+    const current = await fixture();
+    const activeRun = await current.port.pinForRun();
+    try {
+      current.setTools([{ name: "replacement", inputSchema }]);
+      current.setToolsListFailure(true);
+      await expect(current.port.refreshCatalog()).rejects.toMatchObject({
+        code: "mcp_list_tools_failed",
+      });
+      expect(current.port.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.echo"]);
+      await expect(activeRun.execute(call, context())).resolves.toMatchObject({
+        outcome: "error",
+        errorCode: "mcp_catalog_unavailable",
+      });
+      expect(current.calls).toHaveLength(0);
+    } finally {
+      await current.close();
+    }
+  });
+
   it("preserves authorization errors during initial tools/list discovery", async () => {
     await expect(fixture({ authRequiredMethod: "tools/list" })).rejects.toMatchObject({
       code: "mcp_auth_required",

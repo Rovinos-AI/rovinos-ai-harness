@@ -134,6 +134,13 @@ export interface ToolExecutionResult {
 
 /** Tool executor used by the run loop. */
 export interface ToolPort {
+  /** Stable fingerprint for the tool catalog currently exposed by this port. */
+  catalogVersion?(): Sha256Hex | undefined;
+  /** Creates an immutable view for one new or resumed run, when supported. */
+  pinForRun?(options?: {
+    readonly expectedVersion?: Sha256Hex;
+    readonly resumed?: boolean;
+  }): Promise<ToolPort>;
   /** Returns custom durable recovery behavior for a tool's dangling intent. */
   resumeStrategy?(toolId: Code): ToolResumeStrategy | undefined;
   /** Sanitizes arguments before any durable model response or tool intent is recorded. */

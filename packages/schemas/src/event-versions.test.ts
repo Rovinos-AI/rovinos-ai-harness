@@ -26,6 +26,20 @@ function addFlag(payload: unknown, key: string): unknown {
 }
 
 describe("event schema upcasting", () => {
+  it("upcasts v1 run metadata without inventing a catalog fingerprint", () => {
+    const raw = {
+      ...envelope,
+      type: "run_created",
+      seq: 0,
+      configHash: "c".repeat(64),
+      policyVersion: "policy.v1",
+      depth: 0,
+    };
+
+    expect(upcastEvent(raw)).toEqual({ ...raw, v: 2 });
+    expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogVersion");
+  });
+
   it("upcasts v1 model requests without inventing hashes of unrecorded parameters", () => {
     const raw = {
       ...envelope,

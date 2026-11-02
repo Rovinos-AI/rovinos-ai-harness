@@ -11,8 +11,11 @@ function makeStartEvents(options: RunLoopOptions): EventPartial[] {
   return [
     {
       type: "run_created",
-      v: 1,
+      v: 2,
       configHash: options.configHash,
+      ...(options.toolCatalogVersion === undefined
+        ? {}
+        : { toolCatalogVersion: options.toolCatalogVersion }),
       policyVersion: options.policyVersion,
       ...(options.replayOf === undefined ? {} : { replayOf: options.replayOf }),
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),

@@ -27,6 +27,7 @@ import {
   Principal,
   PiiConfigSchema,
   RunConfigSchema,
+  Sha256Hex,
   SequentialIdGenerator,
   HarnessError,
   Traceparent,
@@ -54,6 +55,7 @@ import { emailDetector, PiiToolPort, Tokenizer } from "@rovinos/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
+import { McpCatalogChangedError } from "@rovinos/mcp";
 import { NaiveContext } from "./context/naive-context.js";
 import { StrategyContextPort } from "./context/context-port.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";
@@ -359,6 +361,7 @@ async function createApprovalRun(
   args: JsonValueType = { z: 1, a: 3 },
   editable: readonly string[] = ["/a"],
   identity: { readonly requestedBy?: string; readonly separationOfDuties?: boolean } = {},
+  toolCatalogVersion?: Sha256Hex,
 ) {
   const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
   let events: Event[] = [];
@@ -366,8 +369,9 @@ async function createApprovalRun(
     events = await recorder.recordBatch([
       {
         type: "run_created",
-        v: 1,
+        v: toolCatalogVersion === undefined ? 1 : 2,
         configHash,
+        ...(toolCatalogVersion === undefined ? {} : { toolCatalogVersion }),
         policyVersion: "test.policy",
         ...(identity.requestedBy === undefined
           ? {}
@@ -569,6 +573,27 @@ afterAll(() => {
 });
 
 describe("approval lifecycle", () => {
+  it("does not execute a prior approval when its pinned catalog changed", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const catalogVersion = Sha256Hex.parse("d".repeat(64));
+    const approvalRun = await createApprovalRun(store, clock, undefined, undefined, {}, catalogVersion);
+    await requestApprovalForRun(approvalRun.recorder, clock, approvalRun.state);
+    await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+    const headBeforeResume = await store.head(runId);
+    const tool = new FakeToolPort();
+    const execute = vi.spyOn(tool, "execute");
+    const pinForRun = vi.fn(() => Promise.reject(new McpCatalogChangedError()));
+
+    await expect(
+      resumeRun(createResumeOptions(store, clock, { tool: Object.assign(tool, { pinForRun }) })),
+    ).rejects.toMatchObject({ code: "mcp_catalog_changed" });
+
+    expect(pinForRun).toHaveBeenCalledWith({ resumed: true, expectedVersion: catalogVersion });
+    expect(execute).not.toHaveBeenCalled();
+    expect(await store.head(runId)).toEqual(headBeforeResume);
+  });
+
   it("records a request, suspends the run, and forces a checkpoint", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
@@ -1201,6 +1226,37 @@ describe("approval lifecycle", () => {
 });
 
 describe("runLoop", () => {
+  it("pins the tool catalog before recording run creation", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const catalogVersion = Sha256Hex.parse("c".repeat(64));
+    const pinnedTool = Object.assign(new FakeToolPort(), {
+      catalogVersion: () => catalogVersion,
+    });
+    const pinForRun = vi.fn(() => Promise.resolve(pinnedTool));
+    const tool: ToolPort = Object.assign(new FakeToolPort(), { pinForRun });
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([completion()]),
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "catalog-pinned run",
+      signal: new AbortController().signal,
+      budgets: defaultBudgets,
+      configHash,
+      policyVersion: "test.policy",
+    });
+
+    expect(pinForRun).toHaveBeenCalledOnce();
+    expect(result.events[0]).toMatchObject({
+      type: "run_created",
+      v: 2,
+      toolCatalogVersion: catalogVersion,
+    });
+  });
+
   it("records cancellation when the startup guard rejects a new run", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
@@ -2848,7 +2904,10 @@ describe("runLoop", () => {
           .map((event) => event.reason),
       ).toEqual(["interrupted", "resumed", "final_answer"]);
       expect(result.state.segmentId).not.toBe(segmentId);
-      expect(restore).toHaveBeenCalledWith(undefined, prior);
+      expect(restore).toHaveBeenCalledWith(
+        undefined,
+        prior.map((event) => (event.type === "run_created" ? { ...event, v: 2 } : event)),
+      );
     });
 
     it("reruns idempotent dangling calls and escalates non-idempotent calls", async () => {

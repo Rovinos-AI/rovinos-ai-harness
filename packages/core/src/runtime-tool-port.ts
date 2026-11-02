@@ -61,6 +61,19 @@ export function composeToolPorts(
         context: Parameters<NonNullable<ToolPort["prepare"]>>[1],
       ) => portFor(call.toolId).prepare?.(call, context) ?? Promise.resolve(call)
     : undefined;
+  const pinForRun = ports.some((port) => port.pinForRun !== undefined)
+    ? async (pinOptions?: Parameters<NonNullable<ToolPort["pinForRun"]>>[0]) =>
+      composeToolPorts(
+        additional.pinForRun === undefined
+          ? additional
+          : await additional.pinForRun(pinOptions),
+        existing.pinForRun === undefined ? existing : await existing.pinForRun(pinOptions),
+        options,
+      )
+    : undefined;
+  const catalogVersion = ports.some((port) => port.catalogVersion !== undefined)
+    ? () => existing.catalogVersion?.() ?? additional.catalogVersion?.()
+    : undefined;
   const validateInputSchema = ports.some((port) => port.validateInputSchema !== undefined)
     ? (
         toolId: Code,
@@ -73,6 +86,8 @@ export function composeToolPorts(
     : undefined;
   return {
     ...(prepare === undefined ? {} : { prepare }),
+    ...(pinForRun === undefined ? {} : { pinForRun }),
+    ...(catalogVersion === undefined ? {} : { catalogVersion }),
     ...(validateInputSchema === undefined ? {} : { validateInputSchema }),
     resumeStrategy: (toolId) => portFor(toolId).resumeStrategy?.(toolId),
     describe: (toolId, args) => portFor(toolId).describe(toolId, args),
