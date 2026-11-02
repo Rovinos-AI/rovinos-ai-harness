@@ -192,16 +192,10 @@ export async function recordInputRun(options: InputFixtureOptions = {}): Promise
   }
 }
 
-/** Records sequential round-zero requests through the real legacy live handler. */
-export async function recordLegacyInputRun(reuseKey: boolean): Promise<{
-  resolved: ResolvedRun;
-  toolRegistry: ToolPort;
-}> {
-  const actions = ["accept", "decline", "cancel"] as const;
-  let nextId = 100;
-  let time = 1_000;
-  let presentation = 0;
-  const tool: ToolPort = {
+const legacyActions = ["accept", "decline", "cancel"] as const;
+
+function legacyInputTool(reuseKey: boolean): ToolPort {
+  return {
     ...inputTool({}, []),
     describe: (toolId) =>
       toolId === inputToolId ? { idempotent: false, timeoutMs: 1000 } : undefined,
@@ -222,15 +216,27 @@ export async function recordLegacyInputRun(reuseKey: boolean): Promise<{
             },
           },
           timeoutMs: 1000,
+          maxPerRun: 3,
           signal: context.signal,
         });
-        if (response?.action !== actions[index]) {
+        if (response?.action !== legacyActions[index]) {
           throw new Error("Synthetic legacy resolution did not match.");
         }
       }
       return { outcome: "ok", result: { recorded: true } };
     },
   };
+}
+
+/** Records sequential round-zero requests through the real legacy live handler. */
+export async function recordLegacyInputRun(reuseKey: boolean): Promise<{
+  resolved: ResolvedRun;
+  toolRegistry: ToolPort;
+}> {
+  let nextId = 100;
+  let time = 1_000;
+  let presentation = 0;
+  const tool = legacyInputTool(reuseKey);
   const runtime = await createRuntime(inputRunConfig, {
     alreadyTokenized: true,
     store: new InMemoryEventStore(),
@@ -247,7 +253,7 @@ export async function recordLegacyInputRun(reuseKey: boolean): Promise<{
         id: Code.parse("test.synthetic"),
         available: (request) => request.source === "mcp_legacy",
         present: () => {
-          const action = actions[presentation++] ?? "decline";
+          const action = legacyActions[presentation++] ?? "decline";
           return Promise.resolve({
             action,
             principal: Code.parse("cli.synthetic"),

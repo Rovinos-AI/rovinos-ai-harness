@@ -1179,6 +1179,62 @@ async function resolveEvent(
 }
 
 describe("durable MCP input requests", () => {
+  it.each([false, true])(
+    "caps concurrent legacy requests before recording or presentation (policy decline: %s)",
+    async (policyDecline) => {
+      const { recorder } = createRecorder();
+      const history = await createRun(recorder, []);
+      const present = vi.fn(() =>
+        Promise.resolve({ action: "accept" as const, principal: Code.parse("cli.test") }),
+      );
+      const tool = new FakeToolPort(
+        new Map([
+          [
+            "known_tool",
+            {
+              idempotent: true,
+              timeoutMs: 1_000,
+              execute: async (_call, runContext) => {
+                await Promise.all(
+                  Array.from({ length: 6 }, async (_, index) => {
+                    const input = {
+                      callId: callIds.idempotent,
+                      serverId: Code.parse("mcp.test"),
+                      elicitationId: `legacy-${String(index)}`,
+                      request: {
+                        inputKey: `legacy-${String(index)}`,
+                        mode: "url" as const,
+                        message: "Continue on the server website",
+                        url: "https://example.test/continue",
+                      },
+                      timeoutMs: 1_000,
+                      maxPerRun: 3,
+                      signal: runContext.signal,
+                    };
+                    return policyDecline
+                      ? runContext.elicitation?.recordLegacyPolicyDecline?.(input)
+                      : runContext.elicitation?.handleLegacyLive?.(input);
+                  }),
+                );
+                return { outcome: "ok", result: null };
+              },
+            },
+          ],
+        ]),
+      );
+      const events = await toolStep({
+        ...toolStepDependencies(recorder, tool, history),
+        inputChannels: [{ id: Code.parse("cli.test"), available: () => true, present }],
+        calls: [{ callId: callIds.idempotent, toolId: "known_tool", args: {} }],
+      });
+
+      expect(events.filter(({ type }) => type === "input_requested")).toHaveLength(3);
+      expect(events.filter(({ type }) => type === "input_resolved")).toHaveLength(3);
+      expect(present).toHaveBeenCalledTimes(policyDecline ? 0 : 3);
+      expect(events.at(-1)).toMatchObject({ type: "tool_result", outcome: "ok" });
+    },
+  );
+
   async function runLegacyLiveTool(options: {
     readonly channels?: readonly HumanInputChannel[];
     readonly callId?: string;
@@ -1209,6 +1265,7 @@ describe("durable MCP input requests", () => {
                 elicitationId: request.inputKey,
                 request,
                 timeoutMs: options.timeoutMs ?? 20,
+                maxPerRun: 3,
                 signal: runContext.signal,
               };
               if (options.policyDecline === true) {

@@ -93,6 +93,7 @@ export class ReplayLegacyInputs {
           ...(request.url === undefined ? {} : { url: request.url }),
         },
         timeoutMs: Math.max(1, (request.expiresAt ?? request.ts + 60_000) - request.ts),
+        maxPerRun: this.resolutions.size,
         signal: context.signal,
       });
       if (

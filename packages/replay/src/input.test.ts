@@ -1,13 +1,72 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, Event } from "@rovinos/schemas";
 import type { PolicyPort } from "@rovinos/core";
-import { describe, expect, it } from "vitest";
-import { inputReplayOptions, recordInputRun } from "./input-fixture.js";
+import { describe, expect, it, vi } from "vitest";
+import { inputReplayOptions, recordInputRun, recordLegacyInputRun } from "./input-fixture.js";
 import { replayRun } from "./replay.js";
 import { buildReplayRuntime } from "./replay-runtime.js";
 import { ResolvedRunSchema } from "./resolve.js";
 
 describe("recorded human-input runtime", () => {
+  it.each([false, true])(
+    "replays legacy live accept, decline and cancel without real tools (reuseKey=%s)",
+    async (reuseKey) => {
+      const { resolved, toolRegistry } = await recordLegacyInputRun(reuseKey);
+      const execute = vi.spyOn(toolRegistry, "execute");
+      const outcome = await replayRun(resolved, { ...inputReplayOptions, toolRegistry });
+      expect(outcome.status).toBe("completed");
+      expect(outcome.divergence).toBeUndefined();
+      expect(execute).not.toHaveBeenCalled();
+      expect(
+        outcome.events
+          .filter((event) => event.type === "input_resolved")
+          .map(({ action, answer }) => ({ action, answer })),
+      ).toEqual([
+        { action: "accept", answer: { email: "<EMAIL_1>" } },
+        { action: "decline", answer: undefined },
+        { action: "cancel", answer: undefined },
+      ]);
+      expect(JSON.stringify(outcome.events)).not.toContain("synthetic.input@example.test");
+      expect(
+        outcome.events.some(
+          (event) => event.type === "run_status_changed" && event.to === "suspended",
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["missing", "mode", "authority"] as const)(
+    "rejects a legacy recording with a %s resolution",
+    async (mutation) => {
+      const { resolved, toolRegistry } = await recordLegacyInputRun(true);
+      const invalid = ResolvedRunSchema.parse({
+        ...resolved,
+        runs: resolved.runs.map((run) => ({
+          ...run,
+          events: run.events.flatMap((event) => {
+            if (event.type !== "input_resolved" || event.action !== "decline") {
+              return [event];
+            }
+            if (mutation === "missing") {
+              return [];
+            }
+            return [
+              Event.parse({
+                ...event,
+                ...(mutation === "mode" ? { mode: "url" } : { decidedBy: "policy" }),
+              }),
+            ];
+          }),
+        })),
+      });
+      const outcome = await replayRun(invalid, { ...inputReplayOptions, toolRegistry });
+      expect(outcome.status).toBe("error");
+      expect(outcome.divergence?.code).toBe(
+        mutation === "missing" ? "replay_missing_result" : "replay_divergence",
+      );
+    },
+  );
+
   it.each([{ email: 42 }, { email: ["<EMAIL_1>"] }, { email: "<EMAIL_1>", unexpected: true }])(
     "rejects a malformed recorded answer through the real resolver",
     async (answer) => {

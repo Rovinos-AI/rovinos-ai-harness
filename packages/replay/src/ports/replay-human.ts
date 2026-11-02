@@ -59,7 +59,7 @@ export class ReplayHuman {
         }
         verifyInputRequest(request, recorded);
         const resolution = this.inputResolutions.get(recorded.requestId);
-        if (resolution === undefined || resolution.decidedBy !== "human") {
+        if (resolution?.decidedBy !== "human") {
           return Promise.reject(new ReplayMissingResultError(recorded.seq));
         }
         this.legacyPosition++;

@@ -141,6 +141,16 @@ async function recordLegacyRequest(
   ) {
     return undefined;
   }
+  if (
+    Array.from(state.inputRequests.values()).filter(
+      (request) =>
+        (request.source === "mcp_mrtr" || request.source === "mcp_legacy") &&
+        request.serverId === input.serverId,
+    ).length >= input.maxPerRun
+  ) {
+    input.onRateLimited?.();
+    return undefined;
+  }
   const requestId = options.ids.next();
   try {
     options.events.push(
@@ -217,8 +227,9 @@ async function collectLegacyResolution(
 async function handleLegacyLive(
   options: McpElicitationPortOptions,
   input: LegacyElicitationInput,
+  recordRequest: (input: LegacyElicitationInput) => Promise<Id | undefined>,
 ): Promise<InputResponse | undefined> {
-  const requestId = await recordLegacyRequest(options, input);
+  const requestId = await recordRequest(input);
   if (requestId === undefined) {
     return undefined;
   }
@@ -267,8 +278,9 @@ async function recordLegacyTimeout(
 async function recordLegacyPolicyDecline(
   options: McpElicitationPortOptions,
   input: LegacyElicitationInput,
+  recordRequest: (input: LegacyElicitationInput) => Promise<Id | undefined>,
 ): Promise<void> {
-  const requestId = await recordLegacyRequest(options, input);
+  const requestId = await recordRequest(input);
   if (requestId !== undefined) {
     await resolveActiveInput({
       recorder: options.recorder,
@@ -352,11 +364,16 @@ async function handleInputRequired(
 
 /** Creates the per-call MCP input handler that records and checkpoints requests before exposure. */
 export function createMcpElicitationPort(options: McpElicitationPortOptions): ElicitationPort {
+  let requestTail: Promise<Id | undefined> = Promise.resolve(undefined);
+  const recordRequest = (input: LegacyElicitationInput): Promise<Id | undefined> => {
+    requestTail = requestTail.then(() => recordLegacyRequest(options, input));
+    return requestTail;
+  };
   return {
     handleInputRequired: (input) => handleInputRequired(options, input),
-    handleLegacyLive: (input) => handleLegacyLive(options, input),
+    handleLegacyLive: (input) => handleLegacyLive(options, input, recordRequest),
     recordLegacyTimeout: (input) => recordLegacyTimeout(options, input),
-    recordLegacyPolicyDecline: (input) => recordLegacyPolicyDecline(options, input),
+    recordLegacyPolicyDecline: (input) => recordLegacyPolicyDecline(options, input, recordRequest),
   };
 }
 
