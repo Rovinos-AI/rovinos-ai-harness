@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  EVENT_FIELD_CLASS,
-  HarnessError,
-  Id,
-  JsonValue,
-  Principal,
-  RunStatus,
-  type EventType,
-} from "@rovinos/schemas";
+import { Code, HarnessError, Id, JsonValue, Principal, RunStatus } from "@rovinos/schemas";
+import type { EVENT_FIELD_CLASS, EventType } from "@rovinos/schemas";
 import type { RuntimeOverrides } from "@rovinos/core";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { SafeEvent } from "@rovinos/telemetry";
@@ -271,10 +263,11 @@ type ContentEventType = {
     : Type;
 }[EventType];
 
-type SameType<Left, Right> =
-  (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
+type SameType<Left, Right> = [Left] extends [Right]
+  ? [Right] extends [Left]
     ? true
-    : false;
+    : false
+  : false;
 
 function exhaustiveContentTypes<
   const Types extends readonly [ContentEventType, ...ContentEventType[]],
