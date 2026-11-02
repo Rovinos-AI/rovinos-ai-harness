@@ -834,10 +834,9 @@ describe("AnthropicAdapter", () => {
   });
 
   it("does not replay a forced synthetic tool call from opaque Anthropic content", async () => {
-    const emitResultAlias = createProviderToolAliases([
-      "lookup",
+    const emitResultAlias = createProviderToolAliases(["lookup", "emit_result"]).toProviderName(
       "emit_result",
-    ]).toProviderName("emit_result");
+    );
     const providerResult = await makeRequest({
       ...responseBody,
       content: [

@@ -21,10 +21,7 @@ import {
   type ChatCompletionLike,
 } from "./chat-completions-mapper.js";
 import { mapOpenAIError } from "./openai-error-utils.js";
-import {
-  createProviderToolAliasesForRequest,
-  type ProviderToolAliases,
-} from "./tool-aliases.js";
+import { createProviderToolAliasesForRequest, type ProviderToolAliases } from "./tool-aliases.js";
 
 interface StreamToolCall {
   id: string;
@@ -144,9 +141,11 @@ function choiceDeltas(
 function* finishOpenAIStream(
   state: OpenAIStreamState,
   context: ProviderContext,
-  provider: Code,
-  startedAt: number,
-  aliases: ProviderToolAliases,
+  options: {
+    readonly provider: Code;
+    readonly startedAt: number;
+    readonly aliases: ProviderToolAliases;
+  },
 ): Generator<ProviderDelta> {
   if (state.finishReason === null) {
     throw new ProviderError("provider_unavailable");
@@ -172,13 +171,10 @@ function* finishOpenAIStream(
     choices: [{ finish_reason: state.finishReason, message }],
     ...(state.usage === undefined ? {} : { usage: state.usage }),
   };
-  const mapped = fromChatResponse(
-    response,
-    context.ids,
-    provider,
-    state.callIdsByProviderId,
-    aliases,
-  );
+  const mapped = fromChatResponse(response, context.ids, options.provider, {
+    callIdsByProviderId: state.callIdsByProviderId,
+    aliases: options.aliases,
+  });
   const indexByCallId = new Map(
     [...state.toolCalls.entries()].map(([index, tool]) => [tool.callId, index + 1]),
   );
@@ -207,7 +203,7 @@ function* finishOpenAIStream(
   yield {
     type: "finish",
     finishReason: mapped.finishReason,
-    latencyMs: Math.max(0, context.clock.now() - startedAt),
+    latencyMs: Math.max(0, context.clock.now() - options.startedAt),
   };
 }
 
@@ -303,7 +299,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         ),
         { signal: context.signal },
       );
-      const mapped = fromChatResponse(response, context.ids, this.provider, undefined, aliases);
+      const mapped = fromChatResponse(response, context.ids, this.provider, { aliases });
       return {
         ...mapped,
         latencyMs: Math.max(0, context.clock.now() - startedAt),
@@ -380,7 +376,11 @@ export class OpenAIAdapter implements ProviderAdapter {
           };
         }
       }
-      yield* finishOpenAIStream(state, context, this.provider, startedAt, aliases);
+      yield* finishOpenAIStream(state, context, {
+        provider: this.provider,
+        startedAt,
+        aliases,
+      });
     } catch (error) {
       throw mapOpenAIError(error, context.clock.now());
     }

@@ -340,20 +340,19 @@ describe("OpenAI Chat Completions mapper", () => {
       },
       { next: () => id },
       "openai",
-      undefined,
-      aliases,
+      { aliases },
     );
 
-    expect(mapped.tools?.[0]?.function.name).toBe(aliases.toProviderName("weather.forecast"));
+    expect(mapped.tools).toMatchObject([
+      { function: { name: aliases.toProviderName("weather.forecast") } },
+    ]);
     expect(mapped.tool_choice).toEqual({
       type: "function",
       function: { name: aliases.toProviderName("weather.forecast") },
     });
     expect(mapped.messages[0]).toMatchObject({
       role: "assistant",
-      tool_calls: [
-        { function: { name: aliases.toProviderName("weather.forecast") } },
-      ],
+      tool_calls: [{ function: { name: aliases.toProviderName("weather.forecast") } }],
     });
     expect(response.parts[0]).toMatchObject({
       type: "tool_call",
@@ -383,8 +382,7 @@ describe("OpenAI Chat Completions mapper", () => {
         },
         { next: () => id },
         "openai",
-        undefined,
-        aliases,
+        { aliases },
       ),
     ).toThrow(ProviderError);
   });

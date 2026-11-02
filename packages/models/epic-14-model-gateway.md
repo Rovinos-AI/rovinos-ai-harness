@@ -9,6 +9,7 @@ Shared design for this epic:
 - **No PII logic here.** The PII tokenizer (epic 13) wraps the gateway at the `model_input` boundary. The gateway only receives already-tokenized messages and exposes a provider `trust` level for epic 13 to use.
 - **Serializable requests.** `ModelRequest` must be JSON-serializable (Zod schema objects are passed separately as `outputSchema`; the request carries only its JSON Schema and `schemaHash`). This keeps cassettes and replay deterministic.
 - Never hardcode prices or model capabilities as truth. Ship conservative defaults and let config override.
+- **Provider tool names.** OpenAI and Anthropic adapters send deterministic, 64-character-safe aliases derived from canonical tool IDs. They translate definitions, forced choices, history, and responses at the adapter boundary; only aliases for tools advertised in that request are accepted. No alias map is persisted, and policy, event, and MCP-routing identity remains the canonical tool ID.
 
 ---
 

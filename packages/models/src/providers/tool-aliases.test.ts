@@ -20,7 +20,7 @@ describe("provider tool aliases", () => {
       toolIds.map((toolId) => createProviderToolAliases([toolId]).toProviderName(toolId)),
     );
     expect(new Set(names).size).toBe(toolIds.length);
-    expect(names.every((name) => /^[A-Za-z0-9_-]{1,64}$/u.test(name))).toBe(true);
+    expect(names.every((name) => /^[\w-]{1,64}$/u.test(name))).toBe(true);
     expect(names.every((name) => name.length === 64)).toBe(true);
     expect(names[3]).not.toBe(names[4]);
   });

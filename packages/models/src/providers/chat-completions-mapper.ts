@@ -122,9 +122,7 @@ function assistantMessage(
       }));
       return {
         ...rawFields,
-        ...(aliasedToolCalls === undefined || aliasedToolCalls === null
-          ? {}
-          : { tool_calls: aliasedToolCalls }),
+        ...(aliasedToolCalls === undefined ? {} : { tool_calls: aliasedToolCalls }),
         ...(refusal === undefined ? {} : { refusal }),
       };
     }
@@ -361,8 +359,10 @@ export function fromChatResponse(
   response: ChatCompletionLike,
   ids: { readonly next: () => Id },
   provider = "openai",
-  callIdsByProviderId?: ReadonlyMap<string, Id>,
-  aliases?: ProviderToolAliases,
+  options: {
+    readonly callIdsByProviderId?: ReadonlyMap<string, Id>;
+    readonly aliases?: ProviderToolAliases;
+  } = {},
 ): {
   readonly parts: ModelRequest["messages"][number]["parts"];
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
@@ -380,8 +380,8 @@ export function fromChatResponse(
   const mappedCalls = mapToolCalls(
     choice.message.tool_calls ?? [],
     ids,
-    callIdsByProviderId,
-    aliases,
+    options.callIdsByProviderId,
+    options.aliases,
   );
   const parts = mappedCalls.invalidArguments ? [] : mappedCalls.parts;
 

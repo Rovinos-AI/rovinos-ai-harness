@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { ModelRequest } from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
 
-const PROVIDER_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u;
+const PROVIDER_TOOL_NAME = /^[\w-]{1,64}$/u;
 const ALIAS_PREFIX = "T_";
 const ALIAS_HASH_LENGTH = 62;
 
@@ -53,11 +53,7 @@ export function createProviderToolAliases(
   const toolIdByProviderName = new Map<string, string>();
   for (const toolId of toolIds) {
     const alias = providerAlias(toolId);
-    if (
-      !PROVIDER_TOOL_NAME.test(alias) ||
-      toolIdByProviderName.has(alias) ||
-      toolIds.has(alias)
-    ) {
+    if (!PROVIDER_TOOL_NAME.test(alias) || toolIdByProviderName.has(alias) || toolIds.has(alias)) {
       throw invalidToolName();
     }
     providerNameByToolId.set(toolId, alias);
