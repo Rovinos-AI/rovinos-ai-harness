@@ -114,8 +114,8 @@ describe("ToolRegistry", () => {
   it("fails startup with both server ids when normalized ids collide", () => {
     const build = () =>
       new ToolRegistry([
-        { config: config("first", { toolPrefix: "shared" }), tools: [tool("A B")] },
-        { config: config("second", { toolPrefix: "shared" }), tools: [tool("a_b")] },
+        { config: config("first", { toolPrefix: "shared" }), tools: [tool("execute")] },
+        { config: config("second", { toolPrefix: "shared" }), tools: [tool("execute")] },
       ]);
     const error = thrownBy(build);
 
@@ -123,7 +123,7 @@ describe("ToolRegistry", () => {
     expect(error).toMatchObject({
       code: "tool_id_collision",
       serverIds: ["first", "second"],
-      normalizedToolId: "shared.a_b",
+      normalizedToolId: "shared.execute",
     });
   });
 
@@ -131,7 +131,7 @@ describe("ToolRegistry", () => {
     const error = thrownBy(
       () =>
         new ToolRegistry([
-          { config: config("server"), tools: [tool("Get Data"), tool("get_data")] },
+          { config: config("server"), tools: [tool("get_data"), tool("get_data")] },
         ]),
     );
 
@@ -241,5 +241,27 @@ describe("ToolRegistry", () => {
     expect(registry.rejected()).toEqual([
       { serverId: "server", nativeName: "", reason: "tool_name_invalid" },
     ]);
+  });
+
+  it("rejects native names that normalization would change", () => {
+    const rejectedNames = ["exec ", "\u0435xec", "Get-Thing", "tool!", "two__underscores"];
+    const registry = new ToolRegistry([
+      {
+        config: config("server", { toolPrefix: "sandbox" }),
+        tools: [tool("exec"), ...rejectedNames.map((name) => tool(name))],
+      },
+    ]);
+
+    expect(registry.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["sandbox.exec"]);
+    expect(registry.rejected()).toEqual(
+      rejectedNames.map((nativeName) => ({
+        serverId: "server",
+        nativeName,
+        reason: "tool_name_invalid",
+      })),
+    );
+    expect(registry.rejected().filter(({ reason }) => reason === "tool_name_invalid")).toHaveLength(
+      rejectedNames.length,
+    );
   });
 });
