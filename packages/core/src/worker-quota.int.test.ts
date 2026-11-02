@@ -142,6 +142,7 @@ it("keeps matching runs within maxConcurrentRuns across two SQLite workers", asy
     expect(secondRunStarted).toBe(false);
     expect((await store.listRuns({ status: "running", limit: 10 })).runs).toHaveLength(1);
     expect(maximumActiveRuns).toBe(1);
+    expect(quotaRejection).toHaveBeenCalledTimes(1);
     expect(quotaRejection).toHaveBeenCalledWith("research_team");
 
     finishFirstRun();
