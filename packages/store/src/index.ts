@@ -34,14 +34,18 @@ export {
   RunQueueFailResultSchema,
   RunQueueJobSchema,
   RunQueueKindSchema,
+  RunQueueRunIdentitySchema,
   type EnqueueRunJob,
   type RunQueue,
+  type RunQueueClaimGuard,
+  type RunQueueClaimOptions,
   type RunQueueDeadLetter,
   type RunQueueFailResult,
   type RunQueueIdGenerator,
   type RunQueueJob,
   type RunQueueKind,
   type RunQueueOptions,
+  type RunQueueRunIdentity,
   SystemRunQueueIdGenerator,
 } from "./queue/types.js";
 export type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.js";
