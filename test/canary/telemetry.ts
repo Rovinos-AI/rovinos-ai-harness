@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { logs, SeverityNumber } from "@opentelemetry/api-logs";
-import { trace } from "@opentelemetry/api";
+import { logs, SeverityNumber, trace } from "@opentelemetry/api";
 
 import { Id } from "@rovinos/schemas";
 import {

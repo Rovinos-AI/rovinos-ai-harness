@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { TelemetryConfigSchema } from "@rovinos/schemas";
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
-import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { InMemorySpanExporter } from "@opentelemetry/sdk-trace";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "node:process";
 import { SentinelRequiredError } from "./sentinel/gate.js";

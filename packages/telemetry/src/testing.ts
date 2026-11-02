@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ExportResultCode, type ExportResult } from "@opentelemetry/core";
 import {
-  ExportResultCode,
-  type ExportResult,
-} from "@opentelemetry/sdk-trace-base/node_modules/@opentelemetry/core";
-import {
-  BasicTracerProvider,
+  TracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
+} from "@opentelemetry/sdk-trace";
 import {
   AggregationTemporality,
   InMemoryMetricExporter,
@@ -27,8 +24,8 @@ export function completeExportSuccessfully(callback: (result: ExportResult) => v
 }
 
 /** Creates a no-export tracer provider with deterministic identifiers for tests. */
-export function createTestTracerProvider(): BasicTracerProvider {
-  return new BasicTracerProvider({
+export function createTestTracerProvider(): TracerProvider {
+  return new TracerProvider({
     idGenerator: {
       generateTraceId: () => "a".repeat(32),
       generateSpanId: () => "b".repeat(16),
@@ -38,16 +35,16 @@ export function createTestTracerProvider(): BasicTracerProvider {
 
 /** Creates a deterministic tracer provider that retains finished spans for assertions. */
 export function createTestSpanCollector(): {
-  readonly provider: BasicTracerProvider;
+  readonly provider: TracerProvider;
   getFinishedSpans: () => ReturnType<InMemorySpanExporter["getFinishedSpans"]>;
 } {
   const exporter = new InMemorySpanExporter();
-  const provider = new BasicTracerProvider({
+  const provider = new TracerProvider({
     idGenerator: {
       generateTraceId: () => "a".repeat(32),
       generateSpanId: () => "b".repeat(16),
     },
-    spanProcessors: [new SimpleSpanProcessor(exporter)],
+    spanProcessors: [new SimpleSpanProcessor({ exporter })],
   });
   return {
     provider,

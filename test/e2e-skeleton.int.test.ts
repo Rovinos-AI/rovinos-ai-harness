@@ -23,8 +23,7 @@ import {
   type Transport,
 } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { trace } from "@opentelemetry/api";
-import { logs, SeverityNumber } from "@opentelemetry/api-logs";
+import { logs, SeverityNumber, trace } from "@opentelemetry/api";
 import Database from "better-sqlite3";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";

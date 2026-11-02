@@ -6,7 +6,7 @@ import {
   ROOT_CONTEXT,
   SpanStatusCode,
   trace,
-  type AttributeValue,
+  type AnyValue,
   type Link,
   type Span,
   type Context,
@@ -240,7 +240,7 @@ export class RunRecorder {
    */
   async withStepSpan(
     definition: SpanDefinition<SpanDefinitionShape>,
-    attrs: Readonly<Record<string, AttributeValue>>,
+    attrs: Readonly<Record<string, AnyValue>>,
     fn: (span: Span) => Event | Promise<Event>,
     options: StepSpanOptions = {},
   ): Promise<Event> {

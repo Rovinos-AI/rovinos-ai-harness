@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { context, trace } from "@opentelemetry/api";
-import { logs } from "@opentelemetry/api-logs";
+import { context, logs, trace } from "@opentelemetry/api";
 import { createRuntime } from "@rovinos/core";
 import { FakeModelPort } from "@rovinos/core/testing";
 import {

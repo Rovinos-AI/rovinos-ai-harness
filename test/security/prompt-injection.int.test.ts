@@ -4,8 +4,7 @@ import { AgentSpawnInputSchema, restrictToolPort, type ToolPort } from "@rovinos
 import { Code, Id, UNREGISTERED_TOOL_ID } from "@rovinos/schemas";
 import { createTelemetrySdk, type TelemetrySdkOptions } from "@rovinos/telemetry";
 import { completeExportSuccessfully } from "@rovinos/telemetry/testing";
-import { logs } from "@opentelemetry/api-logs";
-import { trace } from "@opentelemetry/api";
+import { logs, trace } from "@opentelemetry/api";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertNoForbiddenExecution,
