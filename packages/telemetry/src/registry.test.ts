@@ -2,10 +2,10 @@
 import { context, ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
-  BasicTracerProvider,
+  TracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
+} from "@opentelemetry/sdk-trace";
 import { HarnessError } from "@rovinos/schemas";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -32,8 +32,8 @@ import { getTracer } from "./tracer.js";
 const exporter = new InMemorySpanExporter();
 const testId = "00000000000000000000000000";
 const testOwnerTask = { taskId: "4.7", packageName: "@rovinos/telemetry" } as const;
-const provider = new BasicTracerProvider({
-  spanProcessors: [new SimpleSpanProcessor(exporter)],
+const provider = new TracerProvider({
+  spanProcessors: [new SimpleSpanProcessor({ exporter })],
 });
 
 beforeAll(() => {

@@ -25,7 +25,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "1.1.0",
     "@aws-sdk/client-bedrock-runtime": "3.1156.0",
-    "@azure/identity": "4.14.0",
+    "@azure/identity": "4.14.1",
     "@google/genai": "2.31.0",
     "@rovinos/schemas": "workspace:^",
     "@rovinos/telemetry": "workspace:^",
@@ -45,7 +45,7 @@
     }
   },
   "devDependencies": {
-    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api": "1.10.0",
     "ajv": "8.20.0",
     "google-auth-library": "10.9.1",
     "undici": "8.12.3",

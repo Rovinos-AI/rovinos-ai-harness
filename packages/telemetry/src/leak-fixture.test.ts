@@ -2,7 +2,7 @@
 import { SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import { TelemetryConfigSchema } from "@rovinos/schemas";
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
-import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { InMemorySpanExporter } from "@opentelemetry/sdk-trace";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { attr } from "./attr.js";
 import { __resetRegistryForTests, defineSpan } from "./registry.js";

@@ -7,7 +7,7 @@ import {
   type SpanContext,
 } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace";
 import { lookupSpanDefinition } from "../registry.js";
 import { countDroppedTelemetry } from "../metrics.js";
 import { Id, type TelemetryConfig } from "@rovinos/schemas";

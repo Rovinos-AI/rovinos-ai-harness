@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { trace } from "@opentelemetry/api";
-import { SeverityNumber, type Logger, type LogRecord } from "@opentelemetry/api-logs";
+import { SeverityNumber, type Logger, type LogRecord } from "@opentelemetry/api";
 import {
   InMemoryLogRecordExporter,
   LoggerProvider,

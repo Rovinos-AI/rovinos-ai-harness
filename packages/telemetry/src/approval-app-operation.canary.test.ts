@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
-import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { InMemorySpanExporter } from "@opentelemetry/sdk-trace";
 import { Code } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { createTelemetrySdk } from "./sdk.js";
