@@ -19,7 +19,8 @@ COPY package.json yarn.lock .yarnrc.yml ./
 COPY --from=manifests /manifests/ ./
 RUN mise exec -- yarn install --immutable
 COPY . .
-RUN mise exec -- yarn build
+RUN mise exec -- yarn build \
+    && mise exec -- yarn exec tsc -p test/fixtures/sample-mcp-server/tsconfig.json
 
 FROM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec
 WORKDIR /app
@@ -30,4 +31,4 @@ RUN groupadd --gid 10001 harness \
 COPY --from=build --chown=10001:10001 /app/ ./
 USER 10001
 EXPOSE 3333
-CMD ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "test/fixtures/sample-mcp-server/server.ts"]
+CMD ["node", "test/fixtures/sample-mcp-server/dist/server.js"]
