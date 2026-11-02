@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { trace } from "@opentelemetry/api";
-import { ExportResultCode } from "@opentelemetry/core";
+
 import { Id } from "@rovinos/schemas";
 import {
   attr,
@@ -14,7 +14,10 @@ import {
   VaultRunView,
   type TelemetrySdkOptions,
 } from "@rovinos/telemetry";
-import { __registerUnsafeSpanForTests } from "@rovinos/telemetry/testing";
+import {
+  __registerUnsafeSpanForTests,
+  completeExportSuccessfully,
+} from "@rovinos/telemetry/testing";
 import { z } from "zod";
 
 const UNSAFE_SPAN_NAME = "harness.canary.unsafe";
@@ -42,14 +45,14 @@ export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
     spanExporter: {
       export: (finished, callback) => {
         spans.push(...finished);
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       shutdown: () => Promise.resolve(),
     },
     logExporter: {
       export: (finished, callback) => {
         records.push(...finished);
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),
@@ -130,13 +133,13 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
     spanExporter: {
       export: (finished, callback) => {
         spans.push(...finished);
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       shutdown: () => Promise.resolve(),
     },
     logExporter: {
       export: (_finished, callback) => {
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),

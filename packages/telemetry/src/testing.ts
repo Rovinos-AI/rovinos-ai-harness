@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  ExportResultCode,
+  type ExportResult,
+} from "@opentelemetry/sdk-trace-base/node_modules/@opentelemetry/core";
+import {
   BasicTracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
@@ -16,6 +20,11 @@ import type { Id, VaultValueEntry } from "@rovinos/schemas";
 import type { VaultRunReader } from "./sentinel/run-values.js";
 
 export { __getLoggerDroppedFieldsForTests } from "./logger.js";
+
+/** Completes an OpenTelemetry exporter callback with its SDK-compatible success code. */
+export function completeExportSuccessfully(callback: (result: ExportResult) => void): void {
+  callback({ code: ExportResultCode.SUCCESS });
+}
 
 /** Creates a no-export tracer provider with deterministic identifiers for tests. */
 export function createTestTracerProvider(): BasicTracerProvider {
