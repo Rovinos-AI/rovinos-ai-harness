@@ -73,21 +73,21 @@ class FakeQueue implements RunQueue {
 
   claim(workerId: string, limit: number, _leaseMs?: number, options?: RunQueueClaimOptions) {
     const claimed: RunQueueJob[] = [];
-    for (const item of [...this.pending]) {
-      if (claimed.length >= limit) {
+    let index = 0;
+    while (index < this.pending.length && claimed.length < limit) {
+      const item = this.pending[index];
+      if (item === undefined) {
         break;
       }
       if (
         options?.canClaim !== undefined &&
         !options.canClaim(this.claimIdentity ?? { runId: item.runId }, this.claimActiveRuns, false)
       ) {
+        index += 1;
         continue;
       }
       claimed.push(item);
-      const index = this.pending.indexOf(item);
-      if (index >= 0) {
-        this.pending.splice(index, 1);
-      }
+      this.pending.splice(index, 1);
     }
     return Promise.resolve(claimed.map((item) => ({ ...item, leaseOwner: workerId })));
   }
@@ -204,20 +204,21 @@ describe("Worker", () => {
   it("keeps a claim queued when the quota service rejects it", async () => {
     const queue = new FakeQueue();
     queue.claimIdentity = { runId: RUN_ID, requestedBy: "cli.alice", role: "researcher" };
-    let worker: Worker | undefined;
+    const control: { worker?: Worker } = {};
     const quotaService = {
       assertCanClaim: () => {
-        worker?.stop();
+        control.worker?.stop();
         throw new QuotaExceededError("research_team");
       },
     };
-    worker = new Worker({
+    const worker = new Worker({
       queue,
       ids: fakeIds(),
       clock: fakeClock,
       quotaService,
       execute: vi.fn(),
     });
+    control.worker = worker;
 
     await worker.run();
 
