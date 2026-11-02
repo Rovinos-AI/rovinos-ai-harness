@@ -33,7 +33,7 @@ RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store
        done \
     && cp -a packages/cli/dist /out/
 
-FROM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS runtime
+FROM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime
 
 WORKDIR /app
 RUN groupadd --gid 10001 harness \
