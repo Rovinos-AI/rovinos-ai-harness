@@ -11,6 +11,7 @@ import { defineSuite } from "../load.js";
 import { InProcessExecutor } from "./inprocess.js";
 import type { TrialSpec } from "../trial.js";
 import { runEval } from "../runner.js";
+import { createNoCanaryLeakGrader } from "../graders/no-canary-leak.js";
 import {
   appendTrialProcessOutput,
   captureProcessOutput,
@@ -116,7 +117,14 @@ describe("InProcessExecutor", () => {
       }),
     });
 
-    const result = await executor.run(makeTrial(join(await createDirectory(), "trial")));
+    const result = await executor.runWithContext(
+      makeTrial(join(await createDirectory(), "trial")),
+      async (context) => {
+        const grade = await createNoCanaryLeakGrader({ canaries: [canary] }).grade(context);
+        expect(grade.codes).toContain("canary_in_logs");
+        return context.result;
+      },
+    );
 
     expect(trialLogSinks(result.dbPath)).toContainEqual({
       name: "stderr",

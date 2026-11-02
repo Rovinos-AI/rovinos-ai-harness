@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { IdGenerator } from "@rovinos/core";
 import type { ModelGateway } from "@rovinos/models";
-import { Code, createVerdictSchema, ModelRequestSchema, parseYaml } from "@rovinos/schemas";
+import {
+  Code,
+  createVerdictSchema,
+  ModelRequestSchema,
+  ModelUsageSchema,
+  parseYaml,
+} from "@rovinos/schemas";
 import type { Event, JsonValue, ModelRequest, ModelUsage, Verdict } from "@rovinos/schemas";
 import { z } from "zod";
 import { JudgeRubricSchema, LlmJudgeGraderSpecSchema } from "../schema.js";
@@ -152,15 +158,27 @@ function addUsage(total: z.infer<typeof TrialUsageSchema>, next: ModelUsage) {
   });
 }
 
-function failedGrade(usage: z.infer<typeof TrialUsageSchema>): GradeResult {
+function failedGrade(usage: z.infer<typeof TrialUsageSchema>, code?: string): GradeResult {
   return GradeResultSchema.parse({
     graderId: "llm_judge",
     pass: false,
     score: 0,
-    codes: ["judge_error"],
+    codes: code === undefined ? ["judge_error"] : ["judge_error", code],
     counts: { judge_error: 1 },
     usage,
   });
+}
+
+function failedRequestGrade(usage: z.infer<typeof TrialUsageSchema>, error: unknown): GradeResult {
+  if (typeof error !== "object" || error === null) {
+    return failedGrade(usage);
+  }
+  const failedUsage = ModelUsageSchema.safeParse(Reflect.get(error, "usage"));
+  const total = failedUsage.success ? addUsage(usage, failedUsage.data) : usage;
+  return failedGrade(
+    total,
+    Reflect.get(error, "code") === "cassette_miss" ? "cassette_miss" : undefined,
+  );
 }
 
 function weightedScore(
@@ -238,8 +256,8 @@ export function createLlmJudgeGrader(
             : { counts: { votes_total: requestCount, votes_pass: passVotes } }),
           usage,
         });
-      } catch {
-        return failedGrade(usage);
+      } catch (error) {
+        return failedRequestGrade(usage, error);
       }
     },
   };

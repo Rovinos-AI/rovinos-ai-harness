@@ -6,30 +6,17 @@ import type {
   GraderSpec,
   GradeResult,
   TrialResult,
+  GradeContext,
+  TrialExecutor,
+  TrialSpec,
 } from "@rovinos/eval";
 import type { EvalPackage } from "./eval-types.js";
-
-type TrialRecords = ReturnType<EvalPackage["parseEvalTrialJsonl"]>;
-
-/** Returns the first grader requiring a capability not exposed by the CLI executor contract. */
-export function unavailableGrader(suite: EvalSuite): "test_command" | "llm_judge" | undefined {
-  for (const task of suite.tasks) {
-    for (const grader of task.graders) {
-      if (grader.type === "test_command" || grader.type === "llm_judge") {
-        return grader.type;
-      }
-    }
-  }
-  return undefined;
-}
+import type { EvalExecutorOptions } from "./eval-executor.js";
+import { judgeGrader } from "./eval-judge.js";
+import type { FileCassetteStore } from "@rovinos/models";
 
 function graderFailure(api: EvalPackage, graderId: GraderSpec["type"], code: string): GradeResult {
-  return api.GradeResultSchema.parse({
-    graderId,
-    pass: false,
-    score: 0,
-    codes: [code],
-  });
+  return api.GradeResultSchema.parse({ graderId, pass: false, score: 0, codes: [code] });
 }
 
 interface GraderContext {
@@ -39,83 +26,136 @@ interface GraderContext {
   readonly events: readonly Event[];
 }
 
-async function gradeSpec(api: EvalPackage, context: GraderContext): Promise<GradeResult> {
+interface TrialGrading {
+  readonly api: EvalPackage;
+  readonly trial: TrialSpec;
+  readonly capabilities: GradeContext;
+  readonly options: EvalExecutorOptions;
+  readonly stores: Map<string, FileCassetteStore>;
+}
+
+async function gradeDeterministic(api: EvalPackage, context: GraderContext): Promise<GradeResult> {
   const { spec, task, result, events } = context;
   if (spec.type === "file_diff") {
-    try {
-      return await api.createFileDiffGrader(spec).grade({ result });
-    } catch {
-      return graderFailure(api, spec.type, "grader_execution_failed");
-    }
+    return api.createFileDiffGrader(spec).grade({ result });
   }
   if (spec.type === "no_canary_leak") {
     if ((task.canaries?.length ?? 0) === 0) {
       return graderFailure(api, spec.type, "canaries_missing");
     }
-    try {
-      return await api
-        .createNoCanaryLeakGrader({
-          canaries: task.canaries ?? [],
-          ...(task.workspace === undefined ? {} : { fixtureDir: task.workspace.fixtureDir }),
-        })
-        .grade({ result });
-    } catch {
-      return graderFailure(api, spec.type, "grader_execution_failed");
-    }
+    return api
+      .createNoCanaryLeakGrader({
+        canaries: task.canaries ?? [],
+        ...(task.workspace === undefined ? {} : { fixtureDir: task.workspace.fixtureDir }),
+      })
+      .grade({ result });
   }
   if (spec.type === "schema_valid") {
     return api.createSchemaValidGrader(spec).grade({ result, events });
   }
   if (spec.type === "trajectory") {
-    const trajectory = api.evaluateTrajectory(events, spec.assertions, {
-      canaries: task.canaries,
-    });
-    const codes = trajectory.results.filter((item) => !item.pass).map(({ code }) => code);
+    const trajectory = api.evaluateTrajectory(events, spec.assertions, { canaries: task.canaries });
     return api.GradeResultSchema.parse({
       graderId: spec.type,
       pass: trajectory.pass,
       score: trajectory.pass ? 1 : 0,
-      codes,
+      codes: trajectory.results.filter((item) => !item.pass).map(({ code }) => code),
     });
   }
   return graderFailure(api, spec.type, "grader_context_unavailable");
 }
 
-async function gradeRecord(
-  api: EvalPackage,
-  suite: EvalSuite,
-  record: TrialRecords[number],
-  eventsByTrial: ReadonlyMap<string, readonly Event[]>,
-): Promise<EvalGradeRecord | undefined> {
-  const task = suite.tasks.find((candidate) => candidate.id === record.taskId);
-  if (task === undefined) {
-    return undefined;
+async function gradeSpec(spec: GraderSpec, context: TrialGrading): Promise<GradeResult> {
+  const { api, trial, capabilities, options } = context;
+  try {
+    if (spec.type === "test_command") {
+      return capabilities.backend === undefined
+        ? graderFailure(api, spec.type, "eval_test_command_context_unavailable")
+        : await api.createTestCommandGrader(spec).grade(capabilities);
+    }
+    if (spec.type === "llm_judge") {
+      return await (
+        await judgeGrader(api, spec, trial, { options, stores: context.stores })
+      ).grade(capabilities);
+    }
+    return await gradeDeterministic(api, {
+      spec,
+      task: trial.task,
+      result: capabilities.result,
+      events: capabilities.events ?? [],
+    });
+  } catch {
+    return graderFailure(
+      api,
+      spec.type,
+      spec.type === "llm_judge" ? "judge_error" : "grader_execution_failed",
+    );
   }
-  const gradeBase = {
-    taskId: record.taskId,
-    variantId: record.variantId,
-    trialIndex: record.trialIndex,
-  };
-  if (record.result.status === "skipped_budget") {
-    return { ...gradeBase, graders: [] };
-  }
-  const key = `${record.taskId}\u0000${record.variantId}\u0000${String(record.trialIndex)}`;
-  const events = eventsByTrial.get(key) ?? [];
-  const graders = await Promise.all(
-    task.graders.map((spec) => gradeSpec(api, { spec, task, result: record.result, events })),
-  );
-  return { ...gradeBase, graders };
 }
 
-/** Grades completed records using metadata, trial events, and deterministic graders. */
-export async function gradeRecords(
-  api: EvalPackage,
-  suite: EvalSuite,
-  records: TrialRecords,
-  eventsByTrial: ReadonlyMap<string, readonly Event[]>,
-): Promise<EvalGradeRecord[]> {
-  const grades = await Promise.all(
-    records.map((record) => gradeRecord(api, suite, record, eventsByTrial)),
+async function finishTrial(context: TrialGrading, grades: EvalGradeRecord[]): Promise<TrialResult> {
+  const { api, trial, capabilities } = context;
+  const results = await Promise.all(
+    trial.task.graders.map((spec) =>
+      spec.type === "no_canary_leak" ? Promise.resolve(undefined) : gradeSpec(spec, context),
+    ),
   );
-  return grades.filter((grade): grade is EvalGradeRecord => grade !== undefined);
+  // Privacy checks include artifacts produced by every other grader, regardless of suite order.
+  for (const [index, spec] of trial.task.graders.entries()) {
+    if (spec.type === "no_canary_leak") {
+      results[index] = await gradeSpec(spec, context);
+    }
+  }
+  const graders = results.filter((grade) => grade !== undefined);
+  const usage = graders.reduce(
+    (total, grade) => ({
+      inputTokens: total.inputTokens + (grade.usage?.inputTokens ?? 0),
+      outputTokens: total.outputTokens + (grade.usage?.outputTokens ?? 0),
+      costMicros: total.costMicros + (grade.usage?.costMicros ?? 0),
+    }),
+    capabilities.result.usage,
+  );
+  // Report metrics already include trial usage; avoid adding judge usage twice.
+  grades.push({
+    taskId: trial.task.id,
+    variantId: trial.variantId,
+    trialIndex: trial.trialIndex,
+    graders: graders.map((grade) =>
+      api.GradeResultSchema.parse({
+        graderId: grade.graderId,
+        pass: grade.pass,
+        score: grade.score,
+        codes: grade.codes,
+        ...(grade.counts === undefined ? {} : { counts: grade.counts }),
+      }),
+    ),
+  });
+  return api.TrialResultSchema.parse({ ...capabilities.result, usage });
+}
+
+/** Grades before returning each trial so judge usage participates in the scheduling cap. */
+export function gradingExecutor(
+  api: EvalPackage,
+  executor: TrialExecutor,
+  options: EvalExecutorOptions,
+): { executor: TrialExecutor; grades: EvalGradeRecord[] } {
+  const grades: EvalGradeRecord[] = [];
+  const stores = new Map<string, FileCassetteStore>();
+  const graded: TrialExecutor = {
+    run: async (trial) => {
+      const finish = (capabilities: GradeContext) =>
+        finishTrial({ api, trial, capabilities, options, stores }, grades);
+      if (executor.runWithContext !== undefined) {
+        return executor.runWithContext(trial, finish);
+      }
+      const result = await executor.run(trial);
+      return finish({ result, events: (await executor.eventsFor?.(trial)) ?? [] });
+    },
+    ...(executor.eventsFor === undefined
+      ? {}
+      : {
+          eventsFor: (trial: TrialSpec) => executor.eventsFor?.(trial) ?? [],
+        }),
+  };
+  return { executor: graded, grades };
 }
