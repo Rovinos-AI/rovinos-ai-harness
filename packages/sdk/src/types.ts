@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id, JsonValue, Principal, RunStatus } from "@rovinos/schemas";
+import {
+  Code,
+  EVENT_FIELD_CLASS,
+  HarnessError,
+  Id,
+  JsonValue,
+  Principal,
+  RunStatus,
+  type EventType,
+} from "@rovinos/schemas";
 import type { RuntimeOverrides } from "@rovinos/core";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { SafeEvent } from "@rovinos/telemetry";
@@ -254,19 +263,29 @@ export const GetRunContentOptionsSchema = z.object({ reveal: z.literal(false) })
 export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
 
 /** A single tokenized content entry from the event log. */
+type ContentEventType = {
+  [Type in EventType]: Extract<
+    (typeof EVENT_FIELD_CLASS)[Type][keyof (typeof EVENT_FIELD_CLASS)[Type]],
+    "content"
+  > extends never
+    ? never
+    : Type;
+}[EventType];
+
+/** Keep the SDK event-kind contract aligned with the shared content classification. */
+const contentEventTypes = new Set(
+  Object.entries(EVENT_FIELD_CLASS).flatMap(([type, fields]) =>
+    Object.values(fields).includes("content") ? [type] : [],
+  ),
+);
+const ContentEventTypeSchema = z.custom<ContentEventType>(
+  (value) => typeof value === "string" && contentEventTypes.has(value),
+);
+
 export const RunContentEntrySchema = z
   .object({
     seq: z.number().int().nonnegative(),
-    type: z.enum([
-      "run_input",
-      "model_request",
-      "model_response",
-      "tool_intent",
-      "tool_result",
-      "approval_requested",
-      "approval_resolved",
-      "context_compacted",
-    ]),
+    type: ContentEventTypeSchema,
     content: JsonValue,
   })
   .strict();

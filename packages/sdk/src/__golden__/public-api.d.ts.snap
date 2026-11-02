@@ -18,7 +18,7 @@ import { type Harness, type CreateHarnessOptions } from "./types.js";
  */
 export declare function createHarness(options: CreateHarnessOptions): Promise<Harness>;
 
-import { HarnessError, Id } from "@rovinos/schemas";
+import { EVENT_FIELD_CLASS, HarnessError, Id, type EventType } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
@@ -963,33 +963,18 @@ export declare const GetRunContentOptionsSchema: z.ZodObject<{
 /** Options accepted by {@link Harness.getRunContent}. */
 export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
 /** A single tokenized content entry from the event log. */
+type ContentEventType = {
+    [Type in EventType]: Extract<(typeof EVENT_FIELD_CLASS)[Type][keyof (typeof EVENT_FIELD_CLASS)[Type]], "content"> extends never ? never : Type;
+}[EventType];
 export declare const RunContentEntrySchema: z.ZodObject<{
     seq: z.ZodNumber;
-    type: z.ZodEnum<{
-        approval_requested: "approval_requested";
-        approval_resolved: "approval_resolved";
-        context_compacted: "context_compacted";
-        model_request: "model_request";
-        model_response: "model_response";
-        run_input: "run_input";
-        tool_intent: "tool_intent";
-        tool_result: "tool_result";
-    }>;
+    type: z.ZodCustom<ContentEventType, ContentEventType>;
     content: z.ZodJSONSchema;
 }, z.core.$strict>;
 /** Tokenized run content returned only by explicit request. */
 export declare const RunContentSchema: z.ZodArray<z.ZodObject<{
     seq: z.ZodNumber;
-    type: z.ZodEnum<{
-        approval_requested: "approval_requested";
-        approval_resolved: "approval_resolved";
-        context_compacted: "context_compacted";
-        model_request: "model_request";
-        model_response: "model_response";
-        run_input: "run_input";
-        tool_intent: "tool_intent";
-        tool_result: "tool_result";
-    }>;
+    type: z.ZodCustom<ContentEventType, ContentEventType>;
     content: z.ZodJSONSchema;
 }, z.core.$strict>>;
 /** Inferred tokenized content result. Treat values as sensitive. */
@@ -1089,3 +1074,4 @@ export declare class SdkError extends HarnessError {
     /** Creates a stable SDK error with a closed code. */
     constructor(code: SdkError["code"]);
 }
+export {};
