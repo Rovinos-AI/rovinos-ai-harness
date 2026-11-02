@@ -120,6 +120,22 @@ describe("release workflow", () => {
     expect(latest?.run).toContain(":latest");
   });
 
+  it("reuses BuildKit SBOMs and keyless-signs release image digests only", () => {
+    const workflow = readWorkflow();
+    const releaseCommand =
+      workflow.jobs.publish?.steps?.find(
+        (step) => step.name === "Build, push, and sign GHCR images",
+      )?.run ?? "";
+    const ciWorkflow = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
+
+    expect(releaseCommand).toContain("--sbom=true");
+    expect(releaseCommand).toContain('cosign sign --yes "$image@$digest"');
+    expect(releaseCommand).not.toContain('cosign sign --yes "$image:$tag"');
+    expect(releaseCommand).not.toContain("--key");
+    expect(ciWorkflow).not.toContain("cosign sign");
+    expect(releaseCommand).not.toMatch(/-----BEGIN [A-Z ]+PRIVATE KEY-----/u);
+  });
+
   it("skips creation when the GitHub Release already exists", () => {
     const release = readWorkflow().jobs.publish?.steps?.find(
       (step) => step.name === "Create GitHub Release",

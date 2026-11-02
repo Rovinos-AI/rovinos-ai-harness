@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createTelemetrySdk, type TelemetrySdkOptions } from "@rovinos/telemetry";
+import { completeExportSuccessfully } from "@rovinos/telemetry/testing";
 import { Id, JsonValue } from "@rovinos/schemas";
-import { ExportResultCode } from "@opentelemetry/core";
 import { describe, expect, it } from "vitest";
 import { WebFetchTool } from "./web-fetch-tool.js";
 
@@ -13,7 +13,7 @@ describe("web.fetch URL telemetry canary", () => {
     const spanExporter: TelemetrySdkOptions["spanExporter"] = {
       export: (finished, callback) => {
         spans.push(...finished.map(({ name, attributes }) => JSON.stringify({ name, attributes })));
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       shutdown: () => Promise.resolve(),
     };
@@ -22,7 +22,7 @@ describe("web.fetch URL telemetry canary", () => {
         logs.push(
           ...finished.map(({ eventName, attributes }) => JSON.stringify({ eventName, attributes })),
         );
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),
