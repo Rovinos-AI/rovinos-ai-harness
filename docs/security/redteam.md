@@ -3,32 +3,41 @@
 The approval-integrity checker audits ordered, schema-validated event logs for
 unauthorized execution, approval edits outside their allowed pointers, duplicate
 or cross-run resolutions, separation-of-duties violations, and accepted human
-input without an in-scope human decision. The CLI report schema contains only
-trial metadata, grader pass flags, and closed codes; it does not expose event
-payloads or model transcripts.
+input without an in-scope human decision. Accepted input must be recorded as a
+human decision; simulated, policy, expiry, and timeout decisions do not satisfy
+the invariant. Reports contain only trial metadata, grader pass flags, and
+closed codes, never event payloads or model transcripts.
 
-The cassette suite is in `evals/redteam/`. Its synthetic scripted responses are
-recorded and replayed through the real eval CLI and runtime without a live
-provider. Each task checks final status, that its forbidden tool has no
-successful result, and both approval invariant graders. The single-response
-cassettes do not drive concurrent or cross-run workflows; those semantic
-scenarios are orchestrated by the runtime replay tests below.
+Invariant graders default on for eval trials. If an executor does not expose an
+event log, the grader passes with the `invariant_event_log_unavailable` code
+rather than failing an otherwise usable eval; a nonempty log without a
+`run_created` event remains a failure.
 
-Runtime replay attacks additionally cover policy-deny bypass; self-approval
+The cassette suite is in `evals/redteam/`. The `gates` replay test validates
+`cassettes/attacks.json`, loads each committed model cassette, and runs its
+response through the real runtime with a registered synthetic `sandbox.exec`
+port and a real `PolicyEngine`. Cases cover an ask that remains suspended, a
+deny decision, and nested-pointer argument denial. The replay verifies the
+matching `tool_intent`, expected policy decision and status, no successful
+result for the forbidden tool, `verifyInvariants(events)`, and both invariant
+graders. Its mutation case changes an ask decision to allow and confirms that
+the suite fails when the protected tool executes.
+
+The runtime replay suite additionally covers policy-deny bypass; self-approval
 through registered and unregistered model-visible tools and text claims; edits
-outside `editableFields`; stale approval ids across runs; racing resolutions;
-nested-pointer argument smuggling; cross-run PII token scope; subagent
-privilege escalation; app-only tools; cancel/resume manipulation; and
-self-answering both `agent.ask_user` and MCP elicitation. A test-only
-pre-approval execution mutation verifies that `verifyInvariants` reports the
-unauthorized execution.
+outside `editableFields`; stale approval IDs across runs; racing resolutions;
+raw case, homoglyph, and trailing-space aliases; nested-pointer argument
+smuggling; cross-run PII token scope; subagent privilege escalation; app-only
+tools; cancel/resume manipulation; and self-answering both `agent.ask_user` and
+MCP elicitation. Each attack uses real runtime events and checks the relevant
+safe status and invariant behavior. Mutation checks cover deny bypass and
+execution before approval.
 
-Raw model aliases (case, homoglyph, and trailing-space variants) are rejected
-before policy evaluation, and registry ids that normalize to the same id fail
-startup with a collision. Distinct registered look-alike ids are not covered;
-that boundary remains pending owner review. The runtime tests exercise these
-scenarios using real event logs. See `evals/redteam/README.md` for which
-multi-event attacks are orchestrated outside the cassette tasks.
+Raw model aliases are rejected before policy evaluation, and registry IDs that
+normalize to the same ID fail startup with a collision. Distinct registered
+look-alike IDs are not covered; that boundary remains pending owner review.
+See `evals/redteam/README.md` for the split between cassette and runtime-only
+attacks.
 
 Run the focused replay checks with:
 
@@ -42,5 +51,5 @@ GitHub Actions runs the CLI cassette replay and runtime replay tests in the
 `gates` job. **(verify)** This maps the retired Azure stage to the GitHub Actions
 replay gate. No nightly re-record is configured; re-recording against the
 scripted model is a follow-up. These checks cover the listed synthetic cases,
-not every possible model/provider behavior. Runtime tools and policy
-boundaries remain separate enforcement points.
+not every possible model/provider behavior. Runtime tools and policy boundaries
+remain separate enforcement points.

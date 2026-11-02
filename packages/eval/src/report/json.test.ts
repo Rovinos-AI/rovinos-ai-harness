@@ -75,6 +75,12 @@ describe("eval JSON reports", () => {
     expect(report.invariantsEnabled).toBe(false);
   });
 
+  it("defaults report schemas to enabled invariants, matching report inputs", () => {
+    expect(
+      EvalReportSchema.parse({ schemaVersion: 1, trials: [], aggregates: [] }).invariantsEnabled,
+    ).toBe(true);
+  });
+
   it("parses versioned trial JSONL and rejects missing grade associations", () => {
     const line = JSON.stringify(reportTrial());
     expect(parseEvalTrialJsonl(`${line}\n`)).toHaveLength(1);

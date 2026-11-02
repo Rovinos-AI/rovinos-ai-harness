@@ -173,7 +173,7 @@ export type EvalAggregate = z.infer<typeof EvalAggregateSchema>;
 export const EvalReportSchema = z
   .object({
     schemaVersion: z.literal(1),
-    invariantsEnabled: z.boolean().default(false),
+    invariantsEnabled: z.boolean().default(true),
     trials: z.array(EvalTrialMetricsSchema),
     aggregates: z.array(EvalAggregateSchema),
   })

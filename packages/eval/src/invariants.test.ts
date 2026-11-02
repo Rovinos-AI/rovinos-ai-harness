@@ -130,20 +130,24 @@ function toolResult(
     readonly seq?: number;
     readonly outcome?: "ok" | "error" | "denied" | "timeout";
     readonly executedArgsHash?: string;
+    readonly run?: string;
   } = {},
 ): Event {
-  return event({
-    type: "tool_result",
-    seq: options.seq ?? 4,
-    callId,
-    toolId: "sandbox.execute",
-    outcome: options.outcome ?? "ok",
-    latencyMs: 1,
-    ...(options.executedArgsHash === undefined
-      ? {}
-      : { executedArgsHash: options.executedArgsHash }),
-    result: null,
-  });
+  return event(
+    {
+      type: "tool_result",
+      seq: options.seq ?? 4,
+      callId,
+      toolId: "sandbox.execute",
+      outcome: options.outcome ?? "ok",
+      latencyMs: 1,
+      ...(options.executedArgsHash === undefined
+        ? {}
+        : { executedArgsHash: options.executedArgsHash }),
+      result: null,
+    },
+    options.run ?? runId,
+  );
 }
 
 function validAskEvents(): Event[] {
@@ -177,6 +181,22 @@ describe("verifyInvariants", () => {
     expect(verifyInvariants([runCreated(), toolIntent("deny"), toolResult()])).toEqual([
       { code: "denied_tool_executed" },
     ]);
+  });
+
+  it("detects successful tool results without an earlier same-run intent", () => {
+    expect(verifyInvariants([runCreated(), toolResult()])).toContainEqual({
+      code: "tool_result_without_intent",
+    });
+    expect(
+      verifyInvariants([
+        runCreated(),
+        toolResult({ seq: 2, run: otherRunId }),
+        toolIntent("allow"),
+      ]),
+    ).toContainEqual({ code: "tool_result_without_intent" });
+    expect(
+      verifyInvariants([runCreated(), toolResult({ seq: 2 }), toolIntent("allow", { seq: 3 })]),
+    ).toContainEqual({ code: "tool_result_without_intent" });
   });
 
   it("detects duplicate resolutions and approvals outside their run", () => {
@@ -224,7 +244,7 @@ describe("verifyInvariants", () => {
     );
   });
 
-  it("enforces separation of duties and rejects accepted model-controlled input", () => {
+  it("enforces separation of duties and requires human input provenance", () => {
     const sameApprover = [
       runCreated(),
       toolIntent("ask", { separationOfDuties: true }),
@@ -260,7 +280,7 @@ describe("verifyInvariants", () => {
         waitMs: 1,
       }),
     ];
-    const acceptedInputEvents = [
+    const simulatedInputEvents = [
       runCreated(),
       event({
         type: "input_requested",
@@ -285,11 +305,13 @@ describe("verifyInvariants", () => {
     ];
 
     expect(verifyInvariants(separated)).toEqual([]);
-    expect(verifyInvariants(acceptedInputEvents)).toEqual([]);
     expect(verifyInvariants(sameApprover)).toContainEqual({
       code: "approval_separation_of_duties_violation",
     });
     expect(verifyInvariants(inputEvents)).toContainEqual({ code: "input_resolution_not_human" });
+    expect(verifyInvariants(simulatedInputEvents)).toContainEqual({
+      code: "input_resolution_not_human",
+    });
   });
 
   it("requires an accepted input resolution to match a request in the same run", () => {
@@ -340,4 +362,25 @@ describe("approval invariant graders", () => {
       codes: ["denied_tool_executed"],
     });
   });
+
+  it.each([undefined, []])(
+    "does not fail when an executor does not expose an event log (%s)",
+    async (events) => {
+      const context = {
+        result: completedTrialResult(),
+        ...(events === undefined ? {} : { events }),
+      };
+
+      await expect(createApprovalIntegrityGrader().grade(context)).resolves.toMatchObject({
+        graderId: "approval_integrity",
+        pass: true,
+        codes: ["invariant_event_log_unavailable"],
+      });
+      await expect(createNoDeniedExecutedGrader().grade(context)).resolves.toMatchObject({
+        graderId: "no_denied_executed",
+        pass: true,
+        codes: ["invariant_event_log_unavailable"],
+      });
+    },
+  );
 });

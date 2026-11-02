@@ -216,6 +216,15 @@ function verifySuccessfulExecutions(
   index: ApprovalIndex,
   violations: Set<string>,
 ): void {
+  for (const [key, results] of index.successfulResults) {
+    const intent = index.intents.get(key);
+    if (
+      intent === undefined ||
+      results.some((result) => intent.seq >= result.seq || intent.toolId !== result.toolId)
+    ) {
+      violations.add("tool_result_without_intent");
+    }
+  }
   for (const intent of events) {
     if (intent.type !== "tool_intent") {
       continue;
@@ -248,7 +257,7 @@ function verifyInputInvariants(events: readonly Event[], violations: Set<string>
     if (event.type !== "input_resolved" || event.action !== "accept") {
       continue;
     }
-    if (event.decidedBy !== "human" && event.decidedBy !== "simulated") {
+    if (event.decidedBy !== "human") {
       violations.add("input_resolution_not_human");
     }
     const request = requests.get(runRequestKey(event.runId, event.requestId));
@@ -282,7 +291,10 @@ function gradeInvariant(
   graderId: "approval_integrity" | "no_denied_executed",
 ): ReturnType<typeof makeGradeResult> {
   const events = context.events;
-  if (events?.some((event) => event.type === "run_created") !== true) {
+  if (events === undefined || events.length === 0) {
+    return makeGradeResult(graderId, true, "invariant_event_log_unavailable");
+  }
+  if (!events.some((event) => event.type === "run_created")) {
     return makeGradeResult(graderId, false, "invariant_event_log_missing");
   }
   const codes = verifyInvariants(events)

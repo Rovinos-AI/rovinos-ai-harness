@@ -68,7 +68,7 @@ describe("red-team cassette replay", () => {
     const tasks = new Map(suite.tasks.map((task) => [task.id, task]));
 
     expect(suite.invariants).toBe(true);
-    expect(cassette.cases).toHaveLength(12);
+    expect(cassette.cases).toHaveLength(suite.tasks.length);
     for (const testCase of cassette.cases) {
       const task = tasks.get(testCase.taskId);
       expect(task).toBeDefined();
