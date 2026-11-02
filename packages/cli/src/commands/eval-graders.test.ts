@@ -34,6 +34,19 @@ function trialEvents(taskId: string): readonly Event[] {
   return [
     EventSchema.parse({
       runId,
+      seq: 0,
+      ts: 1,
+      v: 1,
+      traceId: "00000000000000000000000000000001",
+      spanId: "0000000000000001",
+      segmentId: runId,
+      type: "run_created",
+      configHash: "a".repeat(64),
+      policyVersion: "policy_test",
+      requestedBy: "cli.requester",
+    }),
+    EventSchema.parse({
+      runId,
       seq: 1,
       ts: 1,
       v: 1,
@@ -184,6 +197,7 @@ it("grades supported deterministic graders through the CLI on pass and failure p
   );
 
   expect(exitCode).toBe(ExitCode.ok);
+  expect(report.invariantsEnabled).toBe(true);
   expect(gradeCodes.get("file_pass")).toEqual([]);
   expect(gradeCodes.get("file_fail")).toEqual(["content_mismatch"]);
   expect(gradeCodes.get("file_error")).toEqual(["grader_execution_failed"]);
@@ -195,5 +209,61 @@ it("grades supported deterministic graders through the CLI on pass and failure p
   expect(gradeCodes.get("schema_fail")).toEqual(["no_json"]);
   expect(gradeCodes.get("trajectory_pass")).toEqual([]);
   expect(gradeCodes.get("trajectory_fail")).toEqual(["final_status_mismatch"]);
+  expect(
+    report.trials
+      .find(({ taskId }) => taskId === "file_pass")
+      ?.graders.map(({ graderId }) => graderId),
+  ).toEqual(["approval_integrity", "file_diff", "no_denied_executed"]);
   expect(JSON.stringify(report)).not.toContain(syntheticCanary);
+});
+
+it("reports an explicit suite-level invariant opt-out", async () => {
+  root = await mkdtemp(join(tmpdir(), "harness-eval-invariants-disabled-"));
+  const suitePath = join(root, "suite.json");
+  const output = join(root, "reports");
+  await writeFile(
+    suitePath,
+    JSON.stringify({
+      schemaVersion: 1,
+      invariants: false,
+      tasks: [
+        {
+          id: "invariants_disabled",
+          input: { goal: "Synthetic goal." },
+          graders: [],
+          tags: [],
+        },
+      ],
+    }),
+    "utf8",
+  );
+  const executor: TrialExecutor = {
+    run: (trial: TrialSpec) =>
+      Promise.resolve(
+        evalApi.TrialResultSchema.parse({
+          status: "completed",
+          runId: Id.parse("00000000000000000000000001"),
+          dbPath: join(trial.workDir, "data", "harness.db"),
+          workspaceDir: join(trial.workDir, "workspace"),
+          durationMs: 1,
+          usage: { inputTokens: 1, outputTokens: 1, costMicros: 1 },
+          exitCode: 0,
+        }),
+      ),
+    eventsFor: () => [],
+  };
+  const exitCode = await main(["eval", "run", suitePath, "--out", output], context(), [
+    createEvalCommand({
+      loadEval: () => Promise.resolve(evalApi),
+      createExecutor: () => executor,
+    }),
+  ]);
+  const report = parseJson(
+    evalApi.EvalReportSchema,
+    await readFile(join(output, "eval-report.json"), "utf8"),
+  );
+
+  expect(exitCode).toBe(ExitCode.ok);
+  expect(report.invariantsEnabled).toBe(false);
+  expect(report.trials[0]?.graders).toEqual([]);
 });

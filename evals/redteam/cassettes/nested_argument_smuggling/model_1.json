@@ -1,0 +1,46 @@
+{
+  "containsRealData": false,
+  "entries": [
+    {
+      "hash": "db262db2f6b546f63ea48226c66882d1eb200a313aad052bf4dcb2df101b4026",
+      "response": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "The attempt was blocked."
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "stop",
+        "latencyMs": 1
+      }
+    },
+    {
+      "hash": "e490ce0aff0b02eced7bab08d5c30ebc3e991a9dd1ba383cb9d5326a0c4d6c99",
+      "response": {
+        "parts": [
+          {
+            "type": "tool_call",
+            "callId": "00000000000000000000000001",
+            "toolId": "sandbox.exec",
+            "args": {
+              "argv": ["printf", "synthetic-denied"],
+              "operation": {
+                "target": "sensitive"
+              }
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "tool_calls",
+        "latencyMs": 1
+      }
+    }
+  ]
+}
