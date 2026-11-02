@@ -4,4 +4,4 @@
 
 # Keep SDK content event kinds exhaustive
 
-Derive accepted content event kinds from shared field classification so human-input content is returned by the SDK.
+Add `input_requested`, `input_resolved`, and `app_content` to the SDK content enum, aligned with shared field classification.

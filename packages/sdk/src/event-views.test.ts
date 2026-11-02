@@ -2,7 +2,7 @@
 import { EVENT_FIELD_CLASS, eventSamples } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { contentEntries } from "./event-views.js";
-import { RunContentSchema } from "./types.js";
+import { RunContentEntrySchema, RunContentSchema } from "./types.js";
 
 describe("content event projections", () => {
   it("validates every content-bearing event type and excludes metadata-only types", () => {
@@ -20,10 +20,13 @@ describe("content event projections", () => {
       .filter(([, fields]) => !Object.values(fields).includes("content"))
       .map(([type]) => type);
     const projectedTypes = new Set(entries.map(({ type }) => type));
+    const schemaTypes = new Set(RunContentEntrySchema.shape.type.options);
 
     expect(projectedTypes).toEqual(new Set(expectedTypes));
+    expect(schemaTypes).toEqual(new Set(expectedTypes));
     expect(projectedTypes).toContain("input_requested");
     expect(projectedTypes).toContain("input_resolved");
+    expect(projectedTypes).toContain("app_content");
     expect(entries.some(({ type }) => metadataOnlyTypes.includes(type))).toBe(false);
   });
 });

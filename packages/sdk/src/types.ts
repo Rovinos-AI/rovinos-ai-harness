@@ -262,7 +262,6 @@ export const GetRunContentOptionsSchema = z.object({ reveal: z.literal(false) })
 /** Options accepted by {@link Harness.getRunContent}. */
 export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
 
-/** A single tokenized content entry from the event log. */
 type ContentEventType = {
   [Type in EventType]: Extract<
     (typeof EVENT_FIELD_CLASS)[Type][keyof (typeof EVENT_FIELD_CLASS)[Type]],
@@ -272,20 +271,38 @@ type ContentEventType = {
     : Type;
 }[EventType];
 
-/** Keep the SDK event-kind contract aligned with the shared content classification. */
-const contentEventTypes = new Set(
-  Object.entries(EVENT_FIELD_CLASS).flatMap(([type, fields]) =>
-    Object.values(fields).includes("content") ? [type] : [],
-  ),
-);
-const ContentEventTypeSchema = z.custom<ContentEventType>(
-  (value) => typeof value === "string" && contentEventTypes.has(value),
-);
+type SameType<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
+    ? true
+    : false;
 
+function exhaustiveContentTypes<
+  const Types extends readonly [ContentEventType, ...ContentEventType[]],
+>(
+  types: Types & (SameType<ContentEventType, Types[number]> extends true ? unknown : never),
+): Types {
+  return types;
+}
+
+const contentEventTypes = exhaustiveContentTypes([
+  "run_input",
+  "model_request",
+  "model_response",
+  "tool_intent",
+  "tool_result",
+  "approval_requested",
+  "approval_resolved",
+  "input_requested",
+  "input_resolved",
+  "app_content",
+  "context_compacted",
+]);
+
+/** A single tokenized content entry from the event log. */
 export const RunContentEntrySchema = z
   .object({
     seq: z.number().int().nonnegative(),
-    type: ContentEventTypeSchema,
+    type: z.enum(contentEventTypes),
     content: JsonValue,
   })
   .strict();
