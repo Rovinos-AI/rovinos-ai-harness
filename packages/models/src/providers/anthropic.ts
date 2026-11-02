@@ -21,6 +21,10 @@ import {
   createAnthropicStreamingParams,
   streamEventDeltas,
 } from "./anthropic-streaming.js";
+import {
+  createProviderToolAliasesForRequest,
+  type ProviderToolAliases,
+} from "./tool-aliases.js";
 
 /** Secret-shaped input accepted without importing the configuration package. */
 export interface AnthropicApiKey {
@@ -91,6 +95,7 @@ function buildMessageContent(
   request: ModelRequest,
   messageIndex: number,
   provider: string,
+  aliases: ProviderToolAliases,
 ): JsonValue[] {
   const message = request.messages[messageIndex];
   if (message === undefined) {
@@ -109,7 +114,18 @@ function buildMessageContent(
       ) {
         throw new ProviderError("provider_bad_request");
       }
-      return readOpaqueContent(opaque.blob.content);
+      return readOpaqueContent(opaque.blob.content).map((block) => {
+        if (
+          typeof block !== "object" ||
+          block === null ||
+          Array.isArray(block) ||
+          block.type !== "tool_use" ||
+          typeof block.name !== "string"
+        ) {
+          return block;
+        }
+        return { ...block, name: aliases.providerNameForHistory(block.name) };
+      });
     }
   }
 
@@ -121,7 +137,7 @@ function buildMessageContent(
       blocks.push({
         type: "tool_use",
         id: `toolu_${part.callId}`,
-        name: part.toolId,
+        name: aliases.providerNameForHistory(part.toolId),
         input: part.args,
       });
     } else if (part.type === "tool_result") {
@@ -136,14 +152,14 @@ function buildMessageContent(
   return blocks;
 }
 
-function buildMessages(request: ModelRequest, provider: string) {
+function buildMessages(request: ModelRequest, provider: string, aliases: ProviderToolAliases) {
   const messages: { role: "assistant" | "user"; content: JsonValue[] }[] = [];
   for (const [index, message] of request.messages.entries()) {
     if (message.role === "system") {
       continue;
     }
     const role = message.role === "assistant" ? "assistant" : "user";
-    const content = buildMessageContent(request, index, provider);
+    const content = buildMessageContent(request, index, provider, aliases);
     const cacheStablePrefix = request.stablePrefixMessages === index + 1 && content.length > 0;
     const outboundContent = cacheStablePrefix ? [...content] : content;
     if (cacheStablePrefix) {
@@ -179,7 +195,11 @@ function mapCachedUsage(usage: Message["usage"]) {
   };
 }
 
-function buildRequest(request: ModelRequest, provider: string): JsonValue {
+function buildRequest(
+  request: ModelRequest,
+  provider: string,
+  aliases: ProviderToolAliases,
+): JsonValue {
   // The Messages API requires max_tokens, so do not silently choose a limit for callers.
   if (request.maxOutputTokens === undefined) {
     throw new ProviderError("provider_bad_request");
@@ -197,12 +217,11 @@ function buildRequest(request: ModelRequest, provider: string): JsonValue {
         ? { ...block, cache_control: { type: "ephemeral" as const } }
         : block,
     );
-  const messages = buildMessages(request, provider);
-  // Tool IDs are already validated Codes; send names unchanged for round trips.
+  const messages = buildMessages(request, provider, aliases);
   const tools =
     request.toolChoice !== "none" && request.tools !== undefined
       ? request.tools.map((tool, index) => ({
-          name: tool.toolId,
+          name: aliases.toProviderName(tool.toolId),
           description: tool.description,
           input_schema: tool.inputSchema,
           ...(index === (request.tools?.length ?? 0) - 1
@@ -216,7 +235,10 @@ function buildRequest(request: ModelRequest, provider: string): JsonValue {
   } else if (request.toolChoice === "required") {
     toolChoice = { type: "any" };
   } else if (request.toolChoice !== undefined && request.toolChoice !== "none") {
-    toolChoice = { type: "tool", name: request.toolChoice.forced };
+    toolChoice = {
+      type: "tool",
+      name: aliases.toAdvertisedProviderName(request.toolChoice.forced),
+    };
   }
 
   return JsonValue.parse({
@@ -334,7 +356,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     response: Message,
     context: ProviderContext,
     startedAt: number,
-    callIdsByToolUseId: ReadonlyMap<string, Id> = new Map(),
+    callIdsByToolUseId: ReadonlyMap<string, Id>,
+    aliases: ProviderToolAliases,
   ): ProviderResult {
     try {
       const toolUseIdByCallId: Record<string, string> = {};
@@ -348,7 +371,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           parts.push({
             type: "tool_call",
             callId,
-            toolId: Code.parse(block.name),
+            toolId: aliases.toCanonicalName(block.name),
             args: JsonValue.parse(block.input),
           });
         }
@@ -380,7 +403,10 @@ export class AnthropicAdapter implements ProviderAdapter {
             : "other",
         latencyMs: Math.max(0, context.clock.now() - startedAt),
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        throw error;
+      }
       throw new ProviderError("provider_unknown");
     }
   }
@@ -389,7 +415,8 @@ export class AnthropicAdapter implements ProviderAdapter {
   async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
     const startedAt = context.clock.now();
     let response: Message;
-    const params = buildRequest(request, this.provider);
+    const aliases = createProviderToolAliasesForRequest(request);
+    const params = buildRequest(request, this.provider, aliases);
     try {
       // Use raw post so opaque blocks (including future block types) pass through verbatim.
       response = await this.client.post<Message>("/v1/messages", {
@@ -402,13 +429,14 @@ export class AnthropicAdapter implements ProviderAdapter {
       }
       mapError(error, context.signal, context.clock.now());
     }
-    return this.mapMessage(response, context, startedAt);
+    return this.mapMessage(response, context, startedAt, new Map(), aliases);
   }
 
   /** @inheritdoc */
   async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
     const startedAt = context.clock.now();
-    const params = buildRequest(request, this.provider);
+    const aliases = createProviderToolAliasesForRequest(request);
+    const params = buildRequest(request, this.provider, aliases);
     // The builder returns this SDK request shape as JSON because provider blocks are extensible.
     const streamParams = createAnthropicStreamingParams(params);
     const stream = this.client.messages.stream(streamParams, { signal: context.signal });
@@ -418,10 +446,20 @@ export class AnthropicAdapter implements ProviderAdapter {
       for await (const event of stream) {
         const mapped = streamEventDeltas(event, state, context.ids, usage);
         usage = mapped.usage;
-        yield* mapped.deltas;
+        for (const delta of mapped.deltas) {
+          yield delta.type === "tool_call" && delta.toolId !== undefined
+            ? { ...delta, toolId: aliases.toCanonicalName(delta.toolId) }
+            : delta;
+        }
       }
       const response = await stream.finalMessage();
-      const result = this.mapMessage(response, context, startedAt, state.callIdsByToolUseId);
+      const result = this.mapMessage(
+        response,
+        context,
+        startedAt,
+        state.callIdsByToolUseId,
+        aliases,
+      );
       for (const part of result.parts) {
         if (part.type === "opaque") {
           yield { type: "opaque", part };

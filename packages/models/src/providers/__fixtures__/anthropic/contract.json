@@ -68,7 +68,7 @@
         "role": "assistant",
         "model": "claude-sonnet-5-5",
         "content": [
-          { "type": "tool_use", "id": "toolu_fixture", "name": "lookup", "input": { "query": "x" } }
+          { "type": "tool_use", "id": "toolu_fixture", "name": "T_29a1af58c138274076260b2d9c83b8378cc951a68d9b4de13794b853d695e4", "input": { "query": "x" } }
         ],
         "stop_reason": "tool_use",
         "stop_sequence": null,
@@ -91,7 +91,7 @@
               {
                 "type": "tool_use",
                 "id": "toolu_fixture",
-                "name": "lookup",
+                "name": "T_29a1af58c138274076260b2d9c83b8378cc951a68d9b4de13794b853d695e4",
                 "input": { "query": "x" }
               }
             ],
