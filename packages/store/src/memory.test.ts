@@ -53,7 +53,7 @@ function modelRequest(id: typeof runId, ts: number): NewEvent {
   return {
     runId: id,
     ts,
-    v: 1,
+    v: 3,
     traceId,
     spanId,
     segmentId: id,
@@ -62,6 +62,7 @@ function modelRequest(id: typeof runId, ts: number): NewEvent {
     provider: "test",
     model: "test",
     messages: [{ role: "user", parts: [{ type: "text", text: "synthetic" }] }],
+    advertisedToolIds: [],
   };
 }
 

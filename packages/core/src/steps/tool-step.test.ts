@@ -42,7 +42,8 @@ import { planDanglingIntents } from "../resume-policy.js";
 import { foldRunState, type ApprovalRequestedEvent, type ToolIntentEvent } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
-import type { PolicyPort, RunContext, ToolPort } from "../ports.js";
+import type { ModelCompletion, PolicyPort, RunContext, ToolPort } from "../ports.js";
+import { prepareCompletion } from "./prepare-tool.js";
 import { modelToolOptions } from "./model-step.js";
 import { createAgentAskUserHandler } from "./ask-user-step.js";
 import {
@@ -580,25 +581,93 @@ describe("tool-step resume handling", () => {
 
     expect(modelToolOptions(tool, []).tools).toEqual([]);
 
+    const prepared = await prepareCompletion(
+      {
+        provider: "test",
+        model: "test",
+        parts: [
+          {
+            type: "tool_call",
+            callId: callIds.unknown,
+            toolId: telemetryToolId,
+            args: null,
+          },
+        ],
+        providerBlobs: null,
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "tool_calls",
+        latencyMs: 0,
+        schemaValid: true,
+        repairAttempts: 0,
+        fallbackDepth: 0,
+      } satisfies ModelCompletion,
+      tool,
+      { runId, signal: new AbortController().signal },
+      modelToolOptions(tool, []).tools?.map(({ toolId }) => toolId) ?? [],
+    );
     const events = await toolStep({
       ...toolStepDependencies(recorder, tool, history),
-      calls: [{ callId: callIds.unknown, toolId: telemetryToolId, args: null }],
+      calls: prepared.preparedCalls.map(({ call }) => call),
+      preparedCalls: prepared.preparedCalls,
     });
 
     expect(events).toMatchObject([
       {
         type: "tool_intent",
-        toolId: UNREGISTERED_TOOL_ID,
+        toolId: telemetryToolId,
         policyDecision: "deny",
-        policyReason: "unknown_tool",
+        policyReason: "tool_not_advertised",
       },
       {
         type: "tool_result",
-        toolId: UNREGISTERED_TOOL_ID,
-        outcome: "denied",
-        errorCode: "unknown_tool",
+        toolId: telemetryToolId,
+        outcome: "error",
+        errorCode: "tool_not_advertised",
       },
     ]);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("records an unadvertised registered tool error before policy or execution", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+    const policy: PolicyPort = {
+      version: Code.parse("test.policy"),
+      decide: vi.fn(() => ({
+        decision: "allow" as const,
+        ruleId: "test_allow",
+        reason: "test_allowed",
+        editable: [],
+      })),
+    };
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute,
+    };
+    const call = { callId: callIds.unknown, toolId: "hidden.tool", args: null };
+
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, tool, history, policy),
+      calls: [call],
+      preparedCalls: [{ call, errorCode: "tool_not_advertised" }],
+    });
+
+    expect(events).toMatchObject([
+      {
+        type: "tool_intent",
+        toolId: call.toolId,
+        policyDecision: "deny",
+        policyReason: "tool_not_advertised",
+      },
+      {
+        type: "tool_result",
+        toolId: call.toolId,
+        outcome: "error",
+        errorCode: "tool_not_advertised",
+      },
+    ]);
+    expect(policy.decide).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 

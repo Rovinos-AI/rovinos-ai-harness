@@ -154,11 +154,12 @@ async function linkChild(
 
 function competingEvent(seq: number): {
   readonly type: "model_request";
-  readonly v: 1;
+  readonly v: 3;
   readonly requestId: ReturnType<typeof Id.parse>;
   readonly provider: "test";
   readonly model: "test";
   readonly messages: [];
+  readonly advertisedToolIds: [];
   readonly runId: ReturnType<typeof Id.parse>;
   readonly ts: number;
   readonly traceId: string;
@@ -167,11 +168,12 @@ function competingEvent(seq: number): {
 } {
   return {
     type: "model_request",
-    v: 1,
+    v: 3,
     requestId: Id.parse(String(seq).padStart(26, "0")),
     provider: "test",
     model: "test",
     messages: [],
+    advertisedToolIds: [],
     runId,
     ts: 101 + seq,
     traceId: "a".repeat(32),

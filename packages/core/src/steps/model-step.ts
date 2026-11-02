@@ -131,11 +131,12 @@ function requestParts(
     modelRequest,
     requestPartial: {
       type: "model_request",
-      v: 2,
+      v: 3,
       requestId,
       provider: options.provider ?? "unknown",
       model: options.modelName ?? "unknown",
       messages: options.messages,
+      advertisedToolIds: modelRequest.tools?.map(({ toolId }) => toolId) ?? [],
       requestHash: storedModelRequestHash(modelRequest.messages, requestParametersHash),
       requestParametersHash,
       ...(role === undefined ? {} : { role }),
@@ -187,10 +188,14 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         return failure.event ?? requestEvent;
       }
 
+      if (requestEvent.type !== "model_request") {
+        throw new Error("Expected a recorded model request.");
+      }
       const prepared = await prepareCompletion(
         completion,
         options.tool,
         toolRunContext(modelRunContext(options), options.recorder, recorded),
+        requestEvent.advertisedToolIds,
       );
       completion = prepared.completion;
       const structuredValue = tokenizedStructuredValue(completion);

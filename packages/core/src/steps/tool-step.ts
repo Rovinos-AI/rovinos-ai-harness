@@ -95,7 +95,10 @@ export async function runToolCall(
   behavior: RunToolCallBehavior = {},
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
-  const unregistered = normalizeUnregisteredToolCall(proposedCall, description, behavior.prepared);
+  const unregistered =
+    behavior.prepared?.errorCode === "tool_not_advertised"
+      ? undefined
+      : normalizeUnregisteredToolCall(proposedCall, description, behavior.prepared);
   const call = unregistered?.call ?? proposedCall;
   const safeBehavior =
     unregistered === undefined ? behavior : { ...behavior, prepared: unregistered.prepared };
@@ -135,6 +138,9 @@ async function runToolCallWithinSpan(input: RunToolCallSpanOptions): Promise<Eve
       input.behavior.existingIntent.policyDecision,
       input.behavior.existingIntent.ruleId,
     );
+  }
+  if (input.behavior.prepared?.errorCode === "tool_not_advertised") {
+    return recordUnadvertisedCallAndPush(input, input.proposedCall);
   }
   const prepared = await prepareRunToolCall(
     input.options,
@@ -326,6 +332,44 @@ async function recordDeniedResultAndPush(
   const event = await recordDeniedResult(input.options.recorder, call, code, executedArgsHash);
   input.events.push(event);
   return event;
+}
+
+async function recordUnadvertisedCallAndPush(
+  input: RunToolCallSpanOptions,
+  call: ModelToolCall,
+): Promise<Event> {
+  const recorded = await input.options.recorder.recordBatch([
+    {
+      type: "tool_intent",
+      v: 1,
+      callId: call.callId,
+      toolId: call.toolId,
+      idempotent: input.description?.idempotent ?? false,
+      policyDecision: "deny",
+      policyReason: "tool_not_advertised",
+      argsHash: hashArgs(call.args),
+      args: call.args,
+    },
+    {
+      type: "tool_result",
+      v: 1,
+      callId: call.callId,
+      toolId: call.toolId,
+      outcome: "error",
+      errorCode: "tool_not_advertised",
+      latencyMs: 0,
+      result: null,
+    },
+  ]);
+  if (recorded.length !== 2) {
+    throw new ToolStepEventMissingError();
+  }
+  input.events.push(...recorded);
+  const result = recorded[1];
+  if (result === undefined) {
+    throw new ToolStepEventMissingError();
+  }
+  return result;
 }
 
 class ToolStepEventMissingError extends HarnessError {

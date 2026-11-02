@@ -2411,7 +2411,7 @@ describe("runLoop", () => {
     expect(await store.head(runId)).toBe(recordedTypes.length);
   });
 
-  it("denies unknown tools without executing them", async () => {
+  it("rejects unknown tools absent from the model request without executing them", async () => {
     const clock = new FakeClock(100);
     const tool = new FakeToolPort();
     const result = await runLoop({
@@ -2445,8 +2445,8 @@ describe("runLoop", () => {
       expect.objectContaining({
         type: "tool_result",
         toolId: UNREGISTERED_TOOL_ID,
-        outcome: "denied",
-        errorCode: "unknown_tool",
+        outcome: "error",
+        errorCode: "tool_not_advertised",
       }),
     );
     const response = result.events.find((event) => event.type === "model_response");
@@ -2828,11 +2828,12 @@ describe("runLoop", () => {
       const prior = await createRunHistory(store, clock, [
         {
           type: "model_request",
-          v: 2,
+          v: 3,
           requestId: modelCallId,
           provider: "test_provider",
           model: "test_model",
           messages: [{ role: "user", parts: [{ type: "text", text: "resumed goal" }] }],
+          advertisedToolIds: [],
         },
       ]);
       const contextPort: ContextPort = new NaiveContext();
@@ -3377,11 +3378,12 @@ describe("runLoop", () => {
           ...(await recorder.recordBatch([
             {
               type: "model_request",
-              v: 1,
+              v: 3,
               requestId: modelCallId,
               provider: "test_provider",
               model: "test_model",
               messages: [{ role: "user", parts: [{ type: "text", text: "resumed goal" }] }],
+              advertisedToolIds: [],
             },
             {
               type: "run_status_changed",

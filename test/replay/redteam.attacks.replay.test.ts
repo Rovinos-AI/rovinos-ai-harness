@@ -46,6 +46,7 @@ interface AttackResult {
   readonly events: readonly Event[];
   readonly status: string;
   readonly executions: readonly string[];
+  readonly policyCalls: readonly string[];
   readonly registry: ToolRegistry;
 }
 
@@ -220,6 +221,8 @@ async function runAttack(options: {
   readonly onExecute?: Parameters<typeof runtimeTool>[2];
   readonly onRuntime?: (runtime: Runtime) => void;
   readonly preApprovalCallId?: Id;
+  readonly hiddenToolIds?: readonly string[];
+  readonly stripToolsFromModelRequest?: boolean;
   readonly interaction?: AttackInteraction;
 }): Promise<AttackResult> {
   const registry = registryFor(options.toolNames);
@@ -258,7 +261,7 @@ async function runAttack(options: {
   });
   const askId =
     options.approvalRequiredName === undefined ? undefined : idFor(options.approvalRequiredName);
-  const policy = policyFor({
+  const policyEngine = policyFor({
     denied,
     allowed,
     allowedToolIds: [...(options.allowedToolIds ?? [])],
@@ -277,8 +280,25 @@ async function runAttack(options: {
           },
         }),
   });
+  const policyCalls: string[] = [];
+  const policy: PolicyPort = {
+    version: policyEngine.version,
+    decide: (call, context) => {
+      policyCalls.push(call.toolId);
+      return policyEngine.decide(call, context);
+    },
+  };
   const executions: string[] = [];
   const actualTool = runtimeTool(registry, executions, options.onExecute);
+  const hiddenToolIds = new Set(options.hiddenToolIds ?? []);
+  const tool: ToolPort =
+    hiddenToolIds.size === 0
+      ? actualTool
+      : {
+          ...actualTool,
+          getToolSpecs: () =>
+            (actualTool.getToolSpecs?.() ?? []).filter(({ toolId }) => !hiddenToolIds.has(toolId)),
+        };
   const runtimePolicy: PolicyPort =
     options.ignoreDenials === true
       ? {
@@ -296,12 +316,17 @@ async function runAttack(options: {
   let activeRunId: Id | undefined;
   let earlyExecution: Promise<ToolExecutionResult> | undefined;
   const model =
-    options.preApprovalCallId === undefined
+    options.preApprovalCallId === undefined && options.stripToolsFromModelRequest !== true
       ? modelPort
       : {
           complete: (request: Parameters<typeof modelPort.complete>[0], context: RunContext) => {
-            activeRunId = context.runId;
-            return modelPort.complete(request, context);
+            if (options.preApprovalCallId !== undefined) {
+              activeRunId = context.runId;
+            }
+            return modelPort.complete(
+              options.stripToolsFromModelRequest === true ? { ...request, tools: [] } : request,
+              context,
+            );
           },
         };
   const preApprovalCallId = options.preApprovalCallId;
@@ -378,7 +403,7 @@ async function runAttack(options: {
       ids: new SequentialIdGenerator(),
       ...(provider === undefined ? { model } : { providerAdapters: [provider] }),
       policy: policyWithEarlyExecution,
-      tool: actualTool,
+      tool,
       flushTelemetry: () => Promise.resolve(),
     },
   );
@@ -429,7 +454,13 @@ async function runAttack(options: {
       events.push(event);
     }
     events.push(...(interaction?.additionalEvents ?? []));
-    return { events, status: interaction?.status ?? result.status, executions, registry };
+    return {
+      events,
+      status: interaction?.status ?? result.status,
+      executions,
+      policyCalls,
+      registry,
+    };
   } finally {
     await runtime.close();
   }
@@ -502,6 +533,56 @@ describe("runtime-backed red-team attacks", () => {
 
       assertSafeAttack(result, deniedId, "completed");
       expect(result.status).toBe("completed");
+    });
+  });
+
+  it("rejects a registered, policy-allowed tool omitted from the recorded request", async () => {
+    await withGoldenTracing(async () => {
+      const hiddenId = normalizeToolId("sandbox", "exec");
+      const result = await runAttack({
+        toolNames: { sandbox: "exec" },
+        deniedNames: [],
+        allowedNames: ["sandbox"],
+        hiddenToolIds: [hiddenId],
+        script: [
+          completion([makeToolCall(30, hiddenId)]),
+          completion([{ type: "text", text: "done" }]),
+        ],
+      });
+      const request = result.events.find((event) => event.type === "model_request");
+
+      expect(request?.type === "model_request" ? request.advertisedToolIds : undefined).not.toContain(
+        hiddenId,
+      );
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_result",
+          toolId: hiddenId,
+          outcome: "error",
+          errorCode: "tool_not_advertised",
+        }),
+      );
+      expect(result.policyCalls).not.toContain(hiddenId);
+      assertSafeAttack(result, hiddenId, "completed");
+    });
+  });
+
+  it("detects an adapter that strips advertised tools after the recorded request", async () => {
+    await withGoldenTracing(async () => {
+      const hiddenId = normalizeToolId("sandbox", "exec");
+      const result = await runAttack({
+        toolNames: { sandbox: "exec" },
+        deniedNames: [],
+        allowedNames: ["sandbox"],
+        stripToolsFromModelRequest: true,
+        script: [
+          completion([makeToolCall(31, hiddenId)]),
+          completion([{ type: "text", text: "done" }]),
+        ],
+      });
+
+      expect(result.executions).toContain(hiddenId);
+      expect(() => assertSafeAttack(result, hiddenId, "completed")).toThrow();
     });
   });
 

@@ -211,7 +211,7 @@ describe("openConfiguredVaultAdmin", () => {
           {
             runId,
             ts: 2,
-            v: 1,
+            v: 3,
             traceId,
             spanId,
             segmentId: runId,
@@ -220,6 +220,7 @@ describe("openConfiguredVaultAdmin", () => {
             provider: "test",
             model: "test",
             messages: [{ role: "user", parts: [{ type: "text", text: "synthetic content" }] }],
+            advertisedToolIds: [],
           },
         ],
         0,

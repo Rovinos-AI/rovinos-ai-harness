@@ -49,7 +49,7 @@ function requestEvent(
     runId,
     seq,
     ts: seq,
-    v: 1,
+    v: 3,
     traceId,
     spanId,
     segmentId,
@@ -60,6 +60,7 @@ function requestEvent(
     ...(options.role === undefined ? {} : { role: options.role }),
     requestHash: requestHash(modelRequest),
     messages: modelRequest.messages,
+    advertisedToolIds: [],
   };
 }
 

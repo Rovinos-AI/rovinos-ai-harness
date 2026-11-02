@@ -83,6 +83,7 @@ const modelRequestEvent = z
     requestParametersHash: Sha256Hex.nullable().optional(),
     schemaHash: Sha256Hex.optional(),
     messages: z.array(MessageSchema),
+    advertisedToolIds: z.array(Code),
   })
   .strict();
 

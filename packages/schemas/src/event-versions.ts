@@ -10,7 +10,7 @@ export const EVENT_SCHEMA_VERSIONS = {
   run_created: 1,
   run_input: 1,
   run_status_changed: 1,
-  model_request: 2,
+  model_request: 3,
   model_response: 1,
   tool_intent: 1,
   tool_execution_started: 1,
@@ -42,6 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export const UPCASTERS: EventUpcasterMap = {
   model_request: {
     1: modelRequestV1ToV2,
+    2: modelRequestV2ToV3,
   },
   approval_resolved: {
     1: approvalResolvedV1ToV2,
@@ -51,6 +52,13 @@ export const UPCASTERS: EventUpcasterMap = {
 /** Legacy logs lack the non-message inputs; retain their original full-request hash verification. */
 function modelRequestV1ToV2(payload: unknown): unknown {
   return isRecord(payload) ? { ...payload, requestParametersHash: null } : payload;
+}
+
+/** Legacy requests did not persist their advertised tool IDs; fail closed when replaying them. */
+function modelRequestV2ToV3(payload: unknown): unknown {
+  return isRecord(payload) && !Object.hasOwn(payload, "advertisedToolIds")
+    ? { ...payload, advertisedToolIds: [] }
+    : payload;
 }
 
 /** Supplies the human decision identity missing from v1 approval resolutions. */

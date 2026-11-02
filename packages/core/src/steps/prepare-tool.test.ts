@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   EventSchema,
+  APP_TELEMETRY_TOOL_NAME,
   FakeClock,
   HarnessError,
   UNREGISTERED_TOOL_ID,
@@ -10,6 +11,9 @@ import {
 import { InMemoryEventStore } from "@rovinos/store";
 import type { ModelCompletion, ToolPort } from "../ports.js";
 import { RunRecorder } from "../recorder.js";
+import { restrictToolPort } from "../subagent/supervisor.js";
+import { ASK_USER_TOOL_SPEC } from "../builtin/ask-user-tool.js";
+import { VERIFY_TOOL_SPEC } from "../builtin/verify-tool.js";
 import {
   prepareCompletion,
   prepareToolCall,
@@ -17,6 +21,7 @@ import {
   toolRunContext,
 } from "./prepare-tool.js";
 import { toolErrorCode } from "./tool-execution.js";
+import { modelToolOptions } from "./model-step.js";
 
 const id = "00000000000000000000000001";
 const call = { callId: id, toolId: "synthetic.tool", args: "synthetic@example.test" };
@@ -65,7 +70,7 @@ describe("tool preparation", () => {
     const port = tool();
     const prepare = vi.fn(() => Promise.resolve({ ...call, args: "<EMAIL_1>" }));
     port.prepare = prepare;
-    const prepared = await prepareCompletion(completion(), port, context);
+    const prepared = await prepareCompletion(completion(), port, context, [call.toolId]);
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(prepared.preparedCalls).toEqual([{ call: { ...call, args: "<EMAIL_1>" } }]);
     expect(prepared.completion.parts[0]).toMatchObject({ args: "<EMAIL_1>" });
@@ -76,7 +81,7 @@ describe("tool preparation", () => {
   it("retains failed calls as non-executable durable recovery input", async () => {
     const port = tool();
     port.prepare = () => Promise.reject(new BlockedError());
-    const prepared = await prepareCompletion(completion(), port, context);
+    const prepared = await prepareCompletion(completion(), port, context, [call.toolId]);
     expect(prepared.completion.parts).toEqual([
       { type: "tool_call", ...call, args: null },
       { type: "text", text: "done" },
@@ -97,7 +102,7 @@ describe("tool preparation", () => {
       parts: [{ type: "tool_call" as const, ...unknownCall }],
     };
 
-    const prepared = await prepareCompletion(input, port, context);
+    const prepared = await prepareCompletion(input, port, context, [unknownCall.toolId]);
 
     expect(prepare).not.toHaveBeenCalled();
     expect(prepared.completion.parts).toEqual([
@@ -123,7 +128,7 @@ describe("tool preparation", () => {
 
   it("keeps ports without preparation backward compatible", async () => {
     await expect(prepareToolCall(tool(), call, context)).resolves.toEqual({ call });
-    const prepared = await prepareCompletion(completion(), undefined, context);
+    const prepared = await prepareCompletion(completion(), undefined, context, []);
     expect(prepared.completion.parts).toEqual([
       { type: "tool_call", ...call, toolId: UNREGISTERED_TOOL_ID },
       { type: "text", text: "done" },
@@ -131,7 +136,102 @@ describe("tool preparation", () => {
     expect(prepared.preparedCalls).toEqual([
       {
         call: { ...call, toolId: UNREGISTERED_TOOL_ID },
-        errorCode: "unknown_tool",
+        errorCode: "tool_not_advertised",
+      },
+    ]);
+  });
+
+  it("marks every registered call absent from the request tools as non-executable", async () => {
+    const port = tool();
+    const input = {
+      ...completion(),
+      parts: [
+        { type: "tool_call" as const, ...call },
+        { type: "tool_call" as const, ...call, callId: "00000000000000000000000002" },
+      ],
+    };
+
+    const prepared = await prepareCompletion(input, port, context, []);
+
+    expect(prepared.preparedCalls).toEqual([
+      { call, errorCode: "tool_not_advertised" },
+      {
+        call: { ...call, callId: "00000000000000000000000002" },
+        errorCode: "tool_not_advertised",
+      },
+    ]);
+  });
+
+  it("accepts a registered call present in the recorded request tool IDs", async () => {
+    const prepared = await prepareCompletion(completion(), tool(), context, [call.toolId]);
+
+    expect(prepared.preparedCalls).toEqual([{ call }]);
+  });
+
+  it("advertises built-ins and enforces a subagent's scoped tool list", async () => {
+    const specs = [
+      ASK_USER_TOOL_SPEC,
+      VERIFY_TOOL_SPEC,
+      { toolId: APP_TELEMETRY_TOOL_NAME, description: "host telemetry", inputSchema: {} },
+      { toolId: "parent.only", description: "parent tool", inputSchema: {} },
+    ];
+    const parent: ToolPort = {
+      getToolSpecs: () => specs,
+      describe: (toolId) =>
+        specs.some((spec) => spec.toolId === toolId)
+          ? { idempotent: true, timeoutMs: 100 }
+          : undefined,
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    };
+    const scoped = restrictToolPort(parent, [
+      ASK_USER_TOOL_SPEC.toolId,
+      VERIFY_TOOL_SPEC.toolId,
+      APP_TELEMETRY_TOOL_NAME,
+    ]);
+    const advertisedToolIds =
+      modelToolOptions(scoped, []).tools?.map(({ toolId }) => toolId) ?? [];
+    const builtInCalls = [
+      {
+        type: "tool_call" as const,
+        callId: id,
+        toolId: ASK_USER_TOOL_SPEC.toolId,
+        args: {},
+      },
+      {
+        type: "tool_call" as const,
+        callId: "00000000000000000000000002",
+        toolId: VERIFY_TOOL_SPEC.toolId,
+        args: {},
+      },
+    ];
+    const preparedBuiltins = await prepareCompletion(
+      { ...completion(), parts: builtInCalls },
+      scoped,
+      context,
+      advertisedToolIds,
+    );
+    const parentOnly = {
+      ...call,
+      toolId: "parent.only",
+      callId: "00000000000000000000000003",
+      args: {},
+    };
+    const preparedParentOnly = await prepareCompletion(
+      { ...completion(), parts: [{ type: "tool_call", ...parentOnly }] },
+      scoped,
+      context,
+      advertisedToolIds,
+    );
+
+    expect(advertisedToolIds).toEqual([ASK_USER_TOOL_SPEC.toolId, VERIFY_TOOL_SPEC.toolId]);
+    expect(preparedBuiltins.preparedCalls.map(({ errorCode }) => errorCode)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(preparedParentOnly.preparedCalls).toEqual([
+      {
+        call: { ...parentOnly, toolId: UNREGISTERED_TOOL_ID },
+        errorCode: "tool_not_advertised",
       },
     ]);
   });

@@ -26,8 +26,9 @@ it("upcasts the v1 model-request fixture while preserving legacy hash verificati
   const event = upcastEvent(fixture.event);
   expect(event).toMatchObject({
     type: "model_request",
-    v: 2,
+    v: 3,
     requestParametersHash: null,
+    advertisedToolIds: [],
     requestHash: fixture.event.requestHash,
   });
   if (event.type !== "model_request") {
@@ -41,6 +42,19 @@ it("upcasts the v1 model-request fixture while preserving legacy hash verificati
       stablePrefixMessages: 0,
     }),
   );
+});
+
+it("upcasts a v2 model request with no recorded tool advertisement to an empty list", async () => {
+  const text = await readFile(join(fixturesDirectory, "model-request-v2.json"), "utf8");
+  const fixture = parseJson(
+    z.object({ containsRealData: z.literal(false), event: RawEventEnvelopeSchema }).strict(),
+    text,
+  );
+  expect(upcastEvent(fixture.event)).toMatchObject({
+    type: "model_request",
+    v: 3,
+    advertisedToolIds: [],
+  });
 });
 
 it("loads, projects, replays, and resumes every committed synthetic legacy log", async () => {
