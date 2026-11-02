@@ -212,6 +212,7 @@ async function runAttack(options: {
   };
   readonly allowedNames?: readonly string[];
   readonly allowedToolIds?: readonly string[];
+  readonly hiddenToolIds?: readonly string[];
   readonly deniedSubagentNames?: readonly string[];
   readonly script: readonly ModelCompletion[];
   readonly ignoreDenials?: boolean;
@@ -278,7 +279,12 @@ async function runAttack(options: {
         }),
   });
   const executions: string[] = [];
-  const actualTool = runtimeTool(registry, executions, options.onExecute);
+  const registeredTool = runtimeTool(registry, executions, options.onExecute);
+  const actualTool: ToolPort = {
+    ...registeredTool,
+    getToolSpecs: () =>
+      registry.getToolSpecs().filter(({ toolId }) => !options.hiddenToolIds?.includes(toolId)),
+  };
   const runtimePolicy: PolicyPort =
     options.ignoreDenials === true
       ? {
@@ -429,6 +435,11 @@ async function runAttack(options: {
       events.push(event);
     }
     events.push(...(interaction?.additionalEvents ?? []));
+    for (const { request } of modelPort.requests) {
+      for (const toolId of options.hiddenToolIds ?? []) {
+        expect(request.tools?.map((tool) => tool.toolId) ?? []).not.toContain(toolId);
+      }
+    }
     return { events, status: interaction?.status ?? result.status, executions, registry };
   } finally {
     await runtime.close();
@@ -973,6 +984,28 @@ describe("runtime-backed red-team attacks", () => {
             event.type === "tool_result" && event.toolId === appOnlyId && event.outcome === "ok",
         ),
       ).toBe(false);
+    });
+  });
+
+  it("rejects a registered hidden-tool guess before execution", async () => {
+    await withGoldenTracing(async () => {
+      const hiddenId = normalizeToolId("sandbox", "hidden_action");
+      const result = await runAttack({
+        toolNames: { sandbox: ["exec", "hidden_action"] },
+        deniedNames: [],
+        allowedToolIds: ["sandbox.*"],
+        hiddenToolIds: [hiddenId],
+        script: [
+          completion([makeToolCall(23, hiddenId)]),
+          completion([{ type: "text", text: "done" }]),
+        ],
+      });
+
+      expect(result.registry.describe(hiddenId)).toBeDefined();
+      assertSafeAttack(result, hiddenId, "completed");
+      expect(result.events).toContainEqual(
+        expect.objectContaining({ type: "tool_result", outcome: "error" }),
+      );
     });
   });
 
