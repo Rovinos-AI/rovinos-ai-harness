@@ -11,7 +11,7 @@ transports reject unknown fields.
 | `id` | `Code` | required | Stable server identifier. |
 | `transport` | `stdio` or `http` object | required | How the client connects to the server. |
 | `protocol` | `auto`, `2026-07-28`, or `2025-11-25` | `auto` | Protocol revision; `auto` negotiates a supported revision. |
-| `apps` | boolean | `false` | Advertise the MCP Apps extension to this server. |
+| `apps` | boolean | `false` | Outbound MCP Apps are unsupported; setting `true` fails with `mcp_apps_unsupported`. |
 | `trust` | `internal` or `external` | `external` | Trust level used to gate trace propagation and annotations. |
 | `propagateTrace` | boolean | `false` | Send trace context only to an `internal` server. |
 | `toolAllowlist` | string array | omitted | Server-native tool names permitted for registration. |
@@ -26,6 +26,9 @@ Tool names in `toolAllowlist` and `idempotentTools` are the names returned by
 the server, before harness normalization. Names must be non-empty and unique
 within each list. When `toolAllowlist` is set, every `idempotentTools` entry
 must also be allowlisted. Effective tool prefixes must be unique across servers.
+The outbound client does not host MCP Apps. App-only tools are excluded from
+tool discovery, and setting `apps: true` is rejected rather than advertising
+unsupported capabilities.
 
 ## Stdio transport
 
