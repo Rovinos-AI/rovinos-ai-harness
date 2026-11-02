@@ -10,6 +10,7 @@ import type {
 } from "@rovinos/store";
 import { createEventBuilders } from "@rovinos/store/testing";
 import { SqliteEventStore, SqliteRunQueue } from "@rovinos/store-sqlite";
+import * as telemetry from "@rovinos/telemetry";
 import {
   FakeClock,
   Id,
@@ -61,6 +62,8 @@ class FakeQueue implements RunQueue {
   onFail: (() => void) | undefined;
   claimIdentity: RunQueueRunIdentity | undefined;
   claimActiveRuns: readonly RunQueueRunIdentity[] = [];
+  claimAlreadyRunning = false;
+  readonly deferredNotifications = new Set<string>();
 
   constructor(jobs: readonly RunQueueJob[] = [job()]) {
     this.pending = [...jobs];
@@ -81,8 +84,16 @@ class FakeQueue implements RunQueue {
       }
       if (
         options?.canClaim !== undefined &&
-        !options.canClaim(this.claimIdentity ?? { runId: item.runId }, this.claimActiveRuns, false)
+        !options.canClaim(
+          this.claimIdentity ?? { runId: item.runId },
+          this.claimActiveRuns,
+          this.claimAlreadyRunning,
+        )
       ) {
+        if (options.onDeferred !== undefined && !this.deferredNotifications.has(item.jobId)) {
+          this.deferredNotifications.add(item.jobId);
+          options.onDeferred(this.claimIdentity ?? { runId: item.runId });
+        }
         index += 1;
         continue;
       }
@@ -205,11 +216,17 @@ describe("Worker", () => {
     const queue = new FakeQueue();
     queue.claimIdentity = { runId: RUN_ID, requestedBy: "cli.alice", role: "researcher" };
     const control: { worker?: Worker } = {};
+    const quotaRejection = vi.spyOn(telemetry, "countQuotaRejection");
+    let checks = 0;
     const quotaService = {
       assertCanClaim: () => {
-        control.worker?.stop();
+        checks += 1;
+        if (checks === 2) {
+          control.worker?.stop();
+        }
         throw new QuotaExceededError("research_team");
       },
+      recordRejection: telemetry.countQuotaRejection,
     };
     const worker = new Worker({
       queue,
@@ -217,12 +234,45 @@ describe("Worker", () => {
       clock: fakeClock,
       quotaService,
       execute: vi.fn(),
+      pollIntervalMs: 1,
+    });
+    control.worker = worker;
+
+    try {
+      await worker.run();
+
+      expect(queue.pending).toHaveLength(1);
+      expect(checks).toBe(2);
+      expect(quotaRejection).toHaveBeenCalledExactlyOnceWith("research_team");
+    } finally {
+      quotaRejection.mockRestore();
+    }
+  });
+
+  it("allows an already-running run through the quota claim wrapper", async () => {
+    const queue = new FakeQueue();
+    queue.claimIdentity = { runId: RUN_ID, requestedBy: "cli.alice", role: "researcher" };
+    queue.claimAlreadyRunning = true;
+    const assertCanClaim = vi.fn(() => {
+      throw new QuotaExceededError("research_team");
+    });
+    const control: { worker?: Worker } = {};
+    const worker = new Worker({
+      queue,
+      ids: fakeIds(),
+      clock: fakeClock,
+      quotaService: { assertCanClaim, recordRejection: vi.fn() },
+      execute: () => {
+        control.worker?.stop();
+        return Promise.resolve({ status: "completed" as const });
+      },
     });
     control.worker = worker;
 
     await worker.run();
 
-    expect(queue.pending).toHaveLength(1);
+    expect(assertCanClaim).not.toHaveBeenCalled();
+    expect(queue.completed).toEqual([JOB_ID]);
   });
 
   it("backs off resume conflicts until the durable execution lease can expire", async () => {

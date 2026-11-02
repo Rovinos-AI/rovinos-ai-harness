@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, it, vi } from "vitest";
 import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
-import type { Clock } from "@rovinos/store";
+import type { Clock, RunQueueRunIdentity } from "@rovinos/store";
 import { runQueueConformance, type RunQueueFactoryCreator } from "@rovinos/store/testing";
 
 const fakePg = vi.hoisted(() => {
@@ -123,6 +123,7 @@ const fakePg = vi.hoisted(() => {
         idempotency_key: key,
         last_error_code: null,
         wake_requested: false,
+        quota_rejection_reported: false,
         created_at: numberValue(values, 7),
         updated_at: numberValue(values, 7),
       };
@@ -172,6 +173,48 @@ const fakePg = vi.hoisted(() => {
       }
       return { rows, rowCount: rows.length };
     }
+    if (sql.startsWith("SELECT q.*, e.meta ->>")) {
+      const now = numberValue(values, 0);
+      const limit = numberValue(values, 1);
+      const rows = [...jobs.values()]
+        .filter(
+          (row) =>
+            typeof row.available_at === "number" &&
+            typeof row.attempts === "number" &&
+            typeof row.max_attempts === "number" &&
+            row.available_at <= now &&
+            row.attempts < row.max_attempts &&
+            (row.lease_owner === null ||
+              (typeof row.lease_expires_at === "number" && row.lease_expires_at <= now)) &&
+            !locks.has(String(row.job_id)),
+        )
+        .sort((left, right) => {
+          const byReported =
+            Number(left.quota_rejection_reported) - Number(right.quota_rejection_reported);
+          if (byReported !== 0) {
+            return byReported;
+          }
+          const byPriority = Number(right.priority) - Number(left.priority);
+          return byPriority !== 0
+            ? byPriority
+            : Number(left.available_at) - Number(right.available_at);
+        })
+        .slice(0, limit)
+        .map((row) => {
+          const run = eventRuns.get(String(row.run_id));
+          return {
+            ...row,
+            job_id: row.job_id,
+            requested_by: run?.requested_by ?? null,
+            role: run?.role ?? null,
+            status: run?.status ?? "pending",
+          };
+        });
+      for (const row of rows) {
+        locks.set(String(row.job_id), clientId);
+      }
+      return { rows, rowCount: rows.length };
+    }
     if (sql.startsWith("SELECT * FROM run_queue WHERE available_at <=")) {
       const now = numberValue(values, 0);
       const skippedJobIds =
@@ -216,6 +259,14 @@ const fakePg = vi.hoisted(() => {
         locks.set(String(row.job_id), clientId);
       }
       return { rows, rowCount: rows.length };
+    }
+    if (sql.startsWith("UPDATE run_queue SET quota_rejection_reported = TRUE")) {
+      const row = jobs.get(stringValue(values, 0));
+      if (row === undefined || row.quota_rejection_reported === true) {
+        return { rows: [], rowCount: 0 };
+      }
+      row.quota_rejection_reported = true;
+      return { rows: [{ job_id: row.job_id }], rowCount: 1 };
     }
     if (sql.startsWith("UPDATE run_queue SET lease_owner =")) {
       const row = jobs.get(stringValue(values, 3));
@@ -449,6 +500,30 @@ const postgresFactory: RunQueueFactoryCreator = (clock: Clock) => {
 };
 
 runQueueConformance("PostgresRunQueue mock", postgresFactory);
+
+it("records a deferred-claim quota rejection only once for a queued Postgres job", async () => {
+  const instance = await postgresFactory(new FakeClock(100));
+  const queue = instance.open();
+  const runId = "00000000000000000000000036";
+  const deferred: RunQueueRunIdentity[] = [];
+  try {
+    await instance.seedRun(runId, { requestedBy: "cli.alice", role: "researcher" });
+    await queue.enqueue({ kind: "start", runId });
+    const options = {
+      canClaim: () => false,
+      onDeferred: (identity: RunQueueRunIdentity) => {
+        deferred.push(identity);
+      },
+    };
+
+    await queue.claim("worker.first", 1, 100, options);
+    await queue.claim("worker.second", 1, 100, options);
+
+    expect(deferred).toEqual([{ runId, requestedBy: "cli.alice", role: "researcher" }]);
+  } finally {
+    await instance.cleanup();
+  }
+});
 
 it("rejects invalid Postgres queue configuration without opening a pool", () => {
   expect(() => new PostgresRunQueue("not-a-postgres-url")).toThrow(

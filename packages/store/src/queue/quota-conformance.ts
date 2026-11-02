@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { FakeClock } from "@rovinos/schemas";
 import type { RunQueueRunIdentity } from "./types.js";
 import type { RunQueueFactoryCreator } from "./conformance.js";
@@ -177,10 +177,38 @@ function registerNonMatchingClaim(factory: RunQueueFactoryCreator): void {
   });
 }
 
+function registerDeferredNotificationDeduplication(factory: RunQueueFactoryCreator): void {
+  it("notifies only once when a quota-deferred job is polled repeatedly", async () => {
+    const instance = await factory(new FakeClock(100));
+    try {
+      const queue = instance.open();
+      const runId = "00000000000000000000000035";
+      await instance.seedRun(runId, { requestedBy: "cli.alice", role: "researcher" });
+      const job = await queue.enqueue({ kind: "start", runId });
+      const onDeferred = vi.fn();
+      const options = { canClaim: () => false, onDeferred };
+
+      expect(await queue.claim("worker.first", 1, 100, options)).toEqual([]);
+      expect(await queue.claim("worker.second", 1, 100, options)).toEqual([]);
+
+      expect(onDeferred).toHaveBeenCalledOnce();
+      expect(onDeferred).toHaveBeenCalledWith({
+        runId,
+        requestedBy: "cli.alice",
+        role: "researcher",
+      });
+      await expect(queue.getDeadLetter(job.jobId)).resolves.toBeUndefined();
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
 /** Register claim-time quota behavior required of every durable queue. */
 export function registerQuotaClaimConformance(factory: RunQueueFactoryCreator): void {
   registerDeadLetterSlotRelease(factory);
   registerRunningRunReclaim(factory);
   registerDeferredClaim(factory);
+  registerDeferredNotificationDeduplication(factory);
   registerNonMatchingClaim(factory);
 }

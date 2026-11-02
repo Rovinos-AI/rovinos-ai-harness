@@ -33,7 +33,8 @@ export interface WorkerOptions {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly execute: WorkerJobExecutor;
-  readonly quotaService?: Pick<QuotaService, "assertCanClaim">;
+  readonly quotaService?: Pick<QuotaService, "assertCanClaim"> &
+    Partial<Pick<QuotaService, "recordRejection">>;
   readonly concurrency?: number;
   readonly leaseMs?: number;
   readonly pollIntervalMs?: number;
@@ -97,7 +98,7 @@ function waitForPoll(intervalMs: number, signal: AbortSignal): Promise<void> {
 export class Worker {
   readonly workerId: string;
   private readonly queue: RunQueue;
-  private readonly quotaService: Pick<QuotaService, "assertCanClaim"> | undefined;
+  private readonly quotaService: WorkerOptions["quotaService"];
   private readonly clock: Clock;
   private readonly execute: WorkerJobExecutor;
   private readonly concurrency: number;
@@ -153,6 +154,7 @@ export class Worker {
         const available = this.concurrency - this.active.size;
         if (available > 0) {
           const quotaService = this.quotaService;
+          const deferredQuotaIds = new Map<string, Code>();
           const claimOptions: RunQueueClaimOptions | undefined =
             quotaService === undefined
               ? undefined
@@ -177,9 +179,16 @@ export class Worker {
                       return true;
                     } catch (error) {
                       if (error instanceof QuotaExceededError) {
+                        deferredQuotaIds.set(identity.runId, error.quotaId);
                         return false;
                       }
                       throw error;
+                    }
+                  },
+                  onDeferred: (identity) => {
+                    const quotaId = deferredQuotaIds.get(identity.runId);
+                    if (quotaId !== undefined) {
+                      quotaService.recordRejection?.(quotaId);
                     }
                   },
                 };

@@ -49,7 +49,10 @@ export class SqliteRunQueue implements RunQueue {
     QueueRow
   >;
   private readonly selectClaimableStatement: Database.Statement<[number, number, number], QueueRow>;
-  private readonly selectAllClaimableStatement: Database.Statement<[number, number], QueueRow>;
+  private readonly selectAllClaimableStatement: Database.Statement<
+    [number, number, number],
+    QueueRow
+  >;
   private readonly quotaClaimGuard: ReturnType<typeof createQuotaClaimGuard>;
   private readonly leaseStatement: Database.Statement<[string, number, number, string]>;
   private readonly deadLetterStatement: Database.Statement<[string, number, number]>;
@@ -101,8 +104,8 @@ export class SqliteRunQueue implements RunQueue {
       this.selectClaimableStatement = this.db.prepare<[number, number, number], QueueRow>(
         "SELECT * FROM run_queue WHERE available_at <= ? AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= ?) ORDER BY priority DESC, available_at, created_at, job_id LIMIT ?",
       );
-      this.selectAllClaimableStatement = this.db.prepare<[number, number], QueueRow>(
-        "SELECT * FROM run_queue WHERE available_at <= ? AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= ?) ORDER BY priority DESC, available_at, created_at, job_id",
+      this.selectAllClaimableStatement = this.db.prepare<[number, number, number], QueueRow>(
+        "SELECT * FROM run_queue WHERE available_at <= ? AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= ?) ORDER BY quota_rejection_reported, priority DESC, available_at, created_at, job_id LIMIT ?",
       );
       this.leaseStatement = this.db.prepare<[string, number, number, string]>(
         "UPDATE run_queue SET lease_owner = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ? WHERE job_id = ?",
@@ -184,11 +187,18 @@ export class SqliteRunQueue implements RunQueue {
               "DELETE FROM run_queue WHERE attempts >= max_attempts AND lease_expires_at <= ?",
             )
             .run(now);
+          const candidateLimit = Math.max(count, 100);
           const rows =
             options === undefined
               ? this.selectClaimableStatement.all(now, now, count)
-              : this.selectAllClaimableStatement.all(now, now);
-          const quotaClaimGuard = options === undefined ? undefined : this.quotaClaimGuard(now);
+              : this.selectAllClaimableStatement.all(now, now, candidateLimit);
+          const quotaClaimGuard =
+            options === undefined
+              ? undefined
+              : this.quotaClaimGuard(
+                  now,
+                  rows.map(({ run_id }) => run_id),
+                );
           const claimed: RunQueueJob[] = [];
           for (const row of rows) {
             if (claimed.length >= count) {
@@ -197,7 +207,7 @@ export class SqliteRunQueue implements RunQueue {
             if (
               options !== undefined &&
               quotaClaimGuard !== undefined &&
-              !quotaClaimGuard(row.run_id, options.canClaim)
+              !quotaClaimGuard(row.run_id, options.canClaim, options.onDeferred)
             ) {
               continue;
             }

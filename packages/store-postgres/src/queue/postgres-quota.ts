@@ -4,32 +4,26 @@ import { type RunQueueClaimOptions, type RunQueueRunIdentity } from "@rovinos/st
 import { RunQueueRunIdentitySchema, parseQueueInput } from "@rovinos/store/adapter-internal";
 import { numberColumn, type QueueRow } from "./postgres-helpers.js";
 
+interface QuotaCandidateRow extends QueueRow {
+  requested_by: string | null;
+  role: string | null;
+  status: string;
+}
+
+function quotaIdentity(row: QuotaCandidateRow): CandidateIdentity {
+  return {
+    identity: parseQueueInput(RunQueueRunIdentitySchema, {
+      runId: row.run_id,
+      ...(row.requested_by === null ? {} : { requestedBy: row.requested_by }),
+      ...(row.role === null ? {} : { role: row.role }),
+    }),
+    alreadyRunning: row.status === "running",
+  };
+}
+
 interface CandidateIdentity {
   identity: RunQueueRunIdentity;
   alreadyRunning: boolean;
-}
-
-async function quotaIdentity(client: PoolClient, runId: string): Promise<CandidateIdentity> {
-  const result = await client.query<{
-    run_id: string;
-    requested_by: string | null;
-    role: string | null;
-    status: string;
-  }>(
-    "SELECT e.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role, r.status FROM events AS e JOIN runs AS r ON r.run_id = e.run_id WHERE e.run_id = $1 AND e.type = 'run_created' LIMIT 1",
-    [runId],
-  );
-  const row = result.rows[0];
-  return {
-    identity: parseQueueInput(RunQueueRunIdentitySchema, {
-      runId,
-      ...(row?.requested_by === null || row?.requested_by === undefined
-        ? {}
-        : { requestedBy: row.requested_by }),
-      ...(row?.role === null || row?.role === undefined ? {} : { role: row.role }),
-    }),
-    alreadyRunning: row?.status === "running",
-  };
 }
 
 async function activeQuotaIdentities(
@@ -41,7 +35,7 @@ async function activeQuotaIdentities(
     requested_by: string | null;
     role: string | null;
   }>(
-    "SELECT r.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role FROM run_queue AS q JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > $1 UNION SELECT r.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role FROM run_queue AS q JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE r.status = 'running'",
+    "SELECT r.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role FROM run_queue AS q JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE q.lease_owner IS NOT NULL AND q.lease_expires_at > $1 UNION SELECT r.run_id, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role FROM runs AS r JOIN run_queue AS q ON q.run_id = r.run_id JOIN events AS e ON e.run_id = r.run_id AND e.type = 'run_created' WHERE r.status = 'running'",
     [now],
   );
   return result.rows.map((row) =>
@@ -72,15 +66,14 @@ export async function claimQuotaCandidates({
   options,
 }: QuotaClaimParameters): Promise<QueueRow[]> {
   const claimed: QueueRow[] = [];
-  const skippedJobIds: string[] = [];
   const activeRuns = await activeQuotaIdentities(client, now);
-  while (claimed.length < count) {
-    const selected = await client.query<QueueRow>(
-      "SELECT * FROM run_queue WHERE available_at <= $1 AND attempts < max_attempts AND (lease_owner IS NULL OR lease_expires_at <= $1) AND NOT (job_id = ANY($2::text[])) ORDER BY priority DESC, available_at, created_at, job_id LIMIT 1 FOR UPDATE SKIP LOCKED",
-      [now, skippedJobIds],
-    );
-    const row = selected.rows[0];
-    if (row === undefined) {
+  const candidateLimit = Math.max(count, 100);
+  const selected = await client.query<QuotaCandidateRow>(
+    "SELECT q.*, e.meta ->> 'requestedBy' AS requested_by, e.meta ->> 'quotaRole' AS role, r.status FROM run_queue AS q JOIN runs AS r ON r.run_id = q.run_id JOIN events AS e ON e.run_id = q.run_id AND e.type = 'run_created' WHERE q.available_at <= $1 AND q.attempts < q.max_attempts AND (q.lease_owner IS NULL OR q.lease_expires_at <= $1) ORDER BY q.quota_rejection_reported, q.priority DESC, q.available_at, q.created_at, q.job_id LIMIT $2 FOR UPDATE OF q SKIP LOCKED",
+    [now, candidateLimit],
+  );
+  for (const row of selected.rows) {
+    if (claimed.length >= count) {
       break;
     }
     if (
@@ -88,10 +81,9 @@ export async function claimQuotaCandidates({
       row.attempts >= row.max_attempts ||
       (row.lease_expires_at !== null && numberColumn(row.lease_expires_at) > now)
     ) {
-      skippedJobIds.push(row.job_id);
       continue;
     }
-    const candidate = await quotaIdentity(client, row.run_id);
+    const candidate = quotaIdentity(row);
     if (
       !options.canClaim(
         candidate.identity,
@@ -99,7 +91,13 @@ export async function claimQuotaCandidates({
         candidate.alreadyRunning,
       )
     ) {
-      skippedJobIds.push(row.job_id);
+      const deferred = await client.query<{ job_id: string }>(
+        "UPDATE run_queue SET quota_rejection_reported = TRUE WHERE job_id = $1 AND quota_rejection_reported = FALSE RETURNING job_id",
+        [row.job_id],
+      );
+      if (deferred.rows.length > 0) {
+        options.onDeferred?.(candidate.identity);
+      }
       continue;
     }
     const result = await client.query<QueueRow>(
@@ -108,7 +106,7 @@ export async function claimQuotaCandidates({
     );
     const updated = result.rows[0];
     if (updated === undefined) {
-      skippedJobIds.push(row.job_id);
+      continue;
     } else {
       claimed.push(updated);
       if (!candidate.alreadyRunning) {

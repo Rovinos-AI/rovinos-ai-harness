@@ -67,6 +67,7 @@ export type RunQueueClaimGuard = (
 /** Optional admission check used to defer jobs that exceed configured run quotas. */
 export interface RunQueueClaimOptions {
   readonly canClaim: RunQueueClaimGuard;
+  readonly onDeferred?: (identity: RunQueueRunIdentity) => void;
 }
 
 /** Result of failing a leased job. */

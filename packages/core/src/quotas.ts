@@ -166,7 +166,7 @@ export class QuotaService {
         quota.maxConcurrentRuns !== undefined &&
         activeRuns.filter((active) => matches(quota, active)).length >= quota.maxConcurrentRuns
       ) {
-        this.reject(quota.id);
+        throw new QuotaExceededError(quota.id);
       }
     }
   }
