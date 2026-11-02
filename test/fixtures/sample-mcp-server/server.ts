@@ -13,7 +13,7 @@ import {
   type Tool,
 } from "@modelcontextprotocol/server";
 import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
-import { sampleInputTool, sampleInputTools } from "./elicitation.ts";
+import { sampleInputTool, sampleInputTools } from "./elicitation.js";
 
 const counterPath = process.env.SAMPLE_COUNTER_FILE ?? "/data/messages.count";
 const spanCollector = createTestSpanCollector();

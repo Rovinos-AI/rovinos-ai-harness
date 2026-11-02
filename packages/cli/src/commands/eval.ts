@@ -166,7 +166,11 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   if (cassette === "record") {
     await recordCassettes(dirname(absoluteSuitePath), records, eventsByTrial);
   }
-  const report = api.buildEvalReport({ trials: records, grades });
+  const report = api.buildEvalReport({
+    trials: records,
+    grades,
+    invariantsEnabled: suite.invariants,
+  });
   await writeReportFiles(api, outDir, report);
   writeSummaryTable(context, report);
   context.out.json(api.EvalReportSchema, report);
