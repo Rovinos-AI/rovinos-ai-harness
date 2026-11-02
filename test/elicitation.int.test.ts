@@ -6,9 +6,11 @@ import { resolve } from "node:path";
 import { context, logs, metrics, trace } from "@opentelemetry/api";
 import { createRuntime, type Runtime, type HumanInputChannel } from "@rovinos/core";
 import { ObedientModel } from "@rovinos/core/testing";
+import { verifyInvariants } from "@rovinos/eval";
 import { checkElicitationUrl } from "@rovinos/mcp";
 import {
   Code,
+  type Event,
   FakeClock,
   Id,
   PiiConfigSchema,
@@ -106,6 +108,18 @@ function difference(before: Record<string, number>, after: Record<string, number
       .map(([key, value]) => [key, value - (before[key] ?? 0)] as const)
       .filter(([, value]) => value !== 0),
   );
+}
+
+async function assertTrialInvariants(runtime: Runtime, events: readonly Event[]) {
+  const runCreated = events.find((event) => event.type === "run_created");
+  if (runCreated === undefined) {
+    throw new Error("fixture_run_created_missing");
+  }
+  const recorded: Event[] = [];
+  for await (const event of runtime.store.read(runCreated.runId)) {
+    recorded.push(event);
+  }
+  expect(verifyInvariants(recorded)).toEqual([]);
 }
 
 async function within<T>(operation: Promise<T>, code: string): Promise<T> {
@@ -420,6 +434,7 @@ describe("human-input hostile-server containment", () => {
             content: tool === "confirm_action" ? { confirmed: true } : {},
           },
         });
+        await assertTrialInvariants(test.runtime, waiting.events);
         expect(difference(before, await counters())).toEqual({ asked: 1 });
       } finally {
         await test.close();
@@ -438,6 +453,7 @@ describe("human-input hostile-server containment", () => {
         expect(completed.events).toContainEqual(
           expect.objectContaining({ type: "input_resolved", action: "accept", decidedBy: "human" }),
         );
+        await assertTrialInvariants(test.runtime, completed.events);
         assertModelCannotAnswer(test.model);
       } finally {
         await test.close();
@@ -463,6 +479,7 @@ describe("human-input hostile-server containment", () => {
         expect.objectContaining({ type: "tool_result", errorCode: "mcp_input_rate_limited" }),
       );
       expect(counts).toEqual({ asked: 3, rate_limited: 1 });
+      await assertTrialInvariants(test.runtime, result.events);
     } finally {
       await test.close();
     }
@@ -513,6 +530,7 @@ describe("human-input hostile-server containment", () => {
         JSON.stringify({ spans, logRecords, metrics: metricCollector.getMetrics() }),
       ).not.toContain(test.canary);
       assertModelCannotAnswer(test.model);
+      await assertTrialInvariants(test.runtime, collectedEvents);
       expect(network).not.toHaveBeenCalled();
     } finally {
       network.mockRestore();

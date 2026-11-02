@@ -12,12 +12,7 @@ it("builds and loads the sample server with the Compose entry point", () => {
   );
   const output = execFileSync(
     process.execPath,
-    [
-      "--import",
-      "./test/fixtures/sample-mcp-server/dist/server.js",
-      "--eval",
-      "process.exit(0)",
-    ],
+    ["--import", "./test/fixtures/sample-mcp-server/dist/server.js", "--eval", "process.exit(0)"],
     { cwd, encoding: "utf8", timeout: 10_000 },
   );
 
