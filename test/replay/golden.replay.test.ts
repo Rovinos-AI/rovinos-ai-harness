@@ -29,6 +29,7 @@ it("replays the scripted golden run without divergence or behavioral differences
     const outcome = await replayRun(scenario.resolved, {
       config: scenario.config,
       policy: scenario.policy,
+      toolRegistry: scenario.toolRegistry,
     });
     const comparison = compareGoldenSignature(
       [...outcome.events, ...scenario.coverageEvents],
@@ -76,6 +77,7 @@ it("fails the regression gate when the scripted tool-call order changes", async 
     const outcome = await replayRun(scenario.resolved, {
       config: scenario.config,
       policy: scenario.policy,
+      toolRegistry: scenario.toolRegistry,
     });
     const comparison = compareGoldenSignature(
       [...outcome.events, ...scenario.coverageEvents],
