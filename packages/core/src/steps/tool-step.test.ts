@@ -1250,6 +1250,7 @@ describe("durable MCP input requests", () => {
     readonly timeoutMs?: number;
     readonly policyDecline?: boolean;
     readonly recordTimeoutTwice?: boolean;
+    readonly elicitationId?: string;
     readonly tokenizer?: Tokenizer;
     readonly message?: string;
   }): Promise<readonly Event[]> {
@@ -1257,7 +1258,7 @@ describe("durable MCP input requests", () => {
     const history = await createRun(recorder, []);
     const callId = callIds.idempotent;
     const request = {
-      inputKey: "legacy-id",
+      inputKey: options.elicitationId ?? "legacy-id",
       mode: "url" as const,
       message: options.message ?? "Continue on the server website",
       url: "https://example.test/continue",
@@ -1370,6 +1371,23 @@ describe("durable MCP input requests", () => {
       action: "cancel",
       decidedBy: "timeout",
     });
+  });
+
+  it("resolves a legacy timeout after storage tokenizes its correlation key", async () => {
+    const events = await runLegacyLiveTool({
+      tokenizer: askUserTokenizer(),
+      elicitationId: answerEmail,
+      timeoutMs: 5,
+      recordTimeoutTwice: true,
+    });
+
+    expect(events.find((event) => event.type === "input_requested")).toMatchObject({
+      inputKey: "<EMAIL_1>",
+    });
+    expect(events.filter((event) => event.type === "input_resolved")).toEqual([
+      expect.objectContaining({ action: "cancel", decidedBy: "timeout" }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain(answerEmail);
   });
 
   it("durably records a legacy input policy decline", async () => {

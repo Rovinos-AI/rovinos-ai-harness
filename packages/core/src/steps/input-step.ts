@@ -102,21 +102,6 @@ function legacyRequestEvent(
   };
 }
 
-function activeLegacyRequestId(
-  options: McpElicitationPortOptions,
-  input: LegacyElicitationInput,
-): Id | undefined {
-  const state = foldRunState([...options.history, ...options.events]);
-  return Array.from(state.inputRequests.values()).find(
-    (request) =>
-      request.source === "mcp_legacy" &&
-      request.callId === input.callId &&
-      request.serverId === input.serverId &&
-      request.inputKey === input.elicitationId &&
-      state.pendingInputs.has(request.requestId),
-  )?.requestId;
-}
-
 async function recordLegacyRequest(
   options: McpElicitationPortOptions,
   input: LegacyElicitationInput,
@@ -253,10 +238,10 @@ async function handleLegacyLive(
 
 async function recordLegacyTimeout(
   options: McpElicitationPortOptions,
-  input: LegacyElicitationInput,
+  requestId: Id | undefined,
 ): Promise<void> {
-  const requestId = activeLegacyRequestId(options, input);
-  if (requestId !== undefined) {
+  const state = foldRunState([...options.history, ...options.events]);
+  if (requestId !== undefined && state.pendingInputs.has(requestId)) {
     await resolveActiveInput({
       recorder: options.recorder,
       events: options.events,
@@ -358,15 +343,25 @@ async function handleInputRequired(
 
 /** Creates the per-call MCP input handler that records and checkpoints requests before exposure. */
 export function createMcpElicitationPort(options: McpElicitationPortOptions): ElicitationPort {
+  const legacyRequestIds = new Map<string, Id>();
+  const legacyKey = (input: LegacyElicitationInput): string =>
+    JSON.stringify([input.serverId, input.callId, input.elicitationId]);
   let requestTail: Promise<Id | undefined> = Promise.resolve(undefined);
   const recordRequest = (input: LegacyElicitationInput): Promise<Id | undefined> => {
-    requestTail = requestTail.then(() => recordLegacyRequest(options, input));
+    requestTail = requestTail.then(async () => {
+      const requestId = await recordLegacyRequest(options, input);
+      if (requestId !== undefined) {
+        legacyRequestIds.set(legacyKey(input), requestId);
+      }
+      return requestId;
+    });
     return requestTail;
   };
   return {
     handleInputRequired: (input) => handleInputRequired(options, input),
     handleLegacyLive: (input) => handleLegacyLive(options, input, recordRequest),
-    recordLegacyTimeout: (input) => recordLegacyTimeout(options, input),
+    recordLegacyTimeout: (input) =>
+      recordLegacyTimeout(options, legacyRequestIds.get(legacyKey(input))),
     recordLegacyPolicyDecline: (input) => recordLegacyPolicyDecline(options, input, recordRequest),
   };
 }

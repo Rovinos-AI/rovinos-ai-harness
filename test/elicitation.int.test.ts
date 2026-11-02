@@ -3,9 +3,7 @@
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
-import { context, metrics, trace } from "@opentelemetry/api";
-import { logs } from "@opentelemetry/api-logs";
-import { ExportResultCode } from "@opentelemetry/core";
+import { context, logs, metrics, trace } from "@opentelemetry/api";
 import { createRuntime, type Runtime, type HumanInputChannel } from "@rovinos/core";
 import { ObedientModel } from "@rovinos/core/testing";
 import { checkElicitationUrl } from "@rovinos/mcp";
@@ -22,7 +20,11 @@ import {
 import { InMemoryEventStore } from "@rovinos/store";
 import { InProcessBackend } from "@rovinos/sandbox";
 import { createTelemetrySdk, type TelemetrySdkOptions } from "@rovinos/telemetry";
-import { createTestContextManager, createTestMetricCollector } from "@rovinos/telemetry/testing";
+import {
+  completeExportSuccessfully,
+  createTestContextManager,
+  createTestMetricCollector,
+} from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createHostilePeer,
@@ -47,14 +49,14 @@ beforeAll(() => {
     spanExporter: {
       export: (batch, callback) => {
         spans.push(...batch);
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       shutdown: () => Promise.resolve(),
     },
     logExporter: {
       export: (batch, callback) => {
         logRecords.push(...batch);
-        callback({ code: ExportResultCode.SUCCESS });
+        completeExportSuccessfully(callback);
       },
       shutdown: () => Promise.resolve(),
       forceFlush: () => Promise.resolve(),
