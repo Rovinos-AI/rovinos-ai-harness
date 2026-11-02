@@ -197,7 +197,8 @@ export class InProcessExecutor implements TrialExecutor {
     let modelFailureCode: string | undefined;
     const model = this.options.model?.(trial);
     const runtime = await createRuntime(prepared.runtimeConfig, {
-      dataDir: prepared.dataDir, roleConfigDirectory: dirname(prepared.configPath),
+      dataDir: prepared.dataDir,
+      roleConfigDirectory: dirname(prepared.configPath),
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000 + trial.seed),
       ids,
