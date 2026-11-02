@@ -11,7 +11,7 @@ import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
 import type { ElicitationUrlOptions } from "./elicitation/url.js";
 import { handleLegacyLiveElicitation, legacyUrlInputRequiredResult } from "./elicitation/legacy.js";
 import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
-import { checkElicitationUrl } from "./elicitation/url.js";
+import { checkElicitationUrl, redactUrlCredentials } from "./elicitation/url.js";
 import { validateInputRequiredResult } from "./elicitation/validate.js";
 import { McpProtocolError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
@@ -75,13 +75,15 @@ function createLegacyElicitation(options: CallToolWithInputRoundsOptions) {
   };
 }
 
+interface LegacyRequestInput {
+  readonly requestParams: ElicitRequest["params"];
+  readonly elicitationId: string;
+  readonly signal: AbortSignal;
+}
+
 async function handleLegacyRequest(
   options: CallToolWithInputRoundsOptions,
-  input: {
-    readonly requestParams: ElicitRequest["params"];
-    readonly elicitationId: string;
-    readonly signal: AbortSignal;
-  },
+  input: LegacyRequestInput,
   onRateLimited: () => void,
 ): Promise<ElicitResult> {
   const { requestParams, elicitationId, signal } = input;
@@ -110,7 +112,11 @@ async function handleLegacyRequest(
     callId: options.call.callId,
     serverId: options.route.server.id,
     elicitationId,
-    request: { ...request, inputKey: elicitationId },
+    request: {
+      ...request,
+      inputKey: elicitationId,
+      ...(request.url === undefined ? {} : { url: redactUrlCredentials(request.url) }),
+    },
     timeoutMs: options.route.server.elicitation.legacyLiveTimeoutMs,
     maxPerRun: options.route.server.elicitation.maxPerRun,
     signal,

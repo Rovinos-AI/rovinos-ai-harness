@@ -98,19 +98,7 @@ function legacyRequestEvent(
   return {
     type: "input_requested" as const,
     v: 1 as const,
-    requestId,
-    source: "mcp_legacy" as const,
-    serverId: input.serverId,
-    callId: input.callId,
-    inputKey: input.elicitationId,
-    round: 0,
-    mode: input.request.mode,
-    message: input.request.message,
-    ...(input.request.requestedSchema === undefined
-      ? {}
-      : { schema: input.request.requestedSchema }),
-    ...(input.request.url === undefined ? {} : { url: input.request.url }),
-    expiresAt: Math.max(0, Math.floor(options.clock.now() + input.timeoutMs)),
+    ...legacyInputRequest(options, input, requestId),
   };
 }
 
@@ -153,13 +141,19 @@ async function recordLegacyRequest(
   }
   const requestId = options.ids.next();
   try {
-    options.events.push(
-      await options.recorder.record(legacyRequestEvent(options, input, requestId)),
-    );
+    const recorded = await options.recorder.record(legacyRequestEvent(options, input, requestId));
+    // Storage wrappers may tokenize a copy; expose only the canonical persisted event.
+    for await (const event of options.recorder.eventStore.read(options.runId, {
+      fromSeq: recorded.seq,
+      toSeq: recorded.seq,
+    })) {
+      options.events.push(event);
+      return requestId;
+    }
+    throw new Error("Recorded legacy input is unavailable.");
   } catch (error) {
     throw new RunEventRecordingError(error);
   }
-  return requestId;
 }
 
 function legacyInputRequest(

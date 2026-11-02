@@ -16,6 +16,11 @@ and scan the host's exported spans, logs, metrics, diagnostics, and captured std
 The canary pipeline exercises the sample MCP fixture's error-result shape with a run-seeded raw
 value and verifies it is removed from persisted and exported sinks.
 
+Hostile elicitation integration tests scan returned and persisted input events, model context,
+and exported telemetry in both protocol eras. Legacy input unit tests also verify that accepted
+and policy-declined requests return the storage-tokenized message rather than the raw server
+message; returning the original event instead makes these regressions fail.
+
 The approval-screen unit tests inject synthetic canaries in invalid payloads and bridge
 errors, checking that the DOM error state and telemetry contain only fixed status text/codes.
 Hostile markup remains text, token display does not call approval/reveal tools, and no

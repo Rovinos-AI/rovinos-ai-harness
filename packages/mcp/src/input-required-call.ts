@@ -8,7 +8,11 @@ import type {
   ElicitationRetry,
 } from "./elicitation/mrtr.js";
 import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
-import { checkElicitationUrl, type ElicitationUrlOptions } from "./elicitation/url.js";
+import {
+  checkElicitationUrl,
+  redactUrlCredentials,
+  type ElicitationUrlOptions,
+} from "./elicitation/url.js";
 import {
   InputRequestContentSchema,
   McpInputRequestError,
@@ -102,7 +106,12 @@ async function tokenizeInputRequests(options: {
 }): Promise<ProtectedInputRequests> {
   const { validated, tokenizeHumanInput, protectInputMetadata } = options;
   const tokenizedContent = await tokenizeHumanInput(
-    JsonValue.parse(validated.inputRequests.map(({ inputKey: _key, ...request }) => request)),
+    JsonValue.parse(
+      validated.inputRequests.map(({ inputKey: _key, ...request }) => ({
+        ...request,
+        ...(request.url === undefined ? {} : { url: redactUrlCredentials(request.url) }),
+      })),
+    ),
   );
   const protectedKeys = await Promise.all(
     validated.inputRequests.map(({ inputKey }) => protectInputMetadata(inputKey)),

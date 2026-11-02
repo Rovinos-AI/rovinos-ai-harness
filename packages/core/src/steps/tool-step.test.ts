@@ -25,7 +25,7 @@ import {
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { InMemoryVault } from "@rovinos/vault";
-import { Tokenizer } from "@rovinos/pii";
+import { PiiEventStore, Tokenizer } from "@rovinos/pii";
 import { PolicyEngine } from "@rovinos/policy";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -229,11 +229,20 @@ afterAll(() => {
   context.disable();
 });
 
-function createRecorder(): { readonly recorder: RunRecorder; readonly store: InMemoryEventStore } {
+function createRecorder(tokenizer?: Tokenizer): {
+  readonly recorder: RunRecorder;
+  readonly store: InMemoryEventStore;
+} {
   const store = new InMemoryEventStore();
   return {
     store,
-    recorder: new RunRecorder(store, runId, segmentId, 0, new FakeClock(100)),
+    recorder: new RunRecorder(
+      tokenizer === undefined ? store : new PiiEventStore(store, tokenizer),
+      runId,
+      segmentId,
+      0,
+      new FakeClock(100),
+    ),
   };
 }
 
@@ -1241,14 +1250,16 @@ describe("durable MCP input requests", () => {
     readonly timeoutMs?: number;
     readonly policyDecline?: boolean;
     readonly recordTimeoutTwice?: boolean;
+    readonly tokenizer?: Tokenizer;
+    readonly message?: string;
   }): Promise<readonly Event[]> {
-    const { recorder } = createRecorder();
+    const { recorder } = createRecorder(options.tokenizer);
     const history = await createRun(recorder, []);
     const callId = callIds.idempotent;
     const request = {
       inputKey: "legacy-id",
       mode: "url" as const,
-      message: "Continue on the server website",
+      message: options.message ?? "Continue on the server website",
       url: "https://example.test/continue",
     };
     const tool = new FakeToolPort(
@@ -1325,6 +1336,32 @@ describe("durable MCP input requests", () => {
       approverId: "cli.test",
     });
   });
+
+  it.each([false, true])(
+    "returns storage-tokenized legacy messages (policy decline: %s)",
+    async (policyDecline) => {
+      const events = await runLegacyLiveTool({
+        tokenizer: askUserTokenizer(),
+        message: `Synthetic contact: ${answerEmail}`,
+        policyDecline,
+        channels: [
+          {
+            id: Code.parse("cli.test"),
+            available: () => true,
+            present: () => Promise.resolve({ action: "accept", principal: Code.parse("cli.test") }),
+          },
+        ],
+      });
+
+      expect(events.find((event) => event.type === "input_requested")).toMatchObject({
+        message: "Synthetic contact: <EMAIL_1>",
+      });
+      expect(JSON.stringify(events)).not.toContain(answerEmail);
+      expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+        action: policyDecline ? "decline" : "accept",
+      });
+    },
+  );
 
   it("records a legacy live timeout as a durable timeout resolution", async () => {
     const events = await runLegacyLiveTool({ timeoutMs: 5, recordTimeoutTwice: true });

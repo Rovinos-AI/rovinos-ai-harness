@@ -190,6 +190,9 @@ export async function createHostilePeer(
     };
     const method = methods[behavior] ?? "elicitation/create";
     const params = attackParams(behavior, canary);
+    if (params.mode === "url") {
+      params.elicitationId = "hostile-url";
+    }
     if (behavior !== "oversized_state") {
       const count = behavior === "flood" || behavior === "endless" ? 6 : 1;
       for (let index = 0; index < count; index++) {

@@ -252,10 +252,33 @@ interface Scenario {
 function assertInvalid(scenario: Scenario) {
   expect(scenario.events.filter((event) => event.type === "input_requested")).toEqual([]);
   expect(scenario.test.presented).toEqual([]);
+  if (scenario.era === "2025-11-25") {
+    assertLegacyRejected(scenario);
+    return;
+  }
   expect(scenario.result.events).toContainEqual(
     expect.objectContaining({ type: "tool_result", outcome: "error" }),
   );
   expect(scenario.counts).toEqual({ rejected: 1 });
+}
+
+function assertLegacyRejected(scenario: Scenario) {
+  const { behavior, test, counts } = scenario;
+  if (behavior === "oversized_state") {
+    // Legacy has no MRTR requestState: the SDK drops these unsupported result fields.
+    expect(test.peer.replies).toEqual([]);
+    expect(scenario.events.some((event) => "requestState" in event)).toBe(false);
+    expect(JSON.stringify(scenario.events)).not.toContain("x".repeat(129));
+    expect(counts).toEqual({});
+  } else if (behavior === "sampling" || behavior === "roots" || behavior === "nested") {
+    expect(test.peer.replies).toEqual([
+      expect.objectContaining({ code: behavior === "nested" ? -32602 : -32601 }),
+    ]);
+    expect(counts).toEqual({});
+  } else {
+    expect(test.peer.replies).toEqual([{ action: "cancel", content: {} }]);
+    expect(counts).toEqual({ rejected: 1 });
+  }
 }
 
 function assertDeclined(scenario: Scenario) {
@@ -268,16 +291,54 @@ function assertDeclined(scenario: Scenario) {
 }
 
 function assertFlood(scenario: Scenario) {
+  if (scenario.era === "2025-11-25") {
+    assertLegacyFlood(scenario);
+    return;
+  }
   expect(scenario.events.filter((event) => event.type === "input_requested")).toEqual([]);
   expect(scenario.counts).toEqual({ rate_limited: 1 });
 }
 
 function assertEndless(scenario: Scenario) {
+  if (scenario.era === "2025-11-25") {
+    assertLegacyFlood(scenario);
+    return;
+  }
   expect(scenario.events.filter((event) => event.type === "input_requested")).toHaveLength(2);
   expect(scenario.result.events).toContainEqual(
     expect.objectContaining({ type: "tool_result", errorCode: "mcp_input_rounds_exceeded" }),
   );
   expect(scenario.counts).toEqual({ asked: 2, rounds_exceeded: 1 });
+}
+
+function assertLegacyFlood(scenario: Scenario) {
+  expect(scenario.test.presented).toHaveLength(3);
+  expect(
+    scenario.events.filter((event) => event.type === "input_requested").map(({ round }) => round),
+  ).toEqual([0, 0, 0]);
+  expect(scenario.test.peer.replies).toEqual([
+    ...Array.from({ length: 3 }, () => ({ action: "accept", content: { answer: "synthetic" } })),
+    ...Array.from({ length: 3 }, () => ({ action: "cancel", content: {} })),
+  ]);
+  expect(scenario.result.events).toContainEqual(
+    expect.objectContaining({ type: "tool_result", errorCode: "mcp_input_rate_limited" }),
+  );
+  expect(scenario.counts).toEqual({ asked: 3, rate_limited: 1 });
+}
+
+function assertPatternContained(scenario: Scenario) {
+  if (scenario.era !== "2025-11-25") {
+    assertInvalid(scenario);
+    return;
+  }
+  // The legacy SDK strips the unsupported pattern before calling our handler.
+  assertAsked(scenario);
+  expect(scenario.test.presented[0]?.schema?.properties.answer).toEqual({ type: "string" });
+  const request = scenario.events.find((event) => event.type === "input_requested");
+  expect(request?.schema?.properties.answer).toEqual({ type: "string" });
+  expect(scenario.test.peer.replies).toEqual([
+    { action: "accept", content: { answer: "synthetic" } },
+  ]);
 }
 
 function assertAsked(scenario: Scenario) {
@@ -302,7 +363,7 @@ const assertions: Record<
   card: assertDeclined,
   nested: assertInvalid,
   oversized_schema: assertInvalid,
-  redos: assertInvalid,
+  redos: assertPatternContained,
   sampling: assertInvalid,
   roots: assertInvalid,
   oversized_state: assertInvalid,
