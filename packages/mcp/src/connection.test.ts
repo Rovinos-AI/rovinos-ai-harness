@@ -302,10 +302,20 @@ function deferredTransport(transport: Transport) {
 describe("McpConnection", () => {
   it("rejects unsupported outbound MCP Apps configuration with a closed error code", () => {
     const createTransport = vi.fn<() => Promise<Transport>>();
+    const error = (() => {
+      try {
+        connectionFor(config({ apps: true }), createTransport);
+        return undefined;
+      } catch (caught) {
+        return caught;
+      }
+    })();
 
-    expect(() => connectionFor(config({ apps: true }), createTransport)).toThrow(
-      expect.objectContaining({ code: "mcp_apps_unsupported" }),
-    );
+    expect(error).toBeInstanceOf(McpConnectionError);
+    expect(error).toMatchObject({
+      code: "mcp_apps_unsupported",
+      message: "mcp_apps_unsupported",
+    });
     expect(createTransport).not.toHaveBeenCalled();
   });
 
@@ -448,19 +458,25 @@ describe("McpConnection", () => {
     await peer.serverTransport.close();
   });
 
-  it("omits app-only tools when outbound MCP Apps are disabled", async () => {
+  it("omits only app-only tools when outbound MCP Apps are disabled", async () => {
     const peer = await createMemoryPeer({
       count: 1,
       tools: [
         { name: "app-only", inputSchema, _meta: { ui: { visibility: ["app"] } } },
-        { name: "model-visible", inputSchema, _meta: { ui: { visibility: ["model"] } } },
+        { name: "model-only", inputSchema, _meta: { ui: { visibility: ["model"] } } },
+        { name: "model-and-app", inputSchema, _meta: { ui: { visibility: ["model", "app"] } } },
+        { name: "empty-visibility", inputSchema, _meta: { ui: { visibility: [] } } },
+        { name: "no-metadata", inputSchema },
       ],
     });
     const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
 
     await connection.connect();
     await expect(connection.listTools()).resolves.toEqual([
-      { name: "model-visible", inputSchema, _meta: { ui: { visibility: ["model"] } } },
+      { name: "model-only", inputSchema, _meta: { ui: { visibility: ["model"] } } },
+      { name: "model-and-app", inputSchema, _meta: { ui: { visibility: ["model", "app"] } } },
+      { name: "empty-visibility", inputSchema, _meta: { ui: { visibility: [] } } },
+      { name: "no-metadata", inputSchema },
     ]);
     await connection.close();
     await peer.serverTransport.close();

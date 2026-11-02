@@ -116,7 +116,8 @@ function isAppOnlyTool(tool: McpTool): boolean {
     isRecord(metadata) &&
     isRecord(metadata.ui) &&
     Array.isArray(metadata.ui.visibility) &&
-    metadata.ui.visibility.includes("app")
+    metadata.ui.visibility.includes("app") &&
+    !metadata.ui.visibility.includes("model")
   );
 }
 
