@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHarness } from "@rovinos/sdk";
+import { Principal } from "@rovinos/schemas";
 
 const harness = await createHarness({ configPath: "harness.config.yaml" });
+
+export async function answerPendingInput(
+  requestId: string,
+  content: { readonly email: string },
+): Promise<void> {
+  const resolution = await harness.answerInput(requestId, {
+    action: "accept",
+    content,
+    principal: Principal.parse("cli.example"),
+  });
+  await harness.resumeRun(resolution.runId);
+}
+
 const { runId } = await harness.startRun({
   goal: "Summarize the synthetic project status.",
   idempotencyKey: "synthetic-status-summary",

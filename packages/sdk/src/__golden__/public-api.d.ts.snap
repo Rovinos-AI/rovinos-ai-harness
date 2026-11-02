@@ -6,7 +6,7 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./harness.js";
-export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, type WatchOptions, } from "./types.js";
+export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, type WatchOptions, } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
 
 import { type Harness, type CreateHarnessOptions } from "./types.js";
@@ -1023,12 +1023,28 @@ export declare const ApprovalResolutionResultSchema: z.ZodObject<{
 export type ApprovalResolutionResult = z.infer<typeof ApprovalResolutionResultSchema>;
 /** Input accepted by the future human-input answer API. */
 export declare const AnswerInputOptionsSchema: z.ZodObject<{
-    action: z.ZodString;
+    action: z.ZodEnum<{
+        accept: "accept";
+        cancel: "cancel";
+        decline: "decline";
+    }>;
     content: z.ZodOptional<z.ZodJSONSchema>;
     principal: z.ZodString;
 }, z.core.$strict>;
 /** Options accepted by {@link Harness.answerInput}. */
 export type AnswerInputOptions = z.infer<typeof AnswerInputOptionsSchema>;
+/** Metadata-only result of resolving a human-input request. */
+export declare const InputResolutionResultSchema: z.ZodObject<{
+    runId: z.ZodString;
+    requestId: z.ZodString;
+    action: z.ZodEnum<{
+        accept: "accept";
+        cancel: "cancel";
+        decline: "decline";
+    }>;
+}, z.core.$strict>;
+/** Inferred metadata-only result returned by {@link Harness.answerInput}. */
+export type InputResolutionResult = z.infer<typeof InputResolutionResultSchema>;
 /** Metadata-only result returned by {@link Harness.startRun} and {@link Harness.continueRun}. */
 export declare const RunStartResultSchema: z.ZodObject<{
     runId: z.ZodString;
@@ -1074,8 +1090,14 @@ export interface Harness {
      * Resolve a pending approval as the validated `principal`.
      */
     resolveApproval(approvalId: RunId, decision: ApprovalDecision, options: ResolveApprovalOptions): Promise<ApprovalResolutionResult>;
-    /** Answer a human-input request; validates `requestId` before reporting that epic 25 is unavailable. */
-    answerInput(requestId: RunId, options: AnswerInputOptions): Promise<never>;
+    /**
+     * Resolve a pending human-input request using the supplied principal.
+     *
+     * The answer is schema-validated and tokenized before it is durably recorded. A configured run
+     * queue receives the resume job; without a queue, call {@link Harness.resumeRun} with the result's
+     * `runId`.
+     */
+    answerInput(requestId: RunId, options: AnswerInputOptions): Promise<InputResolutionResult>;
     /** Watch content-free safe events in sequence order. */
     watch(runId: RunId, options?: WatchOptions): AsyncIterable<SafeEvent>;
     /** Explicitly read tokenized content. This method returns sensitive data. */
@@ -1085,7 +1107,7 @@ export interface Harness {
 }
 /** Coded SDK failure that does not include untrusted input values. */
 export declare class SdkError extends HarnessError {
-    readonly code: "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable" | "sdk_run_not_found";
+    readonly code: "sdk_closed" | "sdk_content_unavailable" | "sdk_input_ambiguous" | "sdk_input_unavailable" | "sdk_run_not_found";
     /** Creates a stable SDK error with a closed code. */
     constructor(code: SdkError["code"]);
 }

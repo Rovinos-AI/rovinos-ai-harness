@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
-// Not wired yet: human input contracts into runtime input handling (25.1 -> #239)
-// Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
 // Not wired yet: Vertex AI provider registration in runtime configuration (14.20 -> #161)
-// Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: automatic resume after a durable human-input answer (25.5 -> #243)
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
@@ -25,10 +22,12 @@ import {
 import { McpServer } from "@modelcontextprotocol/server";
 import { logs, SeverityNumber, trace } from "@opentelemetry/api";
 import Database from "better-sqlite3";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createDefaultContext,
   createControlPlaneOperations,
@@ -155,6 +154,28 @@ interface CliCapture {
   readonly code: number;
   readonly stdout: readonly string[];
   readonly stderr: readonly string[];
+}
+
+function runSdkInputAnswerProcess(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): Promise<string> {
+  const script = fileURLToPath(new URL("./fixtures/sdk-human-input-answer.mjs", import.meta.url));
+  const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [script, ...args],
+      { cwd: repositoryRoot, encoding: "utf8", env, timeout: 60_000, windowsHide: true },
+      (error, stdout) => {
+        if (error !== null) {
+          reject(new Error("The SDK human-input answer process failed."));
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
 }
 
 interface Skeleton {
@@ -2922,6 +2943,146 @@ describe("retention", () => {
 });
 
 describe("SDK", () => {
+  it("resolves and resumes a suspended MCP call through the public SDK in a second process", async () => {
+    const current = fixture();
+    const directory = join(current.directory, "sdk-human-input");
+    const dataDirectory = join(directory, "data");
+    const configPath = join(directory, "harness.json");
+    const policyPath = join(directory, "policy.yaml");
+    const effectPath = join(directory, "effect-count.txt");
+    const serverPath = fileURLToPath(
+      new URL("./fixtures/sdk-human-input-mcp-server.mjs", import.meta.url),
+    );
+    const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+    const answer = "sdk.human.answer@example.test";
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      policyPath,
+      [
+        "version: 1",
+        "defaultDecision: deny",
+        "rules:",
+        "  - id: allow_input_tool",
+        "    match:",
+        "      tools: [sdk_human.confirm_action]",
+        "    decision: allow",
+        "    reason: synthetic_allow",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const config = HarnessConfigSchema.parse({
+      run: { checkpointEveryEvents: 2 },
+      keys: { currentKeyId: KEY_ID, keys: [{ id: KEY_ID, secret: KEY_REF }] },
+      pii: PiiConfigSchema.parse({ defaultAction: "tokenize", detokenize: [] }),
+      policy: { file: policyPath },
+      servers: [
+        {
+          id: "sdk_human",
+          transport: {
+            kind: "stdio",
+            command: process.execPath,
+            args: [serverPath, effectPath],
+            cwd: repositoryRoot,
+          },
+          protocol: "2026-07-28",
+          toolAllowlist: ["confirm_action"],
+          elicitation: { enabled: true, modes: ["form"] },
+        },
+      ],
+    });
+    await writeFile(configPath, JSON.stringify(config), "utf8");
+    const harness = await createHarness({
+      configPath,
+      overrides: {
+        dataDir: dataDirectory,
+        clock: new FakeClock(1_000),
+        ids: new SequentialIdGenerator(),
+        model: new FakeModelPort([
+          completion(
+            [
+              {
+                callId: Id.parse("00000000000000000000001001"),
+                toolId: "sdk_human.confirm_action",
+                args: {},
+              },
+            ],
+            "requesting input",
+          ),
+        ]),
+        secretResolver: new EnvSecretResolver(),
+      },
+    });
+    let runId: string;
+    try {
+      ({ runId } = await harness.startRun({ goal: "Complete the synthetic account action." }));
+      let suspended = false;
+      for await (const event of harness.watch(runId, { fromSeq: 0 })) {
+        if (event.kind === "run_status" && event.to === "suspended") {
+          suspended = true;
+          break;
+        }
+      }
+      expect(suspended).toBe(true);
+    } finally {
+      await harness.close();
+    }
+
+    const beforeResumeStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+    let requestId: Id;
+    try {
+      const events = await readEvents(beforeResumeStore, Id.parse(runId));
+      const request = events.find((event) => event.type === "input_requested");
+      if (request?.type !== "input_requested") {
+        throw new Error("The model-selected MCP call did not request human input.");
+      }
+      requestId = request.requestId;
+      expect(request.source).toBe("mcp_mrtr");
+    } finally {
+      await beforeResumeStore.close();
+    }
+
+    const childOutput = await runSdkInputAnswerProcess(
+      [configPath, dataDirectory, runId, requestId],
+      {
+        ...process.env,
+        SDK_HUMAN_INPUT_ANSWER: answer,
+        HARNESS_E2E_KEY: process.env.HARNESS_E2E_KEY,
+      },
+    );
+    const childResult = parseJson(
+      z
+        .object({
+          resolution: z.object({ runId: Id, requestId: Id, action: z.literal("accept") }).strict(),
+          resumed: z.object({ runId: Id, status: z.literal("completed") }).strict(),
+        })
+        .strict(),
+      childOutput.trim(),
+    );
+    expect(childResult.resolution).toEqual({ runId, requestId, action: "accept" });
+    expect(childResult.resumed).toEqual({ runId, status: "completed" });
+    expect(childOutput).not.toContain(answer);
+    expect(await readFile(effectPath, "utf8")).toBe("effect\n");
+
+    const completedStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+    try {
+      const events = await readEvents(completedStore, Id.parse(runId));
+      expect(events.filter((event) => event.type === "input_resolved")).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) => event.type === "tool_result" && event.toolId === "sdk_human.confirm_action",
+        ),
+      ).toHaveLength(1);
+      expect(events.at(-1)).toMatchObject({
+        type: "run_status_changed",
+        to: "completed",
+      });
+      expect(JSON.stringify(events)).not.toContain(answer);
+    } finally {
+      await completedStore.close();
+    }
+  }, 30_000);
+
   it("starts, watches, and reads a run through the public SDK runtime", async () => {
     const current = fixture();
     const config = await current.context.loadConfig();
