@@ -45,7 +45,7 @@ describe("attribute catalog generator", () => {
 
       # Telemetry attribute catalog
 
-      OpenTelemetry semantic-conventions version: \`1.43.0\`.
+      OpenTelemetry semantic-conventions version: \`1.44.0\`.
 
       MCP and GenAI conventions are in development and may change; updating the pinned version requires a deliberate review.
 

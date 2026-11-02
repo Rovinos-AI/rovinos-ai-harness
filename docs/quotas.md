@@ -36,9 +36,13 @@ recorded atomically and subsequent model calls are stopped. Concurrent runs may
 all pass the pre-call check before any response is charged, so their in-flight
 cost can overshoot a shared limit; this is not a spend reservation.
 
-`maxConcurrentRuns` is currently inert: the worker queue does not yet call the
-quota claim check. It will be enforced atomically at worker claim time by task
-24.3 (#232); until then, configuring this field does not limit concurrent runs.
+At worker claim time, `maxConcurrentRuns` limits matching runs across workers.
+A run reserves a slot while it has a live queue lease, or while its persisted
+status is `running` and its queue row still exists (including an expired lease
+or a retry delay). A dead-lettered run, or a run started outside the queue, has
+no queue row and does not reserve a slot. A run already in `running` can reclaim
+its own job. A matching job that would exceed the limit stays queued without
+using an attempt; non-matching jobs can still be claimed.
 
 Quota rejections increment `harness.quota.rejections` with the configured quota
 code as the only attribute. Principal identities are not included in metrics.

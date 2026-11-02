@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Attributes } from "@opentelemetry/api";
 import { countDroppedTelemetry } from "../metrics.js";
+
+type SanitizedAttributes = Record<string, string | number | boolean>;
 
 interface AttributeDefinition {
   readonly shape: unknown;
@@ -83,12 +84,12 @@ export function sanitizeAttributes(
   definition: AttributeDefinition,
   attrs: unknown,
   correlationEnabled = false,
-): Attributes {
+): SanitizedAttributes {
   if (!isRecord(definition.shape) || !isRecord(attrs)) {
     throw new TypeError("Telemetry attributes are malformed.");
   }
 
-  const sanitized: Attributes = {};
+  const sanitized: SanitizedAttributes = {};
   for (const [key, value] of Object.entries(attrs)) {
     if (isDeniedAttributeName(key)) {
       continue;
@@ -134,12 +135,12 @@ export function sanitizeAttributes(
  * @param sourceAttributes - Untrusted resource attributes.
  * @returns A new set containing only allowlisted scalar resource attributes.
  */
-export function sanitizeResourceAttributes(sourceAttributes: unknown): Attributes {
+export function sanitizeResourceAttributes(sourceAttributes: unknown): SanitizedAttributes {
   if (!isRecord(sourceAttributes)) {
     throw new TypeError("Telemetry resource attributes are malformed.");
   }
 
-  const sanitized: Attributes = {};
+  const sanitized: SanitizedAttributes = {};
   for (const key of resourceAttributeNames) {
     const value: unknown = sourceAttributes[key];
     if (isAttributeValue(value)) {
