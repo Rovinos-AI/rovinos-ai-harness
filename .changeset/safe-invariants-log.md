@@ -1,6 +1,5 @@
 ---
 "@rovinos/cli": patch
-"@rovinos/eval": patch
 ---
 
 # Keep invariant graders non-failing when event logs are unavailable
