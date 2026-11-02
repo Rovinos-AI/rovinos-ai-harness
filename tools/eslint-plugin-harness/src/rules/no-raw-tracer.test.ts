@@ -21,8 +21,8 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
   valid: [
     {
       code: `
-        import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
-        const span = new BasicTracerProvider().getTracer("test").startSpan("test");
+        import { TracerProvider } from "@opentelemetry/sdk-trace";
+        const span = new TracerProvider().getTracer("test").startSpan("test");
         span.setAttribute("harness.test", true);
       `,
       filename: sourceFile("packages/telemetry/src/registry.ts"),
@@ -32,11 +32,11 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
       filename: sourceFile("packages/telemetry/src/span.test.ts"),
     },
     {
-      code: 'import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";',
+      code: 'import { TracerProvider } from "@opentelemetry/sdk-trace";',
       filename: sourceFile("packages/telemetry/src/testing.ts"),
     },
     {
-      code: 'import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";',
+      code: 'import type { SpanProcessor } from "@opentelemetry/sdk-trace";',
       filename: sourceFile("packages/core/src/span-types.ts"),
     },
     {
@@ -143,7 +143,7 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
       ],
     },
     {
-      code: 'import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";',
+      code: 'import { TracerProvider } from "@opentelemetry/sdk-trace";',
       filename: sourceFile("packages/core/src/spans.ts"),
       errors: [{ messageId: "forbidden" }],
     },
@@ -153,7 +153,7 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
       errors: [{ messageId: "forbidden" }],
     },
     {
-      code: "const sdk = await import('@opentelemetry/sdk-trace-base');",
+      code: "const sdk = await import('@opentelemetry/sdk-trace');",
       filename: sourceFile("packages/core/src/spans.ts"),
       errors: [{ messageId: "forbidden" }],
     },

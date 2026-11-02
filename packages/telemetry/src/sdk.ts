@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { logs } from "@opentelemetry/api-logs";
+import { logs } from "@opentelemetry/api";
 import type { TelemetryConfig } from "@rovinos/schemas";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import {
@@ -7,11 +7,7 @@ import {
   LoggerProvider,
   type LogRecordExporter,
 } from "@opentelemetry/sdk-logs";
-import {
-  BasicTracerProvider,
-  BatchSpanProcessor,
-  type SpanExporter,
-} from "@opentelemetry/sdk-trace-base";
+import { TracerProvider, BatchSpanProcessor, type SpanExporter } from "@opentelemetry/sdk-trace";
 import { TelemetrySdkError } from "./errors.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
 import { AllowlistSpanProcessor } from "./processors/allowlist-span-processor.js";
@@ -32,7 +28,7 @@ export interface TelemetrySdkOptions {
 
 /** Providers created with allowlist processors and a required fail-closed sentinel. */
 export interface TelemetrySdk {
-  readonly tracerProvider: BasicTracerProvider;
+  readonly tracerProvider: TracerProvider;
   readonly loggerProvider: LoggerProvider;
   /** Flush pending span and log processors, including in-flight sentinel checks. */
   forceFlush(): Promise<void>;
@@ -61,10 +57,13 @@ export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
     ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
   };
   const resource = resourceFromAttributes({ "harness.policy.version": POLICY_VERSION });
-  const tracerProvider = new BasicTracerProvider({
+  const tracerProvider = new TracerProvider({
     resource,
     spanProcessors: [
-      new AllowlistSpanProcessor(new BatchSpanProcessor(options.spanExporter), processorOptions),
+      new AllowlistSpanProcessor(
+        new BatchSpanProcessor({ exporter: options.spanExporter }),
+        processorOptions,
+      ),
     ],
   });
   const loggerProvider = new LoggerProvider({

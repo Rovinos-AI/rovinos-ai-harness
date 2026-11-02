@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  type AnyValue,
   type Attributes,
   createContextKey,
   isSpanContextValid,
@@ -14,7 +15,7 @@ import {
   trace,
 } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { TracerProvider } from "@opentelemetry/sdk-trace";
 import { Code, HarnessError } from "@rovinos/schemas";
 import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
@@ -22,8 +23,6 @@ import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 import { getTracer } from "./tracer.js";
 import { SEMCONV_ATTRIBUTE_NAMES, SEMCONV_SPAN_NAMES } from "./semconv.js";
 import { env } from "node:process";
-
-type AttributeValue = string | number | boolean;
 
 /** Attribute-schema shape accepted by registered span definitions. */
 export type SpanShape = Record<string, z.ZodType>;
@@ -113,7 +112,9 @@ function issuePaths(error: z.ZodError): SpanRegistryIssue[] {
   }));
 }
 
-function isAttributeValue(value: unknown): value is AttributeValue {
+type SimpleAttributeValue = string | boolean | number;
+
+function isAttributeValue(value: unknown): value is SimpleAttributeValue {
   return (
     typeof value === "string" ||
     typeof value === "boolean" ||
@@ -295,7 +296,7 @@ export function ensureTracingFallback(probe: Span): void {
   const tracerIsValid = isSpanContextValid(probe.spanContext());
   probe.end();
   if (!tracerIsValid && !fallbackTracerInstalled) {
-    trace.setGlobalTracerProvider(new BasicTracerProvider());
+    trace.setGlobalTracerProvider(new TracerProvider());
     fallbackTracerInstalled = true;
   }
 
@@ -351,7 +352,7 @@ export function lookupSpanDefinition(
  * @param name - Registered span attribute name.
  * @param value - Attribute value validated against the registered schema.
  */
-export function setActiveSpanAttribute(name: string, value: AttributeValue): void {
+export function setActiveSpanAttribute(name: string, value: AnyValue): void {
   const span = trace.getActiveSpan();
   if (span === undefined) {
     return;

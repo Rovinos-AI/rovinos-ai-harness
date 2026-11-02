@@ -45,15 +45,28 @@ function checkDockerfileDigests(files: string[]): boolean {
 
   for (const file of files) {
     const lines = readFileSync(resolve(rootDirectory, file), "utf8").split(/\r?\n/u);
+    const stages = new Set<string>();
     for (const [index, line] of lines.entries()) {
-      const imageMatch = /^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)/iu.exec(line);
+      const imageMatch = /^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?/iu.exec(line);
       const image = imageMatch?.[1];
-      if (image === undefined || image === "scratch" || /@sha256:[\da-f]{64}$/iu.test(image)) {
+      const stage = imageMatch?.[2];
+      if (
+        image === undefined ||
+        stages.has(image.toLowerCase()) ||
+        image === "scratch" ||
+        /@sha256:[\da-f]{64}$/iu.test(image)
+      ) {
+        if (stage !== undefined) {
+          stages.add(stage.toLowerCase());
+        }
         continue;
       }
 
       process.stderr.write(`${file}:${String(index + 1)}: FROM images must use a sha256 digest.\n`);
       valid = false;
+      if (stage !== undefined) {
+        stages.add(stage.toLowerCase());
+      }
     }
   }
 
