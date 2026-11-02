@@ -23,6 +23,12 @@ export type McpConnectionErrorCode =
   | "mcp_connection_lost"
   | "mcp_list_tools_failed"
   | "mcp_too_many_tools"
+  | "mcp_discovery_page_limit"
+  | "mcp_discovery_schema_limit"
+  | "mcp_discovery_data_limit"
+  | "mcp_discovery_timeout"
+  | "mcp_discovery_cancelled"
+  | "mcp_discovery_busy"
   | "mcp_tool_arguments_invalid"
   | "mcp_tool_call_failed";
 

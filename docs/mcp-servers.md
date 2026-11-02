@@ -117,17 +117,61 @@ The child stderr stream is never forwarded as text; only its byte count is
 available to the safe logger.
 
 The MCP SDK negotiates the protocol automatically unless `protocol` pins an
-era. Tool discovery follows pagination, is capped at 1,000 tools, and caches
-results according to the server-provided `ttlMs`. Modern list-change
+era. Tool discovery follows pagination under the budgets below and caches only
+complete results according to the server-provided `ttlMs`. Modern list-change
 subscriptions refresh the cached tools. Each page is validated against the
 MCP `tools/list` result schema. On modern Streamable HTTP connections, tools
-whose input schema declares `x-mcp-header` parameters are excluded; the
+whose input schema declares invalid `x-mcp-header` parameters are excluded; the
 harness logs only the excluded count (`mcp_tools_excluded`), never tool names.
 `harness doctor` reports a
 `servers_reachable.<serverId>` result for each configured server; its `detail`
 contains the configured server id.
 The `servers_authorized` check covers configured OAuth servers separately from
 reachability.
+
+### Discovery budgets
+
+These fixed defaults apply to each complete `tools/list` traversal, across all
+pages and before invalid-header tools are excluded:
+
+| Budget | Default | Enforcement layer |
+| --- | --- | --- |
+| Pages | 100 | MCP discovery loop; empty pages count and their continuation cursors are followed. |
+| Observed tools | 1,000 | MCP discovery loop; rejected tools count too. |
+| Each input or output schema | 1 MiB | Incremental decoded-JSON measurement, before header scanning. |
+| Total decoded data | 8 MiB | Sum of compact JSON UTF-8 bytes for validated pages, including schemas, descriptions, metadata, and cursors. |
+| Total duration | 30 seconds | One shared deadline for the traversal, never reset per page; the configured `callMs` can fail a page sooner. |
+| Concurrent discoveries | 4 per process | Excess discoveries fail immediately without a queue. Calls on the same connection share an in-flight refresh. |
+
+Repeated cursors fail with `mcp_list_tools_failed`. Exceeding pages, observed
+tools, schema bytes, or total decoded bytes fails with
+`mcp_discovery_page_limit`, `mcp_too_many_tools`,
+`mcp_discovery_schema_limit`, or `mcp_discovery_data_limit`, respectively.
+Deadline expiry, cancellation, and concurrency rejection use
+`mcp_discovery_timeout`, `mcp_discovery_cancelled`, and `mcp_discovery_busy`.
+These errors contain only closed codes, never server content. Discovery fails
+for that server; partial results are not returned, registered, or cached.
+If a list-change notification invalidates an in-flight traversal, that refresh
+fails with `mcp_list_tools_failed` rather than caching the older snapshot; the
+next discovery call starts fresh.
+
+Cancellation stays inside `@rovinos/mcp`: an optional `AbortSignal` on
+`McpConnection.listTools` cancels a shared refresh, including its outstanding
+SDK request. Closing the connection also cancels discovery. No `@rovinos/sdk`
+public types are changed. Connection establishment has its own existing timeout;
+the discovery deadline begins when traversal starts.
+Legacy peers lack per-request stream cancellation, so cancellation or deadline
+expiry closes that connection to stop its outstanding body read; subsequent
+calls reconnect.
+
+These are **decoded-data limits, not wire-byte limits**. The SDK may already
+have buffered and parsed the HTTP response (or decoded a stdio message) before
+the discovery layer measures it. Measurement bounds subsequent traversal and
+header-scanning work; it does not cap SDK buffering, parsing, or heap usage.
+The deadline aborts outstanding HTTP body reads, but JavaScript timers and
+cancellation cannot preempt synchronous SDK parsing. A wire-byte guarantee
+requires transport-layer limits on streamed HTTP bodies (including SSE),
+decompression, and stdio framing before buffering and JSON decoding.
 
 Registered MCP tool ids are normalized to the harness `Code` format, filtered
 by `toolAllowlist`, and rejected when their schemas exceed the bounded JSON
