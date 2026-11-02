@@ -63,4 +63,20 @@ recorded as metadata in the parent's `subagent_completed` event; exhausted
 result validation returns `subagent_result_invalid`.
 An optional `contextStrategy` must name a strategy in the runtime registry.
 
+## Runtime verification
+
+The built-in `agent.verify` tool accepts one to ten unique criteria, each with a
+Code id and a description of at most 500 characters, plus a JSON subject. It
+makes one temperature-zero request routed to the `judge` role and returns a
+structured verdict containing only each criterion id and its met flag, plus
+`pass` or `fail`. The runtime and eval judge derive their criterion-specific
+output contracts from the shared `VerdictSchema`; invalid output is repaired
+through the configured model gateway and returns `verify_failed` if it remains
+invalid.
+
+Criterion descriptions and the subject pass through the normal tool-input and
+model-input PII boundaries. The request, response, and tool result are recorded
+in the parent run, and model usage contributes to that run's budgets. The tool
+is read-only and idempotent, so an interrupted call may be rerun during resume.
+
 See the configuration schema for the exact accepted fields and validation.

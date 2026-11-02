@@ -75,6 +75,13 @@ export interface RunContext {
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
   /** Durable metadata-only sink for vault detokenization audits. */
   readonly recordVaultAudit?: VaultAuditHandler;
+  /** Performs a recorded, schema-enforced auxiliary model call within the active run. */
+  readonly requestStructuredModel?: (input: {
+    readonly messages: Message[];
+    readonly outputSchema: z.ZodType;
+    readonly temperature: number;
+    readonly signal: AbortSignal;
+  }) => Promise<ModelCompletion>;
 }
 
 /** A tool invocation proposed by the model. */

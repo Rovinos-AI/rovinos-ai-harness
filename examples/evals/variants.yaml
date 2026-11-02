@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic model routes for repeatable evaluation runs.
+variants:
+  - id: baseline
+    route:
+      - provider: openai
+        model: synthetic_baseline
+    configOverrides:
+      run:
+        budgets:
+          maxSteps: 80
+  - id: candidate
+    route:
+      - provider: openai
+        model: synthetic_candidate
+    contextStrategy: compact

@@ -39,6 +39,14 @@ export const AppSpanSchema = z.discriminatedUnion("name", [
       durationMs: duration,
     })
     .strict(),
+  z
+    .object({
+      name: z.literal("ui.input"),
+      action: z.enum(["accept", "decline", "cancel", "open_link", "done"]),
+      startOffsetMs: startOffset,
+      durationMs: duration,
+    })
+    .strict(),
 ]);
 
 /** Inferred span accepted by the host's app telemetry boundary. */

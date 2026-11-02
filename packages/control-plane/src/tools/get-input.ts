@@ -6,6 +6,7 @@ import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { getInputOutputSchema, getInputResultSchema, inputRequestInputSchema } from "../schemas.js";
 import { findInputRequest, findPendingInput, getInputResult } from "./input-state.js";
+import { INPUT_RESOURCE_URI } from "../resources/input.js";
 
 /** Registers authorized retrieval of one tokenized input request. */
 export function registerGetInputTool(
@@ -21,6 +22,7 @@ export function registerGetInputTool(
       inputSchema: inputRequestInputSchema,
       outputSchema: getInputResultSchema,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: INPUT_RESOURCE_URI } },
     },
     async (input, context) => {
       const parsed = inputRequestInputSchema.parse(input);

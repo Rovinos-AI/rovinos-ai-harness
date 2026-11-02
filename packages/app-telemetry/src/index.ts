@@ -109,6 +109,27 @@ function makeInteractionSpan(
   return { name: "ui.interaction", kind, count, startOffsetMs, durationMs };
 }
 
+function makeInputSpan(
+  attrs: Record<string, unknown>,
+  startOffsetMs: number,
+  durationMs: number,
+): AppSpan | undefined {
+  if (!hasOnlyKeys(attrs, ["action"])) {
+    return undefined;
+  }
+  const action = attrs.action;
+  if (
+    action !== "accept" &&
+    action !== "decline" &&
+    action !== "cancel" &&
+    action !== "open_link" &&
+    action !== "done"
+  ) {
+    return undefined;
+  }
+  return { name: "ui.input", action, startOffsetMs, durationMs };
+}
+
 function makeSpan(
   name: AppSpanName,
   attrs: unknown,
@@ -127,6 +148,8 @@ function makeSpan(
       return makeErrorSpan(attrs, startOffsetMs, durationMs);
     case "ui.interaction":
       return makeInteractionSpan(attrs, startOffsetMs, durationMs);
+    case "ui.input":
+      return makeInputSpan(attrs, startOffsetMs, durationMs);
   }
 }
 

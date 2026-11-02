@@ -2,7 +2,12 @@
 import { Id } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { defineSuite } from "./load.js";
-import { EvalVariantSchema, TrialResultSchema, TrialSpecSchema } from "./trial.js";
+import {
+  EvalVariantSchema,
+  parseEvalVariants,
+  TrialResultSchema,
+  TrialSpecSchema,
+} from "./trial.js";
 
 const suite = defineSuite({
   schemaVersion: 1,
@@ -37,6 +42,31 @@ describe("eval trial contracts", () => {
         workDir: "/tmp/eval-trial",
       }).success,
     ).toBe(false);
+  });
+
+  it("validates variants files, converts routes, and rejects duplicate or unsafe entries", () => {
+    expect(
+      parseEvalVariants({
+        variants: [
+          { id: "baseline", route: [{ provider: "openai", model: "synthetic" }] },
+          { id: "candidate", contextStrategy: "compact" },
+        ],
+      }),
+    ).toEqual([
+      { id: "baseline", models: [{ provider: "openai", model: "synthetic" }] },
+      { id: "candidate", contextStrategy: "compact" },
+    ]);
+    expect(() => parseEvalVariants({ variants: [{ id: "only_one" }] })).toThrow();
+    expect(() =>
+      parseEvalVariants({
+        variants: [{ id: "duplicate" }, { id: "duplicate" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      parseEvalVariants({
+        variants: [{ id: "baseline", configOverrides: { store: {} } }, { id: "candidate" }],
+      }),
+    ).toThrow();
     expect(EvalVariantSchema.safeParse({ id: "baseline", cassetteMode: "unknown" }).success).toBe(
       false,
     );

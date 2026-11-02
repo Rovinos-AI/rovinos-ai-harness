@@ -192,6 +192,38 @@ describe("createLlmJudgeGrader", () => {
     expect(JSON.stringify(result)).not.toContain("criteria");
   });
 
+  it.each([
+    [
+      "missing",
+      JSON.stringify({
+        criteria: [{ id: "accuracy", met: true }],
+        verdict: "pass",
+      }),
+    ],
+    [
+      "extra",
+      JSON.stringify({
+        criteria: [
+          { id: "accuracy", met: true },
+          { id: "unexpected", met: false },
+        ],
+        verdict: "pass",
+      }),
+    ],
+  ])("repairs %s criterion ids with the shared verdict schema", async (_label, invalid) => {
+    const fake = gateway([invalid, metBoth], { maxRepairs: 1 });
+    const result = await createLlmJudgeGrader(spec(), {
+      gateway: fake.gateway,
+      ids: new SequentialIdGenerator(),
+    }).grade(context());
+
+    expect(result).toMatchObject({
+      pass: true,
+      usage: { inputTokens: 8, outputTokens: 4, costMicros: 14 },
+    });
+    expect(fake.requests).toHaveLength(2);
+  });
+
   it("requires both a majority pass verdict and the weighted score threshold", async () => {
     const fake = gateway([
       JSON.stringify({

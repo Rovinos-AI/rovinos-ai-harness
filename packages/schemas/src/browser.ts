@@ -5,17 +5,33 @@ export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.
 export {
   ApprovalAppGetRequestSchema,
   ApprovalAppInputSchema,
+  InputAnswerRequestSchema,
+  InputAnswerResponseSchema,
+  InputAppGetRequestSchema,
+  InputAppInputSchema,
+  InputAppListSchema,
+  InputAppPendingSummarySchema,
   ResolveRequest,
   ResolveResponse,
   RevealRequest,
   RevealResponse,
   type ApprovalAppGetRequest,
   type ApprovalAppInput,
+  type InputAnswerRequest,
+  type InputAnswerResponse,
+  type InputAppGetRequest,
+  type InputAppInput,
 } from "./approval-tools.js";
 export { parseJson } from "./parse.js";
+export {
+  FormSchema,
+  InputRequestSchema,
+  formSchemaToZod,
+  type InputRequest,
+} from "./human-input.js";
+export { JsonValue } from "./json.js";
 export { parseTokenType } from "./pii-detection.js";
 export { RunStatus } from "./events.js";
-export { JsonValue } from "./json.js";
 export {
   RunConsoleDetailSchema,
   RunConsoleListSchema,

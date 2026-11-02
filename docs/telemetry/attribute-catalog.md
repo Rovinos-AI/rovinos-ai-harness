@@ -152,6 +152,19 @@ Owner task: `3.6`.
 
 Owner task: `3.6`.
 
+### `harness.ui.input`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.app.id` | Code | Required | `@rovinos/host` |
+| `harness.error.code` | Code | Optional | `@rovinos/host` |
+| `harness.run.id` | Id | Required | `@rovinos/host` |
+| `harness.ui.duration_ms` | integer | Required | `@rovinos/host` |
+| `harness.ui.input.action` | enum: `accept`, `decline`, `cancel`, `open_link`, `done` | Required | `@rovinos/host` |
+| `harness.ui.session_id` | Id | Required | `@rovinos/host` |
+
+Owner task: `25.7`.
+
 ### `harness.ui.interaction`
 
 | Attribute | Type | Presence | Owning package |

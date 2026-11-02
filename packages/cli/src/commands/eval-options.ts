@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { HarnessConfig } from "@rovinos/config";
-import { Code, HarnessError } from "@rovinos/schemas";
+import { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
+import { Code, HarnessError, parseYaml } from "@rovinos/schemas";
 import { CommanderError } from "commander";
+import { dirname, resolve } from "node:path";
 import type { EvalSuite, EvalVariant } from "@rovinos/eval";
 import type { EvalPackage } from "./eval-types.js";
 
@@ -24,6 +25,7 @@ export interface EvalOptions {
   readonly concurrency?: string;
   readonly out?: string;
   readonly seed?: string;
+  readonly variants?: string;
   readonly failUnder?: string;
   readonly maxCostUsd?: string;
   readonly exportTelemetry?: boolean;
@@ -86,6 +88,47 @@ export function createVariants(
       ...(cassette === "off" ? {} : { cassetteMode: cassette }),
     }),
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function deepMerge(base: unknown, override: unknown): unknown {
+  if (!isRecord(base) || !isRecord(override)) {
+    return override;
+  }
+  const keys = new Set([...Object.keys(base), ...Object.keys(override)]);
+  return Object.fromEntries(
+    [...keys].map((key) => [
+      key,
+      key in override ? deepMerge(base[key], override[key]) : base[key],
+    ]),
+  );
+}
+
+/** Validates a variants YAML document and converts its routes to runner variants. */
+export function createVariantsFromFile(args: {
+  readonly api: EvalPackage;
+  readonly text: string;
+  readonly filePath: string;
+  readonly cassette: "record" | "replay" | "off";
+  readonly config: HarnessConfig;
+}): EvalVariant[] {
+  const { api, text, filePath, cassette, config } = args;
+  const entries = api.parseEvalVariants(parseYaml(api.EvalVariantsFileSchema, text));
+  return entries.map((variant) => {
+    if (variant.configOverrides !== undefined) {
+      HarnessConfigSchema.parse(deepMerge(config, variant.configOverrides));
+    }
+    return api.EvalVariantSchema.parse({
+      ...variant,
+      ...(variant.policyFile === undefined
+        ? {}
+        : { policyFile: resolve(dirname(filePath), variant.policyFile) }),
+      ...(cassette === "off" ? {} : { cassetteMode: cassette }),
+    });
+  });
 }
 
 /** Returns a suite containing only tasks selected by the optional filter. */

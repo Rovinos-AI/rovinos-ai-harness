@@ -32,6 +32,7 @@ const validSpanNames = new Set([
   "harness.ui.render",
   "harness.ui.decision",
   "harness.ui.error",
+  "harness.ui.input",
   "harness.ui.interaction",
 ]);
 const metricCollector = createTestMetricCollector();

@@ -369,11 +369,12 @@ describe("approval app telemetry", () => {
       "ui.interaction",
       "ui.decision",
     ]);
-    const allowedAttributes: Record<SpanNames[number], readonly string[]> = {
+    const allowedAttributes: Record<AppSpan["name"], readonly string[]> = {
       "ui.render": ["name", "startOffsetMs", "durationMs"],
       "ui.decision": ["name", "decision", "startOffsetMs", "durationMs"],
       "ui.error": ["name", "code", "startOffsetMs", "durationMs"],
       "ui.interaction": ["name", "kind", "count", "startOffsetMs", "durationMs"],
+      "ui.input": ["name", "action", "startOffsetMs", "durationMs"],
     };
     for (const span of emitted) {
       expect(Object.keys(span).sort()).toEqual([...allowedAttributes[span.name]].sort());

@@ -69,6 +69,7 @@ export function computeTrialMetrics(
     taskId: record.taskId,
     variantId: record.variantId,
     trialIndex: record.trialIndex,
+    seed: record.seed,
     status: record.result.status,
     passed: record.result.status === "completed" && gradeMetrics.every((grade) => grade.pass),
     graders: gradeMetrics.map((grade) => ({

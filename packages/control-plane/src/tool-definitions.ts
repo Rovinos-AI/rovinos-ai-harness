@@ -12,6 +12,7 @@ import {
 import type { Tool } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { APPROVAL_RESOURCE_URI } from "./resources/approval.js";
+import { INPUT_RESOURCE_URI } from "./resources/input.js";
 import { RUNS_CONSOLE_RESOURCE_URI } from "./resources/runs-console.js";
 import {
   approveInputSchema,
@@ -36,6 +37,25 @@ import {
   answerInputInputSchema,
 } from "./schemas.js";
 
+const readScopeTools: ReadonlySet<string> = new Set([
+  "list_runs",
+  "get_run",
+  "list_pending_inputs",
+  "harness.runs.list",
+  "harness.runs.get",
+]);
+const approvalScopeTools: ReadonlySet<string> = new Set([
+  "approve",
+  "deny",
+  "review_approval",
+  "get_input",
+  "review_input",
+  "answer_input",
+  "harness.inputs.answer",
+  "harness.approvals.get",
+  "harness.approvals.resolve",
+]);
+
 /** Returns public MCP tool definitions in the order used by `tools/list`. */
 export function toolDefinitions(): Tool[] {
   return [
@@ -54,6 +74,7 @@ function inputToolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(listPendingInputsInputSchema),
       outputSchema: z.toJSONSchema(listPendingInputsOutputSchema),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: INPUT_RESOURCE_URI } },
     },
     {
       name: "get_input",
@@ -61,6 +82,7 @@ function inputToolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(inputRequestInputSchema),
       outputSchema: z.toJSONSchema(getInputResultSchema),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: INPUT_RESOURCE_URI } },
     },
     {
       name: "review_input",
@@ -76,6 +98,14 @@ function inputToolDefinitions(): Tool[] {
       outputSchema: z.toJSONSchema(inputResolutionOutputSchema),
       annotations: { openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
+    },
+    {
+      name: "harness.inputs.answer",
+      description: "Submit a human answer from the input app.",
+      inputSchema: objectInputSchema(answerInputInputSchema),
+      outputSchema: z.toJSONSchema(inputResolutionOutputSchema),
+      annotations: { openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: INPUT_RESOURCE_URI } },
     },
   ];
 }
@@ -203,25 +233,10 @@ function runToolDefinitions(): Tool[] {
 
 /** Returns the authorization scope required by a control-plane tool. */
 export function toolScope(name: string): ControlPlaneAuthScope {
-  if (
-    name === "list_runs" ||
-    name === "get_run" ||
-    name === "list_pending_inputs" ||
-    name === "harness.runs.list" ||
-    name === "harness.runs.get"
-  ) {
+  if (readScopeTools.has(name)) {
     return "read";
   }
-  if (
-    name === "approve" ||
-    name === "deny" ||
-    name === "review_approval" ||
-    name === "get_input" ||
-    name === "review_input" ||
-    name === "answer_input" ||
-    name === "harness.approvals.get" ||
-    name === "harness.approvals.resolve"
-  ) {
+  if (approvalScopeTools.has(name)) {
     return "approve";
   }
   if (name === "harness.approvals.reveal") {

@@ -6,6 +6,7 @@ import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth
 import type { ControlPlaneAuditHandler, ControlPlanePrincipal } from "../auth.js";
 import { answerInputInputSchema, inputResolutionOutputSchema } from "../schemas.js";
 import { findInputRequest, findPendingInput } from "./input-state.js";
+import { INPUT_RESOURCE_URI } from "../resources/input.js";
 
 /** Human resolution operation supplied by the composed runtime. */
 export type ResolveInputOperation = (input: {
@@ -26,63 +27,72 @@ export function registerAnswerInputTool(
     readonly onAudit?: ControlPlaneAuditHandler;
   },
 ): void {
-  server.registerTool(
-    "answer_input",
-    {
-      description: "Submit a human answer to a pending input request.",
-      inputSchema: answerInputInputSchema,
-      outputSchema: inputResolutionOutputSchema,
-      annotations: { openWorldHint: false },
-      _meta: { ui: { visibility: ["app"] } },
-    },
-    async (input, context) => {
-      const parsed = answerInputInputSchema.parse(input);
-      const principal = requireControlPlaneScope(
-        context,
-        Code.parse("answer_input"),
-        "approve",
-        options.onAudit,
-      );
-      const found = await findPendingInput(options.store, parsed.requestId, principal?.runIds);
-      return withControlPlaneAuthorization({
-        context,
-        tool: Code.parse("answer_input"),
-        scope: "approve",
-        ...(found === undefined ? {} : { runId: found.runId }),
-        operation: async () => {
-          if (!options.isAppContext(context, "answer_input")) {
-            return inputError("human_confirmation_unavailable");
-          }
-          if (found === undefined) {
-            const existing = await findInputRequest(
-              options.store,
-              parsed.requestId,
-              principal?.runIds,
-            );
-            return inputError(
-              existing === undefined ? "input_not_found" : "input_already_resolved",
-            );
-          }
-          if (options.resolveInput === undefined) {
-            return inputError("control_plane_runtime_unavailable");
-          }
-          try {
-            await options.resolveInput({
-              runId: found.runId,
-              requestId: parsed.requestId,
-              action: parsed.action,
-              ...(parsed.answer === undefined ? {} : { answer: parsed.answer }),
-              principal: humanPrincipal(principal),
-            });
-            return inputResult({ resolved: true });
-          } catch (error) {
-            return inputError(safeErrorCode(error));
-          }
+  const registerTool = (toolName: "answer_input" | "harness.inputs.answer"): void => {
+    server.registerTool(
+      toolName,
+      {
+        description: "Submit a human answer to a pending input request.",
+        inputSchema: answerInputInputSchema,
+        outputSchema: inputResolutionOutputSchema,
+        annotations: { openWorldHint: false },
+        _meta: {
+          ui: {
+            visibility: ["app"],
+            ...(toolName === "harness.inputs.answer" ? { resourceUri: INPUT_RESOURCE_URI } : {}),
+          },
         },
-        audit: options.onAudit,
-      });
-    },
-  );
+      },
+      async (input, context) => {
+        const parsed = answerInputInputSchema.parse(input);
+        const principal = requireControlPlaneScope(
+          context,
+          Code.parse(toolName),
+          "approve",
+          options.onAudit,
+        );
+        const found = await findPendingInput(options.store, parsed.requestId, principal?.runIds);
+        return withControlPlaneAuthorization({
+          context,
+          tool: Code.parse(toolName),
+          scope: "approve",
+          ...(found === undefined ? {} : { runId: found.runId }),
+          operation: async () => {
+            if (!options.isAppContext(context, toolName)) {
+              return inputError("human_confirmation_unavailable");
+            }
+            if (found === undefined) {
+              const existing = await findInputRequest(
+                options.store,
+                parsed.requestId,
+                principal?.runIds,
+              );
+              return inputError(
+                existing === undefined ? "input_not_found" : "input_already_resolved",
+              );
+            }
+            if (options.resolveInput === undefined) {
+              return inputError("control_plane_runtime_unavailable");
+            }
+            try {
+              await options.resolveInput({
+                runId: found.runId,
+                requestId: parsed.requestId,
+                action: parsed.action,
+                ...(parsed.answer === undefined ? {} : { answer: parsed.answer }),
+                principal: humanPrincipal(principal),
+              });
+              return inputResult({ resolved: true });
+            } catch (error) {
+              return inputError(safeErrorCode(error));
+            }
+          },
+          audit: options.onAudit,
+        });
+      },
+    );
+  };
+  registerTool("answer_input");
+  registerTool("harness.inputs.answer");
 }
 
 function humanPrincipal(principal: ControlPlanePrincipal | undefined): string {

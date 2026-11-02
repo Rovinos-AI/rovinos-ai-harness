@@ -1,22 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { HarnessError } from "@rovinos/schemas";
+import { HarnessError, parseJson } from "@rovinos/schemas";
 import { Option } from "commander";
 import type { EvalSuite } from "@rovinos/eval";
 import type { CommandModule } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
-import { createVariants, filterSuite, nonnegativeNumber, positiveInteger } from "./eval-options.js";
+import {
+  createVariants,
+  createVariantsFromFile,
+  filterSuite,
+  nonnegativeNumber,
+  positiveInteger,
+} from "./eval-options.js";
 import type { EvalOptions } from "./eval-options.js";
 import {
   createDefaultExecutor,
   collectTrialEvents,
   type EvalExecutorDependencies,
+  type EvalExecutorOptions,
 } from "./eval-executor.js";
 import { recordCassettes } from "./eval-cassettes.js";
 import { writeReportFiles, writeSummaryTable } from "./eval-report-output.js";
 import type { EvalPackage } from "./eval-types.js";
-import { gradeRecords, unavailableGrader } from "./eval-graders.js";
+import { gradingExecutor } from "./eval-graders.js";
 
 /** Dependencies replaceable by focused CLI tests; the package is loaded only on command execution. */
 export interface EvalCommandDependencies extends EvalExecutorDependencies {
@@ -49,10 +56,13 @@ interface EvalRunCommandArgs {
   readonly dependencies: EvalCommandDependencies;
 }
 
-function executionModes(options: EvalOptions) {
+function executionModes(options: EvalOptions, suite: EvalSuite) {
   const cassette = options.cassette ?? (options.isolation === "docker" ? "off" : "replay");
   const isolation = options.isolation ?? (cassette === "off" ? "docker" : "inprocess");
   if (isolation === "docker") {
+    if (suite.tasks.some((task) => task.graders.some((grader) => grader.type === "llm_judge"))) {
+      throw new EvalCliError("eval_llm_judge_docker_unavailable");
+    }
     throw new EvalCliError(
       cassette === "replay"
         ? "eval_docker_cassette_replay_unavailable"
@@ -96,29 +106,56 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   const config = await context.loadConfig();
   const absoluteSuitePath = resolve(suitePath);
   const suite = filterSuite(api, await api.loadSuite(absoluteSuitePath), options.filter);
-  const grader = unavailableGrader(suite);
-  if (grader === "test_command") {
-    throw new EvalCliError("eval_test_command_context_unavailable");
-  }
-  if (grader === "llm_judge") {
-    throw new EvalCliError("eval_llm_judge_context_unavailable");
-  }
-  const { cassette, isolation } = executionModes(options);
+  const { cassette, isolation } = executionModes(options, suite);
   const failUnder = parseFailUnder(options);
-  const variants = createVariants(api, options.model, cassette, config);
+  if (options.model !== undefined && options.variants !== undefined) {
+    throw new EvalCliError("usage");
+  }
+  const variants =
+    options.variants === undefined
+      ? createVariants(api, options.model, cassette, config)
+      : createVariantsFromFile({
+          api,
+          text: await readFile(resolve(options.variants), "utf8"),
+          filePath: resolve(options.variants),
+          cassette,
+          config,
+        });
   const outDir = resolve(
     options.out ?? join(process.cwd(), "eval-out", String(context.clock.now())),
   );
-  const executor = await (dependencies.createExecutor ?? createDefaultExecutor)(api, {
+  const executorOptions: EvalExecutorOptions = {
     isolation,
     cassette,
     suiteDirectory: dirname(absoluteSuitePath),
     config,
     exportTelemetry: options.exportTelemetry ?? false,
     context,
-  });
+  };
+  const baseExecutor = await (dependencies.createExecutor ?? createDefaultExecutor)(
+    api,
+    executorOptions,
+  );
+  const { executor, grades } = gradingExecutor(api, baseExecutor, executorOptions);
   const results = await runTrialPlan({ api, suite, variants, executor, outDir, options });
   const records = api.parseEvalTrialJsonl(await readFile(join(outDir, "trials.jsonl"), "utf8"));
+  for (const record of records) {
+    if (
+      !grades.some(
+        (grade) =>
+          grade.taskId === record.taskId &&
+          grade.variantId === record.variantId &&
+          grade.trialIndex === record.trialIndex,
+      )
+    ) {
+      grades.push({
+        taskId: record.taskId,
+        variantId: record.variantId,
+        trialIndex: record.trialIndex,
+        graders: [],
+      });
+    }
+  }
   const eventsByTrial = await collectTrialEvents({
     api,
     suite,
@@ -129,7 +166,6 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   if (cassette === "record") {
     await recordCassettes(dirname(absoluteSuitePath), records, eventsByTrial);
   }
-  const grades = await gradeRecords(api, suite, records, eventsByTrial);
   const report = api.buildEvalReport({ trials: records, grades });
   await writeReportFiles(api, outDir, report);
   writeSummaryTable(context, report);
@@ -142,17 +178,17 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
     : ExitCode.ok;
 }
 
-/** Registers the `harness eval run` command group. */
+/** Registers the `harness eval run` and `harness eval compare` commands. */
 export function createEvalCommand(dependencies: EvalCommandDependencies = {}): CommandModule {
   return {
     name: "eval",
     register(program, context) {
-      program
-        .command("eval")
-        .description("Run evaluation suites")
+      const evalCommand = program.command("eval").description("Run suites and compare reports");
+      evalCommand
         .command("run <suite>")
         .description("Run an evaluation suite")
         .option("--model <provider/model[,provider/model]>", "comma-separated model variants")
+        .option("--variants <file>", "load variants from a YAML file")
         .option("--trials <n>", "trials per task")
         .option("--filter <tag|taskId>", "select tasks by tag or id")
         .addOption(
@@ -190,6 +226,36 @@ export function createEvalCommand(dependencies: EvalCommandDependencies = {}): C
             );
           }
         });
+      evalCommand
+        .command("compare <report-a> <report-b>")
+        .description("Compare two evaluation reports")
+        .option("--variant-a <id>", "select a variant from report A")
+        .option("--variant-b <id>", "select a variant from report B")
+        .option("--seed <n>", "deterministic bootstrap seed", "0")
+        .action(
+          async (
+            reportAPath: string,
+            reportBPath: string,
+            options: { variantA?: string; variantB?: string; seed: string },
+          ) => {
+            const api = await (dependencies.loadEval ?? (() => import("@rovinos/eval")))();
+            const reportA = parseJson(
+              api.EvalReportSchema,
+              await readFile(resolve(reportAPath), "utf8"),
+            );
+            const reportB = parseJson(
+              api.EvalReportSchema,
+              await readFile(resolve(reportBPath), "utf8"),
+            );
+            const comparison = api.compareEvalReports(reportA, reportB, {
+              ...(options.variantA === undefined ? {} : { variantA: options.variantA }),
+              ...(options.variantB === undefined ? {} : { variantB: options.variantB }),
+              seed: positiveInteger(options.seed, true),
+            });
+            context.out.print(api.renderComparisonTable(comparison));
+            context.out.json(api.EvalComparisonReportSchema, comparison);
+          },
+        );
     },
   };
 }

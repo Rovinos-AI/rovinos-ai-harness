@@ -1,12 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { Code, Id, ModelRefSchema } from "@rovinos/schemas";
+import { Code, Id, JsonValue, ModelRefSchema } from "@rovinos/schemas";
 import { z } from "zod";
 import { EvalSuiteSchema, EvalTaskSchema } from "./schema.js";
 import type { EvalSuite } from "./schema.js";
 
 /** Supported modes for an executor's cassette-aware model factory. */
 export const EvalCassetteModeSchema = z.enum(["record", "replay", "auto"]);
+
+const EvalConfigOverridesSchema = z
+  .record(z.string(), JsonValue)
+  .superRefine((overrides, context) => {
+    const supported = new Set(["run", "roles", "models"]);
+    for (const key of Object.keys(overrides)) {
+      if (!supported.has(key)) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Configuration overrides must target trial-supported fields.",
+          params: { errorCode: "eval_variant_override_unsupported" },
+        });
+      }
+    }
+  });
 
 /** One named model, context, policy, and budget variant. */
 export const EvalVariantSchema = z
@@ -23,12 +39,56 @@ export const EvalVariantSchema = z
       })
       .strict()
       .optional(),
+    configOverrides: EvalConfigOverridesSchema.optional(),
     cassetteMode: EvalCassetteModeSchema.optional(),
   })
   .strict();
 
 /** A validated model and harness configuration variant. */
 export type EvalVariant = z.infer<typeof EvalVariantSchema>;
+
+const EvalVariantFileEntrySchema = z
+  .object({
+    id: Code,
+    route: z.array(ModelRefSchema).optional(),
+    contextStrategy: Code.optional(),
+    policyFile: z.string().min(1).optional(),
+    configOverrides: EvalConfigOverridesSchema.optional(),
+  })
+  .strict();
+
+/** Variants file contract consumed by `harness eval run --variants`. */
+export const EvalVariantsFileSchema = z
+  .object({ variants: z.array(EvalVariantFileEntrySchema).min(2) })
+  .strict()
+  .superRefine(({ variants }, context) => {
+    const ids = new Set<string>();
+    for (const [index, variant] of variants.entries()) {
+      if (ids.has(variant.id)) {
+        context.addIssue({
+          code: "custom",
+          path: ["variants", index, "id"],
+          message: "Variant ids must be unique.",
+          params: { errorCode: "eval_variant_id_duplicate" },
+        });
+      }
+      ids.add(variant.id);
+    }
+  });
+
+/** Inferred validated variants file. */
+export type EvalVariantsFile = z.infer<typeof EvalVariantsFileSchema>;
+
+/** Converts validated file variants to the runner's model-route contract. */
+export function parseEvalVariants(input: unknown): EvalVariant[] {
+  const parsed = EvalVariantsFileSchema.parse(input);
+  return parsed.variants.map(({ route, ...variant }) =>
+    EvalVariantSchema.parse({
+      ...variant,
+      ...(route === undefined ? {} : { models: route }),
+    }),
+  );
+}
 
 /** Metadata and isolated paths for one task/variant/trial execution. */
 export const TrialSpecSchema = z
