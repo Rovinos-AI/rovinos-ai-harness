@@ -53,6 +53,7 @@ const imageScanErrorCodeSchema = z.enum([
   "scanner_report_invalid",
   "positive_control_undetected",
   "image_os_packages_missing",
+  "image_library_packages_missing",
   "image_scan_failed",
 ]);
 const maxTrivyReportBytes = 16 * 1024 * 1024;
@@ -117,6 +118,19 @@ export function requireOsPackageInventory(output: string): void {
   );
   if (!hasOsPackages) {
     throw new ImageScanError("image_os_packages_missing");
+  }
+}
+
+/** Fails closed when a Trivy library report contains no language package inventory. */
+export function requireLibraryPackageInventory(output: string): void {
+  const report = parseTrivyReportDocument(output);
+  const hasLibraryPackages = (report.Results ?? []).some(
+    (result) =>
+      (result.Class === "node-pkg" || result.Class === "lang-pkgs") &&
+      (result.Packages?.length ?? 0) > 0,
+  );
+  if (!hasLibraryPackages) {
+    throw new ImageScanError("image_library_packages_missing");
   }
 }
 
@@ -190,11 +204,19 @@ function runPositiveControl(): void {
   process.stdout.write("Image vulnerability positive control detected and blocked.\n");
 }
 
-function runReport(reportPath: string, image: string, requireOsPackages: boolean): void {
+function runReport(
+  reportPath: string,
+  image: string,
+  requireOsPackages: boolean,
+  requireLibraryPackages: boolean,
+): void {
   try {
     const scannerOutput = readFileSync(reportPath, "utf8");
     if (requireOsPackages) {
       requireOsPackageInventory(scannerOutput);
+    }
+    if (requireLibraryPackages) {
+      requireLibraryPackageInventory(scannerOutput);
     }
     const findings = parseTrivyReport(scannerOutput);
     const report = makeReport(image, findings, readPolicy(), Date.now());
@@ -233,9 +255,12 @@ function main(): void {
       runPositiveControl();
       return;
     }
-    const requireOsPackages = args.length === 5 && args[4] === "--require-os-packages";
+    const inventoryFlag = args.length === 5 ? args[4] : undefined;
+    const requireOsPackages = inventoryFlag === "--require-os-packages";
+    const requireLibraryPackages = inventoryFlag === "--require-library-packages";
     if (
-      (args.length !== 4 && !requireOsPackages) ||
+      (args.length !== 4 && args.length !== 5) ||
+      (args.length === 5 && !requireLibraryPackages && !requireOsPackages) ||
       args[0] !== "--report" ||
       args[2] !== "--image" ||
       args[1] === undefined ||
@@ -243,7 +268,7 @@ function main(): void {
     ) {
       throw new ImageScanError("image_scan_failed");
     }
-    runReport(args[1], args[3], requireOsPackages);
+    runReport(args[1], args[3], requireOsPackages, requireLibraryPackages);
   } catch (error) {
     process.stderr.write(`${imageScanErrorCode(error)}\n`);
     process.exitCode = 1;

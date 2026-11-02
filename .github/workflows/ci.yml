@@ -209,13 +209,14 @@ jobs:
             local image_name="$1"
             local image_archive="$RUNNER_TEMP/$image_name.tar"
             local os_image_archive="$RUNNER_TEMP/$image_name-os-audit.tar"
+            local image_status=0
             if ! docker run --rm \
               --volume "$os_image_archive:/image.tar:ro" \
               --volume "$PWD/reports/image-vulnerability:/reports" \
               "$TRIVY_IMAGE" image --input /image.tar --scanners vuln --pkg-types os \
               --list-all-pkgs --format json \
               --output "/reports/$image_name.os.trivy.json" --exit-code 0; then
-              return 1
+              image_status=1
             fi
             if ! node --experimental-strip-types --disable-warning=ExperimentalWarning \
               scripts/security/scan-image.ts \
@@ -223,7 +224,7 @@ jobs:
               --image "$image_name-os-audit" \
               --require-os-packages \
               > "reports/image-vulnerability/$image_name.os.policy.json"; then
-              return 1
+              image_status=1
             fi
             if ! docker run --rm \
               --volume "$image_archive:/image.tar:ro" \
@@ -231,22 +232,25 @@ jobs:
               --env SYFT_CHECK_FOR_APP_UPDATE=false \
               "$SYFT_IMAGE" scan docker-archive:/image.tar \
               --output "cyclonedx-json=/reports/$image_name.cdx.json"; then
-              return 1
+              image_status=1
             fi
             if ! docker run --rm \
               --volume "$image_archive:/image.tar:ro" \
               --volume "$PWD/reports/image-vulnerability:/reports" \
               "$TRIVY_IMAGE" image --input /image.tar --scanners vuln --pkg-types library \
-              --format json --output "/reports/$image_name.trivy.json" --exit-code 0; then
-              return 1
+              --list-all-pkgs --format json \
+              --output "/reports/$image_name.trivy.json" --exit-code 0; then
+              image_status=1
             fi
             if ! node --experimental-strip-types --disable-warning=ExperimentalWarning \
               scripts/security/scan-image.ts \
               --report "reports/image-vulnerability/$image_name.trivy.json" \
               --image "$image_name" \
+              --require-library-packages \
               > "reports/image-vulnerability/$image_name.policy.json"; then
-              return 1
+              image_status=1
             fi
+            return "$image_status"
           }
 
           scan_status=0

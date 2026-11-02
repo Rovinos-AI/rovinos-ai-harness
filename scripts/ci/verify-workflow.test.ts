@@ -267,8 +267,11 @@ describe("GitHub workflows", () => {
     expect(scanCommand).toContain("--list-all-pkgs");
     expect(scanCommand).toContain("--pkg-types library");
     expect(scanCommand).toContain("--require-os-packages");
+    expect(scanCommand).toContain("--require-library-packages");
     expect(scanCommand).toContain("cyclonedx-json=");
     expect(scanCommand).toContain("scripts/security/scan-image.ts");
+    expect(scanCommand).not.toContain("return 1");
+    expect(scanCommand.match(/image_status=1/gu)).toHaveLength(5);
     expect(scanCommand).not.toContain("cosign sign");
     expect(scanCommand).not.toContain("docker push");
     expect(upload?.if).toBe("always()");

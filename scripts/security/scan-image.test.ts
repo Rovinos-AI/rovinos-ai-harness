@@ -9,6 +9,7 @@ import {
   imageScanErrorCode,
   ImageScanError,
   parseTrivyReport,
+  requireLibraryPackageInventory,
   requireOsPackageInventory,
 } from "./scan-image.ts";
 import { FindingSchema, VulnerabilityPolicySchema } from "./vuln-policy.ts";
@@ -110,6 +111,35 @@ describe("parseTrivyReport", () => {
       );
     }).not.toThrow();
   });
+
+  it("fails closed when the library package inventory is empty", () => {
+    expect(() => {
+      requireLibraryPackageInventory(
+        JSON.stringify({
+          Results: [{ Class: "node-pkg", Packages: [], Vulnerabilities: [] }],
+        }),
+      );
+    }).toThrow(expect.objectContaining({ code: "image_library_packages_missing" }));
+  });
+
+  it.each(["node-pkg", "lang-pkgs"])(
+    "accepts a populated %s inventory without requiring vulnerabilities",
+    (packageClass) => {
+      expect(() => {
+        requireLibraryPackageInventory(
+          JSON.stringify({
+            Results: [
+              {
+                Class: packageClass,
+                Packages: [{ Name: "@rovinos/schemas" }],
+                Vulnerabilities: [],
+              },
+            ],
+          }),
+        );
+      }).not.toThrow();
+    },
+  );
 });
 
 describe("evaluateImageFindings", () => {
