@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 const cassetteDirectory = fileURLToPath(new URL("../examples/evals/cassettes/", import.meta.url));
 const piiLikePatterns = [
-  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
+  /\b[\w.%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
   /\b\d{3}-\d{2}-\d{4}\b/u,
   /\b(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/u,
 ];

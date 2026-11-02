@@ -15,7 +15,7 @@ import { SimulatedHuman } from "../human.js";
 import { createProviderCaptureAdapter } from "../trajectory.js";
 import { executionMetricsFromEvents } from "../report/metrics.js";
 import { cp } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ensureRunWorkspace } from "@rovinos/sandbox";
 import type { GradeContext } from "../graders/types.js";
 
@@ -197,7 +197,7 @@ export class InProcessExecutor implements TrialExecutor {
     let modelFailureCode: string | undefined;
     const model = this.options.model?.(trial);
     const runtime = await createRuntime(prepared.runtimeConfig, {
-      dataDir: prepared.dataDir,
+      dataDir: prepared.dataDir, roleConfigDirectory: dirname(prepared.configPath),
       transientVault: false,
       clock: new FakeClock(1_700_000_000_000 + trial.seed),
       ids,
@@ -230,7 +230,6 @@ export class InProcessExecutor implements TrialExecutor {
               )),
       },
     });
-
     let result: TrialResult;
     let events: readonly Event[] = [];
     try {

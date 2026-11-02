@@ -10,6 +10,7 @@ export const suite = defineSuite({
       description: "Correct a greeting in a small fixture project.",
       input: { goal: "Fix greeting.txt so it contains exactly Hello harness." },
       workspace: { fixtureDir: "./fixtures/fix-greeting" },
+      policyFile: "./policies/fix-greeting.yaml",
       models: [{ provider: "openai", model: "synthetic_default" }],
       graders: [
         { type: "test_command", argv: [process.execPath, "test-greeting.mjs"] },

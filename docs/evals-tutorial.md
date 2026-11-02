@@ -16,6 +16,7 @@ gate executes through the documentation test runner:
 ```bash
 rm -rf .tmp/evals-tutorial
 rm -rf .tmp/evals-variants
+rm -rf .tmp/evals-real-model-recording
 ```
 
 <!-- test:run -->
@@ -55,8 +56,10 @@ cassettes, copy the suite to a temporary directory before recording. Use a provi
 you have configured for the CLI, and review the generated files before retaining them:
 
 ```bash
-recording_dir="$(mktemp -d)"
-cp -R examples/evals/. "$recording_dir/"
+recording_dir=".tmp/evals-real-model-recording"
+rm -rf "$recording_dir"
+mkdir -p .tmp
+cp -R examples/evals "$recording_dir"
 node packages/cli/dist/bin.js eval run "$recording_dir/suite.ts" --cassette record --isolation inprocess --model openai/gpt-4o-mini --out "$recording_dir/out"
 ```
 
@@ -82,6 +85,7 @@ Remove the local report when finished:
 ```bash
 rm -rf .tmp/evals-tutorial
 rm -rf .tmp/evals-variants
+rm -rf .tmp/evals-real-model-recording
 ```
 
 ## Decisions and verification
