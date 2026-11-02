@@ -56,6 +56,7 @@ function dependencies(queue: RunQueue, removeListener = vi.fn()): WorkerCommandD
       Promise.resolve({
         ids: { next: () => "00000000000000000000000003" },
         clock: { now: () => 100 },
+        store: { readUsageLedger: () => Promise.resolve([]) },
         resume: vi.fn(() => Promise.resolve({ status: "completed" as const })),
         close: vi.fn(() => Promise.resolve()),
       }),
@@ -126,6 +127,7 @@ describe("harness worker", () => {
         Promise.resolve({
           ids: { next: () => "00000000000000000000000003" },
           clock: { now: () => 100 },
+          store: { readUsageLedger: () => Promise.resolve([]) },
           resume,
           close: vi.fn(() => Promise.resolve()),
         }),
