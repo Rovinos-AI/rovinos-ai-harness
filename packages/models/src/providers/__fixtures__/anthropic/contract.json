@@ -71,7 +71,7 @@
           {
             "type": "tool_use",
             "id": "toolu_fixture",
-            "name": "T_29a1af58c138274076260b2d9c83b8378cc951a68d9b4de13794b853d695e4",
+            "name": "lookup",
             "input": { "query": "x" }
           }
         ],
@@ -96,7 +96,7 @@
               {
                 "type": "tool_use",
                 "id": "toolu_fixture",
-                "name": "T_29a1af58c138274076260b2d9c83b8378cc951a68d9b4de13794b853d695e4",
+                "name": "lookup",
                 "input": { "query": "x" }
               }
             ],

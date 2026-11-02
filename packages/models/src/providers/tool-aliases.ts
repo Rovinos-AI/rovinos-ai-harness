@@ -4,8 +4,9 @@ import type { ModelRequest } from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
 
 const PROVIDER_TOOL_NAME = /^[\w-]{1,64}$/u;
-const ALIAS_PREFIX = "T_";
-const ALIAS_HASH_LENGTH = 62;
+const MAX_TOOL_NAME_LENGTH = 64;
+const HASH_SUFFIX_LENGTH = 9;
+const HASH_LENGTH = HASH_SUFFIX_LENGTH - 1;
 
 /** Request-local translation between canonical tool IDs and provider-safe names. */
 export interface ProviderToolAliases {
@@ -20,20 +21,73 @@ export interface ProviderToolAliases {
 }
 
 function providerAlias(toolId: string): string {
-  const digest = createHash("sha256").update(toolId, "utf8").digest("hex");
-  return `${ALIAS_PREFIX}${digest.slice(0, ALIAS_HASH_LENGTH)}`;
+  const suffix = createHash("sha256").update(toolId, "utf8").digest("hex").slice(0, HASH_LENGTH);
+  return `_${suffix}`;
+}
+
+function sanitizedToolName(toolId: string): string {
+  const name = toolId.replaceAll(/[^\w-]+/gu, "_");
+  return name.length === 0 ? "tool" : name;
 }
 
 function invalidToolName(): ProviderError {
   return new ProviderError("provider_bad_request");
 }
 
+function uniqueProviderNames(toolIds: readonly string[]): Map<string, string> {
+  const sanitizedNames = new Map(toolIds.map((toolId) => [toolId, sanitizedToolName(toolId)]));
+  const countsByName = new Map<string, number>();
+  for (const name of sanitizedNames.values()) {
+    countsByName.set(name, (countsByName.get(name) ?? 0) + 1);
+  }
+  const needsHash = new Set(
+    toolIds.filter(
+      (toolId) =>
+        (sanitizedNames.get(toolId)?.length ?? 0) > MAX_TOOL_NAME_LENGTH ||
+        (countsByName.get(sanitizedNames.get(toolId) ?? "") ?? 0) > 1,
+    ),
+  );
+  for (let attempt = 0; attempt <= toolIds.length; attempt += 1) {
+    const namesByToolId = new Map(
+      toolIds.map((toolId) => {
+        const name = sanitizedNames.get(toolId) ?? "tool";
+        const providerName = needsHash.has(toolId)
+          ? `${name.slice(0, MAX_TOOL_NAME_LENGTH - HASH_SUFFIX_LENGTH)}${providerAlias(toolId)}`
+          : name;
+        return [toolId, providerName];
+      }),
+    );
+    const toolIdsByName = new Map<string, string[]>();
+    for (const [toolId, name] of namesByToolId) {
+      const collidingIds = toolIdsByName.get(name) ?? [];
+      collidingIds.push(toolId);
+      toolIdsByName.set(name, collidingIds);
+    }
+    const collisions = [...toolIdsByName.values()].filter((ids) => ids.length > 1);
+    if (collisions.length === 0) {
+      return namesByToolId;
+    }
+    let updated = false;
+    for (const ids of collisions) {
+      for (const toolId of ids) {
+        if (!needsHash.has(toolId)) {
+          needsHash.add(toolId);
+          updated = true;
+        }
+      }
+    }
+    if (!updated) {
+      throw invalidToolName();
+    }
+  }
+  throw invalidToolName();
+}
+
 /**
  * Creates deterministic provider aliases for advertised and historical canonical IDs.
  *
- * Aliases use the provider-safe ASCII alphabet and stay within the 64-character name limit. The
- * uppercase prefix keeps them outside the harness's lowercase `Code` namespace, and alias
- * collisions fail closed rather than routing a call ambiguously.
+ * Aliases retain readable canonical-name characters, replace unsupported characters with
+ * underscores, and use a short digest only for request-local collisions or long names.
  *
  * @param advertisedToolIds - Canonical IDs whose returned aliases may be decoded.
  * @param historyToolIds - Additional canonical IDs used only to translate request history.
@@ -48,12 +102,12 @@ export function createProviderToolAliases(
     throw invalidToolName();
   }
 
-  const toolIds = new Set([...advertisedToolIds, ...historyToolIds]);
+  const toolIds = [...new Set([...advertisedToolIds, ...historyToolIds])];
+  const namesByToolId = uniqueProviderNames(toolIds);
   const providerNameByToolId = new Map<string, string>();
   const toolIdByProviderName = new Map<string, string>();
-  for (const toolId of toolIds) {
-    const alias = providerAlias(toolId);
-    if (!PROVIDER_TOOL_NAME.test(alias) || toolIdByProviderName.has(alias) || toolIds.has(alias)) {
+  for (const [toolId, alias] of namesByToolId) {
+    if (!PROVIDER_TOOL_NAME.test(alias)) {
       throw invalidToolName();
     }
     providerNameByToolId.set(toolId, alias);

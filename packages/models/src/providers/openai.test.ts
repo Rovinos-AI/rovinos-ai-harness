@@ -372,7 +372,8 @@ describe("OpenAI Chat Completions mapper", () => {
                 ...rawToolMessage,
                 tool_calls: [
                   {
-                    ...rawToolMessage.tool_calls[0],
+                    id: "call_unknown",
+                    type: "function",
                     function: { name: "unknown_alias", arguments: "{}" },
                   },
                 ],
@@ -546,7 +547,10 @@ describe("OpenAI Chat Completions mapper", () => {
       );
 
       expect(secondRequest).toBeDefined();
-      expect(JSON.stringify(secondRequest)).not.toContain("emit_result");
+      const requestMessages = z
+        .object({ messages: z.array(JsonValue) })
+        .parse(secondRequest).messages;
+      expect(JSON.stringify(requestMessages)).not.toContain("emit_result");
       expect(secondRequest).toMatchObject({
         messages: [
           {},
