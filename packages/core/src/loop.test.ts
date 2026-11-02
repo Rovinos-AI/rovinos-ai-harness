@@ -55,7 +55,6 @@ import { emailDetector, PiiToolPort, Tokenizer } from "@rovinos/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
-import { McpCatalogChangedError } from "@rovinos/mcp";
 import { NaiveContext } from "./context/naive-context.js";
 import { StrategyContextPort } from "./context/context-port.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";
@@ -362,6 +361,7 @@ async function createApprovalRun(
   editable: readonly string[] = ["/a"],
   identity: { readonly requestedBy?: string; readonly separationOfDuties?: boolean } = {},
   toolCatalogVersion?: Sha256Hex,
+  toolCatalogFingerprints?: Readonly<Record<string, Sha256Hex>>,
 ) {
   const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
   let events: Event[] = [];
@@ -369,9 +369,10 @@ async function createApprovalRun(
     events = await recorder.recordBatch([
       {
         type: "run_created",
-        v: toolCatalogVersion === undefined ? 1 : 2,
+        v: toolCatalogVersion === undefined && toolCatalogFingerprints === undefined ? 1 : 3,
         configHash,
         ...(toolCatalogVersion === undefined ? {} : { toolCatalogVersion }),
+        ...(toolCatalogFingerprints === undefined ? {} : { toolCatalogFingerprints }),
         policyVersion: "test.policy",
         ...(identity.requestedBy === undefined
           ? {}
@@ -573,25 +574,64 @@ afterAll(() => {
 });
 
 describe("approval lifecycle", () => {
-  it("does not execute a prior approval when its pinned catalog changed", async () => {
+  it("passes the saved per-tool baseline when resuming an approval", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
     const catalogVersion = Sha256Hex.parse("d".repeat(64));
-    const approvalRun = await createApprovalRun(store, clock, undefined, undefined, {}, catalogVersion);
+    const toolFingerprint = Sha256Hex.parse("e".repeat(64));
+    const toolCatalogFingerprints = { approval_tool: toolFingerprint };
+    const approvalRun = await createApprovalRun(
+      store,
+      clock,
+      undefined,
+      undefined,
+      {},
+      catalogVersion,
+      toolCatalogFingerprints,
+    );
     await requestApprovalForRun(approvalRun.recorder, clock, approvalRun.state);
     await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
-    const headBeforeResume = await store.head(runId);
     const tool = new FakeToolPort();
-    const execute = vi.spyOn(tool, "execute");
-    const pinForRun = vi.fn(() => Promise.reject(new McpCatalogChangedError()));
+    const pinnedTool = Object.assign(tool, {
+      catalogFingerprints: () => toolCatalogFingerprints,
+    });
+    const pinForRun = vi.fn(() => Promise.resolve(pinnedTool));
+    const result = await resumeRun(
+      createResumeOptions(store, clock, { tool: Object.assign(pinnedTool, { pinForRun }) }),
+    );
 
-    await expect(
-      resumeRun(createResumeOptions(store, clock, { tool: Object.assign(tool, { pinForRun }) })),
-    ).rejects.toMatchObject({ code: "mcp_catalog_changed" });
+    expect(pinForRun).toHaveBeenCalledWith({
+      resumed: true,
+      expectedVersion: catalogVersion,
+      expectedToolFingerprints: toolCatalogFingerprints,
+    });
+    expect(result.events.length).toBeGreaterThan(0);
+  });
 
-    expect(pinForRun).toHaveBeenCalledWith({ resumed: true, expectedVersion: catalogVersion });
-    expect(execute).not.toHaveBeenCalled();
-    expect(await store.head(runId)).toEqual(headBeforeResume);
+  it("resumes legacy approval runs without a saved catalog baseline", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const approvalRun = await createApprovalRun(store, clock);
+    await requestApprovalForRun(approvalRun.recorder, clock, approvalRun.state);
+    await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "approval_tool",
+          {
+            idempotent: false,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const pinForRun = vi.fn(() => Promise.resolve(tool));
+
+    await resumeRun(createResumeOptions(store, clock, { tool: Object.assign(tool, { pinForRun }) }));
+
+    expect(pinForRun).toHaveBeenCalledWith({ resumed: true });
+    expect(tool.calls).toHaveLength(1);
   });
 
   it("records a request, suspends the run, and forces a checkpoint", async () => {
@@ -1230,8 +1270,10 @@ describe("runLoop", () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
     const catalogVersion = Sha256Hex.parse("c".repeat(64));
+    const toolFingerprint = Sha256Hex.parse("b".repeat(64));
     const pinnedTool = Object.assign(new FakeToolPort(), {
       catalogVersion: () => catalogVersion,
+      catalogFingerprints: () => ({ "mcp_test.echo": toolFingerprint }),
     });
     const pinForRun = vi.fn(() => Promise.resolve(pinnedTool));
     const tool: ToolPort = Object.assign(new FakeToolPort(), { pinForRun });
@@ -1252,8 +1294,9 @@ describe("runLoop", () => {
     expect(pinForRun).toHaveBeenCalledOnce();
     expect(result.events[0]).toMatchObject({
       type: "run_created",
-      v: 2,
+      v: 3,
       toolCatalogVersion: catalogVersion,
+      toolCatalogFingerprints: { "mcp_test.echo": toolFingerprint },
     });
   });
 
@@ -2906,7 +2949,7 @@ describe("runLoop", () => {
       expect(result.state.segmentId).not.toBe(segmentId);
       expect(restore).toHaveBeenCalledWith(
         undefined,
-        prior.map((event) => (event.type === "run_created" ? { ...event, v: 2 } : event)),
+        prior.map((event) => (event.type === "run_created" ? { ...event, v: 3 } : event)),
       );
     });
 

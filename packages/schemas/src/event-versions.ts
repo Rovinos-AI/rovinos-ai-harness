@@ -7,7 +7,7 @@ import { SnapshotSchema, type Snapshot } from "./snapshot.js";
 
 /** Current schema version for each event type. */
 export const EVENT_SCHEMA_VERSIONS = {
-  run_created: 2,
+  run_created: 3,
   run_input: 1,
   run_status_changed: 1,
   model_request: 2,
@@ -42,6 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export const UPCASTERS: EventUpcasterMap = {
   run_created: {
     1: runCreatedV1ToV2,
+    2: runCreatedV2ToV3,
   },
   model_request: {
     1: modelRequestV1ToV2,
@@ -53,6 +54,11 @@ export const UPCASTERS: EventUpcasterMap = {
 
 /** Keeps v1 run metadata valid while adding the optional pinned catalog fingerprint in v2. */
 function runCreatedV1ToV2(payload: unknown): unknown {
+  return payload;
+}
+
+/** Adds the optional per-tool catalog fingerprints while preserving earlier run metadata. */
+function runCreatedV2ToV3(payload: unknown): unknown {
   return payload;
 }
 

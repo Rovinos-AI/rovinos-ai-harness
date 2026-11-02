@@ -117,17 +117,27 @@ function compileSchema(schema: unknown): JsonValueType {
   return parsed.data;
 }
 
+function compareKeys(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
 function canonicalJson(value: JsonValueType): string {
   if (Array.isArray(value)) {
     return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
   }
   if (typeof value === "object" && value !== null) {
     return `{${Object.entries(value)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .sort(([left], [right]) => compareKeys(left, right))
       .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
       .join(",")}}`;
   }
-  return JSON.stringify(value) ?? "null";
+  return JSON.stringify(value);
 }
 
 function fingerprintValue(value: string): string {
@@ -194,15 +204,16 @@ function transportIdentity(server: ServerConfig): JsonValueType {
   };
 }
 
-function catalogFingerprint(tools: readonly RegisteredTool[]): Sha256Hex {
-  const catalog = tools.map(({ server, nativeName, spec, outputSchema, idempotent }) => ({
+function catalogEntry(tool: RegisteredTool): JsonValueType {
+  const { server, nativeName, spec, outputSchema, idempotent } = tool;
+  return {
     serverId: server.id,
     transport: transportIdentity(server),
     protocol: server.protocol,
     trust: server.trust,
     useAnnotations: server.useAnnotations,
     propagateTrace: server.propagateTrace,
-    elicitation: server.elicitation ?? null,
+    elicitation: server.elicitation,
     toolPrefix: server.toolPrefix,
     nativeName,
     idempotent,
@@ -214,7 +225,17 @@ function catalogFingerprint(tools: readonly RegisteredTool[]): Sha256Hex {
       inputSchema: spec.inputSchema,
       ...(outputSchema === undefined ? {} : { outputSchema }),
     },
-  }));
+  };
+}
+
+function toolFingerprint(tool: RegisteredTool): Sha256Hex {
+  return Sha256Hex.parse(
+    createHash("sha256").update(canonicalJson(catalogEntry(tool))).digest("hex"),
+  );
+}
+
+function catalogFingerprint(tools: readonly RegisteredTool[]): Sha256Hex {
+  const catalog = tools.map(catalogEntry);
   return Sha256Hex.parse(
     createHash("sha256").update(canonicalJson(catalog)).digest("hex"),
   );
@@ -254,7 +275,7 @@ export class ToolRegistry {
   readonly #tools: RegisteredTool[] = [];
   readonly #byId = new Map<Code, RegisteredTool>();
   readonly #rejected: RejectedTool[] = [];
-  readonly #catalogVersion: Sha256Hex;
+  #catalogVersion: Sha256Hex;
 
   constructor(servers: readonly ToolRegistryServer[]) {
     for (const { config, tools } of servers) {
@@ -268,6 +289,38 @@ export class ToolRegistry {
   /** Stable fingerprint for the exact advertised specs, routes, and execution metadata. */
   get catalogVersion(): Sha256Hex {
     return this.#catalogVersion;
+  }
+
+  /** Fingerprints each exposed tool's full contract, route, and execution metadata. */
+  catalogFingerprints(): Readonly<Record<string, Sha256Hex>> {
+    return Object.fromEntries(
+      this.#tools.map((tool) => [tool.spec.toolId, toolFingerprint(tool)]),
+    );
+  }
+
+  /** Returns the fingerprint for one registered tool. */
+  fingerprintFor(toolId: Code): Sha256Hex | undefined {
+    const tool = this.#byId.get(toolId);
+    return tool === undefined ? undefined : toolFingerprint(tool);
+  }
+
+  /**
+   * Builds a view containing only tools whose fingerprints still match a persisted run baseline.
+   *
+   * @param expected - Per-tool fingerprints recorded at run creation.
+   * @returns A registry that excludes added, removed, or changed tools.
+   */
+  retainMatchingFingerprints(expected: Readonly<Record<string, Sha256Hex>>): ToolRegistry {
+    const registry = new ToolRegistry([]);
+    for (const tool of this.#tools) {
+      if (expected[tool.spec.toolId] === toolFingerprint(tool)) {
+        registry.#tools.push(tool);
+        registry.#byId.set(tool.spec.toolId, tool);
+      }
+    }
+    registry.#rejected.push(...this.#rejected);
+    registry.#catalogVersion = catalogFingerprint(registry.#tools);
+    return registry;
   }
 
   #register(config: ServerConfig, tool: McpTool): void {

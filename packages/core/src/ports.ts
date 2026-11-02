@@ -136,9 +136,12 @@ export interface ToolExecutionResult {
 export interface ToolPort {
   /** Stable fingerprint for the tool catalog currently exposed by this port. */
   catalogVersion?(): Sha256Hex | undefined;
+  /** Per-tool fingerprints for validating execution against the exposed catalog. */
+  catalogFingerprints?(): Readonly<Record<string, Sha256Hex>>;
   /** Creates an immutable view for one new or resumed run, when supported. */
   pinForRun?(options?: {
     readonly expectedVersion?: Sha256Hex;
+    readonly expectedToolFingerprints?: Readonly<Record<string, Sha256Hex>>;
     readonly resumed?: boolean;
   }): Promise<ToolPort>;
   /** Returns custom durable recovery behavior for a tool's dangling intent. */

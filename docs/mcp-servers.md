@@ -141,21 +141,27 @@ contains that normalized `Code` and both server ids (which can be identical).
 
 ## Catalog versions and run behavior
 
-Each run pins the fingerprint of the complete MCP catalog it was shown,
-including the normalized aliases, descriptions, input schemas, server routes,
-and execution metadata. New runs refresh discovery using each connection's
-`tools/list` TTL and list-change notifications before exposing tools. An
-already-running model request continues to see its pinned specifications;
-before dispatch, the harness refreshes discovery and rejects the call with
-`mcp_catalog_changed` if the locally observed catalog no longer matches. A
-failed refresh rejects dispatch rather than treating an old catalog as freshly
+Each run pins a fingerprint of the complete MCP catalog it was shown and a
+fingerprint for each exposed tool. These fingerprints include normalized
+aliases, descriptions, schemas, server routes, and execution metadata. New runs
+refresh discovery using each connection's `tools/list` TTL and list-change
+notifications before exposing tools. An already-running model request keeps
+its pinned specifications. Before dispatch, the harness refreshes discovery
+and compares only the called tool with its pinned fingerprint. A removed or
+changed tool fails with `mcp_catalog_changed`; unrelated catalog changes do
+not block unchanged tools or expose new tools to the active run. A failed
+refresh rejects dispatch rather than treating an old catalog as freshly
 validated.
 
-The fingerprint is stored on the run's `run_created` event. Resuming a run
-requires rediscovering the same fingerprint; a changed or unavailable catalog
-cannot execute its pending tool calls or reuse their approvals. Start a new run
-to review and use the new catalog. Tool changes do not add permissions or
-approvals automatically.
+The fingerprints are stored on the run's `run_created` event. On resume, only
+tools matching the per-tool baseline are exposed; a pending or approved call
+for a removed or changed tool fails closed at dispatch. New and changed tools
+do not inherit permissions or approvals. Legacy runs without per-tool
+fingerprints have no saved baseline to compare against, so they resume against
+the catalog discovered at resume time; normal policy and approval checks still
+apply. A run that has only the older whole-catalog fingerprint uses a
+conservative complete-fingerprint match because it cannot identify which
+individual tool changed.
 
 This check compares local discovery snapshots, not a remote, version-bound
 execution guarantee. A server may change its behavior after `tools/list`, may

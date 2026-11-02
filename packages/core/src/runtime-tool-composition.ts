@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { OffloadingToolPort } from "@rovinos/context";
-import type { Code } from "@rovinos/schemas";
 import { PiiToolPort } from "@rovinos/pii";
 import type { ModelToolCall, ToolPort } from "./ports.js";
 import type { RunState } from "./run-state.js";
@@ -13,12 +12,62 @@ import { AskUserTool } from "./builtin/ask-user-tool.js";
 import { VerifyTool } from "./builtin/verify-tool.js";
 import { composeToolPorts } from "./runtime-tool-port.js";
 
+type RuntimeToolPortOptions = RuntimeComposition & {
+  readonly roles: RoleRegistry;
+  readonly scopes: RunScopeRegistry;
+};
+
+function createPinForRun(
+  options: RuntimeToolPortOptions,
+  pinToolForRun: ToolPort["pinForRun"],
+): ToolPort["pinForRun"] {
+  if (pinToolForRun === undefined) {
+    return undefined;
+  }
+  return async (pinOptions) =>
+    createRuntimeToolPort({
+      ...options,
+      tool: await pinToolForRun(pinOptions),
+    });
+}
+
+function createResumeStrategy(
+  spawnResumeStrategy: ToolPort["resumeStrategy"],
+  innerResumeStrategy: ToolPort["resumeStrategy"],
+  piiPort: PiiToolPort | undefined,
+  offloadingPort: OffloadingToolPort | undefined,
+): NonNullable<ToolPort["resumeStrategy"]> {
+  return (toolId) => {
+    const strategy = spawnResumeStrategy?.(toolId) ?? innerResumeStrategy?.(toolId);
+    if (strategy === undefined) {
+      return undefined;
+    }
+    return {
+      onDanglingIntent: async (
+        call: ModelToolCall,
+        state: RunState,
+        context: ToolResumeContext,
+      ) => {
+        const decision = await strategy.onDanglingIntent(call, state, context);
+        if (decision.kind !== "result") {
+          return decision;
+        }
+        let execution = decision.execution;
+        if (piiPort !== undefined) {
+          execution = await piiPort.sanitizeRecoveredResult(call, context, execution);
+        }
+        if (offloadingPort !== undefined) {
+          execution = await offloadingPort.offloadRecoveredResult(call, context, execution);
+        }
+        return { ...decision, execution };
+      },
+    };
+  };
+}
+
 /** Builds the runtime's PII/offload-wrapped subagent tool port. */
 export function createRuntimeToolPort(
-  options: RuntimeComposition & {
-    readonly roles: RoleRegistry;
-    readonly scopes: RunScopeRegistry;
-  },
+  options: RuntimeToolPortOptions,
 ): ToolPort {
   const builtins = composeToolPorts(new AskUserTool(), new VerifyTool());
   const toolWithBuiltins = composeToolPorts(builtins, options.tool, {
@@ -55,44 +104,21 @@ export function createRuntimeToolPort(
   const composed = offloadingPort ?? piiTool;
   const spawnResumeStrategy = subagentTool.resumeStrategy?.bind(subagentTool);
   const innerResumeStrategy = toolWithBuiltins.resumeStrategy?.bind(toolWithBuiltins);
-  const pinToolForRun = options.tool.pinForRun;
+  const pinToolForRun = options.tool.pinForRun?.bind(options.tool);
   const getCatalogVersion = options.tool.catalogVersion?.bind(options.tool);
-  const pinForRun =
-    pinToolForRun === undefined
-      ? undefined
-      : async (pinOptions?: Parameters<NonNullable<ToolPort["pinForRun"]>>[0]) =>
-          createRuntimeToolPort({
-            ...options,
-            tool: await pinToolForRun(pinOptions),
-          });
+  const getCatalogFingerprints = options.tool.catalogFingerprints?.bind(options.tool);
+  const pinForRun = createPinForRun(options, pinToolForRun);
   return Object.assign(composed, {
     ...(pinForRun === undefined ? {} : { pinForRun }),
     ...(getCatalogVersion === undefined ? {} : { catalogVersion: getCatalogVersion }),
-    resumeStrategy: (toolId: Code) => {
-      const strategy = spawnResumeStrategy?.(toolId) ?? innerResumeStrategy?.(toolId);
-      if (strategy === undefined) {
-        return undefined;
-      }
-      return {
-        onDanglingIntent: async (
-          call: ModelToolCall,
-          state: RunState,
-          context: ToolResumeContext,
-        ) => {
-          const decision = await strategy.onDanglingIntent(call, state, context);
-          if (decision.kind !== "result") {
-            return decision;
-          }
-          let execution = decision.execution;
-          if (piiPort !== undefined) {
-            execution = await piiPort.sanitizeRecoveredResult(call, context, execution);
-          }
-          if (offloadingPort !== undefined) {
-            execution = await offloadingPort.offloadRecoveredResult(call, context, execution);
-          }
-          return { ...decision, execution };
-        },
-      };
-    },
+    ...(getCatalogFingerprints === undefined
+      ? {}
+      : { catalogFingerprints: getCatalogFingerprints }),
+    resumeStrategy: createResumeStrategy(
+      spawnResumeStrategy,
+      innerResumeStrategy,
+      piiPort,
+      offloadingPort,
+    ),
   });
 }

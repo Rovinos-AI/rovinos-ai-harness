@@ -71,6 +71,7 @@ export interface McpToolPortOptions {
 /** Pinning request used by the core run lifecycle. */
 export interface McpCatalogPinOptions {
   readonly expectedVersion?: Sha256Hex;
+  readonly expectedToolFingerprints?: Readonly<Record<string, Sha256Hex>>;
   readonly resumed?: boolean;
 }
 
@@ -88,6 +89,12 @@ interface CatalogState {
   readonly servers: readonly ServerConfig[];
   registry: ToolRegistry;
   refreshPromise?: Promise<ToolRegistry>;
+}
+
+interface McpToolPortLifecycle {
+  readonly pinnedRegistry?: ToolRegistry;
+  readonly pinnedFingerprints?: Readonly<Record<string, Sha256Hex>>;
+  readonly ownsResources: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -238,8 +245,7 @@ export class McpToolPort {
     private readonly catalog: CatalogState,
     private readonly options: McpToolPortOptions,
     private readonly oauthTokenStore: OAuthTokenStore | undefined,
-    private readonly pinnedRegistry?: ToolRegistry,
-    private readonly ownsResources = true,
+    private readonly lifecycle: McpToolPortLifecycle = { ownsResources: true },
   ) {}
 
   /**
@@ -306,6 +312,11 @@ export class McpToolPort {
     return this.#registry().catalogVersion;
   }
 
+  /** Per-tool fingerprints for the catalog view exposed by this port. */
+  catalogFingerprints(): Readonly<Record<string, Sha256Hex>> {
+    return this.lifecycle.pinnedFingerprints ?? this.catalog.registry.catalogFingerprints();
+  }
+
   /**
    * Refreshes tools through the connection TTL and atomically installs the resulting registry.
    * @returns The fingerprint of the refreshed catalog.
@@ -319,20 +330,33 @@ export class McpToolPort {
    *
    * @param options - Expected version when resuming an existing run.
    * @returns A port whose specs, descriptions, and routes are pinned to one catalog.
-   * @throws McpCatalogChangedError when the current catalog differs from the pinned version.
+   * @throws McpCatalogChangedError when a hash-only saved baseline no longer matches.
    */
   async pinForRun(options: McpCatalogPinOptions = {}): Promise<McpToolPort> {
-    const registry = await this.#refreshCatalog();
-    if (options.resumed === true && options.expectedVersion === undefined) {
-      throw new McpCatalogChangedError();
-    }
+    const refreshedRegistry = await this.#refreshCatalog();
+    const expectedToolFingerprints = options.expectedToolFingerprints;
     if (
+      options.resumed === true &&
+      expectedToolFingerprints === undefined &&
       options.expectedVersion !== undefined &&
-      options.expectedVersion !== registry.catalogVersion
+      options.expectedVersion !== refreshedRegistry.catalogVersion
     ) {
       throw new McpCatalogChangedError();
     }
-    return new McpToolPort(this.catalog, this.options, this.oauthTokenStore, registry, false);
+    const registry =
+      expectedToolFingerprints === undefined
+        ? refreshedRegistry
+        : refreshedRegistry.retainMatchingFingerprints(expectedToolFingerprints);
+    return new McpToolPort(
+      this.catalog,
+      this.options,
+      this.oauthTokenStore,
+      {
+        pinnedRegistry: registry,
+        pinnedFingerprints: expectedToolFingerprints ?? refreshedRegistry.catalogFingerprints(),
+        ownsResources: false,
+      },
+    );
   }
 
   /** Returns the retry metadata and input schema for a registered tool. */
@@ -343,6 +367,10 @@ export class McpToolPort {
 
   /** Executes one tool call and maps every remote failure to a stable code. */
   async execute(call: McpToolCall, context: McpToolCallContext): Promise<McpToolExecutionResult> {
+    const toolId = Code.safeParse(call.toolId);
+    if (!toolId.success) {
+      return failure("mcp_tool_not_found");
+    }
     let registry: ToolRegistry;
     try {
       registry = await this.#refreshCatalog();
@@ -350,16 +378,18 @@ export class McpToolPort {
       return failure("mcp_catalog_unavailable");
     }
     if (
-      this.pinnedRegistry !== undefined &&
-      registry.catalogVersion !== this.pinnedRegistry.catalogVersion
+      this.lifecycle.pinnedRegistry !== undefined &&
+      this.lifecycle.pinnedFingerprints !== undefined
     ) {
-      return failure("mcp_catalog_changed");
+      const expectedFingerprint = this.lifecycle.pinnedFingerprints[toolId.data];
+      if (expectedFingerprint === undefined) {
+        return failure("mcp_tool_not_found");
+      }
+      if (registry.fingerprintFor(toolId.data) !== expectedFingerprint) {
+        return failure("mcp_catalog_changed");
+      }
     }
-    const toolId = Code.safeParse(call.toolId);
-    if (!toolId.success) {
-      return failure("mcp_tool_not_found");
-    }
-    const selectedRegistry = this.pinnedRegistry ?? registry;
+    const selectedRegistry = this.lifecycle.pinnedRegistry ?? registry;
     const route = selectedRegistry.resolve(toolId.data);
     const description = selectedRegistry.describe(toolId.data);
     if (route === undefined || description === undefined) {
@@ -404,7 +434,7 @@ export class McpToolPort {
 
   /** Closes every managed server connection. */
   async close(): Promise<void> {
-    if (!this.ownsResources) {
+    if (!this.lifecycle.ownsResources) {
       return;
     }
     try {
@@ -415,7 +445,7 @@ export class McpToolPort {
   }
 
   #registry(): ToolRegistry {
-    return this.pinnedRegistry ?? this.catalog.registry;
+    return this.lifecycle.pinnedRegistry ?? this.catalog.registry;
   }
 
   #refreshCatalog(): Promise<ToolRegistry> {

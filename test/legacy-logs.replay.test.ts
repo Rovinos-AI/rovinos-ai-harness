@@ -69,8 +69,9 @@ it("loads, projects, replays, and resumes every committed synthetic legacy log",
       const events = rawEvents.map(upcastEvent);
       expect(events.length).toBeGreaterThan(0);
       expect(rawEvents[0]).toMatchObject({ type: "run_created", v: 1 });
-      expect(events[0]).toMatchObject({ type: "run_created", v: 2 });
+      expect(events[0]).toMatchObject({ type: "run_created", v: 3 });
       expect(events[0]).not.toHaveProperty("toolCatalogVersion");
+      expect(events[0]).not.toHaveProperty("toolCatalogFingerprints");
       const legacyApproval = rawEvents.find(({ type }) => type === "approval_resolved");
       expect(legacyApproval).toMatchObject({ v: 1 });
       expect(legacyApproval).not.toHaveProperty("decidedBy");

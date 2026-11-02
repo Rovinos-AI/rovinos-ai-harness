@@ -51,6 +51,8 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly tool: ToolPort;
   /** Catalog fingerprint pinned for this run, when a port supplies one. */
   readonly toolCatalogVersion?: Sha256Hex;
+  /** Per-tool fingerprints used to validate future dispatch and resume. */
+  readonly toolCatalogFingerprints?: Readonly<Record<string, Sha256Hex>>;
   readonly policy?: PolicyPort;
   readonly context: ContextPort;
   readonly ids: IdGenerator;
@@ -129,6 +131,7 @@ class RunAbortedError extends HarnessError {
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   const tool = await options.tool.pinForRun?.();
   const toolCatalogVersion = tool?.catalogVersion?.();
+  const toolCatalogFingerprints = tool?.catalogFingerprints?.();
   const runOptions =
     tool === undefined
       ? options
@@ -136,6 +139,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
           ...options,
           tool,
           ...(toolCatalogVersion === undefined ? {} : { toolCatalogVersion }),
+          ...(toolCatalogFingerprints === undefined ? {} : { toolCatalogFingerprints }),
         };
   const events: Event[] = [];
   const budgetTracker = new BudgetTracker(

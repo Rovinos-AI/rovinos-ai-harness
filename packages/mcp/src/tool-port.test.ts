@@ -240,7 +240,7 @@ afterAll(() => {
 });
 
 describe("McpToolPort", () => {
-  it("pins a run to one catalog and routes new runs only through the refreshed catalog", async () => {
+  it("pins a run and rejects a removed tool while routing new runs through refreshed tools", async () => {
     const current = await fixture();
     const activeRun = await current.port.pinForRun();
     try {
@@ -272,11 +272,30 @@ describe("McpToolPort", () => {
     }
   });
 
-  it("rejects a resumed run when its persisted catalog fingerprint differs", async () => {
+  it("allows unrelated catalog additions while an active run calls an unchanged tool", async () => {
+    const current = await fixture();
+    const activeRun = await current.port.pinForRun();
+    try {
+      current.setTools([
+        { name: "echo", inputSchema },
+        { name: "extra", inputSchema },
+      ]);
+      await current.peer.server.server.notification({ method: "notifications/tools/list_changed" });
+      await current.port.refreshCatalog();
+
+      await expect(activeRun.execute(call, context())).resolves.toMatchObject({ outcome: "ok" });
+      expect(current.calls.map(({ name }) => name)).toEqual(["echo"]);
+      expect(activeRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.echo"]);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("rejects a changed tool on active and resumed runs but tolerates the catalog change", async () => {
     const current = await fixture();
     try {
       const initial = await current.port.pinForRun();
-      const activeRun = await current.port.pinForRun();
+      const activeRun = initial;
       current.setTools([
         {
           name: "echo",
@@ -294,9 +313,45 @@ describe("McpToolPort", () => {
         errorCode: "mcp_catalog_changed",
       });
       expect(current.calls).toHaveLength(0);
+      const resumedRun = await current.port.pinForRun({
+        resumed: true,
+        expectedVersion: initial.catalogVersion(),
+        expectedToolFingerprints: initial.catalogFingerprints(),
+      });
+      expect(resumedRun.getToolSpecs()).toEqual([]);
+      await expect(resumedRun.execute(call, context())).resolves.toMatchObject({
+        outcome: "error",
+        errorCode: "mcp_catalog_changed",
+      });
+      expect(current.calls).toHaveLength(0);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("blocks removed tools after approval and allows legacy runs without a saved baseline", async () => {
+    const current = await fixture();
+    try {
+      const initial = await current.port.pinForRun();
+      const fingerprints = initial.catalogFingerprints();
+      current.setTools([]);
+      await current.peer.server.server.notification({ method: "notifications/tools/list_changed" });
+      await current.port.refreshCatalog();
+
+      const resumedRun = await current.port.pinForRun({
+        resumed: true,
+        expectedToolFingerprints: fingerprints,
+      });
+      expect(resumedRun.getToolSpecs()).toEqual([]);
+      await expect(resumedRun.execute(call, context())).resolves.toMatchObject({
+        outcome: "error",
+        errorCode: "mcp_catalog_changed",
+      });
+      expect(current.calls).toHaveLength(0);
       await expect(
         current.port.pinForRun({ resumed: true, expectedVersion: initial.catalogVersion() }),
       ).rejects.toMatchObject({ code: "mcp_catalog_changed" });
+      await expect(current.port.pinForRun({ resumed: true })).resolves.toBeDefined();
     } finally {
       await current.close();
     }

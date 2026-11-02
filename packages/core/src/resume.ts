@@ -394,6 +394,9 @@ async function resumeFromHistory(
     ...(created.toolCatalogVersion === undefined
       ? {}
       : { expectedVersion: created.toolCatalogVersion }),
+    ...(created.toolCatalogFingerprints === undefined
+      ? {}
+      : { expectedToolFingerprints: created.toolCatalogFingerprints }),
   });
   const resumeOptions = pinnedTool === undefined ? options : { ...options, tool: pinnedTool };
   const recorder = new RunRecorder(

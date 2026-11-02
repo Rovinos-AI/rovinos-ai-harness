@@ -36,8 +36,25 @@ describe("event schema upcasting", () => {
       depth: 0,
     };
 
-    expect(upcastEvent(raw)).toEqual({ ...raw, v: 2 });
+    expect(upcastEvent(raw)).toEqual({ ...raw, v: 3 });
     expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogVersion");
+    expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogFingerprints");
+  });
+
+  it("upcasts v2 run metadata without inventing per-tool fingerprints", () => {
+    const raw = {
+      ...envelope,
+      type: "run_created",
+      seq: 0,
+      v: 2,
+      configHash: "c".repeat(64),
+      toolCatalogVersion: "d".repeat(64),
+      policyVersion: "policy.v1",
+      depth: 0,
+    };
+
+    expect(upcastEvent(raw)).toEqual({ ...raw, v: 3 });
+    expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogFingerprints");
   });
 
   it("upcasts v1 model requests without inventing hashes of unrecorded parameters", () => {
