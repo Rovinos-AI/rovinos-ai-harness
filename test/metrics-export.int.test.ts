@@ -2,10 +2,8 @@
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { env } from "node:process";
 import { Command } from "commander";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { createDefaultContext, createOutput, ExitCode, main } from "@rovinos/cli/programmatic";
@@ -76,14 +74,18 @@ describe("SDK and CLI OTLP metrics export", () => {
     vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", undefined);
     vi.stubEnv(
       "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-      `http://127.0.0.1:${address.port}/v1/metrics`,
+      `http://127.0.0.1:${address.port.toString()}/v1/metrics`,
     );
 
     const canary = "SYNTHETIC_METRIC_PROMPT_CANARY";
     const config = HarnessConfigSchema.parse({ pii: { enabled: false } });
     const harness = await createHarness({
       config,
-      overrides: { store: new InMemoryEventStore(), transientVault: true, model: createMetricModel() },
+      overrides: {
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        model: createMetricModel(),
+      },
     });
     const directory = await mkdtemp(join(tmpdir(), "harness-metrics-cli-"));
     let harnessClosed = false;

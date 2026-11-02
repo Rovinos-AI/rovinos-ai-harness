@@ -8,6 +8,7 @@ import {
   type MeterProvider,
 } from "@opentelemetry/api";
 import { Code, type Code as CodeType, type ModelUsage } from "@rovinos/schemas";
+import { isValidModelUsage } from "./metric-validation.js";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
 
@@ -140,8 +141,7 @@ let telemetryMeterProvider: MeterProvider | undefined;
 
 function getTelemetryMeter(): Meter {
   return (
-    telemetryMeterProvider?.getMeter("@rovinos/telemetry") ??
-    metrics.getMeter("@rovinos/telemetry")
+    telemetryMeterProvider?.getMeter("@rovinos/telemetry") ?? metrics.getMeter("@rovinos/telemetry")
   );
 }
 
@@ -394,26 +394,6 @@ export function countSentinelScopeReduced(): void {
   } catch {
     return;
   }
-}
-
-function isNonnegativeSafeInteger(value: number): boolean {
-  return Number.isSafeInteger(value) && value >= 0;
-}
-
-function isValidModelUsage(
-  usage: Pick<
-    ModelUsage,
-    "inputTokens" | "outputTokens" | "costMicros" | "cacheReadTokens" | "cacheWriteTokens"
-  >,
-): boolean {
-  return (
-    isNonnegativeSafeInteger(usage.inputTokens) &&
-    isNonnegativeSafeInteger(usage.outputTokens) &&
-    Number.isSafeInteger(usage.inputTokens + usage.outputTokens) &&
-    (usage.cacheReadTokens === undefined || isNonnegativeSafeInteger(usage.cacheReadTokens)) &&
-    (usage.cacheWriteTokens === undefined || isNonnegativeSafeInteger(usage.cacheWriteTokens)) &&
-    (usage.costMicros === undefined || isNonnegativeSafeInteger(usage.costMicros))
-  );
 }
 
 /** Counts total input and output tokens and optional cost for one provider/model. */

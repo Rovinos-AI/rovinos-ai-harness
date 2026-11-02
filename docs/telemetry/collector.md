@@ -11,8 +11,10 @@ The shared runtime initializes the harness meter provider for SDK and CLI runs. 
 attribute combinations; `maxSeries` can be raised to at most 1,000. Views are built from
 `METRIC_ALLOWLIST`, so only each metric's declared attribute keys are retained. The harness metric
 SDK does not emit exemplars. When `ownership: host` is selected, the host must install and flush its
-own global meter provider and apply equivalent attribute and cardinality controls; the harness
-does not replace or shut down that provider.
+own global meter provider and apply equivalent attribute and cardinality controls. The harness
+does not apply metric views in host-owned mode, so `maxSeries`, the metric attribute allowlist, and
+the no-exemplar behavior do not constrain the host's provider; the harness does not replace or shut
+down that provider.
 
 Set `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the collector's `/v1/metrics` URL, or set the common
 `OTEL_EXPORTER_OTLP_ENDPOINT` base URL, to enable OTLP/HTTP export. Exports run every 60 seconds and

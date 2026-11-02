@@ -14,7 +14,8 @@ scanned for canary-like patterns.
 The hostile MCP App integration tests send run-seeded canaries through rejected telemetry fields
 and scan the host's exported spans, logs, metrics, diagnostics, and captured stdout.
 The canary pipeline exercises the sample MCP fixture's error-result shape with a run-seeded raw
-value and verifies it is removed from persisted and exported sinks.
+value and verifies it is removed from persisted and exported sinks. It also enables harness-owned
+metrics through an exporting reader and scans metric names, attributes, and exemplar data.
 The SDK/CLI metrics export integration sends a run-seeded prompt canary through both public paths
 and checks the local OTLP receiver for the expected counter and histogram without that value.
 

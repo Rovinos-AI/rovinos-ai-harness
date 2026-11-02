@@ -36,6 +36,7 @@ import {
 interface CapturedSinks {
   readonly spans: CanaryTelemetry["spans"];
   readonly logs: CanaryTelemetry["logs"];
+  readonly metrics: CanaryTelemetry["metrics"];
   readonly stdout: string[];
   readonly stderr: string[];
   readonly inspect: string[];
@@ -145,6 +146,7 @@ export class CanaryHarness {
     this.captured = {
       spans: input.telemetry.spans,
       logs: input.telemetry.logs,
+      metrics: input.telemetry.metrics,
       stdout: [],
       stderr: [],
       inspect: [],
@@ -311,6 +313,7 @@ export class CanaryHarness {
     const sinks: [string, string][] = [
       ["spans", JSON.stringify(this.captured.spans)],
       ["logs", JSON.stringify(this.captured.logs)],
+      ["metrics", JSON.stringify(this.captured.metrics)],
       ["stdout", this.captured.stdout.join("\n")],
       ["stderr", this.captured.stderr.join("\n")],
       ["cli.inspect", this.captured.inspect.join("\n")],

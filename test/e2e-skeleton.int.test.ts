@@ -78,7 +78,6 @@ import {
 } from "@rovinos/sandbox";
 import { InMemoryEventStore, type EventStore } from "@rovinos/store";
 import { createEventBuilders } from "@rovinos/store/testing";
-import { AggregationTemporality, InMemoryMetricExporter } from "@opentelemetry/sdk-metrics";
 import { createPolicyCheckedAppCallHandler } from "@rovinos/host";
 import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { ProviderError, type ProviderAdapter } from "@rovinos/models";
@@ -153,6 +152,7 @@ const logDefinition = defineLogRecord("harness.e2e.skeleton", {
 });
 type ExportedSpan = Parameters<TelemetrySdkOptions["spanExporter"]["export"]>[0][number];
 type ExportedLogRecord = Parameters<TelemetrySdkOptions["logExporter"]["export"]>[0][number];
+type ExportedMetric = Parameters<NonNullable<TelemetrySdkOptions["metricExporter"]>["export"]>[0];
 
 interface CliCapture {
   readonly code: number;
@@ -179,7 +179,7 @@ interface Skeleton {
   readonly context: CliContext;
   readonly spans: ExportedSpan[];
   readonly logs: ExportedLogRecord[];
-  readonly metrics: InMemoryMetricExporter;
+  readonly metrics: ExportedMetric[];
   readonly telemetry: ReturnType<typeof createTelemetrySdk>;
   runId?: Id;
   approvalId?: Id;
@@ -442,7 +442,7 @@ beforeAll(async () => {
   process.env.HARNESS_E2E_KEY = key;
   const spans: ExportedSpan[] = [];
   const records: ExportedLogRecord[] = [];
-  const metrics = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  const metrics: ExportedMetric[] = [];
   let canaryAvailable = false;
   let probePending = false;
   const sentinelProbe = { enabled: false };
@@ -473,10 +473,18 @@ beforeAll(async () => {
     forceFlush: () => Promise.resolve(),
     shutdown: () => Promise.resolve(),
   };
+  const metricExporter: NonNullable<TelemetrySdkOptions["metricExporter"]> = {
+    export: (data, callback) => {
+      metrics.push(data);
+      completeExportSuccessfully(callback);
+    },
+    forceFlush: () => Promise.resolve(),
+    shutdown: () => Promise.resolve(),
+  };
   const telemetry = createTelemetrySdk({
     spanExporter,
     logExporter,
-    metricExporter: metrics,
+    metricExporter,
     gate: new SentinelGate(
       new VaultRunView({
         listRawValueEntries: async () => {
@@ -2984,11 +2992,9 @@ describe("invariants", () => {
     await current.telemetry.forceFlush();
     expect(current.spans.length).toBeGreaterThan(0);
     expect(current.logs.length).toBeGreaterThan(0);
-    const metricData = current.metrics
-      .getMetrics()
-      .flatMap(({ scopeMetrics }) =>
-        scopeMetrics.flatMap(({ metrics: entries }) => entries),
-      );
+    const metricData = current.metrics.flatMap(({ scopeMetrics }) =>
+      scopeMetrics.flatMap(({ metrics: entries }) => entries),
+    );
     expect(metricData.some(({ descriptor }) => descriptor.name === "harness.model.tokens")).toBe(
       true,
     );

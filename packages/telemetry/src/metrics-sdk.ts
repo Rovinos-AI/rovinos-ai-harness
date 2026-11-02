@@ -60,10 +60,7 @@ function createMetricReader(
       });
 }
 
-function sameConfig(
-  left: TelemetryConfig["metrics"],
-  right: TelemetryConfig["metrics"],
-): boolean {
+function sameConfig(left: TelemetryConfig["metrics"], right: TelemetryConfig["metrics"]): boolean {
   return (
     left.enabled === right.enabled &&
     left.ownership === right.ownership &&
@@ -80,24 +77,25 @@ async function flushProvider(provider: MeterProvider | undefined): Promise<void>
 }
 
 function createLifecycle(metrics: ActiveMetrics): TelemetryMetricsLifecycle {
+  const active = metrics;
   let released = false;
   return {
-    forceFlush: () => flushProvider(metrics.provider),
+    forceFlush: () => flushProvider(active.provider),
     shutdown: async () => {
       if (released) {
         return;
       }
       released = true;
-      metrics.references -= 1;
-      if (metrics.references > 0) {
+      active.references -= 1;
+      if (active.references > 0) {
         return;
       }
-      if (activeMetrics === metrics) {
+      if (activeMetrics === active) {
         activeMetrics = undefined;
         selectTelemetryMeterProvider(undefined);
       }
       try {
-        await metrics.provider?.shutdown({ timeoutMillis: EXPORT_TIMEOUT_MS });
+        await active.provider?.shutdown({ timeoutMillis: EXPORT_TIMEOUT_MS });
       } catch {
         return;
       }

@@ -13,7 +13,9 @@ import {
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "node:process";
+import { TelemetryMetricsConfigError } from "./errors.js";
 import { countHostAppRejected, countModelUsage } from "./metrics.js";
+import { initializeTelemetryMetrics } from "./metrics-sdk.js";
 import { SentinelRequiredError } from "./sentinel/gate.js";
 import { createTelemetrySdk } from "./sdk.js";
 import { SEMCONV_STABILITY_OPT_IN } from "./semconv.js";
@@ -111,9 +113,7 @@ describe("createTelemetrySdk", () => {
       expect(
         exporter
           .getMetrics()
-          .flatMap(({ scopeMetrics }) =>
-            scopeMetrics.flatMap(({ metrics: entries }) => entries),
-          )
+          .flatMap(({ scopeMetrics }) => scopeMetrics.flatMap(({ metrics: entries }) => entries))
           .some(({ descriptor }) => descriptor.name === "harness.host.app_rejected"),
       ).toBe(true);
 
@@ -164,14 +164,27 @@ describe("createTelemetrySdk", () => {
       await sdk.forceFlush();
       const metricData = exporter
         .getMetrics()
-        .flatMap(({ scopeMetrics }) =>
-          scopeMetrics.flatMap(({ metrics: entries }) => entries),
-        )
+        .flatMap(({ scopeMetrics }) => scopeMetrics.flatMap(({ metrics: entries }) => entries))
         .find(({ descriptor }) => descriptor.name === "harness.model.tokens");
       expect(metricData?.dataPoints.length).toBeLessThanOrEqual(2);
       expect(JSON.stringify(metricData).toLowerCase()).not.toContain("exemplar");
     } finally {
       await sdk.shutdown();
+    }
+  });
+
+  it("rejects conflicting process-wide metrics settings", async () => {
+    const first = initializeTelemetryMetrics(
+      TelemetryConfigSchema.parse({ metrics: { maxSeries: 2 } }).metrics,
+    );
+    try {
+      expect(() =>
+        initializeTelemetryMetrics(
+          TelemetryConfigSchema.parse({ metrics: { maxSeries: 3 } }).metrics,
+        ),
+      ).toThrow(TelemetryMetricsConfigError);
+    } finally {
+      await first.shutdown();
     }
   });
 
