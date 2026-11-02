@@ -2027,7 +2027,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@modelcontextprotocol/ext-apps@npm:2.0.4":
+"@modelcontextprotocol/ext-apps@npm:2.0.4, @modelcontextprotocol/ext-apps@npm:^2.0.0":
   version: 2.0.4
   resolution: "@modelcontextprotocol/ext-apps@npm:2.0.4"
   dependencies:
@@ -2047,29 +2047,6 @@ __metadata:
     react-dom:
       optional: true
   checksum: 10c0/5a7e42cca9baa4fea2e36678fe9a6c0c0d4d0c77ddf7f871d80d554358f987d0ca3eb9a629b729b87c6a684ee8337fec284915ca6d79cbbeaee776f1ca5b58e7
-  languageName: node
-  linkType: hard
-
-"@modelcontextprotocol/ext-apps@npm:^2.0.0":
-  version: 2.0.3
-  resolution: "@modelcontextprotocol/ext-apps@npm:2.0.3"
-  dependencies:
-    "@standard-schema/spec": "npm:^1.1.0"
-  peerDependencies:
-    "@modelcontextprotocol/client": ^2.0.0
-    "@modelcontextprotocol/core": ^2.0.0
-    "@modelcontextprotocol/server": ^2.0.0
-    react: ^17.0.0 || ^18.0.0 || ^19.0.0
-    react-dom: ^17.0.0 || ^18.0.0 || ^19.0.0
-    zod: ^4.2.0
-  peerDependenciesMeta:
-    "@modelcontextprotocol/server":
-      optional: true
-    react:
-      optional: true
-    react-dom:
-      optional: true
-  checksum: 10c0/5f80dbf74901e375ef37a6005dd0683fa0c7f810c81ce1e04c56c04976c97aa94a6c05390cae1b3c8cc003f1e83a58e04c3cd5876df02538d5173d0ebf408507
   languageName: node
   linkType: hard
 
@@ -2334,7 +2311,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@opentelemetry/api@npm:1.10.0, @opentelemetry/api@npm:^1.3.0, @opentelemetry/api@npm:^1.4.1":
+"@opentelemetry/api@npm:1.9.1":
+  version: 1.9.1
+  resolution: "@opentelemetry/api@npm:1.9.1"
+  checksum: 10c0/c608485fc8b5a91e1f7e05e843b45b509307456b31cd2ad365933d90813e40ebfedf179f1451c762037e82d7c76aa8500e95d2da3609f640a1206cde5322cd14
+  languageName: node
+  linkType: hard
+
+"@opentelemetry/api@npm:^1.3.0, @opentelemetry/api@npm:^1.4.1":
   version: 1.10.0
   resolution: "@opentelemetry/api@npm:1.10.0"
   checksum: 10c0/c666f89d882e2e3ea3780b4e419de3ba7e00a80bf334269c3c8507a5e2b4e453e2bc8368f6230f894d789b206c14dde313ea6f51fa7bc629f0eff8480b5d356b
@@ -2426,17 +2410,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@opentelemetry/semantic-conventions@npm:1.44.0":
+"@opentelemetry/semantic-conventions@npm:1.44.0, @opentelemetry/semantic-conventions@npm:^1.29.0":
   version: 1.44.0
   resolution: "@opentelemetry/semantic-conventions@npm:1.44.0"
   checksum: 10c0/38ce72dfe254e16177903cc42475eecdfd312d20487133a84d1ab8d97c452acabb186e0069ddcd9a8ba1f65d76535dfec670ce059ef4265f8f29fc395b0db5f0
-  languageName: node
-  linkType: hard
-
-"@opentelemetry/semantic-conventions@npm:^1.29.0":
-  version: 1.43.0
-  resolution: "@opentelemetry/semantic-conventions@npm:1.43.0"
-  checksum: 10c0/ea4b4b07c9414b0c5e7ce7349f608cb2572d16922d96077fb0882b59f173ec9b94aada74896bd5dd4aeb1759924503bd5a34b6dc2847a84c36f71626a0578ec4
   languageName: node
   linkType: hard
 
@@ -2864,7 +2841,7 @@ __metadata:
     "@modelcontextprotocol/ext-apps": "npm:2.0.4"
     "@modelcontextprotocol/node": "npm:2.1.2"
     "@modelcontextprotocol/server": "npm:2.4.0"
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/context-async-hooks": "npm:2.12.0"
     "@opentelemetry/resources": "npm:2.12.0"
@@ -2958,7 +2935,7 @@ __metadata:
   resolution: "@rovinos/core@workspace:packages/core"
   dependencies:
     "@modelcontextprotocol/server": "npm:2.4.0"
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/context": "workspace:^"
     "@rovinos/mcp": "workspace:^"
     "@rovinos/models": "workspace:^"
@@ -3003,7 +2980,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/eval@workspace:packages/eval"
   dependencies:
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@rovinos/core": "workspace:^"
     "@rovinos/models": "workspace:^"
@@ -3026,7 +3003,7 @@ __metadata:
     "@modelcontextprotocol/client": "npm:2.4.0"
     "@modelcontextprotocol/core": "npm:2.4.0"
     "@modelcontextprotocol/ext-apps": "npm:2.0.4"
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/core": "workspace:^"
     "@rovinos/schemas": "workspace:^"
     "@rovinos/telemetry": "workspace:^"
@@ -3046,7 +3023,7 @@ __metadata:
   dependencies:
     "@modelcontextprotocol/client": "npm:2.4.0"
     "@modelcontextprotocol/server": "npm:2.4.0"
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/crypto": "workspace:^"
     "@rovinos/schemas": "workspace:^"
     "@rovinos/telemetry": "workspace:^"
@@ -3066,7 +3043,7 @@ __metadata:
     "@aws-sdk/client-bedrock-runtime": "npm:3.1160.0"
     "@azure/identity": "npm:4.14.1"
     "@google/genai": "npm:2.32.0"
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/schemas": "workspace:^"
     "@rovinos/telemetry": "workspace:^"
     ajv: "npm:8.20.0"
@@ -3115,7 +3092,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/replay@workspace:packages/replay"
   dependencies:
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@rovinos/core": "workspace:^"
     "@rovinos/models": "workspace:^"
     "@rovinos/pii": "workspace:^"
@@ -3133,7 +3110,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/sandbox@workspace:packages/sandbox"
   dependencies:
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/core": "npm:2.12.0"
     "@rovinos/context": "workspace:^"
     "@rovinos/crypto": "workspace:^"
@@ -3170,7 +3147,7 @@ __metadata:
     "@azure/keyvault-secrets": "npm:4.12.0"
     "@google/genai": "npm:2.32.0"
     "@modelcontextprotocol/client": "npm:2.4.0"
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/context-async-hooks": "npm:2.12.0"
     "@opentelemetry/resources": "npm:2.12.0"
@@ -3278,7 +3255,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rovinos/telemetry@workspace:packages/telemetry"
   dependencies:
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/context-async-hooks": "npm:2.12.0"
     "@opentelemetry/resources": "npm:2.12.0"
@@ -3372,17 +3349,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@smithy/core@npm:^3.33.2, @smithy/core@npm:^3.33.3, @smithy/core@npm:^3.35.0":
-  version: 3.36.2
-  resolution: "@smithy/core@npm:3.36.2"
-  dependencies:
-    "@smithy/types": "npm:^4.19.0"
-    tslib: "npm:^2.6.2"
-  checksum: 10c0/88c3adbbdb1409e0ca93fd19bf6836d34485d7aecd59546cb007e8322cc5306f89807f7918934a691c3482b93adaa3ac7210c6ef33259d2ebee211d674edfdea
-  languageName: node
-  linkType: hard
-
-"@smithy/core@npm:^3.37.0, @smithy/core@npm:^3.38.0":
+"@smithy/core@npm:^3.33.2, @smithy/core@npm:^3.33.3, @smithy/core@npm:^3.35.0, @smithy/core@npm:^3.37.0, @smithy/core@npm:^3.38.0":
   version: 3.38.0
   resolution: "@smithy/core@npm:3.38.0"
   dependencies:
@@ -3552,16 +3519,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:*, @types/node@npm:>=13.7.0":
-  version: 26.6.5
-  resolution: "@types/node@npm:26.6.5"
-  dependencies:
-    undici-types: "npm:~8.9.0"
-  checksum: 10c0/4f791f69466ace7842c09e7bef96cb1ddbb65cf3db916ef7e84f0e2b2a17220b6b816dc7539d01520cadfb17ed7169b8214910900493e0a83be8bc7d124ec20a
-  languageName: node
-  linkType: hard
-
-"@types/node@npm:26.6.6":
+"@types/node@npm:*, @types/node@npm:26.6.6, @types/node@npm:>=13.7.0":
   version: 26.6.6
   resolution: "@types/node@npm:26.6.6"
   dependencies:
@@ -3652,19 +3610,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript-eslint/project-service@npm:8.72.0":
-  version: 8.72.0
-  resolution: "@typescript-eslint/project-service@npm:8.72.0"
-  dependencies:
-    "@typescript-eslint/tsconfig-utils": "npm:^8.72.0"
-    "@typescript-eslint/types": "npm:^8.72.0"
-    debug: "npm:^4.4.3"
-  peerDependencies:
-    typescript: ">=4.8.4 <6.1.0"
-  checksum: 10c0/33825ee41b6f0281f40fca6c9123af5493225a971f62173381984de52d4101cc974fdb93077e16ac4b67b3c345bea738c1bc228b76610bd1737f6b2af2c0ccaf
-  languageName: node
-  linkType: hard
-
 "@typescript-eslint/project-service@npm:8.72.1":
   version: 8.72.1
   resolution: "@typescript-eslint/project-service@npm:8.72.1"
@@ -3696,32 +3641,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript-eslint/scope-manager@npm:8.72.0, @typescript-eslint/scope-manager@npm:^8.71.2":
-  version: 8.72.0
-  resolution: "@typescript-eslint/scope-manager@npm:8.72.0"
-  dependencies:
-    "@typescript-eslint/types": "npm:8.72.0"
-    "@typescript-eslint/visitor-keys": "npm:8.72.0"
-  checksum: 10c0/f8e40de6c306aa5792ede4389aa279cca8ea43d0ea31fec083102bd563ac22d14a6b0554b641e27f476421e033adc299c6b4d4d026bb1fd84f7694421fb5a74f
-  languageName: node
-  linkType: hard
-
-"@typescript-eslint/scope-manager@npm:8.72.1":
+"@typescript-eslint/scope-manager@npm:8.72.1, @typescript-eslint/scope-manager@npm:^8.71.2":
   version: 8.72.1
   resolution: "@typescript-eslint/scope-manager@npm:8.72.1"
   dependencies:
     "@typescript-eslint/types": "npm:8.72.1"
     "@typescript-eslint/visitor-keys": "npm:8.72.1"
   checksum: 10c0/75d55ebcf24c628c955f95446f553991e5b6e30b7f4bc8f14247d72b6490771e7d44757302cf4bc8f5529c1dd58a87d362b5ddbedf9299ff407a0604c25a0a5b
-  languageName: node
-  linkType: hard
-
-"@typescript-eslint/tsconfig-utils@npm:8.72.0, @typescript-eslint/tsconfig-utils@npm:^8.72.0":
-  version: 8.72.0
-  resolution: "@typescript-eslint/tsconfig-utils@npm:8.72.0"
-  peerDependencies:
-    typescript: ">=4.8.4 <6.1.0"
-  checksum: 10c0/98a23511042dcf4af517897712a44e69a50304f2ea9a1e004ed95f53185e17f669d2d4333384b6b611177a2ecaba65b1ad0f821ecc7d4fdccc6868aa87491f36
   languageName: node
   linkType: hard
 
@@ -3750,36 +3676,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript-eslint/types@npm:8.72.0, @typescript-eslint/types@npm:^8.44.1, @typescript-eslint/types@npm:^8.56.0, @typescript-eslint/types@npm:^8.72.0":
-  version: 8.72.0
-  resolution: "@typescript-eslint/types@npm:8.72.0"
-  checksum: 10c0/11ee41f1860149f3dcfe6f517840cd7254fbc90f4acaf6098f731bb00a6392f8e5d7d9d0e47e516bd0e5fcd3110e41624ad893036ad79fa6dd6b5a67d6a42aa6
-  languageName: node
-  linkType: hard
-
-"@typescript-eslint/types@npm:8.72.1, @typescript-eslint/types@npm:^8.72.1":
+"@typescript-eslint/types@npm:8.72.1, @typescript-eslint/types@npm:^8.44.1, @typescript-eslint/types@npm:^8.56.0, @typescript-eslint/types@npm:^8.72.0, @typescript-eslint/types@npm:^8.72.1":
   version: 8.72.1
   resolution: "@typescript-eslint/types@npm:8.72.1"
   checksum: 10c0/759f36d27a5b6c4dcdcd035ddec6e39d261cfcab864e641c4a6252d4be6358e53055ad737f1797e6ebb2b64b8cda380a0492acb96d7115e7ed86e6b27ceeddc3
-  languageName: node
-  linkType: hard
-
-"@typescript-eslint/typescript-estree@npm:8.72.0":
-  version: 8.72.0
-  resolution: "@typescript-eslint/typescript-estree@npm:8.72.0"
-  dependencies:
-    "@typescript-eslint/project-service": "npm:8.72.0"
-    "@typescript-eslint/tsconfig-utils": "npm:8.72.0"
-    "@typescript-eslint/types": "npm:8.72.0"
-    "@typescript-eslint/visitor-keys": "npm:8.72.0"
-    debug: "npm:^4.4.3"
-    minimatch: "npm:^10.2.2"
-    semver: "npm:^7.7.3"
-    tinyglobby: "npm:^0.2.15"
-    ts-api-utils: "npm:^2.5.0"
-  peerDependencies:
-    typescript: ">=4.8.4 <6.1.0"
-  checksum: 10c0/594eb6dc625b5265833701fca67984d94863d1552202e48f8180d78af69da61a4aa8e8126ac83196d4d8f18c4f74390287c0eb81219b0f5694f308c5d11352fe
   languageName: node
   linkType: hard
 
@@ -3802,7 +3702,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript-eslint/utils@npm:8.72.1":
+"@typescript-eslint/utils@npm:8.72.1, @typescript-eslint/utils@npm:^8.71.2, @typescript-eslint/utils@npm:^8.72.0":
   version: 8.72.1
   resolution: "@typescript-eslint/utils@npm:8.72.1"
   dependencies:
@@ -3814,31 +3714,6 @@ __metadata:
     eslint: ^8.57.0 || ^9.0.0 || ^10.0.0
     typescript: ">=4.8.4 <6.1.0"
   checksum: 10c0/f0be6d53ee67c65a4b37431367ef58441e60e88d220f2fafd22ecbba91f5ce0c8ba340c4b0f4d1551ef6856f310b353593a4b5304636fbe37aea3fc0eaa8182f
-  languageName: node
-  linkType: hard
-
-"@typescript-eslint/utils@npm:^8.71.2, @typescript-eslint/utils@npm:^8.72.0":
-  version: 8.72.0
-  resolution: "@typescript-eslint/utils@npm:8.72.0"
-  dependencies:
-    "@eslint-community/eslint-utils": "npm:^4.9.1"
-    "@typescript-eslint/scope-manager": "npm:8.72.0"
-    "@typescript-eslint/types": "npm:8.72.0"
-    "@typescript-eslint/typescript-estree": "npm:8.72.0"
-  peerDependencies:
-    eslint: ^8.57.0 || ^9.0.0 || ^10.0.0
-    typescript: ">=4.8.4 <6.1.0"
-  checksum: 10c0/5d6404bdf52fe4e55af411ad92e3cfb9d183b7379af9e8e30d4f818dabdac4043023e717043d6985d8f3090b11a6d47f7f47df52feb890dc7f5eda3ec5e83037
-  languageName: node
-  linkType: hard
-
-"@typescript-eslint/visitor-keys@npm:8.72.0":
-  version: 8.72.0
-  resolution: "@typescript-eslint/visitor-keys@npm:8.72.0"
-  dependencies:
-    "@typescript-eslint/types": "npm:8.72.0"
-    eslint-visitor-keys: "npm:^5.0.0"
-  checksum: 10c0/9df92b2ece08c5c7f2568b88d1c6c1fcb4233c9dc67f42b0d1eb60564cd0f1970e00ad6a917ce28da21476ca930a92f45414d4e27f59bb8a502abef5c436be48
   languageName: node
   linkType: hard
 
@@ -9293,7 +9168,7 @@ __metadata:
     "@modelcontextprotocol/inspector": "npm:2.13.0"
     "@modelcontextprotocol/node": "npm:2.1.2"
     "@modelcontextprotocol/server": "npm:2.4.0"
-    "@opentelemetry/api": "npm:1.10.0"
+    "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/core": "npm:2.12.0"
     "@rovinos/cli": "workspace:^"

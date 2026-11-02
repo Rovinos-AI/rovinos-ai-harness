@@ -6,7 +6,6 @@ import {
   ROOT_CONTEXT,
   SpanStatusCode,
   trace,
-  type AttributeValue,
   type Link,
   type Span,
   type Context,
@@ -31,6 +30,8 @@ import {
 } from "@rovinos/telemetry";
 import { RUN_SPAN } from "./spans.js";
 import { DeploymentStartupError } from "./runtime-deployment.js";
+
+type AttributeValue = string | number | boolean;
 
 /** Clock used to timestamp recorded events. */
 export interface Clock {

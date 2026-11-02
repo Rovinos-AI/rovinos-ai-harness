@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  type AttributeValue,
   type Attributes,
   createContextKey,
   isSpanContextValid,
@@ -23,6 +22,8 @@ import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 import { getTracer } from "./tracer.js";
 import { SEMCONV_ATTRIBUTE_NAMES, SEMCONV_SPAN_NAMES } from "./semconv.js";
 import { env } from "node:process";
+
+type AttributeValue = string | number | boolean;
 
 /** Attribute-schema shape accepted by registered span definitions. */
 export type SpanShape = Record<string, z.ZodType>;
