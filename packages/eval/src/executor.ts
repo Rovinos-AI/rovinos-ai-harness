@@ -17,6 +17,7 @@ import {
 import type { Event, ModelsConfig, RunBudgetsSchema, SecretRef } from "@rovinos/schemas";
 import { z } from "zod";
 import type { Clock, RuntimeConfig } from "@rovinos/core";
+import type { GradeContext } from "./graders/types.js";
 import type { EvalTask } from "./schema.js";
 import { EvalCassetteModeSchema } from "./trial.js";
 import type { EvalVariant, TrialResult, TrialSpec } from "./trial.js";
@@ -94,6 +95,11 @@ class TrialSetupError extends HarnessError {
 export interface TrialExecutor {
   /** Runs the trial and returns only metadata about its outcome. */
   run(trial: TrialSpec): Promise<TrialResult>;
+  /** Executes grading before releasing the isolated runtime resources. */
+  runWithContext?(
+    trial: TrialSpec,
+    finish: (context: GradeContext) => Promise<TrialResult>,
+  ): Promise<TrialResult>;
   /** Returns tokenized events kept in memory for grading and cassette recording. */
   eventsFor?(trial: TrialSpec): Promise<readonly Event[]> | readonly Event[];
 }

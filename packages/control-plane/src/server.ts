@@ -29,6 +29,7 @@ import { registerReviewInputTool } from "./tools/review-input.js";
 import { registerApprovalAppTools, ApprovalAppRevealRateLimiter } from "./tools/approvals-app.js";
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
+import { loadInputHtml, registerInputResource } from "./resources/input.js";
 import { registerRunResources } from "./resources/runs.js";
 import { configureRunResourceUpdates } from "./resources/server-updates.js";
 import { controlPlanePrincipal, hasControlPlaneScope } from "./auth.js";
@@ -139,6 +140,7 @@ function registerRunInspection(
   });
   registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
   registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
+  registerInputResource(server, options.inputHtml ?? loadInputHtml());
 }
 
 function registerInputTools(input: {

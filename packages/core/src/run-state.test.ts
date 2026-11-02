@@ -314,6 +314,71 @@ describe("foldRunState", () => {
       });
     });
 
+    test("does not treat a nested judge response with a pending tool as the parent's final answer", () => {
+      const judgeRequest = {
+        ...envelope(2),
+        type: "model_request" as const,
+        requestId: id,
+        provider: "test",
+        model: "test",
+        role: "judge",
+        messages: [],
+      };
+
+      expect(
+        planLastModelResponseRecovery([
+          runCreated(0),
+          toolIntent(1, otherRunId, true),
+          judgeRequest,
+          modelResponse(3),
+        ]),
+      ).toEqual({ kind: "none" });
+    });
+
+    test("does not treat a nested judge response followed by its tool result as final", () => {
+      const judgeRequest = {
+        ...envelope(2),
+        type: "model_request" as const,
+        requestId: id,
+        provider: "test",
+        model: "test",
+        role: "judge",
+        messages: [],
+      };
+
+      expect(
+        planLastModelResponseRecovery([
+          runCreated(0),
+          toolIntent(1, otherRunId, true),
+          judgeRequest,
+          modelResponse(3),
+          toolResult(4, otherRunId),
+        ]),
+      ).toEqual({ kind: "none" });
+    });
+
+    test("recovers a top-level judge response after completed tool calls", () => {
+      const judgeRequest = {
+        ...envelope(3),
+        type: "model_request" as const,
+        requestId: id,
+        provider: "test",
+        model: "test",
+        role: "judge",
+        messages: [],
+      };
+
+      expect(
+        planLastModelResponseRecovery([
+          runCreated(0),
+          toolIntent(1, otherRunId, true),
+          toolResult(2, otherRunId),
+          judgeRequest,
+          modelResponse(4),
+        ]),
+      ).toEqual({ kind: "final_answer" });
+    });
+
     test("does not recover proposals that already have a tool intent", () => {
       const response = {
         ...modelResponse(1),

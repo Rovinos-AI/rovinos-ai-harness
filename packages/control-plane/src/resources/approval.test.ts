@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 
 describe("approval app resource", () => {
-  it("resolves both app assets beside a bundle and from the workspace source tree", async () => {
+  it("resolves app assets beside a bundle and from the workspace source tree", async () => {
     const root = await mkdtemp(join(tmpdir(), "approval-resource-"));
     temporaryDirectories.push(root);
     const layouts = [
@@ -37,7 +37,7 @@ describe("approval app resource", () => {
     ] as const;
 
     for (const [layout, modulePath, assetDirectory] of layouts) {
-      for (const filename of ["approval.html", "runs-console.html"] as const) {
+      for (const filename of ["approval.html", "runs-console.html", "input.html"] as const) {
         const assetPath = join(root, assetDirectory, filename);
         await mkdir(join(root, assetDirectory), { recursive: true });
         await writeFile(assetPath, `${layout}:${filename}`);

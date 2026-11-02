@@ -46,6 +46,7 @@ export interface ToolStepExecutionOptions {
   readonly inputChannels?: readonly HumanInputChannel[];
   readonly tokenizer?: Pick<Tokenizer, "tokenizeJson">;
   readonly resolver?: AuditingVaultResolver;
+  readonly requestStructuredModel?: RunContext["requestStructuredModel"];
 }
 
 function invalidElicitationOutcome(): ElicitationInputOutcome {

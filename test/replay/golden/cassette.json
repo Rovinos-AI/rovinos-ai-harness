@@ -2,7 +2,7 @@
   "containsRealData": false,
   "entries": [
     {
-      "hash": "268b27c74734f67d2fcff21207ce9b3068f1718c56f610bd451eca2006d8d390",
+      "hash": "0f3ef76d8221dcd7a273cd67ba5c1fb8ac52ef0c5fae95631c9f9227cc6df63f",
       "response": {
         "parts": [
           {
@@ -23,7 +23,28 @@
       }
     },
     {
-      "hash": "50472183a012958957f2e7460b05de88b03122a2532f6a8565b78c114dbd87f5",
+      "hash": "5a033bdc6ba298d947304b44800b28c4785008fa3dc200c56f772d1112f87bd2",
+      "response": {
+        "parts": [
+          {
+            "type": "tool_call",
+            "callId": "00000000000000000000000073",
+            "toolId": "synthetic.denied",
+            "args": {
+              "value": "blocked"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "tool_calls",
+        "latencyMs": 1
+      }
+    },
+    {
+      "hash": "7aead6d1adfe55bd02a8b55620d0906ded5225e5a0ce4049159aa37a9ac81c9d",
       "response": {
         "parts": [
           {
@@ -44,7 +65,7 @@
       }
     },
     {
-      "hash": "84d1fefc468ce20108b74759e237d395cf4e1b73720dcb6953e446f50dc028ff",
+      "hash": "d5261f1a168e58f13a092d9ce58ab1fd7060688113fd077e40ff4fa7dafa7ed9",
       "response": {
         "parts": [
           {
@@ -57,27 +78,6 @@
           "outputTokens": 1
         },
         "finishReason": "stop",
-        "latencyMs": 1
-      }
-    },
-    {
-      "hash": "9dacff3ba3f0e1494c488ad37dd832896c0153af81d8a7571860f47e961f7416",
-      "response": {
-        "parts": [
-          {
-            "type": "tool_call",
-            "callId": "00000000000000000000000073",
-            "toolId": "synthetic.denied",
-            "args": {
-              "value": "blocked"
-            }
-          }
-        ],
-        "usage": {
-          "inputTokens": 1,
-          "outputTokens": 1
-        },
-        "finishReason": "tool_calls",
         "latencyMs": 1
       }
     }

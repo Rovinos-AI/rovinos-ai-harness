@@ -5,6 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { requireControlPlaneScope, withControlPlaneAuthorization } from "../auth.js";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { listPendingInputsInputSchema, listPendingInputsOutputSchema } from "../schemas.js";
+import { INPUT_RESOURCE_URI } from "../resources/input.js";
 import { listInputRequests } from "./input-state.js";
 
 /** Registers metadata-only pending input listing with read scope and run filtering. */
@@ -21,6 +22,7 @@ export function registerListPendingInputsTool(
       inputSchema: listPendingInputsInputSchema,
       outputSchema: listPendingInputsOutputSchema,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: INPUT_RESOURCE_URI } },
     },
     async (input, context) => {
       const parsed = listPendingInputsInputSchema.parse(input);

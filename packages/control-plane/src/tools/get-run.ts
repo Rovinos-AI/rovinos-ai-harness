@@ -56,6 +56,7 @@ export async function getRun(
     usage: run.state.usage,
     ...(run.state.lastCheckpoint === undefined ? {} : { lastCheckpoint: run.state.lastCheckpoint }),
     pendingApprovals,
+    pendingInputs: run.state.pendingInputs.size,
     recentEvents,
   });
 }

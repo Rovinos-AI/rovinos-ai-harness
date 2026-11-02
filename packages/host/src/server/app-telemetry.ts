@@ -36,9 +36,15 @@ export const AppSpanBatchAckSchema = z
 /** Inferred minimal acknowledgment returned to the app. */
 export type AppSpanBatchAck = z.infer<typeof AppSpanBatchAckSchema>;
 
-export { UI_DECISION_SPAN, UI_ERROR_SPAN, UI_INTERACTION_SPAN, UI_RENDER_SPAN } from "./stamp.js";
+export {
+  UI_DECISION_SPAN,
+  UI_ERROR_SPAN,
+  UI_INPUT_SPAN,
+  UI_INTERACTION_SPAN,
+  UI_RENDER_SPAN,
+} from "./stamp.js";
 
-const spanNames = new Set(["ui.render", "ui.decision", "ui.error", "ui.interaction"]);
+const spanNames = new Set(["ui.render", "ui.decision", "ui.error", "ui.interaction", "ui.input"]);
 const maxBatchBytes = 16 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -9,7 +9,7 @@ export const MCP_APP_HTML_MIME_TYPE = "text/html;profile=mcp-app";
 
 /** Resolves an approval app asset beside a bundle, with a source-tree fallback. */
 export function approvalAppResourcePath(
-  filename: "approval.html" | "runs-console.html",
+  filename: "approval.html" | "runs-console.html" | "input.html",
   moduleUrl = import.meta.url,
 ): string {
   const bundledAsset = new URL(`./assets/${filename}`, moduleUrl);

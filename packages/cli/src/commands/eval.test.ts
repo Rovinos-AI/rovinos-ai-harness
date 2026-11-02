@@ -301,7 +301,7 @@ describe("harness eval run", () => {
     expect(stderr).toEqual(["budget_exceeded\n"]);
   });
 
-  it("rejects test_command before trials with its typed context code", async () => {
+  it("reports a missing sandbox capability as a grader failure instead of rejecting the suite", async () => {
     const suitePath = await createSuite();
     await writeFile(
       suitePath,
@@ -328,14 +328,23 @@ describe("harness eval run", () => {
       },
     });
 
-    const exitCode = await main(["eval", "run", suitePath], context, [command]);
+    const output = join(temporaryDirectory ?? "", "reports");
+    const exitCode = await main(
+      ["eval", "run", suitePath, "--out", output, "--fail-under", "1"],
+      context,
+      [command],
+    );
 
     expect(exitCode).toBe(ExitCode.failure);
-    expect(executorStarted).toBe(false);
-    expect(stderr).toEqual(["eval_test_command_context_unavailable\n"]);
+    expect(executorStarted).toBe(true);
+    expect(stderr).toEqual(["eval_failed\n"]);
+    const { readFile } = await import("node:fs/promises");
+    expect(await readFile(join(output, "eval-report.json"), "utf8")).toContain(
+      "eval_test_command_context_unavailable",
+    );
   });
 
-  it("rejects llm_judge before trials with its typed context code", async () => {
+  it("rejects Docker judge suites with a grader-specific typed code", async () => {
     const suitePath = await createSuite();
     await writeFile(
       suitePath,
@@ -370,11 +379,13 @@ describe("harness eval run", () => {
       },
     });
 
-    const exitCode = await main(["eval", "run", suitePath], context, [command]);
+    const exitCode = await main(["eval", "run", suitePath, "--isolation", "docker"], context, [
+      command,
+    ]);
 
     expect(exitCode).toBe(ExitCode.failure);
     expect(executorStarted).toBe(false);
-    expect(stderr).toEqual(["eval_llm_judge_context_unavailable\n"]);
+    expect(stderr).toEqual(["eval_llm_judge_docker_unavailable\n"]);
   });
 
   it("fails Docker cassette-off before constructing the executor", async () => {

@@ -10,6 +10,7 @@ import { createSubagentTool } from "./subagent/runtime.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { RuntimeComposition } from "./runtime-config.js";
 import { AskUserTool } from "./builtin/ask-user-tool.js";
+import { VerifyTool } from "./builtin/verify-tool.js";
 import { composeToolPorts } from "./runtime-tool-port.js";
 
 /** Builds the runtime's PII/offload-wrapped subagent tool port. */
@@ -19,7 +20,8 @@ export function createRuntimeToolPort(
     readonly scopes: RunScopeRegistry;
   },
 ): ToolPort {
-  const toolWithAskUser = composeToolPorts(new AskUserTool(), options.tool, {
+  const builtins = composeToolPorts(new AskUserTool(), new VerifyTool());
+  const toolWithBuiltins = composeToolPorts(builtins, options.tool, {
     preferAdditionalSpecs: true,
   });
   const subagentTool = createSubagentTool({
@@ -28,7 +30,7 @@ export function createRuntimeToolPort(
     ids: options.ids,
     store: options.store,
     model: options.model,
-    parentTool: toolWithAskUser,
+    parentTool: toolWithBuiltins,
     policy: options.policy,
     policyVersion: options.policyVersion,
     sandboxBackend: options.sandboxBackend,
@@ -52,7 +54,7 @@ export function createRuntimeToolPort(
       : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
   const composed = offloadingPort ?? piiTool;
   const spawnResumeStrategy = subagentTool.resumeStrategy?.bind(subagentTool);
-  const innerResumeStrategy = toolWithAskUser.resumeStrategy?.bind(toolWithAskUser);
+  const innerResumeStrategy = toolWithBuiltins.resumeStrategy?.bind(toolWithBuiltins);
   return Object.assign(composed, {
     resumeStrategy: (toolId: Code) => {
       const strategy = spawnResumeStrategy?.(toolId) ?? innerResumeStrategy?.(toolId);

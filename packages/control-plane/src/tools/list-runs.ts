@@ -15,6 +15,7 @@ import {
 async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
   let steps = 0;
   const pendingApprovals = new Set<string>();
+  const pendingInputs = new Set<string>();
   for await (const event of store.read(runId, { toSeq: lastSeq })) {
     if (event.type === "model_response") {
       steps += 1;
@@ -24,12 +25,20 @@ async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
       pendingApprovals.add(event.approvalId);
     } else if (event.type === "approval_resolved") {
       pendingApprovals.delete(event.approvalId);
+    } else if (event.type === "input_requested") {
+      pendingInputs.add(event.requestId);
+    } else if (event.type === "input_resolved") {
+      pendingInputs.delete(event.requestId);
     }
   }
-  return { steps, pendingApprovals: pendingApprovals.size };
+  return {
+    steps,
+    pendingApprovals: pendingApprovals.size,
+    pendingInputs: pendingInputs.size,
+  };
 }
 
-/** Lists run metadata and derived step and approval counts. */
+/** Lists run metadata and derived step, approval, and input counts. */
 export async function listRuns(
   store: EventStore,
   input: ListRunsInput,

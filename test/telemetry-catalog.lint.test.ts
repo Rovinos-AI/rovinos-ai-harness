@@ -23,6 +23,7 @@ const expectedSpanNames = [
   "harness.tool_call",
   "harness.ui.decision",
   "harness.ui.error",
+  "harness.ui.input",
   "harness.ui.interaction",
   "harness.ui.render",
   "harness.ui_session",
