@@ -2,9 +2,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunQueue, RunQueueJob } from "@rovinos/store";
+import type {
+  RunQueue,
+  RunQueueClaimOptions,
+  RunQueueJob,
+  RunQueueRunIdentity,
+} from "@rovinos/store";
 import { createEventBuilders } from "@rovinos/store/testing";
 import { SqliteEventStore, SqliteRunQueue } from "@rovinos/store-sqlite";
+import * as telemetry from "@rovinos/telemetry";
 import {
   FakeClock,
   Id,
@@ -17,6 +23,7 @@ import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "./ports.j
 import { ResumeConflictError } from "./resume.js";
 import { createRuntime } from "./runtime.js";
 import { RESUME_LEASE_MS } from "./resume-lease.js";
+import { QuotaExceededError, type QuotaIdentity } from "./quotas.js";
 import { Worker } from "./worker.js";
 
 const RUN_ID = "00000000000000000000000001";
@@ -53,6 +60,10 @@ class FakeQueue implements RunQueue {
   heartbeatCalls = 0;
   heartbeatResponse: Promise<boolean> | undefined;
   onFail: (() => void) | undefined;
+  claimIdentity: RunQueueRunIdentity | undefined;
+  claimActiveRuns: readonly RunQueueRunIdentity[] = [];
+  claimAlreadyRunning = false;
+  readonly deferredNotifications = new Set<string>();
 
   constructor(jobs: readonly RunQueueJob[] = [job()]) {
     this.pending = [...jobs];
@@ -63,10 +74,33 @@ class FakeQueue implements RunQueue {
     return Promise.resolve(job(input.kind, input.runId));
   }
 
-  claim(workerId: string, limit: number) {
-    return Promise.resolve(
-      this.pending.splice(0, limit).map((item) => ({ ...item, leaseOwner: workerId })),
-    );
+  claim(workerId: string, limit: number, _leaseMs?: number, options?: RunQueueClaimOptions) {
+    const claimed: RunQueueJob[] = [];
+    let index = 0;
+    while (index < this.pending.length && claimed.length < limit) {
+      const item = this.pending[index];
+      if (item === undefined) {
+        break;
+      }
+      if (
+        options?.canClaim !== undefined &&
+        !options.canClaim(
+          this.claimIdentity ?? { runId: item.runId },
+          this.claimActiveRuns,
+          this.claimAlreadyRunning,
+        )
+      ) {
+        if (options.onDeferred !== undefined && !this.deferredNotifications.has(item.jobId)) {
+          this.deferredNotifications.add(item.jobId);
+          options.onDeferred(this.claimIdentity ?? { runId: item.runId });
+        }
+        index += 1;
+        continue;
+      }
+      claimed.push(item);
+      this.pending.splice(index, 1);
+    }
+    return Promise.resolve(claimed.map((item) => ({ ...item, leaseOwner: workerId })));
   }
 
   heartbeat() {
@@ -128,6 +162,7 @@ describe("Worker", () => {
       control.worker?.stop();
       return Promise.resolve({ status: "completed" as const });
     });
+
     const worker = new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute });
     control.worker = worker;
 
@@ -137,6 +172,107 @@ describe("Worker", () => {
     expect(execute).toHaveBeenCalledOnce();
     expect(queue.completed).toEqual([JOB_ID]);
     expect(queue.failed).toEqual([]);
+  });
+
+  it("passes persisted run identities to the quota claim guard", async () => {
+    const queue = new FakeQueue();
+    queue.claimIdentity = {
+      runId: RUN_ID,
+      requestedBy: "cli.alice",
+      role: "researcher",
+    };
+    queue.claimActiveRuns = [
+      {
+        runId: "00000000000000000000000003",
+        requestedBy: "cli.bob",
+        role: "researcher",
+      },
+    ];
+    const control: { worker?: Worker } = {};
+    const quotaService = {
+      assertCanClaim: vi.fn((identity: QuotaIdentity, activeRuns: readonly QuotaIdentity[]) => {
+        expect(identity).toEqual({ requestedBy: "cli.alice", role: "researcher" });
+        expect(activeRuns).toEqual([{ requestedBy: "cli.bob", role: "researcher" }]);
+      }),
+    };
+    const worker = new Worker({
+      queue,
+      ids: fakeIds(),
+      clock: fakeClock,
+      quotaService,
+      execute: () => {
+        control.worker?.stop();
+        return Promise.resolve({ status: "completed" as const });
+      },
+    });
+    control.worker = worker;
+
+    await worker.run();
+
+    expect(quotaService.assertCanClaim).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a claim queued when the quota service rejects it", async () => {
+    const queue = new FakeQueue();
+    queue.claimIdentity = { runId: RUN_ID, requestedBy: "cli.alice", role: "researcher" };
+    const control: { worker?: Worker } = {};
+    const quotaRejection = vi.spyOn(telemetry, "countQuotaRejection");
+    let checks = 0;
+    const quotaService = {
+      assertCanClaim: () => {
+        checks += 1;
+        if (checks === 2) {
+          control.worker?.stop();
+        }
+        throw new QuotaExceededError("research_team");
+      },
+      recordRejection: telemetry.countQuotaRejection,
+    };
+    const worker = new Worker({
+      queue,
+      ids: fakeIds(),
+      clock: fakeClock,
+      quotaService,
+      execute: vi.fn(),
+      pollIntervalMs: 1,
+    });
+    control.worker = worker;
+
+    try {
+      await worker.run();
+
+      expect(queue.pending).toHaveLength(1);
+      expect(checks).toBe(2);
+      expect(quotaRejection).toHaveBeenCalledExactlyOnceWith("research_team");
+    } finally {
+      quotaRejection.mockRestore();
+    }
+  });
+
+  it("allows an already-running run through the quota claim wrapper", async () => {
+    const queue = new FakeQueue();
+    queue.claimIdentity = { runId: RUN_ID, requestedBy: "cli.alice", role: "researcher" };
+    queue.claimAlreadyRunning = true;
+    const assertCanClaim = vi.fn(() => {
+      throw new QuotaExceededError("research_team");
+    });
+    const control: { worker?: Worker } = {};
+    const worker = new Worker({
+      queue,
+      ids: fakeIds(),
+      clock: fakeClock,
+      quotaService: { assertCanClaim, recordRejection: vi.fn() },
+      execute: () => {
+        control.worker?.stop();
+        return Promise.resolve({ status: "completed" as const });
+      },
+    });
+    control.worker = worker;
+
+    await worker.run();
+
+    expect(assertCanClaim).not.toHaveBeenCalled();
+    expect(queue.completed).toEqual([JOB_ID]);
   });
 
   it("backs off resume conflicts until the durable execution lease can expire", async () => {

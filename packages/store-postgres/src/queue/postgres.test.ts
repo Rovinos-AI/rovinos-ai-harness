@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, it, vi } from "vitest";
 import { FakeClock, SequentialIdGenerator } from "@rovinos/schemas";
-import type { Clock } from "@rovinos/store";
+import type { Clock, RunQueueRunIdentity } from "@rovinos/store";
 import { runQueueConformance, type RunQueueFactoryCreator } from "@rovinos/store/testing";
 
 const fakePg = vi.hoisted(() => {
@@ -9,8 +9,14 @@ const fakePg = vi.hoisted(() => {
   const jobs = new Map<string, Row>();
   const dead = new Map<string, Row>();
   const migrations = new Map<string, string>();
+  const eventRuns = new Map<
+    string,
+    { requested_by: string | null; role: string | null; status: string }
+  >();
   const locks = new Map<string, number>();
+  const quotaLockWaiters: { clientId: number; resolve: () => void }[] = [];
   let nextClientId = 0;
+  let quotaLockOwner: number | undefined;
   let nextConnectionWait: (() => Promise<void>) | undefined;
   let beforeNextForUpdate: (() => void) | undefined;
 
@@ -36,6 +42,11 @@ const fakePg = vi.hoisted(() => {
         locks.delete(jobId);
       }
     }
+    if (quotaLockOwner === clientId) {
+      const next = quotaLockWaiters.shift();
+      quotaLockOwner = next?.clientId;
+      next?.resolve();
+    }
   }
 
   function handle(
@@ -55,6 +66,29 @@ const fakePg = vi.hoisted(() => {
     if (sql === "COMMIT" || sql === "ROLLBACK") {
       releaseLocks(clientId);
       return { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith("SELECT e.run_id, e.meta ->>")) {
+      const runId = stringValue(values, 0);
+      const run = eventRuns.get(runId);
+      return {
+        rows: run === undefined ? [] : [{ run_id: runId, ...run }],
+        rowCount: run === undefined ? 0 : 1,
+      };
+    }
+    if (sql.startsWith("SELECT r.run_id")) {
+      const now = numberValue(values, 0);
+      const rows = [...eventRuns].flatMap(([runId, run]) => {
+        const hasQueueRow = [...jobs.values()].some(
+          (job) =>
+            job.run_id === runId &&
+            ((job.lease_owner !== null &&
+              typeof job.lease_expires_at === "number" &&
+              job.lease_expires_at > now) ||
+              run.status === "running"),
+        );
+        return hasQueueRow ? [{ run_id: runId, ...run }] : [];
+      });
+      return { rows, rowCount: rows.length };
     }
     if (sql.startsWith("SELECT version, checksum FROM schema_migrations")) {
       return {
@@ -89,6 +123,7 @@ const fakePg = vi.hoisted(() => {
         idempotency_key: key,
         last_error_code: null,
         wake_requested: false,
+        quota_rejection_reported: false,
         created_at: numberValue(values, 7),
         updated_at: numberValue(values, 7),
       };
@@ -138,7 +173,7 @@ const fakePg = vi.hoisted(() => {
       }
       return { rows, rowCount: rows.length };
     }
-    if (sql.startsWith("SELECT * FROM run_queue WHERE available_at <=")) {
+    if (sql.startsWith("SELECT q.*, e.meta ->>")) {
       const now = numberValue(values, 0);
       const limit = numberValue(values, 1);
       const rows = [...jobs.values()]
@@ -151,6 +186,58 @@ const fakePg = vi.hoisted(() => {
             row.attempts < row.max_attempts &&
             (row.lease_owner === null ||
               (typeof row.lease_expires_at === "number" && row.lease_expires_at <= now)) &&
+            !locks.has(String(row.job_id)),
+        )
+        .sort((left, right) => {
+          const byReported =
+            Number(left.quota_rejection_reported) - Number(right.quota_rejection_reported);
+          if (byReported !== 0) {
+            return byReported;
+          }
+          const byPriority = Number(right.priority) - Number(left.priority);
+          return byPriority !== 0
+            ? byPriority
+            : Number(left.available_at) - Number(right.available_at);
+        })
+        .slice(0, limit)
+        .map((row) => {
+          const run = eventRuns.get(String(row.run_id));
+          return {
+            ...row,
+            job_id: row.job_id,
+            requested_by: run?.requested_by ?? null,
+            role: run?.role ?? null,
+            status: run?.status ?? "pending",
+          };
+        });
+      for (const row of rows) {
+        locks.set(String(row.job_id), clientId);
+      }
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.startsWith("SELECT * FROM run_queue WHERE available_at <=")) {
+      const now = numberValue(values, 0);
+      const skippedJobIds =
+        Array.isArray(values[1]) && values[1].every((value) => typeof value === "string")
+          ? values[1]
+          : [];
+      let limit = Number.MAX_SAFE_INTEGER;
+      if (typeof values[1] === "number") {
+        limit = numberValue(values, 1);
+      } else if (Array.isArray(values[1])) {
+        limit = 1;
+      }
+      const rows = [...jobs.values()]
+        .filter(
+          (row) =>
+            typeof row.available_at === "number" &&
+            typeof row.attempts === "number" &&
+            typeof row.max_attempts === "number" &&
+            row.available_at <= now &&
+            row.attempts < row.max_attempts &&
+            (row.lease_owner === null ||
+              (typeof row.lease_expires_at === "number" && row.lease_expires_at <= now)) &&
+            !skippedJobIds.includes(String(row.job_id)) &&
             !locks.has(String(row.job_id)),
         )
         .sort((left, right) => {
@@ -172,6 +259,14 @@ const fakePg = vi.hoisted(() => {
         locks.set(String(row.job_id), clientId);
       }
       return { rows, rowCount: rows.length };
+    }
+    if (sql.startsWith("UPDATE run_queue SET quota_rejection_reported = TRUE")) {
+      const row = jobs.get(stringValue(values, 0));
+      if (row === undefined || row.quota_rejection_reported === true) {
+        return { rows: [], rowCount: 0 };
+      }
+      row.quota_rejection_reported = true;
+      return { rows: [{ job_id: row.job_id }], rowCount: 1 };
     }
     if (sql.startsWith("UPDATE run_queue SET lease_owner =")) {
       const row = jobs.get(stringValue(values, 3));
@@ -299,6 +394,31 @@ const fakePg = vi.hoisted(() => {
     pauseNextConnection(wait: () => Promise<void>): void {
       nextConnectionWait = wait;
     },
+    async acquireQuotaLock(clientId: number): Promise<void> {
+      if (quotaLockOwner === undefined) {
+        quotaLockOwner = clientId;
+        return;
+      }
+      if (quotaLockOwner !== clientId) {
+        await new Promise<void>((resolve) => quotaLockWaiters.push({ clientId, resolve }));
+      }
+    },
+    seedRun(
+      runId: string,
+      identity: { requestedBy?: string | undefined; role?: string | undefined },
+    ): void {
+      eventRuns.set(runId, {
+        requested_by: identity.requestedBy ?? null,
+        role: identity.role ?? null,
+        status: "pending",
+      });
+    },
+    markRunning(runId: string): void {
+      const run = eventRuns.get(runId);
+      if (run !== undefined) {
+        eventRuns.set(runId, { ...run, status: "running" });
+      }
+    },
     beforeNextLockedQuery(hook: () => void): void {
       beforeNextForUpdate = hook;
     },
@@ -307,8 +427,11 @@ const fakePg = vi.hoisted(() => {
       jobs.clear();
       dead.clear();
       migrations.clear();
+      eventRuns.clear();
       locks.clear();
+      quotaLockWaiters.length = 0;
       nextClientId = 0;
+      quotaLockOwner = undefined;
       nextConnectionWait = undefined;
       beforeNextForUpdate = undefined;
     },
@@ -325,8 +448,12 @@ vi.mock("pg", () => ({
       await fakePg.waitForNextConnection();
       const clientId = fakePg.newClientId();
       return {
-        query: (query: string, values: unknown[] = []) =>
-          Promise.resolve(fakePg.handle(query, values, clientId)),
+        query: async (query: string, values: unknown[] = []) => {
+          if (query.startsWith("SELECT pg_advisory_xact_lock")) {
+            await fakePg.acquireQuotaLock(clientId);
+          }
+          return fakePg.handle(query, values, clientId);
+        },
         release: () => undefined,
       };
     }
@@ -358,6 +485,14 @@ const postgresFactory: RunQueueFactoryCreator = (clock: Clock) => {
       queues.add(queue);
       return queue;
     },
+    seedRun(runId, identity) {
+      fakePg.seedRun(runId, identity);
+      return Promise.resolve();
+    },
+    markRunning(runId) {
+      fakePg.markRunning(runId);
+      return Promise.resolve();
+    },
     async cleanup() {
       await Promise.all([...queues].map((queue) => queue.close()));
     },
@@ -365,6 +500,30 @@ const postgresFactory: RunQueueFactoryCreator = (clock: Clock) => {
 };
 
 runQueueConformance("PostgresRunQueue mock", postgresFactory);
+
+it("records a deferred-claim quota rejection only once for a queued Postgres job", async () => {
+  const instance = await postgresFactory(new FakeClock(100));
+  const queue = instance.open();
+  const runId = "00000000000000000000000036";
+  const deferred: RunQueueRunIdentity[] = [];
+  try {
+    await instance.seedRun(runId, { requestedBy: "cli.alice", role: "researcher" });
+    await queue.enqueue({ kind: "start", runId });
+    const options = {
+      canClaim: () => false,
+      onDeferred: (identity: RunQueueRunIdentity) => {
+        deferred.push(identity);
+      },
+    };
+
+    await queue.claim("worker.first", 1, 100, options);
+    await queue.claim("worker.second", 1, 100, options);
+
+    expect(deferred).toEqual([{ runId, requestedBy: "cli.alice", role: "researcher" }]);
+  } finally {
+    await instance.cleanup();
+  }
+});
 
 it("rejects invalid Postgres queue configuration without opening a pool", () => {
   expect(() => new PostgresRunQueue("not-a-postgres-url")).toThrow(
