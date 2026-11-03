@@ -464,6 +464,9 @@ describe("Worker", () => {
     };
     const tool: ToolPort = {
       describe: () => ({ idempotent: false, timeoutMs: 1_000, longRunning: true }),
+      getToolSpecs: () => [
+        { toolId: TOOL_ID, description: "Synthetic worker tool", inputSchema: {} },
+      ],
       prepare: (call) => Promise.resolve(call),
       execute: (_call, context) => {
         sideEffects += 1;

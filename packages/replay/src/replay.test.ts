@@ -152,10 +152,10 @@ describe("replayRun", () => {
     expect(JSON.stringify(events)).not.toContain(raw);
     expect(JSON.stringify(events)).toContain("<EMAIL_1>");
     const request = events.find((event) => event.type === "model_request");
-    expect(request?.v).toBe(2);
+    expect(request?.v).toBe(3);
     expect(request?.requestParametersHash).toMatch(/^[a-f0-9]{64}$/u);
 
-    const outcome = await replayRun(original, { config: runConfig });
+    const outcome = await replayRun(original, { config: runConfig, toolRegistry: fakeTool() });
     expect(outcome.status).toBe("completed");
     expect(outcome.divergence).toBeUndefined();
     expect(JSON.stringify(outcome.events)).not.toContain(raw);
@@ -165,7 +165,7 @@ describe("replayRun", () => {
     const original = await recordRun([completion([{ type: "text", text: "synthetic answer" }])]);
     const originalEvents = original.runs[0]?.events ?? [];
     const originalCreated = originalEvents[0];
-    const outcome = await replayRun(original, { config: runConfig });
+    const outcome = await replayRun(original, { config: runConfig, toolRegistry: fakeTool() });
     const replayCreated = outcome.events[0];
     const replaySpan = spanCollector
       ?.getFinishedSpans()
@@ -211,7 +211,10 @@ describe("replayRun", () => {
         ? Event.parse({ ...event, configHash: "d".repeat(64), policyVersion: "old.policy" })
         : event,
     );
-    const outcome = await replayRun(withRootEvents(original, changed), { config: runConfig });
+    const outcome = await replayRun(withRootEvents(original, changed), {
+      config: runConfig,
+      toolRegistry: fakeTool(),
+    });
 
     expect(outcome.configDrift).toBe(true);
     expect(outcome.policyDrift).toBe(true);
@@ -225,7 +228,10 @@ describe("replayRun", () => {
         ? Event.parse({ ...event, requestHash: "d".repeat(64) })
         : event,
     );
-    const outcome = await replayRun(withRootEvents(original, changed), { config: runConfig });
+    const outcome = await replayRun(withRootEvents(original, changed), {
+      config: runConfig,
+      toolRegistry: fakeTool(),
+    });
 
     expect(outcome.status).toBe("error");
     expect(outcome.divergence).toMatchObject({ code: "replay_divergence" });
@@ -236,7 +242,10 @@ describe("replayRun", () => {
     const events = original.runs[0]?.events ?? [];
     const requestIndex = events.findIndex((event) => event.type === "model_request");
     const truncated = events.slice(0, requestIndex + 1);
-    const outcome = await replayRun(withRootEvents(original, truncated), { config: runConfig });
+    const outcome = await replayRun(withRootEvents(original, truncated), {
+      config: runConfig,
+      toolRegistry: fakeTool(),
+    });
 
     expect(outcome.status).toBe("error");
     expect(outcome.divergence).toMatchObject({ code: "replay_missing_result" });
@@ -246,7 +255,10 @@ describe("replayRun", () => {
     const original = await recordRun([completion([{ type: "text", text: "synthetic answer" }])]);
     const events = original.runs[0]?.events ?? [];
     const withoutInput = events.filter((event) => event.type !== "run_input");
-    const outcome = await replayRun(withRootEvents(original, withoutInput), { config: runConfig });
+    const outcome = await replayRun(withRootEvents(original, withoutInput), {
+      config: runConfig,
+      toolRegistry: fakeTool(),
+    });
 
     expect(outcome.status).toBe("error");
     expect(outcome.divergence).toMatchObject({ code: "replay_missing_result" });
@@ -289,7 +301,7 @@ describe("replayRun", () => {
       ],
     });
 
-    const outcome = await replayRun(resolved, { config: runConfig });
+    const outcome = await replayRun(resolved, { config: runConfig, toolRegistry: fakeTool() });
     const created = outcome.events.filter((event) => event.type === "run_created");
     const replayRoot = created.find((event) => event.replayOf === original.rootRunId);
     const replayChild = created.find((event) => event.replayOf === childRunId);
@@ -313,7 +325,11 @@ describe("replayRun", () => {
       ],
       askPolicy,
     );
-    const outcome = await replayRun(original, { config: runConfig, policy: askPolicy });
+    const outcome = await replayRun(original, {
+      config: runConfig,
+      policy: askPolicy,
+      toolRegistry: fakeTool(),
+    });
 
     expect(outcome.status).toBe("completed");
     expect(outcome.events.some((event) => event.type === "approval_resolved")).toBe(true);

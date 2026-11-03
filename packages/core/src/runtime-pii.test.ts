@@ -74,6 +74,7 @@ function scriptedModel(args: JsonValue): FakeModelPort {
 function makeTool(received: JsonValue[], output: JsonValue): ToolPort {
   return {
     describe: (id) => (id === toolId ? { idempotent: true, timeoutMs: 1_000 } : undefined),
+    getToolSpecs: () => [{ toolId, description: "Synthetic echo tool", inputSchema: {} }],
     execute: (call) => {
       received.push(call.args);
       return Promise.resolve({ outcome: "ok", result: output });

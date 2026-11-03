@@ -203,6 +203,9 @@ describe("InProcessExecutor", () => {
     };
     const tool: ToolPort = {
       describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      getToolSpecs: () => [
+        { toolId: "fake.echo", description: "Synthetic echo tool", inputSchema: {} },
+      ],
       execute: () => {
         toolCalls += 1;
         return Promise.resolve({ outcome: "ok", result: { value: "synthetic" } });
@@ -347,6 +350,9 @@ describe("InProcessExecutor", () => {
       },
       tool: {
         prepare: (call) => Promise.resolve(call),
+        getToolSpecs: () => [
+          { toolId: "fake.echo", description: "Synthetic echo tool", inputSchema: {} },
+        ],
         describe: () => ({
           idempotent: true,
           timeoutMs: 1_000,

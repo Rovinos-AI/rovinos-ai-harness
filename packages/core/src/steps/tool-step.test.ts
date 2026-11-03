@@ -47,6 +47,10 @@ import { prepareCompletion } from "./prepare-tool.js";
 import { modelToolOptions } from "./model-step.js";
 import { createAgentAskUserHandler } from "./ask-user-step.js";
 import {
+  recordUnadvertisedCall,
+  ToolStepEventMissingError,
+} from "./tool-result.js";
+import {
   applyApprovalDecision,
   applyDanglingIntents,
   resolveDanglingIntentApproval,
@@ -218,6 +222,12 @@ class TestContextManager implements ContextManager {
 class EmptyBatchRecorder extends RunRecorder {
   override recordBatch(_partials: readonly EventPartial[]): Promise<Event[]> {
     return Promise.resolve([]);
+  }
+}
+
+class SparseBatchRecorder extends RunRecorder {
+  override recordBatch(_partials: readonly EventPartial[]): Promise<Event[]> {
+    return Promise.resolve(new Array<Event>(2));
   }
 }
 
@@ -670,6 +680,22 @@ describe("tool-step resume handling", () => {
     ]);
     expect(decide).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty", EmptyBatchRecorder],
+    ["missing result", SparseBatchRecorder],
+  ] as const)("fails safely when an unadvertised result batch is %s", async (_case, Recorder) => {
+    const store = new InMemoryEventStore();
+    const recorder = new Recorder(store, runId, segmentId, 0, new FakeClock(100));
+
+    await expect(
+      recordUnadvertisedCall(
+        recorder,
+        { callId: callIds.unknown, toolId: "hidden.tool", args: null },
+        undefined,
+      ),
+    ).rejects.toBeInstanceOf(ToolStepEventMissingError);
   });
 
   it("passes only the PolicyPort call fields to a configured PolicyEngine", async () => {
