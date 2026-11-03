@@ -77,6 +77,39 @@ registration flow. OAuth secrets and tokens are stored in the encrypted
 `<dataDir>/mcp-oauth.db` database using the configured key provider. Configure
 `keys` before logging in so credentials can be encrypted with a persistent key.
 
+Protected-resource discovery has a separate network policy under `auth.discovery`:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `profile` | `production`, `internal`, or `local-development` | `production` | Network profile used only for pre-initialize OAuth discovery. |
+| `allowlist` | exact host/port entries | omitted | Optional restriction for `production` and `local-development`; required for `internal`. |
+
+`production` permits public HTTPS destinations without an allowlist and rejects
+loopback, private, link-local, multicast, unspecified, IPv4-mapped private, and
+cloud-metadata addresses. An allowlist narrows this set. `internal` permits
+private addresses only for explicitly allowlisted hosts and ports. Select
+`local-development` explicitly to permit HTTP to loopback services; it does not
+permit arbitrary private addresses. These profiles are independent of
+`trust: internal`, which controls trace propagation and annotation use.
+
+The discovery request follows at most five redirects manually, spends at most
+20 seconds across the entire probe, and reads at most 2 MiB of metadata. Every
+redirect is checked and DNS-pinned before its connection. DNS-rebinding
+protection applies only to these discovery requests; the later MCP SDK HTTP
+transport is not constrained by this discovery-specific socket pinning. Use an
+enforced deployment network policy when broader egress control is required.
+
+For a local HTTP MCP server, explicitly opt in:
+
+```yaml
+auth:
+  kind: oauth
+  grant: client_credentials
+  clientSecret: env:MCP_OAUTH_SECRET
+  discovery:
+    profile: local-development
+```
+
 Run `harness servers login <id>` to start an explicit authorization-code login.
 The command prints the authorization URL and waits for the loopback callback on
 `127.0.0.1`; it opens a browser only when `--open` is supplied. `harness servers

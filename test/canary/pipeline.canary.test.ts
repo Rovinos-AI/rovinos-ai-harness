@@ -109,6 +109,10 @@ describe("canary release gate", () => {
           attributes["harness.keys.store.rows_rotated"] === 5,
       ),
     ).toBe(true);
+    const metricPayload = JSON.stringify(current.captured.metrics);
+    expect(current.captured.metrics.length).toBeGreaterThan(0);
+    expect(metricPayload.toLowerCase()).not.toContain("exemplar");
+    expect(current.canaries.strings.every((value) => !metricPayload.includes(value))).toBe(true);
     await expect(current.assertVaultRoundTrips()).resolves.toBeUndefined();
   });
 

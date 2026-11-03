@@ -4,6 +4,26 @@ Docker Compose attaches the harness and collector to the internal network. Only 
 
 `infra/k8s/networkpolicy.example.yaml` is an example Kubernetes policy, not a supported deployment. It denies egress by default in the namespace, permits DNS to kube-dns, and permits harness pods to reach the collector on OTLP ports 4317 and 4318 and pods explicitly labeled as approved harness sidecars. The sidecar rule has no known port in this example: operators must add its specific `ports` list before applying it because an omitted port list permits all ports. Adapt selectors to the deployment and ensure no other NetworkPolicy grants the harness additional egress. The default-deny policy also blocks collector exporter traffic. The commented collector policy is a template: replace its CIDR with operator-approved exporter destinations and adapt the pod label before enabling it. Standard Kubernetes NetworkPolicy does not express DNS names.
 
+## Runtime metrics bootstrap
+
+The shared runtime initializes the harness meter provider for SDK and CLI runs. The default
+`telemetry.metrics` settings enable harness ownership and cap each metric instrument at 100 distinct
+attribute combinations; `maxSeries` can be raised to at most 1,000. Views are built from
+`METRIC_ALLOWLIST`, so only each metric's declared attribute keys are retained. The harness metric
+SDK does not emit exemplars. When `ownership: host` is selected, the host must install and flush its
+own global meter provider and apply equivalent attribute and cardinality controls. The harness
+does not apply metric views in host-owned mode, so `maxSeries`, the metric attribute allowlist, and
+the no-exemplar behavior do not constrain the host's provider; the harness does not replace or shut
+down that provider.
+
+Set `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the collector's `/v1/metrics` URL, or set the common
+`OTEL_EXPORTER_OTLP_ENDPOINT` base URL, to enable OTLP/HTTP export. Exports run every 60 seconds and
+runtime close flushes pending data. Exporter flush and shutdown failures are best-effort and do not
+change a run result. With neither endpoint variable set, the harness creates no exporting reader;
+set `telemetry.metrics.enabled: false` to explicitly disable its metric provider as well. A process
+uses the first initialized metrics settings; subsequent runtimes must use the same ownership,
+enabled, and `maxSeries` values.
+
 ## Exporter profiles
 
 The collector image is pinned in `infra/collector/VERSION`. Select one profile with

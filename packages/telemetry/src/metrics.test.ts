@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { metrics } from "@opentelemetry/api";
+import { MeterProvider } from "@opentelemetry/sdk-metrics";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TELEMETRY_DROP_REASONS,
@@ -23,6 +24,7 @@ import {
   recordWorkerQueueLag,
   countSentinelScopeReduced,
   countSkippedShortValues,
+  selectTelemetryMeterProvider,
   type TelemetryDropReason,
 } from "./metrics.js";
 
@@ -272,5 +274,42 @@ describe("countDroppedTelemetry", () => {
 
   it("has an instrument for every allowlist entry and no stale entries", () => {
     expect([...createdMetricNames].sort()).toEqual(Object.keys(METRIC_ALLOWLIST).sort());
+  });
+
+  it("enumerates every metric instrument through an allowlisted creation path", () => {
+    createdMetricNames.length = 0;
+    selectTelemetryMeterProvider(new MeterProvider());
+    selectTelemetryMeterProvider(undefined);
+
+    for (const reason of TELEMETRY_DROP_REASONS) {
+      countDroppedTelemetry(reason);
+    }
+    for (const reason of HOST_APP_REJECTED_REASONS) {
+      countHostAppRejected(reason);
+    }
+    for (const decision of POLICY_DECISIONS) {
+      countPolicyDecision(decision);
+    }
+    countQuotaRejection("quota");
+    countPiiBlobHit();
+    countPiiDetectorDegraded();
+    countHostAppSpansAccepted(1);
+    countSkippedShortValues(1);
+    countSentinelScopeReduced();
+    countModelUsage(
+      { inputTokens: 1, outputTokens: 1, cacheReadTokens: 1, cacheWriteTokens: 1, costMicros: 1 },
+      "sample",
+      "model",
+    );
+    countMcpDiscoveryFailed();
+    for (const outcome of MCP_INPUT_REQUEST_OUTCOMES) {
+      countMcpInputRequest(outcome);
+    }
+    for (const outcome of WORKER_JOB_OUTCOMES) {
+      countWorkerJob(outcome);
+    }
+    recordWorkerQueueLag(1);
+
+    expect([...new Set(createdMetricNames)].sort()).toEqual(Object.keys(METRIC_ALLOWLIST).sort());
   });
 });

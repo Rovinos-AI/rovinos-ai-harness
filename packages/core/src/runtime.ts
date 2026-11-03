@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Id } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
-import { forceFlushTelemetry, sentinelTripQueue } from "@rovinos/telemetry";
+import {
+  forceFlushTelemetry,
+  initializeTelemetryMetrics,
+  sentinelTripQueue,
+} from "@rovinos/telemetry";
 import {
   assertRuntimeOwnership,
   closeRuntimeResources,
@@ -383,5 +387,28 @@ export async function createRuntime(
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
   assertRuntimeOverrideRequirements(overrides);
-  return composeRuntime(await setupRuntime(config, overrides));
+  const metricsLifecycle =
+    config.telemetry === undefined
+      ? undefined
+      : initializeTelemetryMetrics(config.telemetry.metrics);
+  try {
+    const runtime = composeRuntime(await setupRuntime(config, overrides));
+    let closePromise: Promise<void> | undefined;
+    return {
+      ...runtime,
+      close: () => {
+        closePromise ??= (async () => {
+          try {
+            await runtime.close();
+          } finally {
+            await metricsLifecycle?.shutdown();
+          }
+        })();
+        return closePromise;
+      },
+    };
+  } catch (error) {
+    await metricsLifecycle?.shutdown();
+    throw error;
+  }
 }

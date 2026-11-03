@@ -9,6 +9,7 @@ const defaultAllowedFiles = [
   "packages/telemetry/src/log-registry.ts",
   "packages/telemetry/src/tracer.ts",
   "packages/telemetry/src/sdk.ts",
+  "packages/telemetry/src/metrics-sdk.ts",
   "packages/telemetry/src/testing.ts",
   "**/*.test.ts",
   "test/canary/telemetry.ts",
