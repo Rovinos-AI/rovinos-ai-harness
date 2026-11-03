@@ -16,6 +16,8 @@ export interface RunQueueFactory {
   seedRun(runId: string, identity: RunQueueSeedIdentity): Promise<void>;
   /** Transition a seeded run to running for quota-admission tests. */
   markRunning(runId: string): Promise<void>;
+  /** Transition a running run to cancelled for quota-admission tests. */
+  markCancelled(runId: string): Promise<void>;
   /** Close connections and remove any adapter-specific test data. */
   cleanup(): Promise<void>;
 }
