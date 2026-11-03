@@ -13,6 +13,7 @@ import {
   type Tool,
 } from "@modelcontextprotocol/server";
 import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
+import { sampleInputTool, sampleInputTools } from "./elicitation.js";
 
 const counterPath = process.env.SAMPLE_COUNTER_FILE ?? "/data/messages.count";
 const spanCollector = createTestSpanCollector();
@@ -68,6 +69,7 @@ const messageSchema = {
   additionalProperties: false,
 } satisfies Tool["inputSchema"];
 const tools = [
+  ...sampleInputTools,
   { name: "echo", description: "Return the supplied value.", inputSchema: valueSchema },
   {
     name: "send_message",
@@ -208,7 +210,11 @@ function createServer(): McpServer {
   const server = new McpServer({ name: "sample-mcp-server", version: "1.0.0" });
   server.server.registerCapabilities({ tools: { listChanged: true } });
   server.server.setRequestHandler("tools/list", () => ({ tools }));
-  server.server.setRequestHandler("tools/call", (request, extra) => {
+  server.server.setRequestHandler("tools/call", async (request, extra) => {
+    const inputResult = await sampleInputTool(request, extra);
+    if (inputResult !== undefined) {
+      return inputResult;
+    }
     const args = isRecord(request.params.arguments) ? request.params.arguments : {};
     const handler = toolHandlers[request.params.name];
     return handler === undefined

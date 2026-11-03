@@ -321,7 +321,7 @@ async function completeDockerTrial(options: {
     options.dependencies,
   );
   return finishDockerResult(
-    result,
+    { ...result, inputs: human.inputs ?? { accepted: 0, declined: 0, cancelled: 0 } },
     Math.max(0, Math.floor(options.clock.now() - options.startedAt)),
     {
       exitCode: human.processExitCode,

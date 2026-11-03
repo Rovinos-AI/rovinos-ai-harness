@@ -26,7 +26,7 @@ import { McpProtocolError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
-import type { ElicitationRetry } from "./elicitation/mrtr.js";
+import type { ElicitationRetry, LegacyElicitationInput } from "./elicitation/mrtr.js";
 
 const spanCollector = createTestSpanCollector();
 const canary = "TOOL_ERROR_CANARY";
@@ -1043,6 +1043,60 @@ describe("McpToolPort", () => {
       await current.close();
     }
   });
+
+  it.each([false, true])(
+    "fails a legacy call when core rejects excess live requests (server throws: %s)",
+    async (serverThrows) => {
+      const current = await fixture({ elicitation: { ...mrtrConfig, modes: ["url"] } });
+      let requested = 0;
+      const handleLegacyLive = vi.fn((input: LegacyElicitationInput) => {
+        expect(input.maxPerRun).toBe(mrtrConfig.maxPerRun);
+        if (++requested > mrtrConfig.maxPerRun) {
+          input.onRateLimited?.();
+          return Promise.resolve(undefined);
+        }
+        return Promise.resolve({ action: "accept" as const });
+      });
+      const callTool = vi
+        .spyOn(McpConnection.prototype, "callTool")
+        .mockImplementation(async (request) => {
+          const live = request.legacyElicitation;
+          if (live === undefined) {
+            throw new Error("Legacy callbacks were not attached.");
+          }
+          for (let index = 0; index < 6; index++) {
+            await live.handle(
+              {
+                mode: "url",
+                elicitationId: `legacy-${String(index)}`,
+                message: "Synthetic connect",
+                url: "https://example.test/account",
+              },
+              `legacy-${String(index)}`,
+              request.options?.signal ?? new AbortController().signal,
+            );
+          }
+          if (serverThrows) {
+            throw new Error("Untrusted server failure.");
+          }
+          return { content: [{ type: "text", text: "ignored cancellation" }] };
+        });
+      try {
+        await expect(
+          current.port.execute(
+            call,
+            context(new AbortController().signal, {
+              elicitation: { handleInputRequired: vi.fn(), handleLegacyLive },
+            }),
+          ),
+        ).resolves.toMatchObject({ outcome: "error", errorCode: "mcp_input_rate_limited" });
+        expect(handleLegacyLive).toHaveBeenCalledTimes(6);
+      } finally {
+        callTool.mockRestore();
+        await current.close();
+      }
+    },
+  );
 
   it("declines unsafe legacy URLs without presenting them to a channel", async () => {
     const current = await fixture({

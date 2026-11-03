@@ -39,12 +39,19 @@ function recordedIds(events: readonly Event[]): IdValue[] {
       add(event.segmentId);
     } else if (event.type === "subagent_spawned") {
       add(event.childRunId);
-    } else if (event.type === "model_request") {
+    } else if (event.type === "model_request" || event.type === "input_requested") {
       add(event.requestId);
     } else if (event.type === "approval_requested") {
       add(event.approvalId);
     } else if (event.type === "checkpoint_written") {
       add(event.checkpointId);
+      const workspaceId =
+        event.workspaceRef?.startsWith("ws:") === true
+          ? Id.safeParse(event.workspaceRef.split(":")[1])
+          : undefined;
+      if (workspaceId?.success === true) {
+        add(workspaceId.data);
+      }
     }
   }
   return ids;

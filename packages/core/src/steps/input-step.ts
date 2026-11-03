@@ -98,35 +98,8 @@ function legacyRequestEvent(
   return {
     type: "input_requested" as const,
     v: 1 as const,
-    requestId,
-    source: "mcp_legacy" as const,
-    serverId: input.serverId,
-    callId: input.callId,
-    inputKey: input.elicitationId,
-    round: 0,
-    mode: input.request.mode,
-    message: input.request.message,
-    ...(input.request.requestedSchema === undefined
-      ? {}
-      : { schema: input.request.requestedSchema }),
-    ...(input.request.url === undefined ? {} : { url: input.request.url }),
-    expiresAt: Math.max(0, Math.floor(options.clock.now() + input.timeoutMs)),
+    ...legacyInputRequest(options, input, requestId),
   };
-}
-
-function activeLegacyRequestId(
-  options: McpElicitationPortOptions,
-  input: LegacyElicitationInput,
-): Id | undefined {
-  const state = foldRunState([...options.history, ...options.events]);
-  return Array.from(state.inputRequests.values()).find(
-    (request) =>
-      request.source === "mcp_legacy" &&
-      request.callId === input.callId &&
-      request.serverId === input.serverId &&
-      request.inputKey === input.elicitationId &&
-      state.pendingInputs.has(request.requestId),
-  )?.requestId;
 }
 
 async function recordLegacyRequest(
@@ -141,15 +114,31 @@ async function recordLegacyRequest(
   ) {
     return undefined;
   }
+  if (
+    Array.from(state.inputRequests.values()).filter(
+      (request) =>
+        (request.source === "mcp_mrtr" || request.source === "mcp_legacy") &&
+        request.serverId === input.serverId,
+    ).length >= input.maxPerRun
+  ) {
+    input.onRateLimited?.();
+    return undefined;
+  }
   const requestId = options.ids.next();
   try {
-    options.events.push(
-      await options.recorder.record(legacyRequestEvent(options, input, requestId)),
-    );
+    const recorded = await options.recorder.record(legacyRequestEvent(options, input, requestId));
+    // Storage wrappers may tokenize a copy; expose only the canonical persisted event.
+    for await (const event of options.recorder.eventStore.read(options.runId, {
+      fromSeq: recorded.seq,
+      toSeq: recorded.seq,
+    })) {
+      options.events.push(event);
+      return requestId;
+    }
+    throw new Error("Recorded legacy input is unavailable.");
   } catch (error) {
     throw new RunEventRecordingError(error);
   }
-  return requestId;
 }
 
 function legacyInputRequest(
@@ -217,8 +206,9 @@ async function collectLegacyResolution(
 async function handleLegacyLive(
   options: McpElicitationPortOptions,
   input: LegacyElicitationInput,
+  recordRequest: (input: LegacyElicitationInput) => Promise<Id | undefined>,
 ): Promise<InputResponse | undefined> {
-  const requestId = await recordLegacyRequest(options, input);
+  const requestId = await recordRequest(input);
   if (requestId === undefined) {
     return undefined;
   }
@@ -248,10 +238,10 @@ async function handleLegacyLive(
 
 async function recordLegacyTimeout(
   options: McpElicitationPortOptions,
-  input: LegacyElicitationInput,
+  requestId: Id | undefined,
 ): Promise<void> {
-  const requestId = activeLegacyRequestId(options, input);
-  if (requestId !== undefined) {
+  const state = foldRunState([...options.history, ...options.events]);
+  if (requestId !== undefined && state.pendingInputs.has(requestId)) {
     await resolveActiveInput({
       recorder: options.recorder,
       events: options.events,
@@ -267,8 +257,9 @@ async function recordLegacyTimeout(
 async function recordLegacyPolicyDecline(
   options: McpElicitationPortOptions,
   input: LegacyElicitationInput,
+  recordRequest: (input: LegacyElicitationInput) => Promise<Id | undefined>,
 ): Promise<void> {
-  const requestId = await recordLegacyRequest(options, input);
+  const requestId = await recordRequest(input);
   if (requestId !== undefined) {
     await resolveActiveInput({
       recorder: options.recorder,
@@ -352,11 +343,26 @@ async function handleInputRequired(
 
 /** Creates the per-call MCP input handler that records and checkpoints requests before exposure. */
 export function createMcpElicitationPort(options: McpElicitationPortOptions): ElicitationPort {
+  const legacyRequestIds = new Map<string, Id>();
+  const legacyKey = (input: LegacyElicitationInput): string =>
+    JSON.stringify([input.serverId, input.callId, input.elicitationId]);
+  let requestTail: Promise<Id | undefined> = Promise.resolve(undefined);
+  const recordRequest = (input: LegacyElicitationInput): Promise<Id | undefined> => {
+    requestTail = requestTail.then(async () => {
+      const requestId = await recordLegacyRequest(options, input);
+      if (requestId !== undefined) {
+        legacyRequestIds.set(legacyKey(input), requestId);
+      }
+      return requestId;
+    });
+    return requestTail;
+  };
   return {
     handleInputRequired: (input) => handleInputRequired(options, input),
-    handleLegacyLive: (input) => handleLegacyLive(options, input),
-    recordLegacyTimeout: (input) => recordLegacyTimeout(options, input),
-    recordLegacyPolicyDecline: (input) => recordLegacyPolicyDecline(options, input),
+    handleLegacyLive: (input) => handleLegacyLive(options, input, recordRequest),
+    recordLegacyTimeout: (input) =>
+      recordLegacyTimeout(options, legacyRequestIds.get(legacyKey(input))),
+    recordLegacyPolicyDecline: (input) => recordLegacyPolicyDecline(options, input, recordRequest),
   };
 }
 

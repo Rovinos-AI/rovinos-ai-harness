@@ -3,6 +3,7 @@ import { Event, Id } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { reportGrade, reportTrial } from "../../test-utils/report.js";
 import { computeTrialMetrics, executionMetricsFromEvents } from "./metrics.js";
+import { InputCountsSchema } from "../trial.js";
 
 const envelope = {
   runId: Id.parse("00000000000000000000000001"),
@@ -34,6 +35,20 @@ function modelResponse(seq: number, repairAttempts: number, fallbackDepth: numbe
 }
 
 describe("eval report metrics", () => {
+  it("projects only input action counts and defaults legacy trials to zero", () => {
+    const inputs = { accepted: 2, declined: 1, cancelled: 3 };
+    expect(computeTrialMetrics(reportTrial({ result: { inputs } }), []).inputs).toEqual(inputs);
+    expect(computeTrialMetrics(reportTrial(), []).inputs).toEqual({
+      accepted: 0,
+      declined: 0,
+      cancelled: 0,
+    });
+    expect(InputCountsSchema.safeParse({ ...inputs, answer: "synthetic content" }).success).toBe(
+      false,
+    );
+    expect(InputCountsSchema.safeParse({ ...inputs, accepted: -1 }).success).toBe(false);
+  });
+
   it("derives only bounded execution counters from events", () => {
     const events = [
       modelResponse(0, 1, 1),

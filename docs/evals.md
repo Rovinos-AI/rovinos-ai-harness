@@ -37,6 +37,13 @@ only be loaded from trusted sources.
 Simulated humans default to denying approvals. A script that uses default approval
 must set `unsafeAutoApprove: true`; the schema rejects implicit auto-approval.
 
+Human scripts can also provide `inputs` rules with `match` filters for `source`
+(`agent`, `mcp_mrtr`, or `mcp_legacy`), `serverId`, and `mode` (`form` or `url`), an
+`action` (`accept`, `decline`, or `cancel`), and an optional `answer`. The first matching
+rule wins; unmatched inputs decline independently of the approval default. Accepted
+answers pass through the runtime's normal validation and tokenization. Trial reports
+include input action counts, not questions or answers.
+
 `defineSuite` validates an in-memory object and returns the inferred suite type.
 `loadSuite` reads a supported suite file and returns a validated suite with its
 relative file references resolved. Validation failures are `ContractError`s with

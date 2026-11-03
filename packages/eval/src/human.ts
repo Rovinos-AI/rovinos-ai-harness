@@ -8,14 +8,22 @@ import {
   JsonValue as JsonValueSchema,
   parseTokenType,
 } from "@rovinos/schemas";
-import type { ApprovalPayload, Id, JsonValue, RunStatus } from "@rovinos/schemas";
-import type { ApprovalCounts } from "./trial.js";
+import type {
+  ApprovalPayload,
+  Event,
+  Id,
+  InputRequest,
+  JsonValue,
+  RunStatus,
+} from "@rovinos/schemas";
+import type { ApprovalCounts, InputCounts } from "./trial.js";
 import { HumanScriptSchema } from "./schema.js";
 import type { HumanScript } from "./schema.js";
 
-type SimulatedHumanRuntime = Pick<Runtime, "resolveApproval"> & {
-  readonly store: Pick<Runtime["store"], "read">;
-};
+type SimulatedHumanRuntime = Pick<Runtime, "resolveApproval"> &
+  Partial<Pick<Runtime, "resolveInput">> & {
+    readonly store: Pick<Runtime["store"], "read">;
+  };
 
 interface MutableApprovalCounts {
   approved: number;
@@ -23,7 +31,7 @@ interface MutableApprovalCounts {
   edited: number;
 }
 
-/** Result of applying a human script to a run until it is no longer awaiting approval. */
+/** Result of applying a human script until no human decisions remain pending. */
 export interface SimulatedHumanRunResult {
   readonly status: RunStatus;
   readonly maxResumesExceeded: boolean;
@@ -124,14 +132,34 @@ function matchesRule(rule: HumanScript["rules"][number], payload: ApprovalPayloa
   return true;
 }
 
-/** Drives approval decisions through the runtime's normal resolution and resume APIs. */
+function matchesInputRule(
+  rule: NonNullable<HumanScript["inputs"]>[number],
+  request: Pick<InputRequest, "source" | "serverId" | "mode">,
+): boolean {
+  return (
+    (rule.match.source === undefined || rule.match.source === request.source) &&
+    (rule.match.serverId === undefined || rule.match.serverId === request.serverId) &&
+    (rule.match.mode === undefined || rule.match.mode === request.mode)
+  );
+}
+
+class SimulatedInputRuntimeError extends HarnessError {
+  readonly code = "human_input_runtime_unavailable";
+
+  constructor() {
+    super("The simulated human requires durable input resolution.");
+  }
+}
+
+/** Drives human decisions through the runtime's normal resolution and resume APIs. */
 export class SimulatedHuman {
   private readonly script: HumanScript;
   private readonly approvalCounts: MutableApprovalCounts = { approved: 0, denied: 0, edited: 0 };
+  private readonly resolvedInputCounts = { accepted: 0, declined: 0, cancelled: 0 };
 
   /**
    * @param script - Validated or untrusted human script; parsed at construction.
-   * @param runtime - Runtime methods used for durable approval resolution.
+   * @param runtime - Runtime methods used for durable human decision resolution.
    */
   constructor(
     script: HumanScript,
@@ -143,6 +171,11 @@ export class SimulatedHuman {
   /** Metadata-only counts of decisions successfully recorded by this simulated human. */
   get counts(): ApprovalCounts {
     return { ...this.approvalCounts };
+  }
+
+  /** Metadata-only input counts, incremented only after durable runtime resolution succeeds. */
+  get inputCounts(): InputCounts {
+    return { ...this.resolvedInputCounts };
   }
 
   /** Whether the script explicitly enables unsafe default auto-approval. */
@@ -159,11 +192,20 @@ export class SimulatedHuman {
     return foldRunState(events).pendingApprovals.size > 0;
   }
 
+  /** Returns whether the durable log contains unresolved human inputs. */
+  async hasPendingInputs(runId: Id): Promise<boolean> {
+    const events = [];
+    for await (const event of this.runtime.store.read(runId)) {
+      events.push(event);
+    }
+    return foldRunState(events).pendingInputs.size > 0;
+  }
+
   /**
-   * Resolves all approvals pending at the start of this step.
+   * Resolves approvals and inputs pending at the start of this step.
    *
    * @param runId - Run whose durable approval requests are being processed.
-   * @returns Number of approvals resolved.
+   * @returns Number of human requests resolved.
    */
   async step(runId: Id): Promise<number> {
     const events = [];
@@ -172,6 +214,33 @@ export class SimulatedHuman {
     }
     const state = foldRunState(events);
     const pending = [...state.pendingApprovals.values()];
+    await this.resolveApprovals(runId, pending);
+    for (const request of state.pendingInputs.values()) {
+      if (this.runtime.resolveInput === undefined) {
+        throw new SimulatedInputRuntimeError();
+      }
+      const rule = this.script.inputs?.find((candidate) => matchesInputRule(candidate, request));
+      const action = rule?.action ?? "decline";
+      await this.runtime.resolveInput(runId, request.requestId, {
+        action,
+        ...(rule?.answer === undefined ? {} : { answer: rule.answer }),
+        principal: "eval.simulated",
+      });
+      if (action === "accept") {
+        this.resolvedInputCounts.accepted += 1;
+      } else if (action === "decline") {
+        this.resolvedInputCounts.declined += 1;
+      } else {
+        this.resolvedInputCounts.cancelled += 1;
+      }
+    }
+    return pending.length + state.pendingInputs.size;
+  }
+
+  private async resolveApprovals(
+    runId: Id,
+    pending: readonly Extract<Event, { type: "approval_requested" }>[],
+  ): Promise<void> {
     for (const approval of pending) {
       const parsed = ApprovalPayloadSchema.safeParse(approval.payload);
       if (!parsed.success) {
@@ -200,11 +269,10 @@ export class SimulatedHuman {
         this.approvalCounts.edited += 1;
       }
     }
-    return pending.length;
   }
 
   /**
-   * Resolves pending approvals and resumes the run until approval is no longer pending.
+   * Resolves pending human requests and resumes within the shared approval/input resume bound.
    *
    * @param runId - Run to drive.
    * @param initialStatus - Status returned by the initial run or most recent resume.
@@ -218,7 +286,10 @@ export class SimulatedHuman {
   ): Promise<SimulatedHumanRunResult> {
     let status = initialStatus;
     let resumes = 0;
-    while (status === "suspended" && (await this.hasPendingApprovals(runId))) {
+    while (
+      status === "suspended" &&
+      ((await this.hasPendingApprovals(runId)) || (await this.hasPendingInputs(runId)))
+    ) {
       if (resumes >= this.script.maxResumes) {
         return { status, maxResumesExceeded: true };
       }
