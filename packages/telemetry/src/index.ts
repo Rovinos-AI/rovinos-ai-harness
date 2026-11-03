@@ -120,7 +120,4 @@ export {
   type TelemetrySdk,
   type TelemetrySdkOptions,
 } from "./sdk.js";
-export {
-  initializeTelemetryMetrics,
-  type TelemetryMetricsLifecycle,
-} from "./metrics-sdk.js";
+export { initializeTelemetryMetrics, type TelemetryMetricsLifecycle } from "./metrics-sdk.js";

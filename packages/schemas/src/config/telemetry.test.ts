@@ -41,9 +41,7 @@ describe("TelemetryConfigSchema", () => {
         metrics: { enabled: false, ownership: "host", maxSeries: 25 },
       }).metrics,
     ).toEqual({ enabled: false, ownership: "host", maxSeries: 25 });
-    expect(
-      TelemetryConfigSchema.safeParse({ metrics: { maxSeries: 1_001 } }).success,
-    ).toBe(false);
+    expect(TelemetryConfigSchema.safeParse({ metrics: { maxSeries: 1_001 } }).success).toBe(false);
   });
 
   it("rejects non-positive, fractional, and unknown values", () => {
