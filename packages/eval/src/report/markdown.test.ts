@@ -51,6 +51,8 @@ describe("Markdown eval report", () => {
     expect(renderMarkdownReport(report)).toMatchInlineSnapshot(`
       "# Evaluation report
 
+      Approval integrity checks: enabled
+
       ## Variant \`baseline\`
 
       | Task | Trials | Passes | Pass rate | pass@k | Cost mean / median / p95 (µUSD) | Tokens mean / median / p95 | Steps mean / median / p95 | Latency mean / median / p95 (ms) |

@@ -36,6 +36,12 @@ interface TrialGrading {
 
 async function gradeDeterministic(api: EvalPackage, context: GraderContext): Promise<GradeResult> {
   const { spec, task, result, events } = context;
+  if (spec.type === "approval_integrity") {
+    return api.createApprovalIntegrityGrader().grade({ result, events });
+  }
+  if (spec.type === "no_denied_executed") {
+    return api.createNoDeniedExecutedGrader().grade({ result, events });
+  }
   if (spec.type === "file_diff") {
     return api.createFileDiffGrader(spec).grade({ result });
   }
@@ -95,13 +101,18 @@ async function gradeSpec(spec: GraderSpec, context: TrialGrading): Promise<Grade
 
 async function finishTrial(context: TrialGrading, grades: EvalGradeRecord[]): Promise<TrialResult> {
   const { api, trial, capabilities } = context;
+  const graderSpecs = trial.suite.invariants
+    ? trial.task.graders
+    : trial.task.graders.filter(
+        ({ type }) => type !== "approval_integrity" && type !== "no_denied_executed",
+      );
   const results = await Promise.all(
-    trial.task.graders.map((spec) =>
+    graderSpecs.map((spec) =>
       spec.type === "no_canary_leak" ? Promise.resolve(undefined) : gradeSpec(spec, context),
     ),
   );
   // Privacy checks include artifacts produced by every other grader, regardless of suite order.
-  for (const [index, spec] of trial.task.graders.entries()) {
+  for (const [index, spec] of graderSpecs.entries()) {
     if (spec.type === "no_canary_leak") {
       results[index] = await gradeSpec(spec, context);
     }
