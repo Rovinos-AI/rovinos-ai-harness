@@ -46,10 +46,7 @@ import type { ModelCompletion, PolicyPort, RunContext, ToolPort } from "../ports
 import { prepareCompletion } from "./prepare-tool.js";
 import { modelToolOptions } from "./model-step.js";
 import { createAgentAskUserHandler } from "./ask-user-step.js";
-import {
-  recordUnadvertisedCall,
-  ToolStepEventMissingError,
-} from "./tool-result.js";
+import { recordUnadvertisedCall, ToolStepEventMissingError } from "./tool-result.js";
 import {
   applyApprovalDecision,
   applyDanglingIntents,
