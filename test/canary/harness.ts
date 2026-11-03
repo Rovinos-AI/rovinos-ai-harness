@@ -36,6 +36,7 @@ import {
 interface CapturedSinks {
   readonly spans: CanaryTelemetry["spans"];
   readonly logs: CanaryTelemetry["logs"];
+  readonly metrics: CanaryTelemetry["metrics"];
   readonly stdout: string[];
   readonly stderr: string[];
   readonly inspect: string[];
@@ -145,6 +146,7 @@ export class CanaryHarness {
     this.captured = {
       spans: input.telemetry.spans,
       logs: input.telemetry.logs,
+      metrics: input.telemetry.metrics,
       stdout: [],
       stderr: [],
       inspect: [],
@@ -212,10 +214,7 @@ export class CanaryHarness {
       });
     } catch (error) {
       telemetry.unsafeSpanCleanup();
-      await Promise.all([
-        telemetry.sdk.tracerProvider.shutdown(),
-        telemetry.sdk.loggerProvider.shutdown(),
-      ]);
+      await telemetry.sdk.shutdown();
       await rm(directory, { recursive: true, force: true });
       throw error;
     }
@@ -314,6 +313,7 @@ export class CanaryHarness {
     const sinks: [string, string][] = [
       ["spans", JSON.stringify(this.captured.spans)],
       ["logs", JSON.stringify(this.captured.logs)],
+      ["metrics", JSON.stringify(this.captured.metrics)],
       ["stdout", this.captured.stdout.join("\n")],
       ["stderr", this.captured.stderr.join("\n")],
       ["cli.inspect", this.captured.inspect.join("\n")],
@@ -361,10 +361,7 @@ export class CanaryHarness {
       await this.runtime.close();
       await this.telemetry.sdk.forceFlush();
       this.telemetry.unsafeSpanCleanup();
-      await Promise.all([
-        this.telemetry.sdk.tracerProvider.shutdown(),
-        this.telemetry.sdk.loggerProvider.shutdown(),
-      ]);
+      await this.telemetry.sdk.shutdown();
     } finally {
       await rm(this.directory, { recursive: true, force: true });
     }

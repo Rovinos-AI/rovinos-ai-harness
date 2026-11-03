@@ -35,6 +35,7 @@ const context = {
 const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
   correlation: { enabled: false },
+  metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
 };
 const runId = Id.parse("A".repeat(26));
 

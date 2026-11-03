@@ -494,6 +494,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             correlation: z.ZodPrefault<z.ZodObject<{
                 enabled: z.ZodDefault<z.ZodBoolean>;
             }, z.core.$strict>>;
+            metrics: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                ownership: z.ZodDefault<z.ZodEnum<{
+                    harness: "harness";
+                    host: "host";
+                }>>;
+                maxSeries: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         sandbox: z.ZodPrefault<z.ZodObject<{
             allowUnsafeInProcess: z.ZodOptional<z.ZodBoolean>;
