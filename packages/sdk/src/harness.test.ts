@@ -204,12 +204,9 @@ class OrphaningCrashStore extends CrashingEventStore {
 }
 
 async function waitForRun(harness: Harness, runId: string, status?: string) {
-  const start = performance.now();
-  let observed = "not_found";
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
       const run = await harness.getRun(runId);
-      observed = run.status;
       if (status === undefined || run.status === status) {
         return run;
       }
@@ -217,7 +214,6 @@ async function waitForRun(harness: Harness, runId: string, status?: string) {
       await new Promise((resolve) => setTimeout(resolve, 1));
     }
   }
-  process.stdout.write(`poll elapsed=${Math.round(performance.now() - start)}ms status=${observed}\n`);
   throw new Error("Run did not reach the expected state.");
 }
 

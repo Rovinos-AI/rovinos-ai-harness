@@ -201,6 +201,9 @@ export class PiiMessageSanitizer {
       summarizeTokenActions(this.tokenActions(collectTokens(value), context.destination)),
       context,
     );
+    if (collectTokens(tokenized.value).length === 0) {
+      return tokenized.value;
+    }
     return mapJsonStrings(tokenized.value, async (text) =>
       this.applyTokenPolicy(text, [], context),
     );

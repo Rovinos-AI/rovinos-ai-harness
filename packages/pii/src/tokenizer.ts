@@ -19,6 +19,12 @@ import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import { assertJsonSize, JsonSizeTracker } from "./json-size.js";
 import { evaluatePiiPolicy } from "./policy.js";
 import {
+  combinePlanResults,
+  createActionCounts,
+  type ActionCounts,
+  type TextPlan,
+} from "./tokenizer-plans.js";
+import {
   detectOutsideTokenSpans,
   resolvePolicyOverlaps,
   type EvaluatedDetection,
@@ -32,17 +38,6 @@ interface Replacement {
   readonly raw: string;
   readonly entityType: string;
   readonly action: PiiAction;
-}
-
-interface TextPlan {
-  readonly text: string;
-  readonly replacements: readonly Replacement[];
-}
-
-interface ActionCounts {
-  readonly actions: Map<PiiAction, Map<Code, number>>;
-  readonly blocked: Map<Code, number>;
-  readonly keys: Map<Code, number>;
 }
 
 interface EntityCount {
@@ -136,9 +131,7 @@ export class Tokenizer {
     const validated = this.copyJson(value);
     assertJsonSize(validated);
 
-    const counts = createActionCounts();
-    const plans: TextPlan[] = [];
-    await this.collectPlans(validated, context, counts, plans);
+    const { counts, plans } = await this.collectPlans(validated, context);
     if (counts.keys.size > 0) {
       throw new PiiTokenizerError("pii_key_contains_pii", toEntityCounts(counts.keys));
     }
@@ -195,25 +188,28 @@ export class Tokenizer {
   private async collectPlans(
     value: JsonValue,
     context: TokenizationContext,
-    counts: ActionCounts,
-    plans: TextPlan[],
-  ): Promise<void> {
+  ): Promise<{ readonly counts: ActionCounts; readonly plans: TextPlan[] }> {
+    const counts = createActionCounts();
     if (typeof value === "string") {
-      plans.push(await this.planText(value, context, counts));
-      return;
+      return { counts, plans: [await this.planText(value, context, counts)] };
     }
     if (Array.isArray(value)) {
-      for (const child of value) {
-        await this.collectPlans(child, context, counts, plans);
-      }
-      return;
+      return combinePlanResults(
+        await Promise.all(value.map((child) => this.collectPlans(child, context))),
+      );
     }
     if (typeof value === "object" && value !== null) {
-      for (const [key, child] of Object.entries(value)) {
-        await this.planText(key, context, counts, true);
-        await this.collectPlans(child, context, counts, plans);
-      }
+      const entries = await Promise.all(
+        Object.entries(value).map(async ([key, child]) => {
+          const keyCounts = createActionCounts();
+          await this.planText(key, context, keyCounts, true);
+          const childResult = await this.collectPlans(child, context);
+          return combinePlanResults([{ counts: keyCounts, plans: [] }, childResult]);
+        }),
+      );
+      return combinePlanResults(entries);
     }
+    return { counts, plans: [] };
   }
 
   private async planText(
@@ -350,10 +346,6 @@ export class Tokenizer {
     }
     return value;
   }
-}
-
-function createActionCounts(): ActionCounts {
-  return { actions: new Map(), blocked: new Map(), keys: new Map() };
 }
 
 function addCount(
