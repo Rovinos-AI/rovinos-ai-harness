@@ -8,6 +8,7 @@ import {
 import {
   AnthropicAdapter,
   AzureOpenAIAdapter,
+  BedrockAdapter,
   createRoutingModelGateway,
   OpenAIAdapter,
   OpenAICompatibleAdapter,
@@ -23,6 +24,8 @@ import { parseRuntimeModelsConfig } from "./runtime-config.js";
 type RuntimeModelConfigErrorCode =
   | "secret_resolver_unavailable"
   | "model_provider_azure_config_invalid"
+  | "model_provider_bedrock_config_invalid"
+  | "model_provider_unsupported"
   | "model_provider_base_url_missing"
   | "model_provider_key_missing";
 
@@ -114,15 +117,10 @@ async function configuredAzureAdapter(
   });
 }
 
-async function configuredAdapter(
+async function configuredApiOptions(
   provider: ModelsConfig["providers"][number],
   secretResolver: RuntimeModelOverrides["secretResolver"],
-  clock: Clock,
-): Promise<ProviderAdapter> {
-  if (provider.kind === "azure_openai") {
-    return configuredAzureAdapter(provider, secretResolver, clock);
-  }
-
+) {
   let apiKey: { reveal(): string } = { reveal: () => "not-needed" };
   if (provider.apiKey !== undefined) {
     if (secretResolver === undefined) {
@@ -134,25 +132,58 @@ async function configuredAdapter(
   }
 
   const capabilities = definedCapabilities(provider.capabilities);
-  const options = {
+  return {
     apiKey,
     provider: provider.id,
     maxOutputTokens: provider.maxOutputTokens,
     ...(provider.baseUrl === undefined ? {} : { baseURL: provider.baseUrl }),
     ...(capabilities === undefined ? {} : { capabilities }),
   };
-  if (provider.kind === "openai_compatible") {
-    if (provider.baseUrl === undefined) {
-      throw new RuntimeModelConfigError("model_provider_base_url_missing");
+}
+
+async function configuredAdapter(
+  provider: ModelsConfig["providers"][number],
+  secretResolver: RuntimeModelOverrides["secretResolver"],
+  clock: Clock,
+): Promise<ProviderAdapter> {
+  switch (provider.kind) {
+    case "anthropic":
+      return new AnthropicAdapter(await configuredApiOptions(provider, secretResolver));
+    case "azure_openai":
+      return configuredAzureAdapter(provider, secretResolver, clock);
+    case "bedrock": {
+      if (provider.region === undefined || provider.modelIds === undefined) {
+        throw new RuntimeModelConfigError("model_provider_bedrock_config_invalid");
+      }
+      const capabilities = definedCapabilities(provider.capabilities);
+      return new BedrockAdapter({
+        region: provider.region,
+        modelIds: provider.modelIds,
+        provider: provider.id,
+        maxOutputTokens: provider.maxOutputTokens,
+        ...(capabilities === undefined ? {} : { capabilities }),
+      });
     }
-    return new OpenAICompatibleAdapter({
-      ...options,
-      baseURL: provider.baseUrl,
-      trust: provider.trust,
-      ...(provider.quirks === undefined ? {} : { quirks: provider.quirks }),
-    });
+    case "openai":
+      return new OpenAIAdapter(await configuredApiOptions(provider, secretResolver));
+    case "openai_compatible": {
+      if (provider.baseUrl === undefined) {
+        throw new RuntimeModelConfigError("model_provider_base_url_missing");
+      }
+      return new OpenAICompatibleAdapter({
+        ...(await configuredApiOptions(provider, secretResolver)),
+        baseURL: provider.baseUrl,
+        trust: provider.trust,
+        ...(provider.quirks === undefined ? {} : { quirks: provider.quirks }),
+      });
+    }
+    default:
+      return unsupportedProvider(provider.kind);
   }
-  return provider.kind === "anthropic" ? new AnthropicAdapter(options) : new OpenAIAdapter(options);
+}
+
+function unsupportedProvider(_kind: never): never {
+  throw new RuntimeModelConfigError("model_provider_unsupported");
 }
 
 /**
