@@ -33,11 +33,13 @@ MCP elicitation. Each attack uses real runtime events and checks the relevant
 safe status and invariant behavior. Mutation checks cover deny bypass and
 execution before approval.
 
-Raw model aliases are rejected before policy evaluation, and registry IDs that
-normalize to the same ID fail startup with a collision. Distinct registered
-look-alike IDs are not covered; that boundary remains pending owner review.
-See `evals/redteam/README.md` for the split between cassette and runtime-only
-attacks.
+Raw model aliases are rejected before policy evaluation. The runtime replay
+also checks that server-advertised names with trailing whitespace or Unicode
+characters resembling another letter are rejected before registration under a
+deny for `sandbox.exec` and allow for `sandbox.*`. Names changed only by
+lowercasing, including camelCase names, are accepted; case-only duplicates
+fail startup with `tool_id_collision`. See `evals/redteam/README.md` for the
+split between cassette and runtime-only attacks.
 
 Run the focused replay checks with:
 

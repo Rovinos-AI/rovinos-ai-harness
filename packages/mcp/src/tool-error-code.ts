@@ -22,6 +22,33 @@ function protocolErrorCode(protocolCode: number): string {
   }
 }
 
+function connectionErrorCode(code: McpConnectionError["code"]): string {
+  switch (code) {
+    case "mcp_auth_required":
+      return "mcp_auth_required";
+    case "mcp_tool_arguments_invalid":
+      return "args_invalid";
+    case "mcp_connect_timeout":
+    case "mcp_discovery_timeout":
+    case "mcp_discovery_cancelled":
+      return "mcp_timeout";
+    case "mcp_connection_lost":
+      return "mcp_connection_lost";
+    case "mcp_apps_unsupported":
+      return "mcp_apps_unsupported";
+    case "mcp_connect_failed":
+    case "mcp_list_tools_failed":
+    case "mcp_too_many_tools":
+    case "mcp_discovery_data_limit":
+    case "mcp_discovery_page_limit":
+    case "mcp_discovery_schema_limit":
+    case "mcp_tool_call_failed":
+      return "mcp_error";
+    default:
+      return "mcp_error";
+  }
+}
+
 /** Maps an untrusted MCP failure to a stable, closed error code. */
 export function errorCode(error: unknown, signal: AbortSignal): string {
   if (signal.aborted) {
@@ -34,25 +61,7 @@ export function errorCode(error: unknown, signal: AbortSignal): string {
     return protocolErrorCode(error.code);
   }
   if (error instanceof McpConnectionError) {
-    switch (error.code) {
-      case "mcp_auth_required":
-        return "mcp_auth_required";
-      case "mcp_tool_arguments_invalid":
-        return "args_invalid";
-      case "mcp_connect_timeout":
-        return "mcp_timeout";
-      case "mcp_connection_lost":
-        return "mcp_connection_lost";
-      case "mcp_apps_unsupported":
-        return "mcp_apps_unsupported";
-      case "mcp_connect_failed":
-      case "mcp_list_tools_failed":
-      case "mcp_too_many_tools":
-      case "mcp_tool_call_failed":
-        return "mcp_error";
-      default:
-        return "mcp_error";
-    }
+    return connectionErrorCode(error.code);
   }
   return "mcp_error";
 }

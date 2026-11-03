@@ -44,7 +44,15 @@
     "request": {
       "requestId": "00000000000000000000000000",
       "model": { "provider": "local-endpoint", "model": "fixture-model" },
-      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "tools": [
+        {
+          "toolId": "lookup",
+          "description": "Lookup a value",
+          "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } }
+        }
+      ],
+      "toolChoice": { "forced": "lookup" }
     },
     "httpResponse": {
       "status": 200,
