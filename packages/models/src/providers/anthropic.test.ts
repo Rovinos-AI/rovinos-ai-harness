@@ -19,8 +19,10 @@ import { collectProviderStream } from "../streaming.js";
 import { withRetries } from "../resilience/retry.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { AnthropicAdapter } from "./anthropic.js";
+import { createProviderToolAliases } from "./tool-aliases.js";
 
 const requestId = "00000000000000000000000000";
+const lookupAlias = createProviderToolAliases(["lookup"]).toProviderName("lookup");
 const toolSpec = {
   toolId: "lookup",
   description: "Find a record",
@@ -37,7 +39,7 @@ const baseRequest: ModelRequest = {
 const rawContent = [
   { type: "thinking", thinking: "private reasoning", signature: "sig_fixture" },
   { type: "text", text: "answer" },
-  { type: "tool_use", id: "toolu_fixture", name: "lookup", input: { query: "x" } },
+  { type: "tool_use", id: "toolu_fixture", name: lookupAlias, input: { query: "x" } },
 ];
 const responseBody = {
   id: "msg_fixture",
@@ -217,7 +219,7 @@ describe("AnthropicAdapter", () => {
       {
         type: "content_block_start",
         index: 2,
-        content_block: { type: "tool_use", id: "toolu_fixture", name: "lookup", input: {} },
+        content_block: { type: "tool_use", id: "toolu_fixture", name: lookupAlias, input: {} },
       },
       {
         type: "content_block_delta",
@@ -582,7 +584,7 @@ describe("AnthropicAdapter", () => {
   });
 
   it("omits cache breakpoints when the request has no stable prefix, system prompt, or tools", async () => {
-    const call = makeRequest();
+    const call = makeRequest({ ...responseBody, content: [] });
     await call.adapter.complete(
       {
         ...baseRequest,
@@ -665,7 +667,10 @@ describe("AnthropicAdapter", () => {
       (caught: unknown) => caught,
     );
     expect(error).toBeInstanceOf(ProviderError);
-    expect(error).toMatchObject({ code: "provider_unknown", message: "provider_unknown" });
+    expect(error).toMatchObject({
+      code: "provider_bad_request",
+      message: "provider_bad_request",
+    });
     expect(error).not.toHaveProperty("cause");
     expect(error).not.toHaveProperty("issues");
     expect(error).not.toHaveProperty("status");
@@ -676,7 +681,7 @@ describe("AnthropicAdapter", () => {
     const content = callIds.map((callId) => ({
       type: "tool_use",
       id: `toolu_${callId}`,
-      name: "lookup",
+      name: lookupAlias,
       input: {},
     }));
     const call = makeRequest();
@@ -829,6 +834,9 @@ describe("AnthropicAdapter", () => {
   });
 
   it("does not replay a forced synthetic tool call from opaque Anthropic content", async () => {
+    const emitResultAlias = createProviderToolAliases(["lookup", "emit_result"]).toProviderName(
+      "emit_result",
+    );
     const providerResult = await makeRequest({
       ...responseBody,
       content: [
@@ -837,11 +845,18 @@ describe("AnthropicAdapter", () => {
         {
           type: "tool_use",
           id: "toolu_emit_result",
-          name: "emit_result",
+          name: emitResultAlias,
           input: { answer: "ok" },
         },
       ],
-    }).adapter.complete(baseRequest, context());
+    }).adapter.complete(
+      {
+        ...baseRequest,
+        tools: [toolSpec, { ...toolSpec, toolId: "emit_result" }],
+        toolChoice: { forced: "emit_result" },
+      },
+      context(),
+    );
     const enforced = await enforceToolOutput(
       providerResult.parts,
       z.object({ answer: z.string() }).strict(),
@@ -905,7 +920,7 @@ describe("AnthropicAdapter", () => {
           {
             type: "tool_use",
             id: "toolu_fixture",
-            name: "lookup",
+            name: lookupAlias,
             input: { query: "x" },
             cache_control: { type: "ephemeral" },
           },
@@ -937,7 +952,7 @@ describe("AnthropicAdapter", () => {
       {
         type: "tool_use",
         id: `toolu_${callId}`,
-        name: "lookup",
+        name: lookupAlias,
         input: {},
       },
     ]);
@@ -948,6 +963,37 @@ describe("AnthropicAdapter", () => {
         tool_use_id: `toolu_${callId}`,
         content: "done",
         is_error: false,
+      },
+    ]);
+  });
+
+  it("translates history calls for tools not advertised in the current request", async () => {
+    const callId = "00000000000000000000000001";
+    const historicalToolId = "legacy.lookup";
+    const aliases = createProviderToolAliases(["lookup"], [historicalToolId]);
+    const request: ModelRequest = {
+      ...baseRequest,
+      messages: [
+        {
+          role: "assistant",
+          parts: [{ type: "tool_call", callId, toolId: historicalToolId, args: {} }],
+        },
+      ],
+    };
+    const call = makeRequest();
+
+    await call.adapter.complete(request, context());
+
+    const body = z
+      .object({ messages: z.array(z.object({ role: z.string(), content: JsonValue })) })
+      .parse(call.getRequestBody());
+    const assistantMessage = body.messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.content).toEqual([
+      {
+        type: "tool_use",
+        id: `toolu_${callId}`,
+        name: aliases.toProviderName(historicalToolId),
+        input: {},
       },
     ]);
   });
@@ -972,11 +1018,12 @@ describe("AnthropicAdapter", () => {
     expect(requestBody.system).toEqual([
       { type: "text", text: "system rule", cache_control: { type: "ephemeral" } },
     ]);
-    expect(requestBody.tool_choice).toEqual({ type: "tool", name: "lookup" });
+    expect(requestBody.tool_choice).toEqual({ type: "tool", name: lookupAlias });
     expect(requestBody.tools).toHaveLength(1);
+    expect(requestBody.tools[0]).toMatchObject({ name: lookupAlias });
 
     const noToolsRequest = { ...request, toolChoice: "none" as const };
-    const noToolsCall = makeRequest();
+    const noToolsCall = makeRequest({ ...responseBody, content: [] });
     await noToolsCall.adapter.complete(noToolsRequest, context());
     const noToolsBody = z.record(z.string(), JsonValue).parse(noToolsCall.getRequestBody());
     expect(noToolsBody).not.toHaveProperty("tools");
