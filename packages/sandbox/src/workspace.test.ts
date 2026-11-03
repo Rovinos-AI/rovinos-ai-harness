@@ -295,6 +295,17 @@ describe("per-run filesystem workspace", () => {
       code: "workspace_file_not_found",
     });
 
+    await expect(
+      workspace.writeBatch([
+        { path: ".harness/offload/first.bin", data: new TextEncoder().encode("123") },
+        { path: ".harness/offload/nested/second.bin", data: new TextEncoder().encode("45") },
+      ]),
+    ).rejects.toMatchObject({ code: "workspace_path_invalid" });
+    await expect(workspace.read(".harness/offload/first.bin")).rejects.toMatchObject({
+      code: "workspace_file_not_found",
+    });
+    await expect(readdir(join(root, runA, ".harness", "offload"))).resolves.toEqual([]);
+
     await workspace.writeBatch([
       { path: ".harness/offload/first.bin", data: new TextEncoder().encode("123") },
       { path: ".harness/offload/second.bin", data: new TextEncoder().encode("45") },

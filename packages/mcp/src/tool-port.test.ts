@@ -405,6 +405,34 @@ describe("McpToolPort", () => {
     }
   });
 
+  it("limits the combined decoded bytes of allowed binary result parts", async () => {
+    const first = Buffer.from([1, 2, 3, 4]).toString("base64");
+    const second = Buffer.from([5, 6, 7]).toString("base64");
+    const current = await fixture({
+      binaryResults: "allow",
+      maxArtifactBytes: 6,
+      offloadBinaryResults: true,
+      result: {
+        content: [
+          { type: "image", mimeType: "image/png", data: first },
+          { type: "audio", mimeType: "audio/wav", data: second },
+        ],
+      },
+    });
+    try {
+      const execution = await current.port.execute(call, context());
+      expect(execution).toEqual({
+        outcome: "error",
+        errorCode: "artifact_too_large",
+        result: null,
+      });
+      expect(JSON.stringify(execution)).not.toContain(first);
+      expect(JSON.stringify(execution)).not.toContain(second);
+    } finally {
+      await current.close();
+    }
+  });
+
   it("offloads every allowed binary part into a separate payload", async () => {
     const bytes = Buffer.alloc(9_000, 1);
     const current = await fixture({
