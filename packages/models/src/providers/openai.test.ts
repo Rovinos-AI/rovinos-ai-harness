@@ -15,6 +15,7 @@ import {
   type CassetteEntry,
   type CassetteStore,
 } from "../cassette/cassette-provider.js";
+import { ProviderError } from "../errors.js";
 import {
   assembleDeltas,
   ProviderResultSchema,
@@ -26,8 +27,15 @@ import { collectProviderStream } from "../streaming.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { OpenAIAdapter } from "./openai.js";
 import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
+import { createProviderToolAliases } from "./tool-aliases.js";
 
 const id = "00000000000000000000000000";
+const lookupAlias = createProviderToolAliases(["lookup"]).toProviderName("lookup");
+const lookupTool = {
+  toolId: "lookup",
+  description: "Lookup a value",
+  inputSchema: { type: "object" },
+};
 const rawToolMessage = {
   role: "assistant" as const,
   content: null,
@@ -38,6 +46,13 @@ const rawToolMessage = {
       function: { name: "lookup", arguments: '{"key":"value"}' },
     },
   ],
+};
+const aliasedToolMessage = {
+  ...rawToolMessage,
+  tool_calls: rawToolMessage.tool_calls.map((toolCall) => ({
+    ...toolCall,
+    function: { ...toolCall.function, name: lookupAlias },
+  })),
 };
 const textMessage = { role: "assistant" as const, content: "answer" };
 const usage = { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 };
@@ -105,9 +120,17 @@ function fixture(
   scenario: ProviderContractFixture["scenario"],
   status: number,
 ): ProviderContractFixture {
+  const fixtureRequest: ModelRequest =
+    scenario === "tool_call"
+      ? {
+          ...request,
+          tools: [lookupTool],
+          toolChoice: { forced: "lookup" },
+        }
+      : request;
   let response: JsonValue;
   if (scenario === "tool_call") {
-    response = completion(rawToolMessage);
+    response = completion(JsonValue.parse(aliasedToolMessage));
   } else if (scenario === "usage_mapping") {
     response = {
       ...completion(textMessage),
@@ -128,7 +151,10 @@ function fixture(
           {
             type: "opaque",
             provider: "openai",
-            blob: { message: rawToolMessage, openaiCallIdByCallId: { [id]: "call_openai_1" } },
+            blob: {
+              message: aliasedToolMessage,
+              openaiCallIdByCallId: { [id]: "call_openai_1" },
+            },
           },
         ]
       : [
@@ -169,7 +195,7 @@ function fixture(
 
   return {
     scenario,
-    request,
+    request: fixtureRequest,
     httpResponse: {
       status,
       ...(scenario === "error_429" ? { headers: { "retry-after": "2" } } : {}),
@@ -267,6 +293,101 @@ runProviderContract(
 );
 
 describe("OpenAI Chat Completions mapper", () => {
+  it("aliases definitions, forced choices, history, and returned calls", () => {
+    const aliases = createProviderToolAliases(["weather.forecast"]);
+    const canonicalRequest: ModelRequest = {
+      ...request,
+      tools: [{ ...lookupTool, toolId: "weather.forecast" }],
+      toolChoice: { forced: "weather.forecast" },
+      messages: [
+        {
+          role: "assistant",
+          parts: [
+            {
+              type: "tool_call",
+              callId: id,
+              toolId: "weather.forecast",
+              args: { city: "Helsinki" },
+            },
+          ],
+        },
+      ],
+    };
+    const mapped = toChatRequest(
+      canonicalRequest,
+      { structuredOutput: "native", parallelToolCalls: true },
+      "openai",
+      aliases,
+    );
+    const response = fromChatResponse(
+      {
+        choices: [
+          {
+            finish_reason: "tool_calls",
+            message: {
+              ...aliasedToolMessage,
+              tool_calls: aliasedToolMessage.tool_calls.map((toolCall) => ({
+                ...toolCall,
+                function: {
+                  ...toolCall.function,
+                  name: aliases.toProviderName("weather.forecast"),
+                },
+              })),
+            },
+          },
+        ],
+        usage,
+      },
+      { next: () => id },
+      "openai",
+      { aliases },
+    );
+
+    expect(mapped.tools).toMatchObject([
+      { function: { name: aliases.toProviderName("weather.forecast") } },
+    ]);
+    expect(mapped.tool_choice).toEqual({
+      type: "function",
+      function: { name: aliases.toProviderName("weather.forecast") },
+    });
+    expect(mapped.messages[0]).toMatchObject({
+      role: "assistant",
+      tool_calls: [{ function: { name: aliases.toProviderName("weather.forecast") } }],
+    });
+    expect(response.parts[0]).toMatchObject({
+      type: "tool_call",
+      toolId: "weather.forecast",
+    });
+  });
+
+  it("rejects tool calls that return an alias outside the current request", () => {
+    const aliases = createProviderToolAliases(["lookup"]);
+    expect(() =>
+      fromChatResponse(
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                ...rawToolMessage,
+                tool_calls: [
+                  {
+                    id: "call_unknown",
+                    type: "function",
+                    function: { name: "unknown_alias", arguments: "{}" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { next: () => id },
+        "openai",
+        { aliases },
+      ),
+    ).toThrow(ProviderError);
+  });
+
   it("round-trips provider call ids and raw assistant messages through JSON", () => {
     const response = fromChatResponse(
       {
@@ -331,6 +452,7 @@ describe("OpenAI Chat Completions mapper", () => {
     const dispatcher = new MockAgent();
     dispatcher.disableNetConnect();
     const origin = "https://openai.test";
+    const syntheticAliases = createProviderToolAliases(["emit_result", "lookup"]);
     const syntheticMessage = {
       role: "assistant",
       content: null,
@@ -338,12 +460,18 @@ describe("OpenAI Chat Completions mapper", () => {
         {
           id: "call_emit",
           type: "function",
-          function: { name: "emit_result", arguments: '{"answer":"ok"}' },
+          function: {
+            name: syntheticAliases.toProviderName("emit_result"),
+            arguments: '{"answer":"ok"}',
+          },
         },
         {
           id: "call_lookup",
           type: "function",
-          function: { name: "lookup", arguments: '{"key":"value"}' },
+          function: {
+            name: syntheticAliases.toProviderName("lookup"),
+            arguments: '{"key":"value"}',
+          },
         },
       ],
     };
@@ -370,7 +498,18 @@ describe("OpenAI Chat Completions mapper", () => {
       baseURL: origin,
     });
     const ids = [id, "00000000000000000000000001"];
-    const providerResult = await adapter.complete(request, {
+    const syntheticRequest: ModelRequest = {
+      ...request,
+      tools: [
+        lookupTool,
+        {
+          ...lookupTool,
+          toolId: "emit_result",
+          inputSchema: { type: "object", properties: { answer: { type: "string" } } },
+        },
+      ],
+    };
+    const providerResult = await adapter.complete(syntheticRequest, {
       signal: new AbortController().signal,
       ids: { next: () => ids.shift() ?? id },
       clock: { now: () => 0 },
@@ -383,9 +522,9 @@ describe("OpenAI Chat Completions mapper", () => {
     try {
       await adapter.complete(
         {
-          ...request,
+          ...syntheticRequest,
           messages: [
-            ...request.messages,
+            ...syntheticRequest.messages,
             { role: "assistant", parts: enforced.parts },
             {
               role: "tool",
@@ -408,7 +547,10 @@ describe("OpenAI Chat Completions mapper", () => {
       );
 
       expect(secondRequest).toBeDefined();
-      expect(JSON.stringify(secondRequest)).not.toContain("emit_result");
+      const requestMessages = z
+        .object({ messages: z.array(JsonValue) })
+        .parse(secondRequest).messages;
+      expect(JSON.stringify(requestMessages)).not.toContain("emit_result");
       expect(secondRequest).toMatchObject({
         messages: [
           {},
@@ -840,7 +982,7 @@ describe("OpenAI streaming adapter", () => {
                   index: 0,
                   id: "call_openai_1",
                   type: "function",
-                  function: { name: "look", arguments: '{"key":' },
+                  function: { name: lookupAlias.slice(0, 30), arguments: '{"key":' },
                 },
               ],
             },
@@ -860,7 +1002,7 @@ describe("OpenAI streaming adapter", () => {
               tool_calls: [
                 {
                   index: 0,
-                  function: { name: "up", arguments: '"value"}' },
+                  function: { name: lookupAlias.slice(30), arguments: '"value"}' },
                 },
               ],
             },
@@ -894,9 +1036,10 @@ describe("OpenAI streaming adapter", () => {
       baseURL: "https://provider.test/v1",
       fetch: () =>
         Promise.resolve(
-          new Response(JSON.stringify(completion(JsonValue.parse(rawToolMessage), "tool_calls")), {
-            headers: { "content-type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify(completion(JsonValue.parse(aliasedToolMessage), "tool_calls")),
+            { headers: { "content-type": "application/json" } },
+          ),
         ),
     });
     const context: ProviderContext = {
@@ -904,13 +1047,19 @@ describe("OpenAI streaming adapter", () => {
       ids: { next: () => id },
       clock: { now: () => 0 },
     };
-    const expected = await completeAdapter.complete(request, context);
+    const toolRequest: ModelRequest = { ...request, tools: [lookupTool] };
+    const expected = await completeAdapter.complete(toolRequest, context);
     const deltas: ProviderDelta[] = [];
-    for await (const delta of streamingAdapter.stream(request, context)) {
+    for await (const delta of streamingAdapter.stream(toolRequest, context)) {
       deltas.push(delta);
     }
 
     expect(assembleDeltas(deltas)).toEqual(expected);
+    expect(
+      deltas.flatMap((delta) =>
+        delta.type === "tool_call" && delta.toolId !== undefined ? [delta.toolId] : [],
+      ),
+    ).toEqual(["lookup"]);
   });
 
   it.each([true, false])(

@@ -19,10 +19,11 @@ privilege escalation; app-only tools; cancel/resume; and self-answering
 invariants. They also include deny-bypass and pre-approval-execution mutation
 checks.
 
-Raw model aliases and same-normalized-ID collisions are covered by runtime
-tests. Distinct registered look-alike IDs are not tested; that boundary remains
-pending owner review. Reports contain metadata and invariant codes only, never
-event content or model transcripts.
+Raw model aliases, server-advertised look-alike names, and same-normalized-ID
+collisions are covered by runtime tests. Names changed only by lowercasing,
+including camelCase, remain valid; names with replaced or collapsed characters
+are rejected during registration. Reports contain metadata and invariant codes
+only, never event content or model transcripts.
 
 The nightly re-record job from the retired Azure pipeline is intentionally not
 reintroduced. **(verify)** The GitHub Actions replay gate is the current CI

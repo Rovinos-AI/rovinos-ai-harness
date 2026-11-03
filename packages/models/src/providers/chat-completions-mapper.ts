@@ -13,6 +13,7 @@ import type {
   ChatCompletionMessageParam,
 } from "openai/resources/chat/completions";
 import { z } from "zod";
+import type { ProviderToolAliases } from "./tool-aliases.js";
 
 const FunctionCallSchema = z.looseObject({
   id: z.string(),
@@ -103,6 +104,7 @@ function assistantMessage(
   requestMessage: ModelRequest["messages"][number],
   callIds: ReadonlyMap<string, string>,
   provider: string,
+  aliases?: ProviderToolAliases,
 ): ChatCompletionAssistantMessageParam {
   for (const part of requestMessage.parts) {
     if (part.type !== "opaque" || part.provider !== provider) {
@@ -111,9 +113,16 @@ function assistantMessage(
     const blob = OpaqueBlobSchema.safeParse(part.blob);
     if (blob.success) {
       const { refusal, tool_calls: toolCalls, ...rawFields } = blob.data.message;
+      const aliasedToolCalls = toolCalls?.map((toolCall) => ({
+        ...toolCall,
+        function: {
+          ...toolCall.function,
+          name: aliases?.providerNameForHistory(toolCall.function.name) ?? toolCall.function.name,
+        },
+      }));
       return {
         ...rawFields,
-        ...(toolCalls === undefined || toolCalls === null ? {} : { tool_calls: toolCalls }),
+        ...(aliasedToolCalls === undefined ? {} : { tool_calls: aliasedToolCalls }),
         ...(refusal === undefined ? {} : { refusal }),
       };
     }
@@ -125,7 +134,10 @@ function assistantMessage(
           {
             id: callIds.get(part.callId) ?? `call_${part.callId}`,
             type: "function" as const,
-            function: { name: part.toolId, arguments: JSON.stringify(part.args) },
+            function: {
+              name: aliases?.providerNameForHistory(part.toolId) ?? part.toolId,
+              arguments: JSON.stringify(part.args),
+            },
           },
         ]
       : [],
@@ -140,13 +152,14 @@ function assistantMessage(
 function mapMessages(
   messages: ModelRequest["messages"],
   provider: string,
+  aliases?: ProviderToolAliases,
 ): ChatCompletionMessageParam[] {
   const callIds = providerCallIdByCallId(messages, provider);
   const mapped: ChatCompletionMessageParam[] = [];
 
   for (const message of messages) {
     if (message.role === "assistant") {
-      mapped.push(assistantMessage(message, callIds, provider));
+      mapped.push(assistantMessage(message, callIds, provider, aliases));
     } else if (message.role === "system" || message.role === "user") {
       mapped.push({ role: message.role, content: textContent(message.parts) });
     } else {
@@ -164,12 +177,15 @@ function mapMessages(
   return mapped;
 }
 
-function mapTools(request: ModelRequest): Pick<ChatCompletionCreateParamsNonStreaming, "tools"> {
+function mapTools(
+  request: ModelRequest,
+  aliases?: ProviderToolAliases,
+): Pick<ChatCompletionCreateParamsNonStreaming, "tools"> {
   const tools =
     request.tools?.map((tool) => ({
       type: "function" as const,
       function: {
-        name: tool.toolId,
+        name: aliases?.toProviderName(tool.toolId) ?? tool.toolId,
         description: tool.description,
         parameters: z.record(z.string(), JsonValue).parse(tool.inputSchema),
       },
@@ -179,6 +195,7 @@ function mapTools(request: ModelRequest): Pick<ChatCompletionCreateParamsNonStre
 
 function mapToolChoice(
   request: ModelRequest,
+  aliases?: ProviderToolAliases,
 ): Pick<ChatCompletionCreateParamsNonStreaming, "tool_choice"> {
   if (request.toolChoice === undefined) {
     return {};
@@ -189,7 +206,10 @@ function mapToolChoice(
   return {
     tool_choice: {
       type: "function",
-      function: { name: request.toolChoice.forced },
+      function: {
+        name:
+          aliases?.toAdvertisedProviderName(request.toolChoice.forced) ?? request.toolChoice.forced,
+      },
     },
   };
 }
@@ -242,13 +262,14 @@ export function toChatRequest(
   request: ModelRequest,
   quirks: ChatCompletionsQuirks,
   provider = "openai",
+  aliases?: ProviderToolAliases,
 ): ChatCompletionCreateParamsNonStreaming {
-  const tools = mapTools(request);
+  const tools = mapTools(request, aliases);
   return {
     model: request.model.model,
-    messages: mapMessages(request.messages, provider),
+    messages: mapMessages(request.messages, provider, aliases),
     ...tools,
-    ...mapToolChoice(request),
+    ...mapToolChoice(request, aliases),
     ...(tools.tools === undefined ? {} : { parallel_tool_calls: quirks.parallelToolCalls }),
     ...mapMaxOutputTokens(request, quirks),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
@@ -260,6 +281,7 @@ function mapToolCalls(
   toolCalls: NonNullable<ChatCompletionLike["choices"][number]["message"]["tool_calls"]>,
   ids: { readonly next: () => Id },
   callIdsByProviderId?: ReadonlyMap<string, Id>,
+  aliases?: ProviderToolAliases,
 ): {
   readonly parts: ModelRequest["messages"][number]["parts"];
   readonly openaiCallIdByCallId: Record<string, string>;
@@ -274,7 +296,10 @@ function mapToolCalls(
       continue;
     }
     let args;
-    const toolId = Code.safeParse(toolCall.function.name);
+    const toolId =
+      aliases === undefined
+        ? Code.safeParse(toolCall.function.name)
+        : Code.safeParse(aliases.toCanonicalName(toolCall.function.name));
     if (!toolId.success) {
       invalidArguments = true;
       continue;
@@ -334,7 +359,10 @@ export function fromChatResponse(
   response: ChatCompletionLike,
   ids: { readonly next: () => Id },
   provider = "openai",
-  callIdsByProviderId?: ReadonlyMap<string, Id>,
+  options: {
+    readonly callIdsByProviderId?: ReadonlyMap<string, Id>;
+    readonly aliases?: ProviderToolAliases;
+  } = {},
 ): {
   readonly parts: ModelRequest["messages"][number]["parts"];
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
@@ -349,7 +377,12 @@ export function fromChatResponse(
     };
   }
 
-  const mappedCalls = mapToolCalls(choice.message.tool_calls ?? [], ids, callIdsByProviderId);
+  const mappedCalls = mapToolCalls(
+    choice.message.tool_calls ?? [],
+    ids,
+    options.callIdsByProviderId,
+    options.aliases,
+  );
   const parts = mappedCalls.invalidArguments ? [] : mappedCalls.parts;
 
   if (!mappedCalls.invalidArguments && choice.message.content !== null) {
