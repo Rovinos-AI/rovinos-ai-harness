@@ -17,6 +17,7 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   ServerConfigSchema,
+  TelemetryConfigSchema,
   type InputRequest,
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
@@ -63,7 +64,11 @@ beforeAll(() => {
       shutdown: () => Promise.resolve(),
       forceFlush: () => Promise.resolve(),
     },
-    telemetry: { sentinel: { enabled: false, minValueLength: 6 }, correlation: { enabled: false } },
+    telemetry: TelemetryConfigSchema.parse({
+      sentinel: { enabled: false, minValueLength: 6 },
+      correlation: { enabled: false },
+      metrics: { ownership: "host" },
+    }),
   });
   trace.setGlobalTracerProvider(telemetry.tracerProvider);
   logs.setGlobalLoggerProvider(telemetry.loggerProvider);
