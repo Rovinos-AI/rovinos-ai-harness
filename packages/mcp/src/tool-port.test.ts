@@ -408,15 +408,19 @@ describe("McpToolPort", () => {
   it("limits the combined decoded bytes of allowed binary result parts", async () => {
     const first = Buffer.from([1, 2, 3, 4]).toString("base64");
     const second = Buffer.from([5, 6, 7]).toString("base64");
+    const uri = "file:///synthetic/ERROR_URI_CANARY";
+    const digest = "e".repeat(64);
     const current = await fixture({
       binaryResults: "allow",
       maxArtifactBytes: 6,
       offloadBinaryResults: true,
       result: {
         content: [
+          { type: "resource_link", uri, name: "synthetic" },
           { type: "image", mimeType: "image/png", data: first },
           { type: "audio", mimeType: "audio/wav", data: second },
         ],
+        structuredContent: { sha256: digest },
       },
     });
     try {
@@ -428,6 +432,8 @@ describe("McpToolPort", () => {
       });
       expect(JSON.stringify(execution)).not.toContain(first);
       expect(JSON.stringify(execution)).not.toContain(second);
+      expect(JSON.stringify(execution)).not.toContain(uri);
+      expect(JSON.stringify(execution)).not.toContain(digest);
     } finally {
       await current.close();
     }
@@ -461,6 +467,52 @@ describe("McpToolPort", () => {
       });
       expect(JSON.stringify(result.result)).not.toContain(bytes.toString("base64"));
       expect(JsonValue.safeParse(result.result).success).toBe(true);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("does not export allowed artifact bytes, URIs, or digests through call spans", async () => {
+    const bytes = Buffer.from("RAW_BINARY_CANARY");
+    const uri = "file:///synthetic/TELEMETRY_URI_CANARY";
+    const base64 = bytes.toString("base64");
+    const current = await fixture({
+      offloadBinaryResults: true,
+      binaryResults: "allow",
+      result: {
+        content: [
+          { type: "resource_link", uri, name: "synthetic" },
+          { type: "image", mimeType: "image/png", data: base64 },
+        ],
+      },
+    });
+    try {
+      const before = spanCollector.getFinishedSpans().length;
+      const execution = await current.port.execute(call, context());
+      const artifact = execution.artifacts?.[0];
+      if (artifact === undefined) {
+        throw new Error("Expected one binary artifact.");
+      }
+      const telemetry = JSON.stringify(
+        spanCollector
+          .getFinishedSpans()
+          .slice(before)
+          .map(({ name, attributes, events, status }) => ({ name, attributes, events, status })),
+      );
+
+      expect(execution.outcome).toBe("ok");
+      expect(artifact.bytes).toEqual(bytes);
+      expect(execution.result).toMatchObject({
+        parts: [{ type: "resource_link", uri }, { type: "image" }],
+      });
+      for (const canary of [bytes.toString(), base64, uri, artifact.sha256]) {
+        expect(
+          JSON.stringify({
+            rawResult: { bytes: bytes.toString(), base64, uri, digest: artifact.sha256 },
+          }),
+        ).toContain(canary);
+        expect(telemetry).not.toContain(canary);
+      }
     } finally {
       await current.close();
     }

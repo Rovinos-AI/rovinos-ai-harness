@@ -7,11 +7,11 @@ import {
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { Code, Id, type TelemetryConfig } from "@rovinos/schemas";
+import { Code, Event, Id, type TelemetryConfig } from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { listLogDefinitions } from "./log-registry.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
-import { SafeEvent } from "./safe-event.js";
+import { SafeEvent, toSafeEvent } from "./safe-event.js";
 import {
   emitKeysRotated,
   emitSafeEvent,
@@ -257,6 +257,59 @@ describe("SafeEvent log projection", () => {
     emitSafeEvent(logger, event);
 
     expect(emit.mock.calls[0]?.[0].attributes).not.toHaveProperty("harness.error.code");
+  });
+
+  it("does not emit MCP result content through SafeEvent logs", () => {
+    const uri = "file:///synthetic/LOG_URI_CANARY";
+    const digest = "f".repeat(64);
+    const binary = "LOG_BINARY_CANARY";
+    const event = Event.parse({
+      runId: common.runId,
+      seq: common.seq,
+      ts: common.ts,
+      v: 2,
+      traceId: common.traceId,
+      spanId: common.spanId,
+      segmentId: "33333333333333333333333333",
+      type: "tool_result",
+      callId: "44444444444444444444444444",
+      toolId: "search",
+      outcome: "ok",
+      latencyMs: 1,
+      result: {
+        format: "mcp-tool-result",
+        version: 1,
+        isError: false,
+        parts: [
+          { type: "resource_link", uri, name: "synthetic" },
+          { type: "image", data: binary },
+          {
+            type: "blob",
+            artifact: {
+              handle: "wf_00000000000000000000000000",
+              mimeType: "application/octet-stream",
+              bytes: 1,
+              sha256: digest,
+            },
+          },
+        ],
+      },
+    });
+    const safeEvent = toSafeEvent(event);
+    if (safeEvent === null) {
+      throw new Error("Expected a safe tool-call event.");
+    }
+    const emit = vi.fn<(record: LogRecord) => void>();
+    const logger = { emit, enabled: () => true } satisfies Logger;
+
+    emitSafeEvent(logger, safeEvent);
+
+    const source = JSON.stringify(event);
+    const log = JSON.stringify(emit.mock.calls);
+    for (const canary of [binary, uri, digest]) {
+      expect(source).toContain(canary);
+      expect(log).not.toContain(canary);
+    }
   });
 
   it("uses the allowlist processor before the real log exporter", async () => {
