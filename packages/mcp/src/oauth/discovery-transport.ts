@@ -35,7 +35,10 @@ interface Operation {
 }
 
 function normalizeHost(host: string): string {
-  return host.replaceAll(/^\[|\]$/gu, "").replaceAll(/\.$/u, "").toLowerCase();
+  return host
+    .replaceAll(/^\[|\]$/gu, "")
+    .replaceAll(/\.$/gu, "")
+    .toLowerCase();
 }
 
 function createOperation(externalSignal?: AbortSignal): Operation {
@@ -73,7 +76,9 @@ function createOperation(externalSignal?: AbortSignal): Operation {
 
 function raceAbort<Result>(promise: Promise<Result>, signal: AbortSignal): Promise<Result> {
   return new Promise((resolve, reject) => {
-    const cleanup = (): void => signal.removeEventListener("abort", onAbort);
+    const cleanup = (): void => {
+      signal.removeEventListener("abort", onAbort);
+    };
     const onAbort = (): void => {
       cleanup();
       reject(new Error("protected_resource_probe_failed"));
@@ -90,7 +95,7 @@ function raceAbort<Result>(promise: Promise<Result>, signal: AbortSignal): Promi
       },
       (error: unknown) => {
         cleanup();
-        reject(error);
+        reject(error instanceof Error ? error : new Error("protected_resource_probe_failed"));
       },
     );
   });
@@ -175,35 +180,34 @@ export async function requestOAuthDiscovery(
 ): Promise<OAuthDiscoveryResponse | undefined> {
   let url = initialUrl;
   const redirects = operation.redirects;
-  while (true) {
+  for (let hop = 0; hop <= MAX_OAUTH_DISCOVERY_REDIRECTS; hop += 1) {
+    const currentUrl = url;
     operation.throwIfAborted();
-    const addresses = await resolveAddresses(url.hostname, operation, dependencies);
-    if (!isAllowedOAuthDiscoveryDestination(url, policy, addresses)) {
+    const addresses = await resolveAddresses(currentUrl.hostname, operation, dependencies);
+    if (!isAllowedOAuthDiscoveryDestination(currentUrl, policy, addresses)) {
       return undefined;
     }
     const address = addresses[0] ?? "";
     if (address === "") {
       return undefined;
     }
-    const response = await requestOneHop(url, address, operation.signal);
+    const response = await requestOneHop(currentUrl, address, operation.signal);
     if (!redirectStatuses.has(response.status)) {
       return response;
     }
     response.body.destroy();
     const location = response.headers.location;
-    if (
-      typeof location !== "string" ||
-      redirects.count >= MAX_OAUTH_DISCOVERY_REDIRECTS
-    ) {
+    if (typeof location !== "string" || redirects.count >= MAX_OAUTH_DISCOVERY_REDIRECTS) {
       return undefined;
     }
     redirects.count += 1;
     try {
-      url = new URL(location, url);
+      url = new URL(location, currentUrl);
     } catch {
       return undefined;
     }
   }
+  return undefined;
 }
 
 /** Reads the streamed metadata body under the shared operation byte and time limits. */

@@ -159,8 +159,7 @@ export class ClientCredentialsExtensionSupport {
   readonly #probeClientCredentialsExtension: typeof clientCredentialsExtensionAvailable;
 
   constructor(
-    probeClientCredentialsExtension: typeof clientCredentialsExtensionAvailable =
-      clientCredentialsExtensionAvailable,
+    probeClientCredentialsExtension: typeof clientCredentialsExtensionAvailable = clientCredentialsExtensionAvailable,
   ) {
     this.#probeClientCredentialsExtension = probeClientCredentialsExtension;
   }

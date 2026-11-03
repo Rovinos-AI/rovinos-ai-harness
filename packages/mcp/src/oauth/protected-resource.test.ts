@@ -27,7 +27,9 @@ afterEach(async () => {
             resolve();
             return;
           }
-          server.close(() => resolve());
+          server.close(() => {
+            resolve();
+          });
         }),
     ),
   );
@@ -49,17 +51,17 @@ async function listen(
 }
 
 function localResolver(hostname: string): (host: string) => Promise<readonly string[]> {
-  return async (host) => {
-    if (host === hostname || host === "localhost") {
-      return ["127.0.0.1"];
-    }
-    return ["93.184.216.34"];
-  };
+  return (host) =>
+    Promise.resolve(host === hostname || host === "localhost" ? ["127.0.0.1"] : ["93.184.216.34"]);
 }
 
 function metadataResponse(response: ServerResponse): void {
   response.writeHead(200, { "content-type": "application/json" });
   response.end(JSON.stringify({ extensions: { [OAUTH_CLIENT_CREDENTIALS_EXTENSION]: {} } }));
+}
+
+function resourceMetadataHeader(host: string | undefined): string {
+  return ["Bearer", `resource_metadata="http://${host ?? "localhost"}/metadata"`].join(" ");
 }
 
 describe("OAuth discovery network profiles", () => {
@@ -105,18 +107,15 @@ describe("OAuth discovery network profiles", () => {
       allowlist: [{ host: "mcp.internal.test", ports: [443] }],
     };
     expect(
-      isAllowedOAuthDiscoveryDestination(
-        new URL("https://mcp.internal.test"),
-        policy,
-        ["10.1.2.3"],
-      ),
+      isAllowedOAuthDiscoveryDestination(new URL("https://mcp.internal.test"), policy, [
+        "10.1.2.3",
+      ]),
     ).toBe(true);
     expect(
-      isAllowedOAuthDiscoveryDestination(
-        new URL("https://mcp.internal.test"),
-        policy,
-        ["10.1.2.3", "169.254.169.254"],
-      ),
+      isAllowedOAuthDiscoveryDestination(new URL("https://mcp.internal.test"), policy, [
+        "10.1.2.3",
+        "169.254.169.254",
+      ]),
     ).toBe(false);
   });
 
@@ -162,7 +161,7 @@ describe("resourceAdvertisesClientCredentials", () => {
       seenHeaders.push(request.headers);
       if (request.url === "/mcp") {
         response.writeHead(401, {
-          "www-authenticate": ["Bearer", `resource_metadata="http://${request.headers.host}/metadata"`].join(" "),
+          "www-authenticate": resourceMetadataHeader(request.headers.host),
         });
         response.end();
         return;
@@ -198,12 +197,9 @@ describe("resourceAdvertisesClientCredentials", () => {
     const host = new URL(baseUrl).hostname;
 
     await expect(
-      resourceAdvertisesClientCredentials(
-        `${baseUrl}/mcp`,
-        undefined,
-        localPolicy,
-        { resolve: localResolver(host) },
-      ),
+      resourceAdvertisesClientCredentials(`${baseUrl}/mcp`, undefined, localPolicy, {
+        resolve: localResolver(host),
+      }),
     ).resolves.toBe(true);
     expect(paths).toEqual(["/mcp", "/.well-known/oauth-protected-resource/mcp"]);
   });
@@ -220,7 +216,7 @@ describe("resourceAdvertisesClientCredentials", () => {
       }
       if (path === "/mcp/") {
         response.writeHead(401, {
-          "www-authenticate": ["Bearer", `resource_metadata="http://${request.headers.host}/metadata"`].join(" "),
+          "www-authenticate": resourceMetadataHeader(request.headers.host),
         });
         response.end();
         return;
@@ -230,12 +226,9 @@ describe("resourceAdvertisesClientCredentials", () => {
     const host = new URL(baseUrl).hostname;
 
     await expect(
-      resourceAdvertisesClientCredentials(
-        `${baseUrl}/mcp`,
-        undefined,
-        localPolicy,
-        { resolve: localResolver(host) },
-      ),
+      resourceAdvertisesClientCredentials(`${baseUrl}/mcp`, undefined, localPolicy, {
+        resolve: localResolver(host),
+      }),
     ).resolves.toBe(true);
     expect(paths).toEqual(["/mcp", "/mcp/", "/metadata"]);
   });
@@ -245,14 +238,14 @@ describe("resourceAdvertisesClientCredentials", () => {
     const { baseUrl } = await listen((request, response) => {
       if (request.url === "/mcp") {
         response.writeHead(401, {
-          "www-authenticate": ["Bearer", `resource_metadata="http://${request.headers.host}/metadata"`].join(" "),
+          "www-authenticate": resourceMetadataHeader(request.headers.host),
         });
         response.end();
         return;
       }
       if (request.url === "/metadata") {
         response.writeHead(302, {
-          location: `http://attacker.test:${String(new URL(baseUrl).port)}/steal`,
+          location: `http://attacker.test:${new URL(baseUrl).port}/steal`,
         });
         response.end();
         return;
@@ -277,7 +270,7 @@ describe("resourceAdvertisesClientCredentials", () => {
     const { baseUrl: controlUrl } = await listen((request, response) => {
       if (request.url === "/mcp") {
         response.writeHead(401, {
-          "www-authenticate": ["Bearer", `resource_metadata="http://${request.headers.host}/metadata"`].join(" "),
+          "www-authenticate": resourceMetadataHeader(request.headers.host),
         });
         response.end();
         return;
@@ -313,12 +306,9 @@ describe("resourceAdvertisesClientCredentials", () => {
     const host = new URL(baseUrl).hostname;
 
     await expect(
-      resourceAdvertisesClientCredentials(
-        `${baseUrl}/mcp`,
-        undefined,
-        localPolicy,
-        { resolve: localResolver(host) },
-      ),
+      resourceAdvertisesClientCredentials(`${baseUrl}/mcp`, undefined, localPolicy, {
+        resolve: localResolver(host),
+      }),
     ).resolves.toBe(false);
     expect(requests).toBe(MAX_OAUTH_DISCOVERY_REDIRECTS + 1);
   });
@@ -330,7 +320,7 @@ describe("resourceAdvertisesClientCredentials", () => {
       metadataResponse(response);
     });
     const hostname = "oauth-pin.invalid";
-    const resolver = vi.fn(async () => ["127.0.0.1"]);
+    const resolver = vi.fn(() => Promise.resolve(["127.0.0.1"]));
 
     await expect(
       resourceAdvertisesClientCredentials(
@@ -359,12 +349,9 @@ describe("resourceAdvertisesClientCredentials", () => {
     const host = new URL(baseUrl).hostname;
 
     await expect(
-      resourceAdvertisesClientCredentials(
-        `${baseUrl}/mcp`,
-        undefined,
-        localPolicy,
-        { resolve: localResolver(host) },
-      ),
+      resourceAdvertisesClientCredentials(`${baseUrl}/mcp`, undefined, localPolicy, {
+        resolve: localResolver(host),
+      }),
     ).rejects.toThrow("protected_resource_probe_failed");
   });
 
@@ -404,9 +391,14 @@ describe("resourceAdvertisesClientCredentials", () => {
       { profile: "production" },
       { resolve: () => new Promise<readonly string[]>(() => undefined) },
     );
-    const assertion = expect(probe).rejects.toThrow("protected_resource_probe_failed");
+    const outcome = probe.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
     await vi.advanceTimersByTimeAsync(MAX_OAUTH_DISCOVERY_TIMEOUT_MS);
-    await assertion;
+    await expect(outcome).resolves.toMatchObject({
+      message: "protected_resource_probe_failed",
+    });
   });
 
   it("cancels DNS resolution when the caller aborts", async () => {

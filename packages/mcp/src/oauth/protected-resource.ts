@@ -46,13 +46,17 @@ export async function resourceAdvertisesClientCredentials(
     if (challenge === undefined) {
       return false;
     }
-    const metadataUrlText = challenge.status === 401 ? resourceMetadataHint(challenge.headers) : undefined;
+    const metadataUrlText =
+      challenge.status === 401 ? resourceMetadataHint(challenge.headers) : undefined;
     challenge.body.destroy();
     let metadataUrl: URL;
     try {
       metadataUrl =
         metadataUrlText === undefined
-          ? new URL(`/.well-known/oauth-protected-resource${resourceUrl.pathname}`, resourceUrl.origin)
+          ? new URL(
+              `/.well-known/oauth-protected-resource${resourceUrl.pathname}`,
+              resourceUrl.origin,
+            )
           : new URL(metadataUrlText, resourceUrl);
     } catch {
       return false;

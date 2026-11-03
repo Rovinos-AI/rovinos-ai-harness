@@ -28,7 +28,10 @@ const blockedIPv4Ranges: readonly IPv4Range[] = [
 ];
 
 function normalizeHost(host: string): string {
-  return host.replaceAll(/^\[|\]$/gu, "").replaceAll(/\.$/u, "").toLowerCase();
+  return host
+    .replaceAll(/^\[|\]$/gu, "")
+    .replaceAll(/\.$/gu, "")
+    .toLowerCase();
 }
 
 function isLoopbackHost(host: string): boolean {
@@ -61,10 +64,7 @@ function ipv4Class(address: string): AddressClass {
   if (privateIPv4Ranges.some((range) => ipv4CidrMatches(bytes, range))) {
     return "private";
   }
-  if (
-    bytes[0] >= 224 ||
-    blockedIPv4Ranges.some((range) => ipv4CidrMatches(bytes, range))
-  ) {
+  if ((bytes[0] ?? 0) >= 224 || blockedIPv4Ranges.some((range) => ipv4CidrMatches(bytes, range))) {
     return "blocked";
   }
   return "public";
@@ -111,7 +111,7 @@ function isIPv6Loopback(groups: readonly number[]): boolean {
 }
 
 function isIPv6UniqueLocal(groups: readonly number[]): boolean {
-  return (((groups[0] ?? 0) & 0xfe00) === 0xfc00);
+  return ((groups[0] ?? 0) & 0xfe00) === 0xfc00;
 }
 
 function isIPv6Special(groups: readonly number[]): boolean {
@@ -127,23 +127,30 @@ function isIPv6Special(groups: readonly number[]): boolean {
   );
 }
 
-function embeddedIPv4Class(groups: readonly number[]): AddressClass | undefined {
-  const mapped =
-    groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
-  const nat64 =
-    groups[0] === 0x64 &&
-    groups[1] === 0xff9b &&
-    groups.slice(2, 6).every((group) => group === 0);
-  const sixToFour = groups[0] === 0x2002;
-  if (!mapped && !nat64 && !sixToFour) {
-    return undefined;
-  }
-  const embedded = mapped || nat64
-    ? [groups[6] ?? 0, groups[7] ?? 0]
-    : [groups[1] ?? 0, groups[2] ?? 0];
-  return ipv4Class(
-    `${String((embedded[0] ?? 0) >>> 8)}.${String((embedded[0] ?? 0) & 0xff)}.${String((embedded[1] ?? 0) >>> 8)}.${String((embedded[1] ?? 0) & 0xff)}`,
+function isIPv4Mapped(groups: readonly number[]): boolean {
+  return groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+}
+
+function isNat64(groups: readonly number[]): boolean {
+  return (
+    groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0)
   );
+}
+
+function ipv4FromGroups(groups: readonly number[], start: number): string {
+  const first = groups[start] ?? 0;
+  const second = groups[start + 1] ?? 0;
+  return `${String(first >>> 8)}.${String(first & 0xff)}.${String(second >>> 8)}.${String(second & 0xff)}`;
+}
+
+function embeddedIPv4Class(groups: readonly number[]): AddressClass | undefined {
+  if (isIPv4Mapped(groups) || isNat64(groups)) {
+    return ipv4Class(ipv4FromGroups(groups, 6));
+  }
+  if (groups[0] === 0x2002) {
+    return ipv4Class(ipv4FromGroups(groups, 1));
+  }
+  return undefined;
 }
 
 function ipv6Class(address: string): AddressClass {
@@ -177,10 +184,17 @@ function isAllowlisted(url: URL, policy: OAuthDiscoveryConfig): boolean {
     return true;
   }
   const host = normalizeHost(url.hostname);
-  const port = Number(url.port === "" ? (url.protocol === "https:" ? 443 : 80) : url.port);
+  const port = Number(url.port === "" ? defaultPort(url.protocol) : url.port);
   return policy.allowlist.some(
     (entry) => normalizeHost(entry.host) === host && entry.ports.includes(port),
   );
+}
+
+function defaultPort(protocol: string): number {
+  if (protocol === "https:") {
+    return 443;
+  }
+  return 80;
 }
 
 function hasAllowedScheme(url: URL, policy: OAuthDiscoveryConfig): boolean {
@@ -190,7 +204,7 @@ function hasAllowedScheme(url: URL, policy: OAuthDiscoveryConfig): boolean {
   return (
     url.protocol === "http:" &&
     policy.profile === "local-development" &&
-    (isLoopbackHost(url.hostname) || isAllowlisted(url, policy))
+    (isLoopbackHost(url.hostname) || (policy.allowlist !== undefined && isAllowlisted(url, policy)))
   );
 }
 
@@ -214,6 +228,17 @@ function areAddressesAllowed(
   });
 }
 
+function hasRequiredAllowlist(policy: OAuthDiscoveryConfig): boolean {
+  return policy.profile !== "internal" || (policy.allowlist?.length ?? 0) > 0;
+}
+
+function allowsOnlyHttpLoopback(url: URL, addresses: readonly string[]): boolean {
+  return (
+    url.protocol !== "http:" ||
+    addresses.every((address) => classifyAddress(address) === "loopback")
+  );
+}
+
 /** Returns whether every resolved address is permitted for this destination. */
 export function isAllowedOAuthDiscoveryDestination(
   url: URL,
@@ -227,10 +252,9 @@ export function isAllowedOAuthDiscoveryDestination(
     addresses.length === 0 ||
     !hasAllowedScheme(url, policy) ||
     !isAllowlisted(url, policy) ||
-    (policy.profile === "internal" && (policy.allowlist?.length ?? 0) === 0) ||
+    !hasRequiredAllowlist(policy) ||
     (policy.profile === "production" && url.protocol !== "https:") ||
-    (url.protocol === "http:" &&
-      addresses.some((address) => classifyAddress(address) !== "loopback"))
+    !allowsOnlyHttpLoopback(url, addresses)
   ) {
     return false;
   }

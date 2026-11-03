@@ -248,9 +248,14 @@ describe("ServerConfigSchema", () => {
     expect(withoutAllowlist.success).toBe(false);
     expect(
       !withoutAllowlist.success &&
-        withoutAllowlist.error.issues.some(
-          (issue) => issue.params?.errorCode === "server_oauth_discovery_allowlist_required",
-        ),
+        withoutAllowlist.error.issues.some((issue) => {
+          const params = z
+            .object({ errorCode: z.string() })
+            .safeParse("params" in issue ? issue.params : undefined);
+          return (
+            params.success && params.data.errorCode === "server_oauth_discovery_allowlist_required"
+          );
+        }),
     ).toBe(true);
 
     expect(
