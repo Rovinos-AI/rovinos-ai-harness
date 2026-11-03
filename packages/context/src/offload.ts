@@ -55,7 +55,9 @@ export interface WorkspacePort {
   write(path: string, data: Uint8Array): Promise<void>;
 
   /** Publishes every file in a batch or leaves no batch file visible. */
-  writeBatch(entries: readonly { readonly path: string; readonly data: Uint8Array }[]): Promise<void>;
+  writeBatch(
+    entries: readonly { readonly path: string; readonly data: Uint8Array }[],
+  ): Promise<void>;
 
   /** Reads bytes from an offload path, optionally selecting a byte range.
    * @param path - Workspace-relative path below `.harness/offload/`.
@@ -193,7 +195,9 @@ export class InMemoryWorkspace implements WorkspacePort {
     });
   }
 
-  writeBatch(entries: readonly { readonly path: string; readonly data: Uint8Array }[]): Promise<void> {
+  writeBatch(
+    entries: readonly { readonly path: string; readonly data: Uint8Array }[],
+  ): Promise<void> {
     return Promise.resolve().then(() => {
       const validated: { readonly path: string; readonly data: Uint8Array }[] = entries.map(
         ({ path, data }) => {

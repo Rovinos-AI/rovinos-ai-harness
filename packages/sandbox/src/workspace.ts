@@ -1,22 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { constants } from "node:fs";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  realpath,
-  rm,
-  stat,
-} from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, realpath, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { HarnessError, Id, type Id as IdValue } from "@rovinos/schemas";
 import { WorkspaceFileNotFoundError, WorkspacePathError } from "@rovinos/context";
 import type { WorkspacePort, WorkspaceReadRange } from "@rovinos/context";
 import type { Clock } from "./types.js";
 import { publishWorkspaceBatch } from "./workspace-batch.js";
-import { isWithinWorkspace, resolveWorkspacePath, SandboxWorkspacePathError } from "./workspace-path.js";
+import {
+  isWithinWorkspace,
+  resolveWorkspacePath,
+  SandboxWorkspacePathError,
+} from "./workspace-path.js";
 export { resolveWorkspacePath, SandboxWorkspacePathError } from "./workspace-path.js";
 
 const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024;

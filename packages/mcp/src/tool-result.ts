@@ -20,7 +20,9 @@ export interface McpResultArtifactPayload {
 
 /** Closed validation error for MCP results that cannot be represented safely. */
 export class McpToolResultError extends Error {
-  constructor(readonly code: "mcp_binary_result_blocked" | "mcp_result_invalid" | "artifact_too_large") {
+  constructor(
+    readonly code: "mcp_binary_result_blocked" | "mcp_result_invalid" | "artifact_too_large",
+  ) {
     super(code);
   }
 }

@@ -279,7 +279,9 @@ describe("ServerConfigSchema", () => {
     );
     expect(ServerConfigSchema.safeParse({ ...config, maxResultBytes: 0 }).success).toBe(false);
     expect(ServerConfigSchema.safeParse({ ...config, maxArtifactBytes: 0 }).success).toBe(false);
-    expect(ServerConfigSchema.safeParse({ ...config, binaryResults: "always" }).success).toBe(false);
+    expect(ServerConfigSchema.safeParse({ ...config, binaryResults: "always" }).success).toBe(
+      false,
+    );
     expect(
       ServerConfigSchema.safeParse({
         ...config,

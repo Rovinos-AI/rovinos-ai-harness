@@ -161,7 +161,9 @@ describe("OffloadingToolPort", () => {
     const execution = await port.execute(call(), context);
     const result = McpToolResultEnvelopeSchema.parse(execution.result);
     const imageReference = McpResultArtifactReferenceSchema.parse(
-      result.parts[1] !== null && typeof result.parts[1] === "object" && !Array.isArray(result.parts[1])
+      result.parts[1] !== null &&
+        typeof result.parts[1] === "object" &&
+        !Array.isArray(result.parts[1])
         ? result.parts[1].artifact
         : undefined,
     );
@@ -184,12 +186,12 @@ describe("OffloadingToolPort", () => {
     expect(result.parts[3]).toEqual({ type: "text", text: "after" });
     expect(resourcePart.resource.uri).toBe("file:///synthetic");
     expect(writeBatch).toHaveBeenCalledTimes(1);
-    expect(
-      await workspace.read(`.harness/offload/${imageReference.handle}.bin`),
-    ).toEqual(imageBytes);
-    expect(
-      await workspace.read(`.harness/offload/${resourceReference.handle}.bin`),
-    ).toEqual(resourceBytes);
+    expect(await workspace.read(`.harness/offload/${imageReference.handle}.bin`)).toEqual(
+      imageBytes,
+    );
+    expect(await workspace.read(`.harness/offload/${resourceReference.handle}.bin`)).toEqual(
+      resourceBytes,
+    );
     expect(JSON.stringify(execution)).not.toContain(Buffer.from(imageBytes).toString("base64"));
     expect(JSON.stringify(execution)).not.toContain(Buffer.from(resourceBytes).toString("base64"));
 

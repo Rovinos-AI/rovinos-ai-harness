@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Each run keeps its discovered registry; refreshes never widen a pinned view.
-import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client";
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import { Code, compileJsonSchema, HarnessError, JsonValue } from "@rovinos/schemas";
 import type { JsonValue as JsonValueType, ServerConfig, Sha256Hex } from "@rovinos/schemas";
 import * as telemetry from "@rovinos/telemetry";
@@ -8,10 +8,10 @@ import { context as otelContext, SpanStatusCode, trace, type Span } from "@opent
 import { McpConnectionError } from "./connection.js";
 import type { McpConnection, McpConnectionDependencies } from "./connection.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
-import { McpProtocolError } from "./errors.js";
 import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
 import type { ElicitationUrlOptions } from "./elicitation/url.js";
 import { callToolWithInputRounds } from "./tool-input-rounds.js";
+import { errorCode } from "./tool-error-code.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
 import {
@@ -104,59 +104,6 @@ interface McpToolPortLifecycle {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function protocolErrorCode(protocolCode: number): string {
-  switch (protocolCode) {
-    case -32602:
-      return "mcp_invalid_params";
-    case -32601:
-      return "mcp_method_not_found";
-    case -32603:
-      return "mcp_internal_error";
-    case -32020:
-      return "mcp_header_mismatch";
-    case -32021:
-      return "mcp_capability_missing";
-    case -32022:
-      return "mcp_protocol_unsupported";
-    default:
-      return "mcp_error";
-  }
-}
-
-function errorCode(error: unknown, signal: AbortSignal): string {
-  if (signal.aborted) {
-    return "mcp_timeout";
-  }
-  if (error instanceof McpProtocolError) {
-    return protocolErrorCode(error.protocolCode);
-  }
-  if (error instanceof ProtocolError) {
-    return protocolErrorCode(error.code);
-  }
-  if (error instanceof McpConnectionError) {
-    switch (error.code) {
-      case "mcp_auth_required":
-        return "mcp_auth_required";
-      case "mcp_tool_arguments_invalid":
-        return "args_invalid";
-      case "mcp_connect_timeout":
-        return "mcp_timeout";
-      case "mcp_connection_lost":
-        return "mcp_connection_lost";
-      case "mcp_apps_unsupported":
-        return "mcp_apps_unsupported";
-      case "mcp_connect_failed":
-      case "mcp_list_tools_failed":
-      case "mcp_too_many_tools":
-      case "mcp_tool_call_failed":
-        return "mcp_error";
-      default:
-        return "mcp_error";
-    }
-  }
-  return "mcp_error";
 }
 
 function failure(code: string, result: JsonValueType = null): McpToolExecutionResult {

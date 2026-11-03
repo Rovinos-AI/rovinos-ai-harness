@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
-import { HarnessError, Id, type Id as IdValue } from "@rovinos/schemas";
+import { HarnessError } from "@rovinos/schemas";
 
 function codeOf(error: unknown): string | undefined {
   return error instanceof Error && "code" in error && typeof error.code === "string"
@@ -9,6 +9,7 @@ function codeOf(error: unknown): string | undefined {
     : undefined;
 }
 
+/** Tests whether a resolved path is the root itself or one of its descendants. */
 export function isWithinWorkspace(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return (

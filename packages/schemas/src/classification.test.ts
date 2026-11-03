@@ -93,6 +93,9 @@ describe("EVENT_FIELD_CLASS", () => {
         ],
       },
     });
+    if (event.type !== "tool_result") {
+      throw new Error("Expected a tool-result event.");
+    }
     const { meta, content } = splitEvent(event);
 
     expect(EVENT_FIELD_CLASS.tool_result.result).toBe("content");

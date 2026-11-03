@@ -1509,7 +1509,7 @@ describe("McpToolPort", () => {
       description: "Synthetic description",
       mimeType: "text/plain",
       annotations: { audience: ["assistant"], priority: 0.5 },
-    };
+    } satisfies Extract<NonNullable<CallToolResult["content"]>[number], { type: "resource_link" }>;
     const current = await fixture({
       result: {
         content: [{ type: "text", text: "before" }, resourceLink, { type: "text", text: "after" }],

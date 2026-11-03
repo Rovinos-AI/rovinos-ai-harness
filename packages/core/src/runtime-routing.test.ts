@@ -281,6 +281,12 @@ describe("createRuntime model routing", () => {
         files.set(path, data);
         return Promise.resolve();
       },
+      writeBatch: (entries: readonly { readonly path: string; readonly data: Uint8Array }[]) => {
+        for (const entry of entries) {
+          files.set(entry.path, entry.data);
+        }
+        return Promise.resolve();
+      },
       read: (path: string) => {
         const data = files.get(path);
         return data === undefined

@@ -8,11 +8,7 @@ import {
 } from "@rovinos/schemas";
 import { OffloadedHandleSchema } from "./offload-schemas.js";
 import type { OffloadedHandle } from "./offload-schemas.js";
-import type {
-  OffloadIdGenerator,
-  OffloadToolExecutionResult,
-  WorkspacePort,
-} from "./offload.js";
+import type { OffloadIdGenerator, OffloadToolExecutionResult, WorkspacePort } from "./offload.js";
 
 interface PreparedArtifactBatch {
   readonly handles: readonly OffloadedHandle[];
@@ -27,7 +23,7 @@ function toolError(errorCode: Code): OffloadToolExecutionResult {
   return { outcome: "error", errorCode, result: null };
 }
 
-function isRecord(value: JsonValueType): value is Record<string, JsonValueType> {
+function isRecord(value: JsonValueType | undefined): value is Record<string, JsonValueType> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

@@ -7,11 +7,7 @@ import {
   ReadOffloadedResultSchema,
 } from "./offload-schemas.js";
 import type { OffloadedHandle } from "./offload-schemas.js";
-import type {
-  OffloadToolCall,
-  OffloadToolExecutionResult,
-  WorkspacePort,
-} from "./offload.js";
+import type { OffloadToolCall, OffloadToolExecutionResult, WorkspacePort } from "./offload.js";
 
 const MAX_READ_BYTES = 16 * 1024;
 const MAX_BASE64_READ_BYTES = (MAX_READ_BYTES / 4) * 3;
@@ -44,11 +40,7 @@ function binaryArtifactPath(handle: OffloadedHandle): string {
 }
 
 function isFileNotFound(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    error.code === "workspace_file_not_found"
-  );
+  return error instanceof Error && "code" in error && error.code === "workspace_file_not_found";
 }
 
 function isContinuationByte(byte: number): boolean {

@@ -310,12 +310,8 @@ describe("per-run filesystem workspace", () => {
       { path: ".harness/offload/first.bin", data: new TextEncoder().encode("123") },
       { path: ".harness/offload/second.bin", data: new TextEncoder().encode("45") },
     ]);
-    await expect(workspace.read(".harness/offload/first.bin")).resolves.toEqual(
-      Buffer.from("123"),
-    );
-    await expect(workspace.read(".harness/offload/second.bin")).resolves.toEqual(
-      Buffer.from("45"),
-    );
+    await expect(workspace.read(".harness/offload/first.bin")).resolves.toEqual(Buffer.from("123"));
+    await expect(workspace.read(".harness/offload/second.bin")).resolves.toEqual(Buffer.from("45"));
   });
 
   it("does not grant quota credit for an externally enlarged file before recount", async () => {
