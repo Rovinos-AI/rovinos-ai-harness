@@ -967,6 +967,37 @@ describe("AnthropicAdapter", () => {
     ]);
   });
 
+  it("translates history calls for tools not advertised in the current request", async () => {
+    const callId = "00000000000000000000000001";
+    const historicalToolId = "legacy.lookup";
+    const aliases = createProviderToolAliases(["lookup"], [historicalToolId]);
+    const request: ModelRequest = {
+      ...baseRequest,
+      messages: [
+        {
+          role: "assistant",
+          parts: [{ type: "tool_call", callId, toolId: historicalToolId, args: {} }],
+        },
+      ],
+    };
+    const call = makeRequest();
+
+    await call.adapter.complete(request, context());
+
+    const body = z
+      .object({ messages: z.array(z.object({ role: z.string(), content: JsonValue })) })
+      .parse(call.getRequestBody());
+    const assistantMessage = body.messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.content).toEqual([
+      {
+        type: "tool_use",
+        id: `toolu_${callId}`,
+        name: aliases.toProviderName(historicalToolId),
+        input: {},
+      },
+    ]);
+  });
+
   it("maps system, forced tool, and toolChoice none request fields", async () => {
     const request: ModelRequest = {
       ...baseRequest,
