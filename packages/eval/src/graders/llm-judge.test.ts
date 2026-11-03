@@ -280,6 +280,26 @@ describe("createLlmJudgeGrader", () => {
     expect(JSON.stringify(view)).not.toContain("/synthetic/run.db");
   });
 
+  it("serializes the versioned MCP result envelope in the bounded judge view", () => {
+    const updatedEvents = events().map((event) =>
+      event.type === "tool_result"
+        ? EventSchema.parse({
+            ...event,
+            result: {
+              format: "mcp-tool-result",
+              version: 1,
+              isError: false,
+              parts: [{ type: "text", text: "synthetic result" }],
+            },
+          })
+        : event,
+    );
+
+    const view = buildJudgeView(updatedEvents, context().result);
+
+    expect(view.toolCalls[0]?.result).toContain('"format":"mcp-tool-result"');
+  });
+
   it("builds a strict verdict schema with no reasoning field", () => {
     const schema = createJudgeVerdictSchema([
       { id: "accuracy", description: "Accurate.", weight: 1 },
