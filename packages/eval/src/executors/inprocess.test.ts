@@ -292,6 +292,9 @@ describe("InProcessExecutor", () => {
       }),
       tool: () => ({
         describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+        getToolSpecs: () => [
+          { toolId: "fake.echo", description: "Synthetic echo tool", inputSchema: {} },
+        ],
         execute: () => {
           toolCalls += 1;
           return Promise.resolve({ outcome: "ok", result: { value: "synthetic" } });
