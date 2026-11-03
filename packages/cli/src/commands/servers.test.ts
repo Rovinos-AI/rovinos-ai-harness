@@ -911,6 +911,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],
@@ -970,6 +971,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],
@@ -1016,6 +1018,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],
@@ -1056,6 +1059,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],
@@ -1096,6 +1100,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],
@@ -1141,6 +1146,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],
@@ -1182,6 +1188,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],
@@ -1236,6 +1243,7 @@ describe("harness servers check", () => {
             auth: {
               kind: "oauth",
               grant: "client_credentials",
+              discovery: { profile: "local-development" },
               clientId: "machine-client",
               clientSecret: "env:OAUTH_SECRET",
               scopes: ["tools:read"],

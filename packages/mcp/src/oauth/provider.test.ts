@@ -177,6 +177,9 @@ function serverConfig(
         kind: "oauth",
         ...auth,
         ...(auth.clientSecret === undefined ? {} : { clientSecret: "env:OAUTH_SECRET" }),
+        ...(auth.grant === "client_credentials"
+          ? { discovery: { profile: "local-development" } }
+          : {}),
       },
     },
   });
