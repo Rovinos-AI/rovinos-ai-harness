@@ -77,6 +77,39 @@ registration flow. OAuth secrets and tokens are stored in the encrypted
 `<dataDir>/mcp-oauth.db` database using the configured key provider. Configure
 `keys` before logging in so credentials can be encrypted with a persistent key.
 
+Protected-resource discovery has a separate network policy under `auth.discovery`:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `profile` | `production`, `internal`, or `local-development` | `production` | Network profile used only for pre-initialize OAuth discovery. |
+| `allowlist` | exact host/port entries | omitted | Optional restriction for `production` and `local-development`; required for `internal`. |
+
+`production` permits public HTTPS destinations without an allowlist and rejects
+loopback, private, link-local, multicast, unspecified, IPv4-mapped private, and
+cloud-metadata addresses. An allowlist narrows this set. `internal` permits
+private addresses only for explicitly allowlisted hosts and ports. Select
+`local-development` explicitly to permit HTTP to loopback services; it does not
+permit arbitrary private addresses. These profiles are independent of
+`trust: internal`, which controls trace propagation and annotation use.
+
+The discovery request follows at most five redirects manually, spends at most
+20 seconds across the entire probe, and reads at most 2 MiB of metadata. Every
+redirect is checked and DNS-pinned before its connection. DNS-rebinding
+protection applies only to these discovery requests; the later MCP SDK HTTP
+transport is not constrained by this discovery-specific socket pinning. Use an
+enforced deployment network policy when broader egress control is required.
+
+For a local HTTP MCP server, explicitly opt in:
+
+```yaml
+auth:
+  kind: oauth
+  grant: client_credentials
+  clientSecret: env:MCP_OAUTH_SECRET
+  discovery:
+    profile: local-development
+```
+
 Run `harness servers login <id>` to start an explicit authorization-code login.
 The command prints the authorization URL and waits for the loopback callback on
 `127.0.0.1`; it opens a browser only when `--open` is supplied. `harness servers
@@ -120,17 +153,64 @@ The child stderr stream is never forwarded as text; only its byte count is
 available to the safe logger.
 
 The MCP SDK negotiates the protocol automatically unless `protocol` pins an
-era. Tool discovery follows pagination, is capped at 1,000 tools, and caches
-results according to the server-provided `ttlMs`. Modern list-change
+era. Tool discovery follows pagination under the budgets below and caches only
+complete results according to the server-provided `ttlMs`. Modern list-change
 subscriptions refresh the cached tools. Each page is validated against the
 MCP `tools/list` result schema. On modern Streamable HTTP connections, tools
-whose input schema declares `x-mcp-header` parameters are excluded; the
+whose input schema declares invalid `x-mcp-header` parameters are excluded; the
 harness logs only the excluded count (`mcp_tools_excluded`), never tool names.
 `harness doctor` reports a
 `servers_reachable.<serverId>` result for each configured server; its `detail`
 contains the configured server id.
 The `servers_authorized` check covers configured OAuth servers separately from
 reachability.
+
+### Discovery budgets
+
+These fixed defaults apply to each complete `tools/list` traversal, across all
+pages and before invalid-header tools are excluded:
+
+| Budget | Default | Enforcement layer |
+| --- | --- | --- |
+| Pages | 100 | MCP discovery loop; empty pages count and their continuation cursors are followed. |
+| Observed tools | 1,000 | MCP discovery loop; rejected tools count too. |
+| Each input or output schema | 1 MiB | Incremental decoded-JSON measurement, before header scanning. |
+| Total decoded data | 8 MiB | Sum of compact JSON UTF-8 bytes for validated pages, including schemas, descriptions, metadata, and cursors. |
+| Total duration | 30 seconds | One shared deadline for the traversal, never reset per page; the configured `callMs` can fail a page sooner. |
+| Concurrent discoveries | 4 per process | Excess discoveries wait in a cancellable FIFO queue. Each 30-second deadline starts after admission, not while waiting. Calls on the same connection share an in-flight refresh. |
+
+Repeated cursors fail with `mcp_list_tools_failed`. Exceeding pages, observed
+tools, schema bytes, or total decoded bytes fails with
+`mcp_discovery_page_limit`, `mcp_too_many_tools`,
+`mcp_discovery_schema_limit`, or `mcp_discovery_data_limit`, respectively.
+Deadline expiry and cancellation use
+`mcp_discovery_timeout` and `mcp_discovery_cancelled`.
+These errors contain only closed codes, never server content. Discovery fails
+for that server; partial results are not returned, registered, or cached.
+If a list-change notification invalidates an in-flight traversal, that refresh
+fails with `mcp_list_tools_failed` rather than caching the older snapshot; the
+next discovery call starts fresh.
+
+Cancellation stays inside `@rovinos/mcp`: an optional `AbortSignal` on
+`McpConnection.listTools` cancels a shared refresh, including its outstanding
+SDK request. Closing the connection also cancels discovery. No `@rovinos/sdk`
+public types are changed. Connection establishment has its own existing timeout;
+the discovery deadline begins when traversal starts.
+Queued discoveries do not consume a running slot or deadline budget. Cancelling
+a queued discovery removes it without contacting the server; later waiters keep
+their FIFO order.
+Legacy peers lack per-request stream cancellation, so cancellation or deadline
+expiry closes that connection to stop its outstanding body read; subsequent
+calls reconnect.
+
+These are **decoded-data limits, not wire-byte limits**. The SDK may already
+have buffered and parsed the HTTP response (or decoded a stdio message) before
+the discovery layer measures it. Measurement bounds subsequent traversal and
+header-scanning work; it does not cap SDK buffering, parsing, or heap usage.
+The deadline aborts outstanding HTTP body reads, but JavaScript timers and
+cancellation cannot preempt synchronous SDK parsing. A wire-byte guarantee
+requires transport-layer limits on streamed HTTP bodies (including SSE),
+decompression, and stdio framing before buffering and JSON decoding.
 
 Registered MCP tool ids use the harness `Code` format and are filtered by
 `toolAllowlist`. Native tool names may use any casing, but normalization must

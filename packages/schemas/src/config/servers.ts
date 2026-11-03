@@ -5,6 +5,7 @@ import { Code } from "../primitives.js";
 import { SecretRefSchema } from "../secret-ref.js";
 import { isSecretKeyName } from "../secret-key-name.js";
 import { ServerElicitationConfigSchema } from "./elicitation.js";
+import { SandboxEgressAllowEntrySchema } from "./sandbox.js";
 
 const ServerTimeoutsSchema = z
   .object({
@@ -29,6 +30,24 @@ const ToolNamesSchema = z.array(z.string().min(1)).superRefine((names, context) 
   }
 });
 
+/** Network profile and optional exact destination allowlist for OAuth discovery. */
+export const OAuthDiscoveryConfigSchema = z
+  .object({
+    profile: z.enum(["production", "internal", "local-development"]).default("production"),
+    allowlist: z.array(SandboxEgressAllowEntrySchema).max(128).optional(),
+  })
+  .strict()
+  .superRefine((discovery, context) => {
+    if (discovery.profile === "internal" && (discovery.allowlist?.length ?? 0) === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["allowlist"],
+        message: "The internal OAuth discovery profile requires an exact host/port allowlist.",
+        params: { errorCode: "server_oauth_discovery_allowlist_required" },
+      });
+    }
+  });
+
 const OAuthAuthSchema = z
   .object({
     kind: z.literal("oauth"),
@@ -38,6 +57,7 @@ const OAuthAuthSchema = z
     clientSecret: SecretRefSchema.optional(),
     scopes: z.array(z.string().min(1)).optional(),
     redirectPort: z.number().int().min(1).max(65_535).optional(),
+    discovery: OAuthDiscoveryConfigSchema.optional(),
   })
   .strict()
   .superRefine((auth, context) => {
@@ -207,3 +227,5 @@ export const ServersConfigSchema = z
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 /** Inferred list of MCP server configurations. */
 export type ServersConfig = z.infer<typeof ServersConfigSchema>;
+/** Inferred OAuth protected-resource discovery network policy. */
+export type OAuthDiscoveryConfig = z.infer<typeof OAuthDiscoveryConfigSchema>;
