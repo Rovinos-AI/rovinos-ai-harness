@@ -223,7 +223,12 @@ describe("provider-safe MCP tool aliases", () => {
         );
         expect(execution).toEqual({
           outcome: "ok",
-          result: { content: [{ type: "text", text: "sunny" }] },
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: false,
+            parts: [{ type: "text", text: "sunny" }],
+          },
         });
         expect(current.executedArgs).toEqual([{ city: "Helsinki" }]);
         expect(JSON.stringify({ policyToolId: toolCall.toolId, execution })).not.toContain(

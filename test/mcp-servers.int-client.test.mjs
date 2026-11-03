@@ -6,6 +6,7 @@ import {
   FakeClock,
   Id,
   JsonValue,
+  McpToolResultEnvelopeSchema,
   PiiConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
@@ -79,11 +80,8 @@ function isRecord(value) {
 }
 
 function resultValue(result) {
-  const decoded = JsonValue.parse(result.result);
-  if (!isRecord(decoded) || !Array.isArray(decoded.content)) {
-    throw new TypeError("The sample MCP server returned an invalid tool result.");
-  }
-  const first = decoded.content[0];
+  const decoded = McpToolResultEnvelopeSchema.parse(result.result);
+  const first = decoded.parts[0];
   if (!isRecord(first) || typeof first.text !== "string") {
     throw new TypeError("The sample MCP server returned an invalid text result.");
   }
