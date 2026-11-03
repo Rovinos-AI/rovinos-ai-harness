@@ -17,6 +17,7 @@ import type {
 } from "@rovinos/core";
 import type { ResolvedRun } from "../resolve.js";
 import { ReplayDivergenceError, ReplayMissingResultError } from "./replay-model.js";
+import { ReplayInputRounds } from "./replay-input-rounds.js";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -49,6 +50,7 @@ export class ReplayToolPort implements ToolPort {
       readonly intents: Map<Id, Extract<Event, { type: "tool_intent" }>>;
       readonly results: Map<Id, Extract<Event, { type: "tool_result" }>>;
       readonly editedArgs: Map<Id, JsonValue>;
+      readonly inputs: ReplayInputRounds;
     }
   >();
 
@@ -90,7 +92,12 @@ export class ReplayToolPort implements ToolPort {
           }
         }
       }
-      this.runs.set(run.runId, { intents, results, editedArgs });
+      this.runs.set(run.runId, {
+        intents,
+        results,
+        editedArgs,
+        inputs: new ReplayInputRounds(run.events),
+      });
     }
   }
 
@@ -141,30 +148,33 @@ export class ReplayToolPort implements ToolPort {
   }
 
   /** Returns the recorded result or fails closed on missing or divergent input. */
-  execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult> {
+  async execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult> {
     const runId = context.runId === this.rootReplayRunId ? this.originalRootRunId : context.runId;
     const run = this.runs.get(runId);
     const intent = run?.intents.get(call.callId);
     const result = run?.results.get(call.callId);
-    if (intent === undefined || result === undefined) {
-      return Promise.reject(new ReplayMissingResultError(intent?.seq));
+    if (run === undefined || intent === undefined || result === undefined) {
+      throw new ReplayMissingResultError(intent?.seq);
     }
-    const effectiveArgs = run?.editedArgs.get(call.callId);
+    const effectiveArgs = run.editedArgs.get(call.callId);
     if (
       hashArgs(call.args) !== intent.argsHash &&
       (effectiveArgs === undefined || hashArgs(call.args) !== hashArgs(effectiveArgs))
     ) {
-      return Promise.reject(new ReplayDivergenceError(intent.seq, "tool_args_hash_mismatch"));
+      throw new ReplayDivergenceError(intent.seq, "tool_args_hash_mismatch");
     }
+    if (await run.inputs.suspend(call, context)) {
+      return { outcome: "ok", result: null, suspend: true, suspendReason: "awaiting_input" };
+    }
+    return this.executionResult(result);
+  }
+
+  private executionResult(result: Extract<Event, { type: "tool_result" }>): ToolExecutionResult {
     const outcome = result.outcome === "ok" ? "ok" : "error";
     const errorCode =
       result.errorCode ??
       (result.outcome === "timeout" ? Code.parse("tool_timeout") : Code.parse("tool_failed"));
-    return Promise.resolve({
-      outcome,
-      result: result.result,
-      ...(outcome === "error" ? { errorCode } : {}),
-    });
+    return { outcome, result: result.result, ...(outcome === "error" ? { errorCode } : {}) };
   }
 }
 

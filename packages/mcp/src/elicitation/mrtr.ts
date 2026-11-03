@@ -36,7 +36,12 @@ export interface ElicitationPort {
   /** Records a request and policy decline without presenting it to a human. */
   recordLegacyPolicyDecline?(input: LegacyElicitationInput): Promise<void>;
   /** Notifies the run loop that a known legacy URL elicitation completed server-side. */
-  onLegacyComplete?(input: Omit<LegacyElicitationInput, "request" | "timeoutMs" | "signal">): void;
+  onLegacyComplete?(
+    input: Omit<
+      LegacyElicitationInput,
+      "request" | "timeoutMs" | "signal" | "maxPerRun" | "onRateLimited"
+    >,
+  ): void;
 }
 
 /** Retry material supplied by the resume planner for the same MCP tool call. */
@@ -54,6 +59,9 @@ export interface LegacyElicitationInput {
   readonly elicitationId: string;
   readonly request: ValidatedInputRequest;
   readonly timeoutMs: number;
+  readonly maxPerRun: number;
+  /** Reports a cap rejection without exposing or recording the rejected request. */
+  readonly onRateLimited?: () => void;
   readonly signal: AbortSignal;
 }
 
