@@ -158,7 +158,7 @@ export class ReplayHuman {
       );
       await recorder.record({
         type: "tool_result",
-        v: 1,
+        v: 2,
         callId: result.callId,
         toolId: result.toolId,
         outcome: result.outcome,
