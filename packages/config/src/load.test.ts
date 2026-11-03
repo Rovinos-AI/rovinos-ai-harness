@@ -549,6 +549,7 @@ store: {}`,
       telemetry: {
         sentinel: { minValueLength: 6 },
         correlation: { enabled: false },
+        metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
       },
       sandbox: {},
       elicitation: {

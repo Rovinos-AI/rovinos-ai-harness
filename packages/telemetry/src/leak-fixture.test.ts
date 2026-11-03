@@ -87,8 +87,7 @@ describe("telemetry leak fixture", () => {
         ),
       ).toBe(true);
     } finally {
-      await sdk.tracerProvider.shutdown();
-      await sdk.loggerProvider.shutdown();
+      await sdk.shutdown();
     }
   });
 });

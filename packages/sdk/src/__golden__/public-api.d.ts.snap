@@ -244,6 +244,17 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     clientSecret: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>;
                     scopes: z.ZodOptional<z.ZodArray<z.ZodString>>;
                     redirectPort: z.ZodOptional<z.ZodNumber>;
+                    discovery: z.ZodOptional<z.ZodObject<{
+                        profile: z.ZodDefault<z.ZodEnum<{
+                            "local-development": "local-development";
+                            internal: "internal";
+                            production: "production";
+                        }>>;
+                        allowlist: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                            host: z.ZodString;
+                            ports: z.ZodArray<z.ZodNumber>;
+                        }, z.core.$strict>>>;
+                    }, z.core.$strict>>;
                 }, z.core.$strict>>;
             }, z.core.$strict>], "kind">;
             protocol: z.ZodDefault<z.ZodEnum<{
@@ -304,6 +315,13 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     clientSecret?: (string & z.core.$brand<"SecretRef">) | undefined;
                     scopes?: string[] | undefined;
                     redirectPort?: number | undefined;
+                    discovery?: {
+                        profile: "internal" | "local-development" | "production";
+                        allowlist?: {
+                            host: string;
+                            ports: number[];
+                        }[] | undefined;
+                    } | undefined;
                 } | undefined;
             };
             protocol: "2025-11-25" | "2026-07-28" | "auto";
@@ -349,6 +367,13 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     clientSecret?: (string & z.core.$brand<"SecretRef">) | undefined;
                     scopes?: string[] | undefined;
                     redirectPort?: number | undefined;
+                    discovery?: {
+                        profile: "internal" | "local-development" | "production";
+                        allowlist?: {
+                            host: string;
+                            ports: number[];
+                        }[] | undefined;
+                    } | undefined;
                 } | undefined;
             };
             protocol: "2025-11-25" | "2026-07-28" | "auto";
@@ -477,6 +502,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             }, z.core.$strict>>;
             correlation: z.ZodPrefault<z.ZodObject<{
                 enabled: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>;
+            metrics: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                ownership: z.ZodDefault<z.ZodEnum<{
+                    harness: "harness";
+                    host: "host";
+                }>>;
+                maxSeries: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
         sandbox: z.ZodPrefault<z.ZodObject<{
