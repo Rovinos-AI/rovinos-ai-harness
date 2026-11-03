@@ -342,10 +342,11 @@ jobs:
         run: yarn pii:report --mode presidio --out-dir reports/pii-report-presidio
       - name: Collect Compose logs
         if: failure()
-        run: >
-          docker compose --env-file infra/collector/VERSION
-          -f infra/compose/docker-compose.test.yml logs --no-color
-          > reports/compose.log
+        run: |
+          mkdir -p reports
+          docker compose --env-file infra/collector/VERSION \
+            -f infra/compose/docker-compose.test.yml logs --no-color \
+            | tee reports/compose.log
       - name: Upload integration reports
         if: success() || failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

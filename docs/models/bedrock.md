@@ -1,20 +1,17 @@
 # Amazon Bedrock
 
-> **Not registered by the shipped runtime factory:** this adapter and its config are available to
-> package-level callers, but normal runtime routing cannot select Bedrock until provider-factory
-> wiring is added. The example below therefore does not enable Bedrock by itself.
->
+Bedrock is available through the runtime provider factory. Configure a region and map harness model
+codes to Bedrock model or inference profile IDs:
+
 > **No streaming path:** task 14.19 implements the synchronous Converse API only. `ConverseStream`
 > support is outside issue #160's scope and belongs with the separate streaming interface in task
 > 14.16 (PR #463).
 
-`BedrockAdapter` uses the AWS SDK for JavaScript v3 Converse API. Configure a region and map
-harness model codes to Bedrock model or inference profile IDs:
+`BedrockAdapter` uses the AWS SDK for JavaScript v3 Converse API.
 
 ```yaml
 models:
   providers:
-    # Package-level adapter only; runtime provider-factory wiring is not yet available.
     - id: bedrock
       kind: bedrock
       region: us-east-1
