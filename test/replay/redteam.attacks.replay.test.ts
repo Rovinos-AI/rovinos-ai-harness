@@ -582,7 +582,9 @@ describe("runtime-backed red-team attacks", () => {
       });
 
       expect(result.executions).toContain(hiddenId);
-      expect(() => assertSafeAttack(result, hiddenId, "completed")).toThrow();
+      expect(() => {
+        assertSafeAttack(result, hiddenId, "completed");
+      }).toThrow();
     });
   });
 

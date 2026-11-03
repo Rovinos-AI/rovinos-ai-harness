@@ -224,8 +224,10 @@ async function executeRecordedIntent(
       input.options.recorder,
       input.events,
       call,
-      preparationError ?? "unknown_tool",
-      executedArgsHash,
+      {
+        code: preparationError ?? "unknown_tool",
+        ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+      },
     );
   }
   const appApproval = input.behavior.existingIntent?.policyReason === APP_APPROVAL_REASON;
@@ -262,7 +264,7 @@ async function executeRecordedIntent(
         call,
         {
           code: decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
-          executedArgsHash,
+          ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
         },
       );
     }
