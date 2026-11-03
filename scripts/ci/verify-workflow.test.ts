@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Structure and security checks for the GitHub Actions CI workflow (task 1.21). The workflow runs
 // untrusted PR code, so its token, triggers, and action pins are guarded here, not by review alone.
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -427,6 +429,38 @@ describe("GitHub workflows", () => {
     expect(stepRunning(steps, "scripts/ci/compose-wait.sh")).toBeDefined();
     expect(teardown?.if).toBe("always()");
     expect(steps.at(-1)).toBe(teardown);
+  });
+
+  it("prints and saves Compose diagnostics when startup fails before reports exist", () => {
+    const steps = jobSteps("integration");
+    const collect = steps.find((step) => step.name === "Collect Compose logs");
+    const upload = steps.find((step) => step.name === "Upload integration reports");
+    const teardown = stepRunning(steps, "down -v --remove-orphans");
+    expect(collect?.if).toBe("failure()");
+    expect(upload?.with?.path).toContain("reports/compose.log");
+    if (collect?.run === undefined || upload === undefined || teardown === undefined) {
+      throw new TypeError("Integration diagnostics must be collected before upload and teardown.");
+    }
+    expect(steps.indexOf(collect)).toBeLessThan(steps.indexOf(upload));
+    expect(steps.indexOf(upload)).toBeLessThan(steps.indexOf(teardown));
+    const directory = mkdtempSync(resolve(tmpdir(), "compose-diagnostics-"));
+    try {
+      const output = execFileSync(
+        "bash",
+        [
+          "-e",
+          "-o",
+          "pipefail",
+          "-c",
+          `docker() { printf '%s\\n' 'sample-mcp-server exited (1)'; }\n${collect.run}`,
+        ],
+        { cwd: directory, encoding: "utf8" },
+      );
+      expect(output).toContain("sample-mcp-server exited (1)");
+      expect(readFileSync(resolve(directory, "reports/compose.log"), "utf8")).toBe(output);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("runs the canary and replay release gates", () => {
