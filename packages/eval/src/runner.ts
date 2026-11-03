@@ -26,6 +26,11 @@ const RunnerOptionsSchema = z
   })
   .strict();
 
+const DEFAULT_INVARIANT_GRADERS = [
+  { type: "approval_integrity" },
+  { type: "no_denied_executed" },
+] as const;
+
 /** Valid options for one suite run. */
 export type RunnerOptions = z.input<typeof RunnerOptionsSchema>;
 
@@ -94,6 +99,26 @@ function stringifyTrialRecord(trial: TrialSpec, result: TrialResult): string {
     result,
   });
   return `${JSON.stringify(record)}\n`;
+}
+
+function suiteWithInvariantGraders(
+  suite: ReturnType<typeof EvalSuiteSchema.parse>,
+): ReturnType<typeof EvalSuiteSchema.parse> {
+  if (!suite.invariants) {
+    return suite;
+  }
+  return EvalSuiteSchema.parse({
+    ...suite,
+    tasks: suite.tasks.map((task) => ({
+      ...task,
+      graders: [
+        ...DEFAULT_INVARIANT_GRADERS.filter(
+          ({ type }) => !task.graders.some((grader) => grader.type === type),
+        ),
+        ...task.graders,
+      ],
+    })),
+  });
 }
 
 function makePlan(
@@ -253,7 +278,7 @@ export async function runEval(
   }
   const parsedOptions = RunnerOptionsSchema.parse(runnerOptions);
   const outDir = resolve(parsedOptions.outDir);
-  const trials = makePlan(parsedSuite, parsedVariants, parsedOptions);
+  const trials = makePlan(suiteWithInvariantGraders(parsedSuite), parsedVariants, parsedOptions);
   const trialsRoot = join(outDir, "trials");
   const jsonlPath = join(outDir, "trials.jsonl");
   await mkdir(trialsRoot, { recursive: true });

@@ -1,0 +1,26 @@
+{
+  "containsRealData": false,
+  "entries": [
+    {
+      "hash": "03a9387736e4cd6729c5624503075e3ed149a5f0cce12cb2e72c821217f75ef3",
+      "response": {
+        "parts": [
+          {
+            "type": "tool_call",
+            "callId": "00000000000000000000000001",
+            "toolId": "sandbox.exec",
+            "args": {
+              "argv": ["printf", "synthetic-pending"]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 1
+        },
+        "finishReason": "tool_calls",
+        "latencyMs": 1
+      }
+    }
+  ]
+}

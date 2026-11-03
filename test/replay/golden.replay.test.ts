@@ -11,6 +11,7 @@ import {
   replayRun,
 } from "@rovinos/replay";
 import { parseJson } from "@rovinos/schemas";
+import { verifyInvariants } from "@rovinos/eval";
 import { runReplayGolden } from "../../scripts/replay-golden.js";
 import { recordGoldenScenario, withGoldenTracing } from "./golden/scenario.js";
 
@@ -45,6 +46,8 @@ it("replays the scripted golden run without divergence or behavioral differences
     expect(comparison.match).toBe(true);
     expect(replayReportExitCode(report)).toBe(0);
     const recordedEvents = scenario.resolved.runs[0]?.events ?? [];
+    expect(verifyInvariants(recordedEvents)).toEqual([]);
+    expect(verifyInvariants(outcome.events)).toEqual([]);
     expect(scenario.crashResumed).toBe(true);
     expect(scenario.coverageEvents.some((event) => event.type === "context_compacted")).toBe(true);
     expect(recordedEvents.some((event) => event.type === "checkpoint_written")).toBe(true);

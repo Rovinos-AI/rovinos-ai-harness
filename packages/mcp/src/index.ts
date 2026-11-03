@@ -10,8 +10,10 @@ export {
 export { McpProtocolError } from "./errors.js";
 export {
   McpToolPort,
+  McpCatalogChangedError,
   type McpToolCall,
   type McpToolCallContext,
+  type McpCatalogPinOptions,
   type McpToolExecutionResult,
   type McpToolPortDependencies,
 } from "./tool-port.js";
