@@ -4,6 +4,7 @@ import { Principal } from "@rovinos/schemas";
 
 const harness = await createHarness({ configPath: "harness.config.yaml" });
 
+/** Resolves a pending request and resumes the run that requested it. */
 export async function answerPendingInput(
   requestId: string,
   content: { readonly email: string },

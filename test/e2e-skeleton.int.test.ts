@@ -22,7 +22,6 @@ import {
 import { McpServer } from "@modelcontextprotocol/server";
 import { logs, SeverityNumber, trace } from "@opentelemetry/api";
 import Database from "better-sqlite3";
-import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -42,6 +41,7 @@ import {
   startRunOutputSchema,
 } from "@rovinos/control-plane";
 import { createHarness } from "@rovinos/sdk";
+import { runSdkInputAnswerProcess } from "../scripts/test-support/sdk-human-input-process.js";
 import {
   CompositeSecretResolver,
   EnvSecretResolver,
@@ -154,28 +154,6 @@ interface CliCapture {
   readonly code: number;
   readonly stdout: readonly string[];
   readonly stderr: readonly string[];
-}
-
-function runSdkInputAnswerProcess(
-  args: readonly string[],
-  env: NodeJS.ProcessEnv,
-): Promise<string> {
-  const script = fileURLToPath(new URL("./fixtures/sdk-human-input-answer.mjs", import.meta.url));
-  const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-  return new Promise((resolve, reject) => {
-    execFile(
-      process.execPath,
-      [script, ...args],
-      { cwd: repositoryRoot, encoding: "utf8", env, timeout: 60_000, windowsHide: true },
-      (error, stdout) => {
-        if (error !== null) {
-          reject(new Error("The SDK human-input answer process failed."));
-          return;
-        }
-        resolve(stdout);
-      },
-    );
-  });
 }
 
 interface Skeleton {

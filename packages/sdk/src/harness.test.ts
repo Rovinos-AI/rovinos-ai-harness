@@ -704,6 +704,11 @@ describe("@rovinos/sdk", () => {
         (event) => event.type === "approval_resolved" && event.approvalId === approvalId,
       ),
     ).toMatchObject({ decidedBy: "human", approverId: "cli.test" });
+    await expect(
+      harness.resolveApproval(approvalId, "approve", {
+        principal: Principal.parse("cli.test"),
+      }),
+    ).rejects.toMatchObject({ code: "sdk_run_not_found" });
     const resumed = await harness.resumeRun(started.runId);
     expect(resumed.status).toBe("completed");
   });
@@ -731,18 +736,21 @@ describe("@rovinos/sdk", () => {
     expect(JSON.stringify(events)).not.toContain("sdk-answer-canary@example.test");
   });
 
-  it.each(["decline", "cancel"] as const)("resolves a human input with action %s", async (action) => {
-    const store = new InMemoryEventStore();
-    const { runId, requestId } = await seedPendingInput(store);
-    const { harness } = await createTestHarness({ store });
+  it.each(["decline", "cancel"] as const)(
+    "resolves a human input with action %s",
+    async (action) => {
+      const store = new InMemoryEventStore();
+      const { runId, requestId } = await seedPendingInput(store);
+      const { harness } = await createTestHarness({ store });
 
-    await expect(
-      harness.answerInput(requestId, { action, principal: Principal.parse("cli.test") }),
-    ).resolves.toEqual({ runId, requestId, action });
-    expect(
-      (await readStoredEvents(store, runId)).find((event) => event.type === "input_resolved"),
-    ).toMatchObject({ action, decidedBy: "human" });
-  });
+      await expect(
+        harness.answerInput(requestId, { action, principal: Principal.parse("cli.test") }),
+      ).resolves.toEqual({ runId, requestId, action });
+      expect(
+        (await readStoredEvents(store, runId)).find((event) => event.type === "input_resolved"),
+      ).toMatchObject({ action, decidedBy: "human" });
+    },
+  );
 
   it("validates the stored answer schema before recording a resolution", async () => {
     const store = new InMemoryEventStore();
@@ -756,9 +764,22 @@ describe("@rovinos/sdk", () => {
         principal: Principal.parse("cli.test"),
       }),
     ).rejects.toMatchObject({ code: "input_answer_invalid" });
-    expect((await readStoredEvents(store, runId)).some((event) => event.type === "input_resolved")).toBe(
-      false,
-    );
+    expect(
+      (await readStoredEvents(store, runId)).some((event) => event.type === "input_resolved"),
+    ).toBe(false);
+  });
+
+  it("rejects a valid request id that is not pending on a suspended run", async () => {
+    const store = new InMemoryEventStore();
+    await seedPendingInput(store);
+    const { harness } = await createTestHarness({ store });
+
+    await expect(
+      harness.answerInput("00000000000000000000000099", {
+        action: "decline",
+        principal: Principal.parse("cli.test"),
+      }),
+    ).rejects.toMatchObject({ code: "sdk_run_not_found" });
   });
 
   it("rejects a requester resolving their own input when separation of duties applies", async () => {
@@ -775,9 +796,9 @@ describe("@rovinos/sdk", () => {
         principal: Principal.parse("cli.requester"),
       }),
     ).rejects.toMatchObject({ code: "approver_is_requester" });
-    expect((await readStoredEvents(store, runId)).some((event) => event.type === "input_resolved")).toBe(
-      false,
-    );
+    expect(
+      (await readStoredEvents(store, runId)).some((event) => event.type === "input_resolved"),
+    ).toBe(false);
   });
 
   it("records an expired request as cancelled before returning the expiry error", async () => {
@@ -815,12 +836,14 @@ describe("@rovinos/sdk", () => {
         principal: Principal.parse("cli.test"),
       }),
     ).rejects.toMatchObject({ code: "sdk_input_ambiguous" });
-    expect((await readStoredEvents(store, first.runId)).some((event) => event.type === "input_resolved")).toBe(
-      false,
-    );
-    expect((await readStoredEvents(store, second.runId)).some((event) => event.type === "input_resolved")).toBe(
-      false,
-    );
+    expect(
+      (await readStoredEvents(store, first.runId)).some((event) => event.type === "input_resolved"),
+    ).toBe(false);
+    expect(
+      (await readStoredEvents(store, second.runId)).some(
+        (event) => event.type === "input_resolved",
+      ),
+    ).toBe(false);
   });
 
   it("does not append duplicate outcomes for concurrent resolutions", async () => {

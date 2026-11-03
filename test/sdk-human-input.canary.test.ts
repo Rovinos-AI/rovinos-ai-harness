@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, logs, trace } from "@opentelemetry/api";
-import { createRuntime, type PolicyPort } from "@rovinos/core";
+import { createRuntime, type ModelCompletion, type PolicyPort } from "@rovinos/core";
 import { FakeModelPort } from "@rovinos/core/testing";
 import { createCanaries } from "@rovinos/eval";
 import {
@@ -12,7 +12,6 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
-  type ModelCompletion,
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { createTestContextManager } from "@rovinos/telemetry/testing";
@@ -21,7 +20,6 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeVaultReader } from "./canary/runtime-fixture.js";
 
-const traceId = "a".repeat(32);
 const requestCallId = Id.parse("00000000000000000000000071");
 const allowPolicy: PolicyPort = {
   version: Code.parse("synthetic.input.canary"),
@@ -48,10 +46,7 @@ function completion(parts: ModelCompletion["parts"]): ModelCompletion {
   };
 }
 
-async function readEvents(
-  store: InMemoryEventStore,
-  runId: Id,
-): Promise<Event[]> {
+async function readEvents(store: InMemoryEventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
     events.push(event);
