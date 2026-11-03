@@ -21,15 +21,17 @@ import {
 } from "./legacy-connection.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
-import { listAllTools, type McpTool } from "./tool-list.js";
+import type { McpTool } from "./tool-list.js";
+import { DiscoveryTask } from "./discovery-budget.js";
 import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
 import {
   type CachedToolList,
-  ListToolsResultSchema,
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
   ClientCredentialsExtensionSupport,
   createConfiguredTransport,
   createMcpClient,
+  discoverConnectionTools,
+  discoveryConnectionError,
   defaultSleep,
   getOrCreateValidator,
   invokeConnectionTool,
@@ -64,6 +66,8 @@ export class McpConnection {
   #state: McpConnectionState = "unavailable";
   #protocolEra: "legacy" | "modern" | undefined;
   #cachedTools: CachedToolList | undefined;
+  readonly #discovery = new DiscoveryTask<McpTool[]>();
+  #toolsGeneration = 0;
   readonly #clientCredentialsExtension = new ClientCredentialsExtensionSupport();
   readonly #legacyElicitation = new LegacyConnectionElicitation();
   #oauthProvider: McpOAuthProvider | undefined;
@@ -229,6 +233,7 @@ export class McpConnection {
   }
 
   async #closeCurrentClient(): Promise<void> {
+    this.#discovery.cancel();
     const previousClient = this.#client;
     this.#client = undefined;
     this.#currentTransport = undefined;
@@ -243,6 +248,7 @@ export class McpConnection {
   }
 
   #onToolsChanged(error: Error | null): void {
+    this.#toolsGeneration++;
     this.#cachedTools = undefined;
     const logRefreshFailure = () => {
       this.#dependencies.logger?.log({
@@ -277,52 +283,50 @@ export class McpConnection {
     };
   }
 
-  /** Lists all server tools, honoring caching per ttlMs, pagination, and a 1,000-tool cap. */
-  async listTools(): Promise<McpTool[]> {
-    await this.#ensureReady();
+  /**
+   * Lists tools under finite discovery budgets, caching only complete results.
+   * Concurrent refreshes share work; cancellation by any caller cancels that shared refresh.
+   */
+  async listTools(signal?: AbortSignal): Promise<McpTool[]> {
+    if (signal?.aborted === true) {
+      throw new McpConnectionError("mcp_discovery_cancelled");
+    }
+    await this.#ensureReady(signal);
     const now = this.#now();
     if (this.#cachedTools !== undefined && this.#cachedTools.expiresAt > now) {
       return [...this.#cachedTools.tools];
     }
-    return this.#fetchTools();
+    return this.#fetchTools(signal);
   }
 
-  async #fetchTools(): Promise<McpTool[]> {
+  async #fetchTools(signal?: AbortSignal): Promise<McpTool[]> {
+    return [
+      ...(await this.#discovery.run((activeSignal) => this.#discoverTools(activeSignal), signal)),
+    ];
+  }
+
+  async #discoverTools(signal: AbortSignal): Promise<McpTool[]> {
     const client = this.#client;
+    const generation = this.#toolsGeneration;
     if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_list_tools_failed");
     }
-    let listed: Awaited<ReturnType<typeof listAllTools>>;
+    let listed: Awaited<ReturnType<typeof discoverConnectionTools>>;
     try {
-      listed = await runWithSafeAuthLogging(
-        this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
-        () =>
-          listAllTools({
-            requestPage: (cursor) =>
-              client.request(
-                { method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }) },
-                ListToolsResultSchema,
-                { timeout: this.#config.timeouts.callMs },
-              ),
-            era: this.#protocolEra,
-            transport: this.#config.transport.kind,
-            onExcluded: (count) => {
-              this.#dependencies.logger?.log({
-                code: "mcp_tools_excluded",
-                serverId: this.#config.id,
-                count,
-              });
-            },
-          }),
-      );
+      listed = await discoverConnectionTools(client, this.#config, this.#dependencies, {
+        era: this.#protocolEra,
+        signal,
+      });
     } catch (error) {
-      if (error instanceof McpAuthRequiredError) {
+      throw discoveryConnectionError(error, () => {
         this.#markUnavailable();
-        throw new McpConnectionError("mcp_auth_required");
-      }
-      throw error instanceof McpConnectionError
-        ? error
-        : new McpConnectionError("mcp_list_tools_failed");
+      });
+    }
+    if (signal.aborted || this.#client !== client) {
+      throw new McpConnectionError("mcp_discovery_cancelled");
+    }
+    if (generation !== this.#toolsGeneration) {
+      throw new McpConnectionError("mcp_list_tools_failed");
     }
     const ttlMs = listed.ttlMs !== undefined && listed.ttlMs > 0 ? listed.ttlMs : 0;
     this.#cachedTools = { tools: listed.tools, expiresAt: this.#now() + ttlMs };
@@ -429,6 +433,7 @@ export class McpConnection {
     this.#closed = true;
     this.#connectGeneration++;
     this.#activeConnectAbortController?.abort();
+    this.#discovery.cancel();
     const connectPromise = this.#connectPromise;
     const client = this.#client;
     this.#client = undefined;

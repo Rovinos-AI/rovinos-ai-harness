@@ -203,8 +203,10 @@ export {
 export {
   ServerConfigSchema,
   ServersConfigSchema,
+  OAuthDiscoveryConfigSchema,
   type ServerConfig,
   type ServersConfig,
+  type OAuthDiscoveryConfig,
 } from "./config/servers.js";
 export {
   ApprovalConfigSchema,
