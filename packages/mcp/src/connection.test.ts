@@ -382,6 +382,7 @@ describe("McpConnection", () => {
     expect(Object.keys(mcpPackage).sort()).toEqual([
       "LegacyElicitationCompletionTracker",
       "McpAuthRequiredError",
+      "McpCatalogChangedError",
       "McpConnection",
       "McpConnectionError",
       "McpOAuthProvider",
