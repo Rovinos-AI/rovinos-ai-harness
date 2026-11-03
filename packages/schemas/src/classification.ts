@@ -12,6 +12,8 @@ export type EventFieldClass = "meta" | "content";
 export const EVENT_FIELD_CLASS = {
   run_created: {
     configHash: "meta",
+    toolCatalogVersion: "meta",
+    toolCatalogFingerprints: "meta",
     policyVersion: "meta",
     replayOf: "meta",
     parentRunId: "meta",
