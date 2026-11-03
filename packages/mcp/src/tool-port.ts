@@ -140,6 +140,8 @@ function errorCode(error: unknown, signal: AbortSignal): string {
         return "mcp_timeout";
       case "mcp_connection_lost":
         return "mcp_connection_lost";
+      case "mcp_apps_unsupported":
+        return "mcp_apps_unsupported";
       case "mcp_connect_failed":
       case "mcp_list_tools_failed":
       case "mcp_too_many_tools":

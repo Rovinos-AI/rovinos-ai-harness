@@ -23,6 +23,7 @@ export type McpConnectionErrorCode =
   | "mcp_connection_lost"
   | "mcp_list_tools_failed"
   | "mcp_too_many_tools"
+  | "mcp_apps_unsupported"
   | "mcp_tool_arguments_invalid"
   | "mcp_tool_call_failed";
 
