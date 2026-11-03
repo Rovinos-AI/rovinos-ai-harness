@@ -1,7 +1,7 @@
 # ADR 0004: Lossless MCP tool results and artifact references
 
-- **Status:** Proposed; maintainer approval required before implementation
-- **Date:** 2026-11-02
+- **Status:** Accepted
+- **Date:** 2026-11-03
 - **Decision owners:** Maintainers
 
 ## Context
@@ -37,17 +37,18 @@ multi-artifact write and authorization contract is not yet defined.
    decoded byte count, and SHA-256 digest. The digest is for integrity checks, not a telemetry
    attribute. Small binary parts may remain inline under the existing threshold; large parts each
    receive a separate reference.
-4. Reuse `maxResultBytes` as the aggregate cap for the complete normalized result before artifact
-   substitution, measured as the UTF-8 byte length of its serialized JSON representation. Count all
-   parts and structured content together, including base64 data for binary parts; do not apply the
-   cap independently per part. Keep the current 1 MiB default unless maintainers approve a separate
-   threshold. Check encoded lengths before decoding/copying and reject over-limit results with
-   `result_too_large`.
+4. Apply `maxResultBytes` (1 MiB by default) to the UTF-8 serialized inline envelope after artifact
+   substitution. Count all parts, references, and structured content together. Add a per-server
+   `maxArtifactBytes` cap (50 MiB by default) over the combined decoded bytes of all offloaded parts.
+   Check encoded lengths before decoding/copying; reject envelope overflow with `result_too_large`
+   and artifact overflow with `artifact_too_large`.
 5. Treat artifact handles as references, not authority. Reads must be authorized by the active
    run's workspace boundary; a handle from another run must not grant access. Artifact bytes and
    resource URIs remain content, never telemetry or error text. Apply existing PII/storage controls
-   before persistence; if a binary part cannot satisfy the approved content-protection boundary,
-   reject it rather than persisting it unprotected.
+   before persistence. Binary parts are blocked by default with `mcp_binary_result_blocked`.
+   Operators may set `binaryResults: allow` per server. Allowed binary artifacts are stored
+   untokenized in the run workspace as an explicit exception to the files-carry-tokens rule.
+   Vault-key encryption is a follow-up; this decision does not add it.
 
 ## Offload and failure semantics
 
@@ -96,10 +97,7 @@ legacy results must both be passed intact to the next model step.
 3. Fetch resource-link URIs during normalization. This would turn untrusted content into network
    authority and is explicitly out of scope.
 
-## Approval required
+## Follow-up
 
-This proposal does not authorize implementation. Maintainers must approve the envelope schema,
-artifact reference and read-authorization contract, byte-limit accounting, all-or-nothing write
-capability, and legacy wrapper behavior before code or event schemas change. In particular, confirm
-that the selected run-workspace boundary satisfies the content-protection requirement for binary
-artifacts.
+Encrypt allowed binary artifacts with the run's vault key while retaining run-scoped reference
+authorization and integrity verification.

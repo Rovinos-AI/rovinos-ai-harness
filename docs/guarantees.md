@@ -50,6 +50,18 @@ other storage unless those systems are separately configured to do so.
   for as long as encrypted data or backups must remain readable, and select
   encrypted adapters for every durable store in scope.
 
+### Binary MCP artifacts
+
+MCP binary results are blocked by default. When an operator opts in per server,
+offloaded binary parts are stored untokenized in that run's workspace. This is
+an explicit exception to the files-carry-tokens rule and is not encrypted with
+the vault key in this release.
+
+- **Evidence:** MCP result validation and workspace artifact tests.
+- **Assumptions:** operators explicitly allow binary results only for servers
+  whose output and workspace access they trust, and protect workspace storage
+  and backups. Vault-key encryption is a follow-up.
+
 ### App telemetry validation and host stamping
 
 The host validates app telemetry against a closed schema, bounds batch size, and
