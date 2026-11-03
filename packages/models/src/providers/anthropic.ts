@@ -6,7 +6,7 @@ import Anthropic, {
 } from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import {
-  Code,
+  type Code,
   type Id,
   JsonValue,
   type Capabilities,
@@ -16,11 +16,13 @@ import {
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
 import { retryAfterMs } from "./retry-after.js";
+import { buildAnthropicRequest } from "./anthropic-request.js";
 import {
   createAnthropicStreamState,
   createAnthropicStreamingParams,
   streamEventDeltas,
 } from "./anthropic-streaming.js";
+import { createProviderToolAliasesForRequest, type ProviderToolAliases } from "./tool-aliases.js";
 
 /** Secret-shaped input accepted without importing the configuration package. */
 export interface AnthropicApiKey {
@@ -44,130 +46,6 @@ export interface AnthropicAdapterOptions {
   readonly capabilities?: Partial<Capabilities>;
 }
 
-function readOpaqueContent(value: JsonValue): JsonValue[] {
-  if (!Array.isArray(value)) {
-    throw new ProviderError("provider_bad_request");
-  }
-  return value;
-}
-
-function readToolUseId(blob: JsonValue, callId: string): string | undefined {
-  if (typeof blob !== "object" || blob === null || Array.isArray(blob)) {
-    return undefined;
-  }
-  const map = blob.toolUseIdByCallId;
-  if (typeof map !== "object" || map === null || Array.isArray(map)) {
-    return undefined;
-  }
-  const value = map[callId];
-  return typeof value === "string" ? value : undefined;
-}
-
-function findToolUseId(
-  request: ModelRequest,
-  messageIndex: number,
-  callId: string,
-  provider: string,
-): string {
-  for (let index = messageIndex - 1; index >= 0; index -= 1) {
-    const message = request.messages[index];
-    if (message?.role !== "assistant") {
-      continue;
-    }
-    const opaque = message.parts.find(
-      (part) => part.type === "opaque" && part.provider === provider,
-    );
-    if (opaque?.type === "opaque") {
-      const toolUseId = readToolUseId(opaque.blob, callId);
-      if (toolUseId !== undefined) {
-        return toolUseId;
-      }
-    }
-  }
-  return `toolu_${callId}`;
-}
-
-function buildMessageContent(
-  request: ModelRequest,
-  messageIndex: number,
-  provider: string,
-): JsonValue[] {
-  const message = request.messages[messageIndex];
-  if (message === undefined) {
-    return [];
-  }
-  if (message.role === "assistant") {
-    const opaque = message.parts.find(
-      (part) => part.type === "opaque" && part.provider === provider,
-    );
-    if (opaque?.type === "opaque") {
-      if (
-        typeof opaque.blob !== "object" ||
-        opaque.blob === null ||
-        Array.isArray(opaque.blob) ||
-        !("content" in opaque.blob)
-      ) {
-        throw new ProviderError("provider_bad_request");
-      }
-      return readOpaqueContent(opaque.blob.content);
-    }
-  }
-
-  const blocks: JsonValue[] = [];
-  for (const part of message.parts) {
-    if (part.type === "text") {
-      blocks.push({ type: "text", text: part.text });
-    } else if (part.type === "tool_call") {
-      blocks.push({
-        type: "tool_use",
-        id: `toolu_${part.callId}`,
-        name: part.toolId,
-        input: part.args,
-      });
-    } else if (part.type === "tool_result") {
-      blocks.push({
-        type: "tool_result",
-        tool_use_id: findToolUseId(request, messageIndex, part.callId, provider),
-        content: typeof part.result === "string" ? part.result : JSON.stringify(part.result),
-        is_error: part.isError,
-      });
-    }
-  }
-  return blocks;
-}
-
-function buildMessages(request: ModelRequest, provider: string) {
-  const messages: { role: "assistant" | "user"; content: JsonValue[] }[] = [];
-  for (const [index, message] of request.messages.entries()) {
-    if (message.role === "system") {
-      continue;
-    }
-    const role = message.role === "assistant" ? "assistant" : "user";
-    const content = buildMessageContent(request, index, provider);
-    const cacheStablePrefix = request.stablePrefixMessages === index + 1 && content.length > 0;
-    const outboundContent = cacheStablePrefix ? [...content] : content;
-    if (cacheStablePrefix) {
-      outboundContent[outboundContent.length - 1] = withCacheControl(
-        outboundContent[outboundContent.length - 1],
-      );
-    }
-    const previous = messages.at(-1);
-    if (previous?.role === role) {
-      previous.content.push(...outboundContent);
-    } else {
-      messages.push({ role, content: [...outboundContent] });
-    }
-  }
-  return messages;
-}
-
-function withCacheControl(block: JsonValue | undefined): JsonValue {
-  if (typeof block !== "object" || block === null || Array.isArray(block)) {
-    return block ?? null;
-  }
-  return { ...block, cache_control: { type: "ephemeral" } };
-}
-
 function mapCachedUsage(usage: Message["usage"]) {
   return {
     ...(typeof usage.cache_read_input_tokens === "number"
@@ -177,57 +55,6 @@ function mapCachedUsage(usage: Message["usage"]) {
       ? { cacheWriteTokens: usage.cache_creation_input_tokens }
       : {}),
   };
-}
-
-function buildRequest(request: ModelRequest, provider: string): JsonValue {
-  // The Messages API requires max_tokens, so do not silently choose a limit for callers.
-  if (request.maxOutputTokens === undefined) {
-    throw new ProviderError("provider_bad_request");
-  }
-  const system = request.messages
-    .flatMap((message) =>
-      message.role === "system"
-        ? message.parts.flatMap((part) =>
-            part.type === "text" ? [{ type: "text" as const, text: part.text }] : [],
-          )
-        : [],
-    )
-    .map((block, index, blocks) =>
-      index === blocks.length - 1
-        ? { ...block, cache_control: { type: "ephemeral" as const } }
-        : block,
-    );
-  const messages = buildMessages(request, provider);
-  // Tool IDs are already validated Codes; send names unchanged for round trips.
-  const tools =
-    request.toolChoice !== "none" && request.tools !== undefined
-      ? request.tools.map((tool, index) => ({
-          name: tool.toolId,
-          description: tool.description,
-          input_schema: tool.inputSchema,
-          ...(index === (request.tools?.length ?? 0) - 1
-            ? { cache_control: { type: "ephemeral" } }
-            : {}),
-        }))
-      : undefined;
-  let toolChoice: JsonValue | undefined;
-  if (request.toolChoice === "auto") {
-    toolChoice = { type: "auto" };
-  } else if (request.toolChoice === "required") {
-    toolChoice = { type: "any" };
-  } else if (request.toolChoice !== undefined && request.toolChoice !== "none") {
-    toolChoice = { type: "tool", name: request.toolChoice.forced };
-  }
-
-  return JsonValue.parse({
-    model: request.model.model,
-    max_tokens: request.maxOutputTokens,
-    messages,
-    ...(system.length === 0 ? {} : { system }),
-    ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-    ...(tools === undefined ? {} : { tools }),
-    ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }),
-  });
 }
 
 function mapProviderTypeError(
@@ -334,7 +161,10 @@ export class AnthropicAdapter implements ProviderAdapter {
     response: Message,
     context: ProviderContext,
     startedAt: number,
-    callIdsByToolUseId: ReadonlyMap<string, Id> = new Map(),
+    options: {
+      readonly callIdsByToolUseId: ReadonlyMap<string, Id>;
+      readonly aliases: ProviderToolAliases;
+    },
   ): ProviderResult {
     try {
       const toolUseIdByCallId: Record<string, string> = {};
@@ -343,12 +173,12 @@ export class AnthropicAdapter implements ProviderAdapter {
         if (block.type === "text") {
           parts.push({ type: "text", text: block.text });
         } else if (block.type === "tool_use") {
-          const callId = callIdsByToolUseId.get(block.id) ?? context.ids.next();
+          const callId = options.callIdsByToolUseId.get(block.id) ?? context.ids.next();
           toolUseIdByCallId[callId] = block.id;
           parts.push({
             type: "tool_call",
             callId,
-            toolId: Code.parse(block.name),
+            toolId: options.aliases.toCanonicalName(block.name),
             args: JsonValue.parse(block.input),
           });
         }
@@ -380,7 +210,10 @@ export class AnthropicAdapter implements ProviderAdapter {
             : "other",
         latencyMs: Math.max(0, context.clock.now() - startedAt),
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        throw error;
+      }
       throw new ProviderError("provider_unknown");
     }
   }
@@ -389,7 +222,8 @@ export class AnthropicAdapter implements ProviderAdapter {
   async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
     const startedAt = context.clock.now();
     let response: Message;
-    const params = buildRequest(request, this.provider);
+    const aliases = createProviderToolAliasesForRequest(request);
+    const params = buildAnthropicRequest(request, this.provider, aliases);
     try {
       // Use raw post so opaque blocks (including future block types) pass through verbatim.
       response = await this.client.post<Message>("/v1/messages", {
@@ -402,13 +236,17 @@ export class AnthropicAdapter implements ProviderAdapter {
       }
       mapError(error, context.signal, context.clock.now());
     }
-    return this.mapMessage(response, context, startedAt);
+    return this.mapMessage(response, context, startedAt, {
+      callIdsByToolUseId: new Map(),
+      aliases,
+    });
   }
 
   /** @inheritdoc */
   async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
     const startedAt = context.clock.now();
-    const params = buildRequest(request, this.provider);
+    const aliases = createProviderToolAliasesForRequest(request);
+    const params = buildAnthropicRequest(request, this.provider, aliases);
     // The builder returns this SDK request shape as JSON because provider blocks are extensible.
     const streamParams = createAnthropicStreamingParams(params);
     const stream = this.client.messages.stream(streamParams, { signal: context.signal });
@@ -418,10 +256,17 @@ export class AnthropicAdapter implements ProviderAdapter {
       for await (const event of stream) {
         const mapped = streamEventDeltas(event, state, context.ids, usage);
         usage = mapped.usage;
-        yield* mapped.deltas;
+        for (const delta of mapped.deltas) {
+          yield delta.type === "tool_call" && delta.toolId !== undefined
+            ? { ...delta, toolId: aliases.toCanonicalName(delta.toolId) }
+            : delta;
+        }
       }
       const response = await stream.finalMessage();
-      const result = this.mapMessage(response, context, startedAt, state.callIdsByToolUseId);
+      const result = this.mapMessage(response, context, startedAt, {
+        callIdsByToolUseId: state.callIdsByToolUseId,
+        aliases,
+      });
       for (const part of result.parts) {
         if (part.type === "opaque") {
           yield { type: "opaque", part };

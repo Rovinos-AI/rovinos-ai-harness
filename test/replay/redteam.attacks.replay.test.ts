@@ -505,6 +505,46 @@ describe("runtime-backed red-team attacks", () => {
     });
   });
 
+  it("rejects server-advertised look-alikes before wildcard policy can route them", async () => {
+    const lookAlikes = [
+      { nativeName: "exec ", toolId: "sandbox.exec_" },
+      { nativeName: "\u0435xec", toolId: "sandbox._xec" },
+    ] as const;
+    const registry = registryFor({
+      sandbox: ["exec", ...lookAlikes.map(({ nativeName }) => nativeName)],
+    });
+    const policy = policyFor({ allowed: ["sandbox.*"], denied: ["sandbox.exec"] });
+    const executions: string[] = [];
+    const tool = runtimeTool(registry, executions);
+
+    expect(registry.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["sandbox.exec"]);
+    expect(registry.rejected()).toEqual(
+      lookAlikes.map(({ nativeName }) => ({
+        serverId: "sandbox_server",
+        nativeName,
+        reason: "tool_name_invalid",
+      })),
+    );
+    for (const { toolId } of lookAlikes) {
+      const code = Code.parse(toolId);
+      expect(policy.decide({ toolId: code, args: {} }, { subagent: false }).decision).toBe("allow");
+      await expect(
+        tool.execute(
+          {
+            callId: Id.parse("00000000000000000000000024"),
+            toolId: code,
+            args: {},
+          },
+          {
+            runId: Id.parse("00000000000000000000000025"),
+            signal: new AbortController().signal,
+          },
+        ),
+      ).resolves.toMatchObject({ outcome: "error", errorCode: "unknown_tool" });
+    }
+    expect(executions).toEqual([]);
+  });
+
   it.each([
     "Sandbox.Exec",
     "sandbox.exec ",
