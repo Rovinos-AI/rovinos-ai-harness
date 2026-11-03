@@ -1271,6 +1271,41 @@ describe("McpToolPort", () => {
     }
   });
 
+  it("preserves resource-link URIs, names, and optional fields in order", async () => {
+    const resourceLink = {
+      type: "resource_link",
+      uri: "file:///synthetic/linked-resource",
+      name: "linked-resource",
+      title: "Synthetic linked resource",
+      description: "Synthetic description",
+      mimeType: "text/plain",
+      annotations: { audience: ["assistant"], priority: 0.5 },
+    };
+    const current = await fixture({
+      result: {
+        content: [
+          { type: "text", text: "before" },
+          resourceLink,
+          { type: "text", text: "after" },
+        ],
+      },
+    });
+    try {
+      await expect(current.port.execute(call, context())).resolves.toMatchObject({
+        outcome: "ok",
+        result: {
+          parts: [
+            { type: "text", text: "before" },
+            resourceLink,
+            { type: "text", text: "after" },
+          ],
+        },
+      });
+    } finally {
+      await current.close();
+    }
+  });
+
   it("blocks embedded binary resources unless explicitly allowed", async () => {
     const current = await fixture({
       result: {
