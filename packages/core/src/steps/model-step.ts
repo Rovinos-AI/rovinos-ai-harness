@@ -2,6 +2,7 @@
 import {
   APP_TELEMETRY_TOOL_NAME,
   Code,
+  HarnessError,
   JsonValue as JsonValueSchema,
   ModelRequestSchema,
   ModelUsageSchema,
@@ -29,6 +30,14 @@ import {
   toolRunContext,
   type PreparedToolCall,
 } from "./prepare-tool.js";
+
+class ModelStepEventMissingError extends HarnessError {
+  readonly code = "model_step_event_missing";
+
+  constructor() {
+    super("The model step did not record its expected event.");
+  }
+}
 
 /** Inputs needed to perform one recorded model call. */
 export interface ModelStepOptions {
@@ -189,7 +198,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       }
 
       if (requestEvent.type !== "model_request") {
-        throw new Error("Expected a recorded model request.");
+        throw new ModelStepEventMissingError();
       }
       const prepared = await prepareCompletion(
         completion,
@@ -215,7 +224,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
   );
 
   if (result === undefined) {
-    throw new Error("Expected the model step to record an outcome.");
+    throw new ModelStepEventMissingError();
   }
   return result;
 }

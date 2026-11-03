@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tool calls are sequential here; parallel execution can be added independently.
-import { APP_TELEMETRY_TOOL_NAME, HarnessError, type Code, type Event } from "@rovinos/schemas";
+import { APP_TELEMETRY_TOOL_NAME, type Code, type Event } from "@rovinos/schemas";
 import type { Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@rovinos/pii";
 import { countPolicyDecision } from "@rovinos/telemetry";
 import type { Checkpointer } from "../checkpoint.js";
 import type { EventPartial } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
-import { recordDeniedResult } from "./tool-result.js";
+import {
+  recordDeniedResultAndPush,
+  recordUnadvertisedCallAndPush,
+  ToolStepEventMissingError,
+} from "./tool-result.js";
 import type { IdGenerator, ModelToolCall, PolicyPort, RunContext, ToolPort } from "../ports.js";
 import { foldRunState } from "../run-state.js";
 import {
@@ -140,7 +144,12 @@ async function runToolCallWithinSpan(input: RunToolCallSpanOptions): Promise<Eve
     );
   }
   if (input.behavior.prepared?.errorCode === "tool_not_advertised") {
-    return recordUnadvertisedCallAndPush(input, input.proposedCall);
+    return recordUnadvertisedCallAndPush(
+      input.options.recorder,
+      input.events,
+      input.proposedCall,
+      input.description,
+    );
   }
   const prepared = await prepareRunToolCall(
     input.options,
@@ -212,7 +221,8 @@ async function executeRecordedIntent(
   const executedArgsHash = executedArgsHashFor(call, input.behavior);
   if (preparationError !== undefined || input.description === undefined) {
     return recordDeniedResultAndPush(
-      input,
+      input.options.recorder,
+      input.events,
       call,
       preparationError ?? "unknown_tool",
       executedArgsHash,
@@ -247,10 +257,13 @@ async function executeRecordedIntent(
     });
     if (decision.decision !== "allow" && !authorizedAsk) {
       return recordDeniedResultAndPush(
-        input,
+        input.options.recorder,
+        input.events,
         call,
-        decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
-        executedArgsHash,
+        {
+          code: decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
+          executedArgsHash,
+        },
       );
     }
   }
@@ -321,64 +334,6 @@ async function recordDeniedIntentAndResultAndPush(
   }
   input.events.push(...recorded);
   return result;
-}
-
-async function recordDeniedResultAndPush(
-  input: RunToolCallSpanOptions,
-  call: ModelToolCall,
-  code: Code,
-  executedArgsHash?: string,
-): Promise<Event> {
-  const event = await recordDeniedResult(input.options.recorder, call, code, executedArgsHash);
-  input.events.push(event);
-  return event;
-}
-
-async function recordUnadvertisedCallAndPush(
-  input: RunToolCallSpanOptions,
-  call: ModelToolCall,
-): Promise<Event> {
-  const recorded = await input.options.recorder.recordBatch([
-    {
-      type: "tool_intent",
-      v: 1,
-      callId: call.callId,
-      toolId: call.toolId,
-      idempotent: input.description?.idempotent ?? false,
-      policyDecision: "deny",
-      policyReason: "tool_not_advertised",
-      argsHash: hashArgs(call.args),
-      args: call.args,
-    },
-    {
-      type: "tool_result",
-      v: 1,
-      callId: call.callId,
-      toolId: call.toolId,
-      outcome: "error",
-      errorCode: "tool_not_advertised",
-      latencyMs: 0,
-      result: null,
-    },
-  ]);
-  if (recorded.length !== 2) {
-    throw new ToolStepEventMissingError();
-  }
-  input.events.push(...recorded);
-  const result = recorded[1];
-  if (result === undefined) {
-    throw new ToolStepEventMissingError();
-  }
-  return result;
-}
-
-class ToolStepEventMissingError extends HarnessError {
-  readonly code = "tool_step_event_missing";
-
-  constructor() {
-    super("Expected a recorded tool event.");
-    this.name = "ToolStepEventMissingError";
-  }
 }
 
 async function executeAndRecord(

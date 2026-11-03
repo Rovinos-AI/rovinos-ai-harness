@@ -632,14 +632,15 @@ describe("tool-step resume handling", () => {
     const { recorder } = createRecorder();
     const history = await createRun(recorder, []);
     const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+    const decide = vi.fn(() => ({
+      decision: "allow" as const,
+      ruleId: "test_allow",
+      reason: "test_allowed",
+      editable: [],
+    }));
     const policy: PolicyPort = {
       version: Code.parse("test.policy"),
-      decide: vi.fn(() => ({
-        decision: "allow" as const,
-        ruleId: "test_allow",
-        reason: "test_allowed",
-        editable: [],
-      })),
+      decide,
     };
     const tool: ToolPort = {
       describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
@@ -667,7 +668,7 @@ describe("tool-step resume handling", () => {
         errorCode: "tool_not_advertised",
       },
     ]);
-    expect(policy.decide).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 
