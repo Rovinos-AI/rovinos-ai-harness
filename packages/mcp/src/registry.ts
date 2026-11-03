@@ -338,8 +338,9 @@ export class ToolRegistry {
   }
 
   #normalizeId(config: ServerConfig, tool: McpTool): Code | undefined {
+    const normalizedName = sanitizeComponent(tool.name);
     const parsedId = Code.safeParse(normalizeToolId(config.toolPrefix, tool.name));
-    if (!parsedId.success || tool.name.length === 0) {
+    if (!parsedId.success || tool.name.length === 0 || normalizedName !== tool.name.toLowerCase()) {
       this.#reject(config, tool, "tool_name_invalid");
       return undefined;
     }
