@@ -6,6 +6,7 @@ import {
   type Id,
   type JsonValue,
   type RunConfig,
+  type Sha256Hex,
 } from "@rovinos/schemas";
 import type { Context, Link } from "@opentelemetry/api";
 import { activeRuns } from "@rovinos/telemetry";
@@ -48,6 +49,10 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly clock: Clock;
   readonly model: ModelPort;
   readonly tool: ToolPort;
+  /** Catalog fingerprint pinned for this run, when a port supplies one. */
+  readonly toolCatalogVersion?: Sha256Hex;
+  /** Per-tool fingerprints used to validate future dispatch and resume. */
+  readonly toolCatalogFingerprints?: Readonly<Record<string, Sha256Hex>>;
   readonly policy?: PolicyPort;
   readonly context: ContextPort;
   readonly ids: IdGenerator;
@@ -124,15 +129,27 @@ class RunAbortedError extends HarnessError {
  * @returns The final folded state and all events created by this invocation.
  */
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
+  const tool = await options.tool.pinForRun?.();
+  const toolCatalogVersion = tool?.catalogVersion?.();
+  const toolCatalogFingerprints = tool?.catalogFingerprints?.();
+  const runOptions =
+    tool === undefined
+      ? options
+      : {
+          ...options,
+          tool,
+          ...(toolCatalogVersion === undefined ? {} : { toolCatalogVersion }),
+          ...(toolCatalogFingerprints === undefined ? {} : { toolCatalogFingerprints }),
+        };
   const events: Event[] = [];
   const budgetTracker = new BudgetTracker(
-    options.budgets,
-    options.initialBudgetViolation,
-    options.deadlineTs,
+    runOptions.budgets,
+    runOptions.initialBudgetViolation,
+    runOptions.deadlineTs,
   );
-  await withRunStartup(options, events, async (runId) => {
-    await drainSentinelTrips(options.recorder, events);
-    return continueRunLoop(options, events, runId, budgetTracker);
+  await withRunStartup(runOptions, events, async (runId) => {
+    await drainSentinelTrips(runOptions.recorder, events);
+    return continueRunLoop(runOptions, events, runId, budgetTracker);
   });
   const state = foldRunState(events);
   return {

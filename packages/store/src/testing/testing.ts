@@ -85,7 +85,7 @@ export function createEventBuilders(): EventStoreTestBuilders {
       return {
         runId,
         ts: nextTimestamp(),
-        v: 1,
+        v: 3,
         traceId: "a".repeat(32),
         spanId: "b".repeat(16),
         segmentId: runId,

@@ -11,7 +11,7 @@ transports reject unknown fields.
 | `id` | `Code` | required | Stable server identifier. |
 | `transport` | `stdio` or `http` object | required | How the client connects to the server. |
 | `protocol` | `auto`, `2026-07-28`, or `2025-11-25` | `auto` | Protocol revision; `auto` negotiates a supported revision. |
-| `apps` | boolean | `false` | Advertise the MCP Apps extension to this server. |
+| `apps` | boolean | `false` | Outbound MCP Apps are unsupported; setting `true` fails with `mcp_apps_unsupported`. |
 | `trust` | `internal` or `external` | `external` | Trust level used to gate trace propagation and annotations. |
 | `propagateTrace` | boolean | `false` | Send trace context only to an `internal` server. |
 | `toolAllowlist` | string array | omitted | Server-native tool names permitted for registration. |
@@ -26,6 +26,9 @@ Tool names in `toolAllowlist` and `idempotentTools` are the names returned by
 the server, before harness normalization. Names must be non-empty and unique
 within each list. When `toolAllowlist` is set, every `idempotentTools` entry
 must also be allowlisted. Effective tool prefixes must be unique across servers.
+The outbound client does not host MCP Apps. App-only tools are excluded from
+tool discovery, and setting `apps: true` is rejected rather than advertising
+unsupported capabilities.
 
 ## Stdio transport
 
@@ -171,6 +174,37 @@ model-input PII boundary. They are descriptive only and never grant authority.
 If two discovered tools normalize to the same id, startup fails with
 `tool_id_collision`, including when both tools are from one server; the error
 contains that normalized `Code` and both server ids (which can be identical).
+
+## Catalog versions and run behavior
+
+Each run pins a fingerprint of the complete MCP catalog it was shown and a
+fingerprint for each exposed tool. These fingerprints include normalized
+aliases, descriptions, schemas, server routes, and execution metadata. New runs
+refresh discovery using each connection's `tools/list` TTL and list-change
+notifications before exposing tools. An already-running model request keeps
+its pinned specifications. Before dispatch, the harness refreshes discovery
+and compares only the called tool with its pinned fingerprint. A removed or
+changed tool fails with `mcp_catalog_changed`; unrelated catalog changes do
+not block unchanged tools or expose new tools to the active run. A failed
+refresh rejects dispatch rather than treating an old catalog as freshly
+validated.
+
+The fingerprints are stored on the run's `run_created` event. On resume, only
+tools matching the per-tool baseline are exposed; a pending or approved call
+for a removed or changed tool fails closed at dispatch. New and changed tools
+do not inherit permissions or approvals. Legacy runs without per-tool
+fingerprints have no saved baseline to compare against, so they resume against
+the catalog discovered at resume time; normal policy and approval checks still
+apply. A run that has only the older whole-catalog fingerprint uses a
+conservative complete-fingerprint match because it cannot identify which
+individual tool changed.
+
+This check compares local discovery snapshots, not a remote, version-bound
+execution guarantee. A server may change its behavior after `tools/list`, may
+not send a change notification, or may not enforce its advertised schema. The
+harness detects changes only when discovery observes them, and MCP does not
+provide an atomic operation that binds a tool call to the previously listed
+schema.
 
 ## Examples
 
