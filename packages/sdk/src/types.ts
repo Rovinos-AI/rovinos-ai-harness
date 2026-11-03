@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id, JsonValue, Principal, RunStatus } from "@rovinos/schemas";
+import {
+  Code,
+  HarnessError,
+  Id,
+  InputResponseSchema,
+  JsonValue,
+  Principal,
+  RunStatus,
+} from "@rovinos/schemas";
 import type { EVENT_FIELD_CLASS, EventType } from "@rovinos/schemas";
 import type { RuntimeOverrides } from "@rovinos/core";
 import { HarnessConfigSchema } from "@rovinos/config";
@@ -338,14 +346,26 @@ export type ApprovalResolutionResult = z.infer<typeof ApprovalResolutionResultSc
 /** Input accepted by the future human-input answer API. */
 export const AnswerInputOptionsSchema = z
   .object({
-    action: Code,
+    action: InputResponseSchema.shape.action,
     content: JsonValue.optional(),
-    principal: Code,
+    principal: Principal,
   })
   .strict();
 
 /** Options accepted by {@link Harness.answerInput}. */
 export type AnswerInputOptions = z.infer<typeof AnswerInputOptionsSchema>;
+
+/** Metadata-only result of resolving a human-input request. */
+export const InputResolutionResultSchema = z
+  .object({
+    runId: Id,
+    requestId: Id,
+    action: InputResponseSchema.shape.action,
+  })
+  .strict();
+
+/** Inferred metadata-only result returned by {@link Harness.answerInput}. */
+export type InputResolutionResult = z.infer<typeof InputResolutionResultSchema>;
 
 /** Metadata-only result returned by {@link Harness.startRun} and {@link Harness.continueRun}. */
 export const RunStartResultSchema = z.object({ runId: Id, status: RunStatus }).strict();
@@ -387,8 +407,14 @@ export interface Harness {
     decision: ApprovalDecision,
     options: ResolveApprovalOptions,
   ): Promise<ApprovalResolutionResult>;
-  /** Answer a human-input request; validates `requestId` before reporting that epic 25 is unavailable. */
-  answerInput(requestId: RunId, options: AnswerInputOptions): Promise<never>;
+  /**
+   * Resolve a pending human-input request using the supplied principal.
+   *
+   * The answer is schema-validated and tokenized before it is durably recorded. A configured run
+   * queue receives the resume job; without a queue, call {@link Harness.resumeRun} with the result's
+   * `runId`.
+   */
+  answerInput(requestId: RunId, options: AnswerInputOptions): Promise<InputResolutionResult>;
   /** Watch content-free safe events in sequence order. */
   watch(runId: RunId, options?: WatchOptions): AsyncIterable<SafeEvent>;
   /** Explicitly read tokenized content. This method returns sensitive data. */
@@ -400,7 +426,11 @@ export interface Harness {
 /** Coded SDK failure that does not include untrusted input values. */
 export class SdkError extends HarnessError {
   readonly code:
-    "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable";
+    | "sdk_run_not_found"
+    | "sdk_closed"
+    | "sdk_content_unavailable"
+    | "sdk_input_unavailable"
+    | "sdk_input_ambiguous";
 
   /** Creates a stable SDK error with a closed code. */
   constructor(code: SdkError["code"]) {

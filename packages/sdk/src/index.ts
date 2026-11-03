@@ -16,6 +16,8 @@ export {
   type GetRunContentOptions,
   type Harness,
   type HarnessOverrides,
+  InputResolutionResultSchema,
+  type InputResolutionResult,
   type ListRunsFilter,
   type ResolveApprovalOptions,
   type RunContent,
