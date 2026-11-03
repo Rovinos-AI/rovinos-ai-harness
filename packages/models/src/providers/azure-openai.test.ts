@@ -16,6 +16,17 @@ const request: ModelRequest = {
   model: { provider: "azure-fixture", model: "fixture-model" },
   messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
 };
+const toolRequest: ModelRequest = {
+  ...request,
+  tools: [
+    {
+      toolId: "lookup",
+      description: "Lookup a value",
+      inputSchema: { type: "object", properties: { query: { type: "string" } } },
+    },
+  ],
+  toolChoice: { forced: "lookup" },
+};
 
 const textMessage = { role: "assistant", content: "answer" };
 const toolMessage = {
@@ -98,7 +109,7 @@ function fixture(scenario: ProviderContractFixture["scenario"]): ProviderContrac
   }
   return ProviderContractFixtureSchema.parse({
     scenario,
-    request,
+    request: scenario === "tool_call" ? toolRequest : request,
     httpResponse: {
       status,
       ...(scenario === "error_429" ? { headers: { "retry-after": "2" } } : {}),

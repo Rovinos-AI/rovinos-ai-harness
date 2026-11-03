@@ -986,6 +986,44 @@ describe("McpConnection", () => {
     await peer.serverTransport.close();
   });
 
+  it("does not cache a discovery invalidated by an overlapping list-change notification", async () => {
+    const peer = await createCountingPeer(60_000);
+    let release: () => void = () => undefined;
+    let started: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requested = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const list = vi.fn(async () => {
+      if (list.mock.calls.length === 1) {
+        started();
+        await pending;
+      }
+      return { tools: [{ name: "counted", inputSchema }], ttlMs: 60_000 };
+    });
+    peer.server.server.setRequestHandler("tools/list", list);
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+    try {
+      await connection.connect();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const result = connection.listTools().catch((error: unknown) => error);
+      await requested;
+      await peer.server.server.notification({ method: "notifications/tools/list_changed" });
+      await vi.advanceTimersByTimeAsync(300);
+      release();
+      expect(await result).toMatchObject({ code: "mcp_list_tools_failed" });
+      await expect(connection.listTools()).resolves.toHaveLength(1);
+      expect(list).toHaveBeenCalledTimes(2);
+    } finally {
+      release();
+      vi.useRealTimers();
+      await connection.close();
+      await peer.serverTransport.close();
+    }
+  });
+
   it("accepts boolean JSON Schemas when validating tool arguments", async () => {
     const peer = await createMemoryPeer();
     const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
