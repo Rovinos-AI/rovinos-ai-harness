@@ -63,8 +63,33 @@ async function createRuntimeModel(
     readonly requestSanitizer?: RequestSanitizer;
   },
 ): Promise<RuntimeComposition["model"]> {
+  const injectedModel = overrides.model;
+  if (injectedModel !== undefined) {
+    const sanitizeRequest = options.requestSanitizer;
+    if (sanitizeRequest === undefined) {
+      return injectedModel;
+    }
+    return {
+      complete: async (request, context) => {
+        const trust =
+          config.models?.providers.find(({ id }) => id === request.model.provider)?.trust ??
+          "hosted";
+        const sanitizedRequest = await sanitizeRequest(
+          request,
+          { ...request.model, trust },
+          {
+            runId: context.runId,
+            signal: context.signal,
+            ...(context.recordPiiAction === undefined
+              ? {}
+              : { recordPiiAction: context.recordPiiAction }),
+          },
+        );
+        return injectedModel.complete(sanitizedRequest, context);
+      },
+    };
+  }
   return (
-    overrides.model ??
     (await createConfiguredModelPort(config.models, {
       ids: options.ids,
       clock: options.clock,
@@ -77,8 +102,7 @@ async function createRuntimeModel(
       ...(options.requestSanitizer === undefined
         ? {}
         : { requestSanitizer: options.requestSanitizer }),
-    })) ??
-    missingModelPort
+    })) ?? missingModelPort
   );
 }
 

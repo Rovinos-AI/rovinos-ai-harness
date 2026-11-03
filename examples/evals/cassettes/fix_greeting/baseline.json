@@ -1,0 +1,47 @@
+{
+  "containsRealData": false,
+  "entries": [
+    {
+      "hash": "5cab5a674b7c7a34c3937184391d7ec57ae73be4f88f710051b27cc0b98aac8d",
+      "response": {
+        "parts": [
+          {
+            "type": "tool_call",
+            "callId": "00000000000000000000000011",
+            "toolId": "fs.write",
+            "args": {
+              "path": "greeting.txt",
+              "content": "Hello harness.\n",
+              "mode": "overwrite"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 8,
+          "costMicros": 0
+        },
+        "finishReason": "tool_calls",
+        "latencyMs": 1
+      }
+    },
+    {
+      "hash": "dc2038ca6636bc90263f0bae38d5d9c48c85f269e30e3d69372cd63de5f9f3f1",
+      "response": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "The greeting is fixed."
+          }
+        ],
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 8,
+          "costMicros": 0
+        },
+        "finishReason": "stop",
+        "latencyMs": 1
+      }
+    }
+  ]
+}

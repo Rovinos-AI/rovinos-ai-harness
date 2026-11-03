@@ -8,9 +8,8 @@ variants:
     configOverrides:
       run:
         budgets:
-          maxSteps: 80
+          maxSteps: 12
   - id: candidate
     route:
       - provider: openai
         model: synthetic_candidate
-    contextStrategy: compact

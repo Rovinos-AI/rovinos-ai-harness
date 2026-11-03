@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -28,7 +28,12 @@ async function createDirectory(): Promise<string> {
   return path;
 }
 
-function makeTrial(workDir: string, includeMetadata = false, human?: unknown): TrialSpec {
+function makeTrial(
+  workDir: string,
+  includeMetadata = false,
+  human?: unknown,
+  policyFile?: string,
+): TrialSpec {
   const suite = defineSuite({
     schemaVersion: 1,
     tasks: [
@@ -39,6 +44,7 @@ function makeTrial(workDir: string, includeMetadata = false, human?: unknown): T
           ...(includeMetadata ? { metadata: { category: "synthetic" } } : {}),
         },
         ...(human === undefined ? {} : { human }),
+        ...(policyFile === undefined ? {} : { policyFile }),
         graders: [],
         tags: [],
       },
@@ -232,6 +238,70 @@ describe("InProcessExecutor", () => {
     expect(toolCalls).toBe(1);
     expect(existsSync(result.dbPath)).toBe(true);
     expect(existsSync(result.workspaceDir)).toBe(true);
+  });
+
+  it("loads task policy files from the isolated trial directory", async () => {
+    const root = await createDirectory();
+    const policyFile = join(root, "policy.yaml");
+    await writeFile(
+      policyFile,
+      [
+        "version: 1",
+        "defaultDecision: deny",
+        "rules:",
+        "  - id: allow_fixture_tool",
+        "    match:",
+        "      tools: [fake.echo]",
+        "    decision: allow",
+        "    reason: fixture_tool",
+        "",
+      ].join("\n"),
+    );
+    let modelCalls = 0;
+    let toolCalls = 0;
+    const executor = new InProcessExecutor({
+      model: () => ({
+        complete: () => {
+          modelCalls += 1;
+          return Promise.resolve({
+            provider: "synthetic",
+            model: "synthetic",
+            parts:
+              modelCalls === 1
+                ? [
+                    {
+                      type: "tool_call" as const,
+                      callId: Id.parse("00000000000000000000000011"),
+                      toolId: "fake.echo",
+                      args: { value: "synthetic" },
+                    },
+                  ]
+                : [{ type: "text" as const, text: "done" }],
+            providerBlobs: null,
+            usage: { inputTokens: 1, outputTokens: 1 },
+            finishReason: modelCalls === 1 ? ("tool_calls" as const) : ("stop" as const),
+            latencyMs: 0,
+            schemaValid: true,
+            repairAttempts: 0,
+            fallbackDepth: 0,
+          });
+        },
+      }),
+      tool: () => ({
+        describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+        execute: () => {
+          toolCalls += 1;
+          return Promise.resolve({ outcome: "ok", result: { value: "synthetic" } });
+        },
+      }),
+    });
+
+    const result = await executor.run(makeTrial(join(root, "trial"), false, undefined, policyFile));
+
+    expect(result.status).toBe("completed");
+    expect(result.exitCode).toBe(0);
+    expect(modelCalls).toBe(2);
+    expect(toolCalls).toBe(1);
   });
 
   it("creates separate data stores and fresh providers for repeated trials", async () => {

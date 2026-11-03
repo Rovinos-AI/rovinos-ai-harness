@@ -1,0 +1,23 @@
+{
+  "containsRealData": false,
+  "entries": [
+    {
+      "hash": "206966854eaf2816289c0d9754108b01ccbe932f185d105c6bcdda5a6b708023",
+      "response": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "The request was handled without forwarding its contact details."
+          }
+        ],
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 8,
+          "costMicros": 0
+        },
+        "finishReason": "stop",
+        "latencyMs": 1
+      }
+    }
+  ]
+}

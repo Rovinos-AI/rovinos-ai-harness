@@ -211,8 +211,9 @@ async function waitForRun(harness: Harness, runId: string, status?: string) {
         return run;
       }
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      // The run may not be visible yet; retry below.
     }
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error("Run did not reach the expected state.");
 }

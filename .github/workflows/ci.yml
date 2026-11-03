@@ -394,6 +394,12 @@ jobs:
           --outputFile.junit=reports/canary-junit.xml
       - name: Build packages for replay example
         run: yarn build
+      - name: Replay example eval suite
+        run: >
+          node packages/cli/dist/bin.js eval run
+          examples/evals/suite.ts
+          --cassette replay
+          --fail-under 1.0
       - name: Replay regression and documentation example gate
         run: >
           yarn test:replay
