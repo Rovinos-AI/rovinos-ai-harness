@@ -226,6 +226,10 @@ function syntheticTools(
   argsAfterApproval: JsonValue[],
 ): ToolPort {
   return {
+    getToolSpecs: () => [
+      { toolId: ALLOW_TOOL, description: "Update the synthetic plan", inputSchema: {} },
+      { toolId: ASK_TOOL, description: "Request synthetic approval", inputSchema: {} },
+    ],
     describe: (toolId) =>
       toolId === ALLOW_TOOL || toolId === ASK_TOOL
         ? { idempotent: true, timeoutMs: 1_000 }
