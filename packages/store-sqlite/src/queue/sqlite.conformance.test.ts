@@ -49,6 +49,14 @@ const sqliteFactory: RunQueueFactoryCreator = async (clock: Clock) => {
         await store.head(id),
       );
     },
+    async markCancelled(runId: string) {
+      const id = Id.parse(runId);
+      await store.append(
+        id,
+        [builders.runStatusChanged(id, "running", "cancelled")],
+        await store.head(id),
+      );
+    },
     async cleanup() {
       await Promise.all([...queues].map((queue) => queue.close()));
       await store.close();

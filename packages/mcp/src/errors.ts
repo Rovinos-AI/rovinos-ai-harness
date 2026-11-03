@@ -28,6 +28,7 @@ export type McpConnectionErrorCode =
   | "mcp_discovery_data_limit"
   | "mcp_discovery_timeout"
   | "mcp_discovery_cancelled"
+  | "mcp_apps_unsupported"
   | "mcp_tool_arguments_invalid"
   | "mcp_tool_call_failed";
 

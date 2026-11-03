@@ -207,6 +207,7 @@ function config(
     readonly connectMs?: number;
     readonly trust?: "internal" | "external";
     readonly propagateTrace?: boolean;
+    readonly apps?: boolean;
     readonly elicitation?: ServerConfig["elicitation"];
   } = {},
 ) {
@@ -214,6 +215,7 @@ function config(
     id: "mcp_test",
     transport: { kind: "stdio", command: "not-spawned-by-memory-transport" },
     protocol: options.protocol ?? "auto",
+    apps: options.apps,
     trust: options.trust ?? "external",
     propagateTrace: options.propagateTrace ?? false,
     idempotentTools: options.idempotentTools,
@@ -298,6 +300,25 @@ function deferredTransport(transport: Transport) {
 }
 
 describe("McpConnection", () => {
+  it("rejects unsupported outbound MCP Apps configuration with a closed error code", () => {
+    const createTransport = vi.fn<() => Promise<Transport>>();
+    const error = (() => {
+      try {
+        connectionFor(config({ apps: true }), createTransport);
+        return undefined;
+      } catch (caught) {
+        return caught;
+      }
+    })();
+
+    expect(error).toBeInstanceOf(McpConnectionError);
+    expect(error).toMatchObject({
+      code: "mcp_apps_unsupported",
+      message: "mcp_apps_unsupported",
+    });
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
   it("handles legacy server-initiated elicitation only during the bound tool call", async () => {
     const peer = await createMemoryPeer({
       count: 1,
@@ -382,6 +403,7 @@ describe("McpConnection", () => {
     expect(Object.keys(mcpPackage).sort()).toEqual([
       "LegacyElicitationCompletionTracker",
       "McpAuthRequiredError",
+      "McpCatalogChangedError",
       "McpConnection",
       "McpConnectionError",
       "McpOAuthProvider",
@@ -433,6 +455,30 @@ describe("McpConnection", () => {
     await connection.connect();
     expect(connection.serverMetadata.protocolVersion).toBe("2025-11-25");
     expect(connection.serverMetadata.supportsApps).toBe(true);
+    await connection.close();
+    await peer.serverTransport.close();
+  });
+
+  it("omits only app-only tools when outbound MCP Apps are disabled", async () => {
+    const peer = await createMemoryPeer({
+      count: 1,
+      tools: [
+        { name: "app-only", inputSchema, _meta: { ui: { visibility: ["app"] } } },
+        { name: "model-only", inputSchema, _meta: { ui: { visibility: ["model"] } } },
+        { name: "model-and-app", inputSchema, _meta: { ui: { visibility: ["model", "app"] } } },
+        { name: "empty-visibility", inputSchema, _meta: { ui: { visibility: [] } } },
+        { name: "no-metadata", inputSchema },
+      ],
+    });
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+
+    await connection.connect();
+    await expect(connection.listTools()).resolves.toEqual([
+      { name: "model-only", inputSchema, _meta: { ui: { visibility: ["model"] } } },
+      { name: "model-and-app", inputSchema, _meta: { ui: { visibility: ["model", "app"] } } },
+      { name: "empty-visibility", inputSchema, _meta: { ui: { visibility: [] } } },
+      { name: "no-metadata", inputSchema },
+    ]);
     await connection.close();
     await peer.serverTransport.close();
   });

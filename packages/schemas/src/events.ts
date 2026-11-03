@@ -40,6 +40,8 @@ const runCreatedEvent = z
     ...eventEnvelopeShape,
     type: z.literal("run_created"),
     configHash: Sha256Hex,
+    toolCatalogVersion: Sha256Hex.optional(),
+    toolCatalogFingerprints: z.record(Code, Sha256Hex).optional(),
     policyVersion: Code,
     replayOf: Id.optional(),
     parentRunId: Id.optional(),

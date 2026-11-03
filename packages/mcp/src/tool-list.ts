@@ -119,6 +119,17 @@ export function excludeHeaderDeclaringTools(
   return { tools: kept, excluded: tools.length - kept.length };
 }
 
+function isAppOnlyTool(tool: McpTool): boolean {
+  const metadata = tool._meta;
+  return (
+    isRecord(metadata) &&
+    isRecord(metadata.ui) &&
+    Array.isArray(metadata.ui.visibility) &&
+    metadata.ui.visibility.includes("app") &&
+    !metadata.ui.visibility.includes("model")
+  );
+}
+
 /** Options for paging through a server's `tools/list` results. */
 export interface ListAllToolsOptions {
   /** Requests one schema-validated page. */
@@ -266,9 +277,12 @@ async function collectTools(
     if (ttlMs === undefined && "ttlMs" in page && typeof page.ttlMs === "number") {
       ttlMs = page.ttlMs;
     }
-    const filtered = excludeHeaderDeclaringTools(page.tools, options);
-    if (filtered.excluded > 0) {
-      options.onExcluded(filtered.excluded);
+    const appVisibleTools = page.tools.filter((tool) => !isAppOnlyTool(tool));
+    const appOnlyExcluded = page.tools.length - appVisibleTools.length;
+    const filtered = excludeHeaderDeclaringTools(appVisibleTools, options);
+    const excluded = appOnlyExcluded + filtered.excluded;
+    if (excluded > 0) {
+      options.onExcluded(excluded);
     }
     tools.push(...filtered.tools);
     cursor = nextCursor(page, seen);

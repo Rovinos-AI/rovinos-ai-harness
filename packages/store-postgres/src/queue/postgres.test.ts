@@ -419,6 +419,12 @@ const fakePg = vi.hoisted(() => {
         eventRuns.set(runId, { ...run, status: "running" });
       }
     },
+    markCancelled(runId: string): void {
+      const run = eventRuns.get(runId);
+      if (run !== undefined) {
+        eventRuns.set(runId, { ...run, status: "cancelled" });
+      }
+    },
     beforeNextLockedQuery(hook: () => void): void {
       beforeNextForUpdate = hook;
     },
@@ -491,6 +497,10 @@ const postgresFactory: RunQueueFactoryCreator = (clock: Clock) => {
     },
     markRunning(runId) {
       fakePg.markRunning(runId);
+      return Promise.resolve();
+    },
+    markCancelled(runId: string) {
+      fakePg.markCancelled(runId);
       return Promise.resolve();
     },
     async cleanup() {

@@ -11,6 +11,13 @@ export {
 export { createSchemaValidGrader } from "./schema-valid.js";
 export { createTestCommandGrader } from "./test-command.js";
 export {
+  createApprovalIntegrityGrader,
+  createNoDeniedExecutedGrader,
+  InvariantResultSchema,
+  verifyInvariants,
+  type InvariantResult,
+} from "../invariants.js";
+export {
   createNoCanaryLeakGrader,
   NoCanaryLeakGraderOptionsSchema,
   type NoCanaryLeakGraderOptions,
