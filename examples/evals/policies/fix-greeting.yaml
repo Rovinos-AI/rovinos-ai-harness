@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic eval policy; only the required workspace edit is allowed.
+version: 1
+defaultDecision: deny
+rules:
+  - id: allow_fixture_write
+    description: Allow writing the expected greeting in this isolated fixture.
+    match:
+      tools:
+        - fs.write
+    decision: allow
+    reason: fixture_write

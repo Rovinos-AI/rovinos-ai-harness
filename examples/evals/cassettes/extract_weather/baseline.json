@@ -1,0 +1,23 @@
+{
+  "containsRealData": false,
+  "entries": [
+    {
+      "hash": "9dc4f096f3d0ca5a7ef426d8177a3c1915b52268d20ceb06d3c721422d1cb63e",
+      "response": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "{\"city\":\"Exampleville\",\"temperatureC\":20}"
+          }
+        ],
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 8,
+          "costMicros": 0
+        },
+        "finishReason": "stop",
+        "latencyMs": 1
+      }
+    }
+  ]
+}

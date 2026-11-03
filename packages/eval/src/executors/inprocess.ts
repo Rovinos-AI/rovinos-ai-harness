@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, FakeClock, SequentialIdGenerator, type Event, type Id } from "@rovinos/schemas";
 import { createRuntime } from "@rovinos/core";
-import type { Clock, ModelPort, PolicyPort, Runtime, ToolPort } from "@rovinos/core";
+import type {
+  Clock,
+  ModelPort,
+  PolicyPort,
+  Runtime,
+  RuntimeOverrides,
+  ToolPort,
+} from "@rovinos/core";
 import { TrialResultSchema, evalSuiteCode } from "../trial.js";
 import type { TrialResult, TrialSpec } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
@@ -15,7 +22,7 @@ import { SimulatedHuman } from "../human.js";
 import { createProviderCaptureAdapter } from "../trajectory.js";
 import { executionMetricsFromEvents } from "../report/metrics.js";
 import { cp } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ensureRunWorkspace } from "@rovinos/sandbox";
 import type { GradeContext } from "../graders/types.js";
 
@@ -51,6 +58,52 @@ function failureCode(error: unknown): string | undefined {
 }
 
 type RuntimeRunResult = Awaited<ReturnType<Runtime["run"]>>;
+
+function runtimeOverrides(options: {
+  readonly prepared: PreparedTrial;
+  readonly trial: TrialSpec;
+  readonly ids: SequentialIdGenerator;
+  readonly model: ModelPort | undefined;
+  readonly executor: InProcessExecutorOptions;
+  readonly onModelFailure: (error: unknown) => void;
+}): RuntimeOverrides {
+  const { prepared, trial, ids, model, executor, onModelFailure } = options;
+  return {
+    dataDir: prepared.dataDir,
+    roleConfigDirectory: dirname(prepared.configPath),
+    transientVault: false,
+    clock: new FakeClock(1_700_000_000_000 + trial.seed),
+    ids,
+    ...(model === undefined
+      ? {}
+      : {
+          model: createProviderCaptureAdapter(
+            {
+              complete: async (request, context) => {
+                try {
+                  return await model.complete(request, context);
+                } catch (error) {
+                  onModelFailure(error);
+                  throw error;
+                }
+              },
+            },
+            trial.task.canaries ?? [],
+          ),
+        }),
+    ...(executor.tool === undefined ? {} : { tool: executor.tool(trial) }),
+    ...(executor.policy === undefined ? {} : { policy: executor.policy(trial) }),
+    secretResolver: {
+      resolve: (reference, signal) =>
+        reference === "env:HARNESS_EVAL_KEY"
+          ? Promise.resolve({ reveal: () => prepared.key })
+          : (executor.secretResolver?.resolve(reference, signal) ??
+            Promise.reject(
+              Object.assign(new Error("secret_unavailable"), { code: "secret_unavailable" }),
+            )),
+    },
+  };
+}
 
 async function prepareRuntimeWorkspace(prepared: PreparedTrial, runId: Id): Promise<string> {
   const workspace = await ensureRunWorkspace(join(prepared.dataDir, "workspaces"), runId);
@@ -197,41 +250,19 @@ export class InProcessExecutor implements TrialExecutor {
     const workspaceDir = await prepareRuntimeWorkspace(prepared, runId);
     let modelFailureCode: string | undefined;
     const model = this.options.model?.(trial);
-    const runtime = await createRuntime(prepared.runtimeConfig, {
-      dataDir: prepared.dataDir,
-      transientVault: false,
-      clock: new FakeClock(1_700_000_000_000 + trial.seed),
-      ids,
-      ...(model === undefined
-        ? {}
-        : {
-            model: createProviderCaptureAdapter(
-              {
-                complete: async (request, context) => {
-                  try {
-                    return await model.complete(request, context);
-                  } catch (error) {
-                    modelFailureCode = failureCode(error);
-                    throw error;
-                  }
-                },
-              },
-              trial.task.canaries ?? [],
-            ),
-          }),
-      ...(this.options.tool === undefined ? {} : { tool: this.options.tool(trial) }),
-      ...(this.options.policy === undefined ? {} : { policy: this.options.policy(trial) }),
-      secretResolver: {
-        resolve: (reference, signal) =>
-          reference === "env:HARNESS_EVAL_KEY"
-            ? Promise.resolve({ reveal: () => prepared.key })
-            : (this.options.secretResolver?.resolve(reference, signal) ??
-              Promise.reject(
-                Object.assign(new Error("secret_unavailable"), { code: "secret_unavailable" }),
-              )),
-      },
-    });
-
+    const runtime = await createRuntime(
+      prepared.runtimeConfig,
+      runtimeOverrides({
+        prepared,
+        trial,
+        ids,
+        model,
+        executor: this.options,
+        onModelFailure: (error) => {
+          modelFailureCode = failureCode(error);
+        },
+      }),
+    );
     let result: TrialResult;
     let events: readonly Event[] = [];
     try {

@@ -15,6 +15,7 @@ describe("approval app operation audit canary", () => {
       telemetry: {
         sentinel: { enabled: false, minValueLength: 6 },
         correlation: { enabled: false },
+        metrics: { enabled: false, ownership: "harness", maxSeries: 100 },
       },
     });
     const audit = {
@@ -48,8 +49,7 @@ describe("approval app operation audit canary", () => {
       expect(serializedRecord).not.toContain(audit.pointer);
       expect(serializedRecord).not.toContain(audit.arguments);
     } finally {
-      await sdk.loggerProvider.shutdown();
-      await sdk.tracerProvider.shutdown();
+      await sdk.shutdown();
     }
   });
 });

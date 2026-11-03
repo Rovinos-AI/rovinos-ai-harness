@@ -27,12 +27,14 @@ const canaryLog = defineLogRecord("harness.canary.pipeline", {
 
 type ExportedSpan = Parameters<TelemetrySdkOptions["spanExporter"]["export"]>[0][number];
 type ExportedLog = Parameters<TelemetrySdkOptions["logExporter"]["export"]>[0][number];
+type ExportedMetric = Parameters<NonNullable<TelemetrySdkOptions["metricExporter"]>["export"]>[0];
 
 /** Capture exporters and test-hook cleanup owned by one canary harness. */
 export interface CanaryTelemetry {
   readonly sdk: ReturnType<typeof createTelemetrySdk>;
   readonly spans: ExportedSpan[];
   readonly logs: ExportedLog[];
+  readonly metrics: ExportedMetric[];
   readonly unsafeSpanCleanup: () => void;
 }
 
@@ -40,6 +42,15 @@ export interface CanaryTelemetry {
 export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
   const spans: ExportedSpan[] = [];
   const records: ExportedLog[] = [];
+  const metricData: ExportedMetric[] = [];
+  const metricExporter: NonNullable<TelemetrySdkOptions["metricExporter"]> = {
+    export: (data, callback) => {
+      metricData.push(data);
+      completeExportSuccessfully(callback);
+    },
+    forceFlush: () => Promise.resolve(),
+    shutdown: () => Promise.resolve(),
+  };
   const sdk = createTelemetrySdk({
     spanExporter: {
       export: (finished, callback) => {
@@ -56,6 +67,7 @@ export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),
     },
+    metricExporter,
     // Test budgets, not the production 5 ms scan limit: on a loaded CI agent a GC pause can push one
     // scan past 5 ms, and the gate then drops the span (fail closed), so assertions on exported spans
     // flaked (#555). Fail-closed behaviour itself is covered in the gate's unit tests.
@@ -66,6 +78,7 @@ export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
     telemetry: {
       sentinel: { minValueLength: 6, enabled: true },
       correlation: { enabled: false },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     },
   });
   if (!trace.setGlobalTracerProvider(sdk.tracerProvider)) {
@@ -80,6 +93,7 @@ export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
     sdk,
     spans,
     logs: records,
+    metrics: metricData,
     unsafeSpanCleanup: __registerUnsafeSpanForTests(UNSAFE_SPAN_NAME, {
       "harness.run.id": Id,
       "harness.canary.value": z.string(),
@@ -146,6 +160,7 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
     telemetry: {
       sentinel: { enabled: false, minValueLength: 6 },
       correlation: { enabled: false },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     },
   });
   const definition = defineSpan(
@@ -159,6 +174,6 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
   span.end();
   await sdk.tracerProvider.forceFlush();
   const payload = JSON.stringify(spans.map(({ name, attributes }) => ({ name, attributes })));
-  await Promise.all([sdk.tracerProvider.shutdown(), sdk.loggerProvider.shutdown()]);
+  await sdk.shutdown();
   return payload;
 }

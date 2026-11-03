@@ -50,14 +50,28 @@ detokenizes values. Set `pii.enabled` to `true` (the default) when content acces
 recorded as `approval_resolved.approverId`; requester and approver principals use the kind-prefixed
 `Principal` contract. For `edit`, the runtime applies its PII-aware tool validation.
 
-`answerInput(requestId, ...)` is reserved for the epic 25 human-input contract and currently rejects
-with the safe `sdk_input_unavailable` code. Its `requestId` and options are validated and are not
-included in that error.
+`answerInput(requestId, ...)` resolves a pending human-input request by its identifier. The request
+identifier is supplied by the human-input surface, not by the model. Accepted content is validated
+against the recorded schema, tokenized before it is durably recorded, and never returned in the
+metadata-only resolution result. Treat the answer as sensitive while collecting it; do not log it.
+
+```ts
+import { Principal } from "@rovinos/schemas";
+
+const resolution = await harness.answerInput(requestId, {
+  action: "accept",
+  content: { email: "synthetic@example.test" },
+  principal: Principal.parse("cli.operator"),
+});
+```
+
+With a configured run queue, resolution enqueues the run for a worker. Without a queue, resume it
+explicitly with `await harness.resumeRun(resolution.runId)`.
 
 ## Decisions and scope
 
 - (verify) Durable SDK idempotency uses an `idempotency_keys` store table, rather than event
   metadata, so the raw key and its hash stay out of the event contract. The store atomically
   inserts or retrieves the run id and removes the record when that run is deleted.
-- The input-answer API is present for the documented SDK shape but remains unavailable until its
-  owning human-input contract is implemented (human input broker 25.3, issue #241).
+- Input resolution is durable and available through the public SDK; without a run queue,
+  applications are responsible for calling `resumeRun` after `answerInput`.

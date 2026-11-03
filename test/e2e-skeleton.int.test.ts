@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
-// Not wired yet: human input contracts into runtime input handling (25.1 -> #239)
-// Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
 // Not wired yet: Vertex AI provider registration in runtime configuration (14.20 -> #161)
-// Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: automatic resume after a durable human-input answer (25.5 -> #243)
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
@@ -29,6 +26,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createDefaultContext,
   createControlPlaneOperations,
@@ -43,6 +41,7 @@ import {
   startRunOutputSchema,
 } from "@rovinos/control-plane";
 import { createHarness } from "@rovinos/sdk";
+import { runSdkInputAnswerProcess } from "../scripts/test-support/sdk-human-input-process.js";
 import {
   CompositeSecretResolver,
   EnvSecretResolver,
@@ -120,8 +119,10 @@ import {
   createTelemetrySdk,
   defineLogRecord,
   defineSpan,
+  countModelUsage,
   listLogDefinitions,
   listSpanDefinitions,
+  METRIC_ALLOWLIST,
   SentinelGate,
   toSafeEvent,
   type TelemetrySdkOptions,
@@ -150,6 +151,7 @@ const logDefinition = defineLogRecord("harness.e2e.skeleton", {
 });
 type ExportedSpan = Parameters<TelemetrySdkOptions["spanExporter"]["export"]>[0][number];
 type ExportedLogRecord = Parameters<TelemetrySdkOptions["logExporter"]["export"]>[0][number];
+type ExportedMetric = Parameters<NonNullable<TelemetrySdkOptions["metricExporter"]>["export"]>[0];
 
 interface CliCapture {
   readonly code: number;
@@ -176,6 +178,7 @@ interface Skeleton {
   readonly context: CliContext;
   readonly spans: ExportedSpan[];
   readonly logs: ExportedLogRecord[];
+  readonly metrics: ExportedMetric[];
   readonly telemetry: ReturnType<typeof createTelemetrySdk>;
   runId?: Id;
   approvalId?: Id;
@@ -438,6 +441,7 @@ beforeAll(async () => {
   process.env.HARNESS_E2E_KEY = key;
   const spans: ExportedSpan[] = [];
   const records: ExportedLogRecord[] = [];
+  const metrics: ExportedMetric[] = [];
   let canaryAvailable = false;
   let probePending = false;
   const sentinelProbe = { enabled: false };
@@ -468,9 +472,18 @@ beforeAll(async () => {
     forceFlush: () => Promise.resolve(),
     shutdown: () => Promise.resolve(),
   };
+  const metricExporter: NonNullable<TelemetrySdkOptions["metricExporter"]> = {
+    export: (data, callback) => {
+      metrics.push(data);
+      completeExportSuccessfully(callback);
+    },
+    forceFlush: () => Promise.resolve(),
+    shutdown: () => Promise.resolve(),
+  };
   const telemetry = createTelemetrySdk({
     spanExporter,
     logExporter,
+    metricExporter,
     gate: new SentinelGate(
       new VaultRunView({
         listRawValueEntries: async () => {
@@ -489,6 +502,7 @@ beforeAll(async () => {
     telemetry: {
       sentinel: { minValueLength: 6, enabled: true },
       correlation: { enabled: false },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     },
   });
   const forceFlush = telemetry.tracerProvider.forceFlush.bind(telemetry.tracerProvider);
@@ -535,6 +549,14 @@ beforeAll(async () => {
   const complete = model.complete.bind(model);
   model.complete = async (request, context) => {
     const response = await complete(request, context);
+    countModelUsage(
+      {
+        inputTokens: response.usage.inputTokens,
+        outputTokens: response.usage.outputTokens,
+      },
+      "synthetic",
+      "synthetic",
+    );
     if (response.finishReason === "stop" && sentinelProbe.enabled) {
       canaryAvailable = true;
       probePending = true;
@@ -627,6 +649,7 @@ beforeAll(async () => {
     context: createDefaultContext(new Command(), createOutput()),
     spans,
     logs: records,
+    metrics,
     telemetry,
   };
 });
@@ -634,8 +657,7 @@ beforeAll(async () => {
 afterAll(async () => {
   const current = skeleton;
   if (current !== undefined) {
-    await current.telemetry.tracerProvider.shutdown();
-    await current.telemetry.loggerProvider.shutdown();
+    await current.telemetry.shutdown();
     await rm(current.directory, { recursive: true, force: true });
   }
   if (previousConfig === undefined) {
@@ -2922,6 +2944,143 @@ describe("retention", () => {
 });
 
 describe("SDK", () => {
+  it("resolves and resumes a suspended MCP call through the public SDK in a second process", async () => {
+    const current = fixture();
+    const directory = join(current.directory, "sdk-human-input");
+    const dataDirectory = join(directory, "data");
+    const configPath = join(directory, "harness.json");
+    const policyPath = join(directory, "policy.yaml");
+    const effectPath = join(directory, "effect-count.txt");
+    const serverPath = fileURLToPath(
+      new URL("./fixtures/sdk-human-input-mcp-server.mjs", import.meta.url),
+    );
+    const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+    const answer = "sdk.human.answer@example.test";
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      policyPath,
+      [
+        "version: 1",
+        "defaultDecision: deny",
+        "rules:",
+        "  - id: allow_input_tool",
+        "    match:",
+        "      tools: [sdk_human.confirm_action]",
+        "    decision: allow",
+        "    reason: synthetic_allow",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const config = HarnessConfigSchema.parse({
+      run: { checkpointEveryEvents: 2 },
+      keys: { currentKeyId: KEY_ID, keys: [{ id: KEY_ID, secret: KEY_REF }] },
+      pii: PiiConfigSchema.parse({ defaultAction: "tokenize", detokenize: [] }),
+      policy: { file: policyPath },
+      servers: [
+        {
+          id: "sdk_human",
+          transport: {
+            kind: "stdio",
+            command: process.execPath,
+            args: [serverPath, effectPath],
+            cwd: repositoryRoot,
+          },
+          protocol: "2026-07-28",
+          toolAllowlist: ["confirm_action"],
+          elicitation: { enabled: true, modes: ["form"] },
+        },
+      ],
+    });
+    await writeFile(configPath, JSON.stringify(config), "utf8");
+    const harness = await createHarness({
+      configPath,
+      overrides: {
+        dataDir: dataDirectory,
+        clock: new FakeClock(1_000),
+        ids: new SequentialIdGenerator(),
+        model: new FakeModelPort([
+          completion(
+            [
+              {
+                callId: Id.parse("00000000000000000000001001"),
+                toolId: "sdk_human.confirm_action",
+                args: {},
+              },
+            ],
+            "requesting input",
+          ),
+        ]),
+        secretResolver: new EnvSecretResolver(),
+      },
+    });
+    let runId: string;
+    try {
+      ({ runId } = await harness.startRun({ goal: "Complete the synthetic account action." }));
+      let suspended = false;
+      for await (const event of harness.watch(runId, { fromSeq: 0 })) {
+        if (event.kind === "run_status" && event.to === "suspended") {
+          suspended = true;
+          break;
+        }
+      }
+      expect(suspended).toBe(true);
+    } finally {
+      await harness.close();
+    }
+
+    const beforeResumeStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+    let requestId: Id;
+    try {
+      const events = await readEvents(beforeResumeStore, Id.parse(runId));
+      const request = events.find((event) => event.type === "input_requested");
+      if (request?.type !== "input_requested") {
+        throw new Error("The model-selected MCP call did not request human input.");
+      }
+      requestId = request.requestId;
+      expect(request.source).toBe("mcp_mrtr");
+    } finally {
+      await beforeResumeStore.close();
+    }
+
+    const childOutput = await runSdkInputAnswerProcess([configPath, dataDirectory, requestId], {
+      ...process.env,
+      SDK_HUMAN_INPUT_ANSWER: answer,
+      HARNESS_E2E_KEY: process.env.HARNESS_E2E_KEY,
+    });
+    const childResult = parseJson(
+      z
+        .object({
+          resolution: z.object({ runId: Id, requestId: Id, action: z.literal("accept") }).strict(),
+          resumed: z.object({ runId: Id, status: z.literal("completed") }).strict(),
+        })
+        .strict(),
+      childOutput.trim(),
+    );
+    expect(childResult.resolution).toEqual({ runId, requestId, action: "accept" });
+    expect(childResult.resumed).toEqual({ runId, status: "completed" });
+    expect(childOutput).not.toContain(answer);
+    expect(await readFile(effectPath, "utf8")).toBe("effect\n");
+
+    const completedStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+    try {
+      const events = await readEvents(completedStore, Id.parse(runId));
+      expect(events.filter((event) => event.type === "input_resolved")).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) => event.type === "tool_result" && event.toolId === "sdk_human.confirm_action",
+        ),
+      ).toHaveLength(1);
+      expect(events.at(-1)).toMatchObject({
+        type: "run_status_changed",
+        to: "completed",
+      });
+      expect(JSON.stringify(events)).not.toContain(answer);
+    } finally {
+      await completedStore.close();
+    }
+  }, 30_000);
+
   it("starts, watches, and reads a run through the public SDK runtime", async () => {
     const current = fixture();
     const config = await current.context.loadConfig();
@@ -2966,10 +3125,31 @@ describe("SDK", () => {
 describe("invariants", () => {
   it("keeps the canary out of telemetry, CLI output, and log captures", async () => {
     const current = fixture();
-    await current.telemetry.tracerProvider.forceFlush();
-    await current.telemetry.loggerProvider.forceFlush();
+    await current.telemetry.forceFlush();
     expect(current.spans.length).toBeGreaterThan(0);
     expect(current.logs.length).toBeGreaterThan(0);
+    const metricData = current.metrics.flatMap(({ scopeMetrics }) =>
+      scopeMetrics.flatMap(({ metrics: entries }) => entries),
+    );
+    expect(metricData.some(({ descriptor }) => descriptor.name === "harness.model.tokens")).toBe(
+      true,
+    );
+    for (const { descriptor, dataPoints } of metricData) {
+      const definition = Object.entries(METRIC_ALLOWLIST).find(
+        ([name]) => name === descriptor.name,
+      );
+      expect(definition).toBeDefined();
+      const allowedKeys = definition?.[1] ?? [];
+      for (const dataPoint of dataPoints) {
+        expect(
+          Object.keys(dataPoint.attributes).every((key) =>
+            allowedKeys.some((allowedKey) => allowedKey === key),
+          ),
+        ).toBe(true);
+      }
+    }
+    expect(JSON.stringify(metricData)).not.toContain(current.canary);
+    expect(JSON.stringify(metricData).toLowerCase()).not.toContain("exemplar");
 
     for (const span of current.spans) {
       expect(JSON.stringify(span)).not.toContain(current.canary);

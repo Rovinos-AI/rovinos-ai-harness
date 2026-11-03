@@ -3,10 +3,9 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { metrics, type SpanContext } from "@opentelemetry/api";
+import { type SpanContext } from "@opentelemetry/api";
 import { APP_TELEMETRY_TOOL_NAME, Id, parseJson, type VaultValueEntry } from "@rovinos/schemas";
 import { type VaultRunReader } from "@rovinos/telemetry";
-import { createTestMetricCollector } from "@rovinos/telemetry/testing";
 import { createReferenceHost, type ReferenceHost } from "@rovinos/host";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { z } from "zod";
@@ -35,7 +34,6 @@ const validSpanNames = new Set([
   "harness.ui.input",
   "harness.ui.interaction",
 ]);
-const metricCollector = createTestMetricCollector();
 const traceDirectory = join(process.cwd(), "reports", "playwright-traces");
 
 let browser: Browser | undefined;
@@ -152,7 +150,7 @@ const bootstrap = `
 `;
 
 function getMetricSnapshot(): MetricSnapshot {
-  const latest = metricCollector.getMetrics().at(-1);
+  const latest = telemetry?.metrics.at(-1);
   const rejected = new Map<string, number>();
   let accepted = 0;
   if (latest === undefined) {
@@ -180,7 +178,7 @@ function getMetricSnapshot(): MetricSnapshot {
 }
 
 async function flushMetrics(): Promise<MetricSnapshot> {
-  await metricCollector.forceFlush();
+  await telemetry?.sdk.forceFlush();
   return getMetricSnapshot();
 }
 
@@ -376,7 +374,7 @@ async function runFixture(
     const output = JSON.stringify({
       spans,
       logs: currentTelemetry.logs.slice(firstLogIndex),
-      metrics: metricCollector.getMetrics(),
+      metrics: currentTelemetry.metrics,
       diagnostics,
       stdout,
       browserConsole,
@@ -466,9 +464,6 @@ function expectErrorCode(spans: CanaryTelemetry["spans"], code: string): void {
 describe("hostile MCP App integration", () => {
   beforeAll(async () => {
     await mkdir(traceDirectory, { recursive: true });
-    if (!metrics.setGlobalMeterProvider(metricCollector.provider)) {
-      throw new Error("The hostile app test metrics provider could not be registered.");
-    }
     telemetry = createCanaryTelemetry(vaultReader);
     browser = await chromium.launch({ headless: true });
   });
@@ -478,12 +473,8 @@ describe("hostile MCP App integration", () => {
     if (telemetry !== undefined) {
       telemetry.unsafeSpanCleanup();
       await telemetry.sdk.forceFlush();
-      await Promise.all([
-        telemetry.sdk.tracerProvider.shutdown(),
-        telemetry.sdk.loggerProvider.shutdown(),
-      ]);
+      await telemetry.sdk.shutdown();
     }
-    await metricCollector.provider.shutdown();
   });
 
   it("rejects a 100 KiB telemetry request and counts the size limit", async () => {
