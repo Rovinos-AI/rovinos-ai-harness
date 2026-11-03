@@ -28,7 +28,7 @@ MCP binary result parts are blocked by default (`mcp_binary_result_blocked`). To
 enable them for a server, set `binaryResults: allow`. The combined decoded bytes
 of all offloaded parts must fit `maxArtifactBytes`; the inline envelope after
 artifact substitution must fit `maxResultBytes`. Allowed binary artifacts are
-stored untokenized in the run workspace; see the explicit privacy exception in
+stored without tokenization in the run workspace; see the explicit privacy exception in
 [the guarantees](guarantees.md#binary-mcp-artifacts).
 
 Tool names in `toolAllowlist` and `idempotentTools` are the names returned by

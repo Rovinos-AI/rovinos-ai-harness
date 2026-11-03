@@ -150,15 +150,15 @@ describe("event schema upcasting", () => {
     }
 
     const event = upcastEvent(raw);
-    expect(event.type).toBe("tool_result");
-    if (event.type === "tool_result") {
-      expect(event.v).toBe(2);
-      expect(event.result).toMatchObject({
+    expect(event).toMatchObject({
+      type: "tool_result",
+      v: 2,
+      result: {
         format: "legacy-json",
         version: 1,
         value: { tool: "synthetic.idempotent", value: { key: "synthetic" } },
-      });
-    }
+      },
+    });
   });
 
   it("preserves explicit v1 resolution decisions and rejects malformed or future envelopes", () => {

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { constants } from "node:fs";
-import { randomUUID } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -8,16 +7,17 @@ import {
   open,
   readdir,
   realpath,
-  rename,
   rm,
   stat,
-  unlink,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
+import { join, resolve } from "node:path";
 import { HarnessError, Id, type Id as IdValue } from "@rovinos/schemas";
 import { WorkspaceFileNotFoundError, WorkspacePathError } from "@rovinos/context";
 import type { WorkspacePort, WorkspaceReadRange } from "@rovinos/context";
 import type { Clock } from "./types.js";
+import { publishWorkspaceBatch } from "./workspace-batch.js";
+import { isWithinWorkspace, resolveWorkspacePath, SandboxWorkspacePathError } from "./workspace-path.js";
+export { resolveWorkspacePath, SandboxWorkspacePathError } from "./workspace-path.js";
 
 const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_RUN_QUOTA_BYTES = 500 * 1024 * 1024;
@@ -56,108 +56,6 @@ export class WorkspaceQuotaExceededError extends HarnessError {
   constructor() {
     super("The workspace quota was exceeded.");
   }
-}
-
-/** Raised when the workspace path or file type is unsafe. */
-export class SandboxWorkspacePathError extends HarnessError {
-  readonly code = "sandbox_workspace_path_invalid";
-
-  constructor() {
-    super("The requested workspace path is invalid.");
-  }
-}
-
-function isWithin(root: string, candidate: string): boolean {
-  const pathFromRoot = relative(root, candidate);
-  return (
-    pathFromRoot === "" ||
-    (pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${sep}`) && !isAbsolute(pathFromRoot))
-  );
-}
-
-function validateRelativePath(value: string): void {
-  const segments = value.split(/[\\/]/u);
-  if (
-    value.length > 4096 ||
-    value.includes("\0") ||
-    isAbsolute(value) ||
-    win32.isAbsolute(value) ||
-    /^[A-Za-z]:/u.test(value) ||
-    segments.some((segment) => segment === ".." || segment.length > 255)
-  ) {
-    throw new SandboxWorkspacePathError();
-  }
-}
-
-async function assertNoSymlinkComponents(root: string, candidate: string): Promise<void> {
-  let current = root;
-  for (const segment of relative(root, candidate)
-    .split(sep)
-    .filter((part) => part !== "")) {
-    current = join(current, segment);
-    try {
-      if ((await lstat(current)).isSymbolicLink()) {
-        throw new SandboxWorkspacePathError();
-      }
-    } catch (error) {
-      if (error instanceof SandboxWorkspacePathError) {
-        throw error;
-      }
-      if (codeOf(error) !== "ENOENT") {
-        throw new SandboxWorkspacePathError();
-      }
-    }
-  }
-}
-
-async function resolveFinalPath(
-  root: string,
-  candidate: string,
-  allowMissing: boolean,
-): Promise<string> {
-  try {
-    const resolved = await realpath(candidate);
-    if (!isWithin(root, resolved)) {
-      throw new SandboxWorkspacePathError();
-    }
-    return resolved;
-  } catch (error) {
-    if (allowMissing && codeOf(error) === "ENOENT") {
-      return candidate;
-    }
-    throw error instanceof SandboxWorkspacePathError ? error : new SandboxWorkspacePathError();
-  }
-}
-
-/**
- * Resolves a workspace-relative path after validating its parent and every existing component.
- *
- * @param root - Trusted per-run workspace root.
- * @param workspacePath - Relative file or directory path.
- * @returns The canonical in-root path, or an in-root path whose final component does not exist yet.
- */
-export async function resolveWorkspacePath(
-  root: string,
-  workspacePath = ".",
-  options: { readonly allowMissing?: boolean } = {},
-): Promise<string> {
-  validateRelativePath(workspacePath);
-  const realRoot = await realpath(root).catch(() => {
-    throw new SandboxWorkspacePathError();
-  });
-  const candidate = resolve(realRoot, workspacePath);
-  if (!isWithin(realRoot, candidate)) {
-    throw new SandboxWorkspacePathError();
-  }
-  const parentPath = candidate === realRoot ? realRoot : dirname(candidate);
-  const parent = await realpath(parentPath).catch(() => {
-    throw new SandboxWorkspacePathError();
-  });
-  if (!isWithin(realRoot, parent)) {
-    throw new SandboxWorkspacePathError();
-  }
-  await assertNoSymlinkComponents(realRoot, candidate);
-  return resolveFinalPath(realRoot, candidate, options.allowMissing === true);
 }
 
 /** Ensures the documented project and private harness directories exist for a run. */
@@ -283,59 +181,16 @@ export class FsWorkspace implements WorkspacePort {
     if (this.#usedBytes + totalBytes > this.#quotaBytes) {
       throw new WorkspaceQuotaExceededError();
     }
-    const staged: { readonly temporary: string; readonly target: string }[] = [];
-    const published: string[] = [];
-    try {
-      for (const [index, entry] of entries.entries()) {
-        const target = await this.#resolveOffloadPath(entry.path, true);
-        const temporary = await this.#resolveOffloadPath(
-          `.harness/offload/.batch-${randomUUID()}-${index}`,
-          true,
-        );
-        try {
-          await lstat(target);
-          throw new WorkspacePathError();
-        } catch (error) {
-          if (error instanceof WorkspacePathError) {
-            throw error;
-          }
-          if (codeOf(error) !== "ENOENT") {
-            throw new WorkspacePathError();
-          }
-        }
-        const handle = await open(
-          temporary,
-          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW,
-          0o600,
-        ).catch(() => {
-          throw new WorkspacePathError();
-        });
-        staged.push({ temporary, target });
-        try {
-          await handle.writeFile(entry.data);
-        } finally {
-          await handle.close();
-        }
+    const published = await publishWorkspaceBatch(entries, (path) =>
+      this.#resolveOffloadPath(path, true),
+    );
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const target = published[index];
+      if (entry !== undefined && target !== undefined) {
+        this.#accountedFileSizes.set(target, entry.data.byteLength);
+        this.#usedBytes += entry.data.byteLength;
       }
-      for (const { temporary, target } of staged) {
-        await rename(temporary, target);
-        published.push(target);
-      }
-      for (let index = 0; index < entries.length; index += 1) {
-        const entry = entries[index];
-        const target = published[index];
-        if (entry !== undefined && target !== undefined) {
-          this.#accountedFileSizes.set(target, entry.data.byteLength);
-          this.#usedBytes += entry.data.byteLength;
-        }
-      }
-    } catch (error) {
-      await Promise.allSettled(staged.map(({ temporary }) => unlink(temporary)));
-      await Promise.allSettled(published.map((path) => unlink(path)));
-      if (error instanceof WorkspacePathError || error instanceof WorkspaceQuotaExceededError) {
-        throw error;
-      }
-      throw new WorkspacePathError();
     }
   }
 
@@ -448,7 +303,7 @@ export class FsWorkspace implements WorkspacePort {
     }
     const resolved = await resolveWorkspacePath(this.#runRoot, path, { allowMissing });
     const offloadRoot = await realpath(join(this.#runRoot, ".harness", "offload"));
-    if (!isWithin(offloadRoot, resolved)) {
+    if (!isWithinWorkspace(offloadRoot, resolved)) {
       throw new WorkspacePathError();
     }
     return resolved;

@@ -47,7 +47,7 @@ multi-artifact write and authorization contract is not yet defined.
    resource URIs remain content, never telemetry or error text. Apply existing PII/storage controls
    before persistence. Binary parts are blocked by default with `mcp_binary_result_blocked`.
    Operators may set `binaryResults: allow` per server. Allowed binary artifacts are stored
-   untokenized in the run workspace as an explicit exception to the files-carry-tokens rule.
+   without tokenization in the run workspace as an explicit exception to the files-carry-tokens rule.
    Vault-key encryption is a follow-up; this decision does not add it.
 
 ## Offload and failure semantics

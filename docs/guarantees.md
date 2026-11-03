@@ -53,7 +53,7 @@ other storage unless those systems are separately configured to do so.
 ### Binary MCP artifacts
 
 MCP binary results are blocked by default. When an operator opts in per server,
-offloaded binary parts are stored untokenized in that run's workspace. This is
+offloaded binary parts are stored without tokenization in that run's workspace. This is
 an explicit exception to the files-carry-tokens rule and is not encrypted with
 the vault key in this release.
 

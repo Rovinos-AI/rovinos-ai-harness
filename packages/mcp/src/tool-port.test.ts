@@ -505,13 +505,13 @@ describe("McpToolPort", () => {
       expect(execution.result).toMatchObject({
         parts: [{ type: "resource_link", uri }, { type: "image" }],
       });
-      for (const canary of [bytes.toString(), base64, uri, artifact.sha256]) {
+      for (const value of [bytes.toString(), base64, uri, artifact.sha256]) {
         expect(
           JSON.stringify({
             rawResult: { bytes: bytes.toString(), base64, uri, digest: artifact.sha256 },
           }),
-        ).toContain(canary);
-        expect(telemetry).not.toContain(canary);
+        ).toContain(value);
+        expect(telemetry).not.toContain(value);
       }
     } finally {
       await current.close();

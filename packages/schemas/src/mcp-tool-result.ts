@@ -35,8 +35,11 @@ export const LegacyToolResultSchema = z
   })
   .strict();
 
+/** Inferred opaque reference to one persisted binary result part. */
 export type McpResultArtifactReference = z.infer<typeof McpResultArtifactReferenceSchema>;
+/** Inferred ordered MCP result envelope with binary payloads replaced by references. */
 export type McpToolResultEnvelope = z.infer<typeof McpToolResultEnvelopeSchema>;
+/** Inferred legacy result wrapper produced by the v1 event upcaster. */
 export type LegacyToolResult = z.infer<typeof LegacyToolResultSchema>;
 
 /** Returns the exact result value carried by a legacy event, or the value unchanged. */

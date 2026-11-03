@@ -66,7 +66,7 @@ function textFromInput(input: JsonValue | undefined): string {
 }
 
 function textFromJson(value: Extract<Event, { type: "tool_result" }>["result"]): string {
-  return typeof value === "string" ? value : (JSON.stringify(value) ?? "");
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 /**
