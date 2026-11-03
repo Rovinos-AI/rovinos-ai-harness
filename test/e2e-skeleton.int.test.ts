@@ -3020,14 +3020,11 @@ describe("SDK", () => {
       await beforeResumeStore.close();
     }
 
-    const childOutput = await runSdkInputAnswerProcess(
-      [configPath, dataDirectory, requestId],
-      {
-        ...process.env,
-        SDK_HUMAN_INPUT_ANSWER: answer,
-        HARNESS_E2E_KEY: process.env.HARNESS_E2E_KEY,
-      },
-    );
+    const childOutput = await runSdkInputAnswerProcess([configPath, dataDirectory, requestId], {
+      ...process.env,
+      SDK_HUMAN_INPUT_ANSWER: answer,
+      HARNESS_E2E_KEY: process.env.HARNESS_E2E_KEY,
+    });
     const childResult = parseJson(
       z
         .object({
