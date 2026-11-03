@@ -660,6 +660,63 @@ describe("@rovinos/sdk", () => {
     expect(() => GetRunContentOptionsSchema.parse({ reveal: true })).toThrow();
   });
 
+  it("returns human-input request and resolution content through getRunContent", async () => {
+    const { harness, store } = await createTestHarness();
+    const started = await harness.startRun({ goal: "Synthetic human-input history" });
+    await waitForRun(harness, started.runId, "completed");
+    const storedEvents = await readStoredEvents(store, started.runId);
+    const created = storedEvents[0];
+    if (created?.type !== "run_created") {
+      throw new Error("Missing run_created event.");
+    }
+
+    const requestId = Id.parse("00000000000000000000000091");
+    const envelope = {
+      runId: created.runId,
+      ts: created.ts + 1,
+      v: 1,
+      traceId: created.traceId,
+      spanId: created.spanId,
+      segmentId: created.segmentId,
+    };
+    const humanInputEvents = [
+      {
+        ...envelope,
+        type: "input_requested",
+        requestId,
+        source: "agent",
+        round: 0,
+        mode: "form",
+        inputKey: "answer",
+        message: "Synthetic question",
+        requestState: { token: "<VALUE_1>" },
+      } satisfies NewEvent,
+      {
+        ...envelope,
+        ts: created.ts + 2,
+        type: "input_resolved",
+        requestId,
+        source: "agent",
+        mode: "form",
+        round: 0,
+        action: "accept",
+        decidedBy: "human",
+        approverId: Principal.parse("cli.answerer"),
+        waitMs: 1,
+        answer: "<VALUE_1>",
+      } satisfies NewEvent,
+    ];
+    await store.append(Id.parse(started.runId), humanInputEvents, storedEvents.length);
+
+    const content = await harness.getRunContent(started.runId, { reveal: false });
+
+    expect(
+      content.filter(({ type }) => type === "input_requested" || type === "input_resolved"),
+    ).toHaveLength(2);
+    expect(JSON.stringify(content)).toContain("<VALUE_1>");
+    expect(JSON.stringify(content)).not.toContain("cli.answerer");
+  });
+
   it("refuses content access when tokenization is disabled", async () => {
     const { harness } = await createTestHarness({ piiEnabled: false });
     const started = await harness.startRun({ goal: "Synthetic content" });
