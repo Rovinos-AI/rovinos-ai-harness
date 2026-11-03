@@ -25,6 +25,11 @@ const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
 const keyId = "rehydration-test-key";
 const encryptionKey = new Uint8Array(32).fill(7);
+const lookupTool = {
+  toolId: "lookup",
+  description: "Look up a synthetic record",
+  inputSchema: { type: "object", properties: { key: { type: "string" } } },
+};
 
 const keyProvider: KeyProvider = {
   currentKeyId: () => keyId,
@@ -273,7 +278,11 @@ describe("model response rehydration", () => {
       baseURL: "https://provider.test/v1",
     });
     const completion = await adapter.complete(
-      conversationRequest("openai", initialMessages()),
+      {
+        ...conversationRequest("openai", initialMessages()),
+        // Aliases are request-scoped; advertise every tool returned by this response.
+        tools: [lookupTool],
+      },
       context(),
     );
     const storedParts = await persistAndReadResponse("openai", completion.parts);
@@ -282,7 +291,14 @@ describe("model response rehydration", () => {
       "openai",
     );
 
-    await adapter.complete(conversationRequest("openai", messages), context());
+    await adapter.complete(
+      {
+        ...conversationRequest("openai", messages),
+        // Aliases are request-scoped; advertise every tool returned by this response.
+        tools: [lookupTool],
+      },
+      context(),
+    );
 
     const body = requestBodies.at(-1);
     const assistantMessage = body?.messages.find(({ role }) => role === "assistant");
@@ -376,7 +392,11 @@ describe("model response rehydration", () => {
       baseURL: "https://provider.test",
     });
     const completion = await anthropic.complete(
-      conversationRequest("anthropic", initialMessages()),
+      {
+        ...conversationRequest("anthropic", initialMessages()),
+        // Aliases are request-scoped; advertise every tool returned by this response.
+        tools: [lookupTool],
+      },
       context(),
     );
     const storedParts = await persistAndReadResponse("anthropic", completion.parts);
