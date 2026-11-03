@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { appendFile } from "node:fs/promises";
 import { McpServer, acceptedContent, inputRequired } from "@modelcontextprotocol/server";
-import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 
 const counterPath = process.argv[2];
@@ -10,6 +10,11 @@ if (counterPath === undefined) {
 }
 
 const answerSchema = z.object({ email: z.email() }).strict();
+const requestedSchema = {
+  type: "object",
+  properties: { email: { type: "string", format: "email" } },
+  required: ["email"],
+};
 const server = new McpServer(
   { name: "sdk-human-input-test", version: "1.0.0" },
   { supportedProtocolVersions: ["2026-07-28"] },
@@ -25,7 +30,7 @@ server.registerTool(
         inputRequests: {
           account: inputRequired.elicit({
             message: "Provide the synthetic account email.",
-            requestedSchema: answerSchema,
+            requestedSchema,
           }),
         },
         requestState: "synthetic-account-state",
@@ -38,4 +43,4 @@ server.registerTool(
     };
   },
 );
-await server.connect(new StdioServerTransport());
+serveStdio(() => server);

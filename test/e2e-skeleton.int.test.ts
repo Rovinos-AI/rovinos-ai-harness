@@ -3021,7 +3021,7 @@ describe("SDK", () => {
     }
 
     const childOutput = await runSdkInputAnswerProcess(
-      [configPath, dataDirectory, runId, requestId],
+      [configPath, dataDirectory, requestId],
       {
         ...process.env,
         SDK_HUMAN_INPUT_ANSWER: answer,
