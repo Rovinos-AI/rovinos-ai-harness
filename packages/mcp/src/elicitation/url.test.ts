@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { checkElicitationUrl } from "./url.js";
+import { checkElicitationUrl, redactUrlCredentials } from "./url.js";
+
+describe("redactUrlCredentials", () => {
+  it("removes synthetic userinfo without changing the URL policy decision", () => {
+    const url = new URL("https://example.test/account?flow=synthetic");
+    url.username = "synthetic-user";
+    url.password = "synthetic-password";
+    expect(checkElicitationUrl(url.href)).toEqual({ accepted: false, reason: "credentials" });
+    expect(redactUrlCredentials(url.href)).toBe("https://example.test/account?flow=synthetic");
+  });
+
+  it("preserves credential-free URLs byte for byte", () => {
+    const url = "https://EXAMPLE.test/%41?flow=synthetic#fragment";
+    expect(redactUrlCredentials(url)).toBe(url);
+  });
+});
 
 describe("checkElicitationUrl", () => {
   it.each(["javascript:alert(1)", "data:text/plain,hello", "file:///etc/passwd"])(

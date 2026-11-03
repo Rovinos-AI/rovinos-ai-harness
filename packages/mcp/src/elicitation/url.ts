@@ -68,6 +68,17 @@ function hasUrlCredentials(value: string): boolean {
   return authority.includes("@");
 }
 
+/** Removes userinfo from an already-validated URL before a policy decline is recorded. */
+export function redactUrlCredentials(value: string): string {
+  const url = new URL(value);
+  if (!hasUrlCredentials(value)) {
+    return value;
+  }
+  url.username = "";
+  url.password = "";
+  return url.href;
+}
+
 function hostPolicy(
   hostname: string,
   options: ElicitationUrlOptions,

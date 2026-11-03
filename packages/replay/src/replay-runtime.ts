@@ -71,6 +71,7 @@ export async function buildReplayRuntime(
     }
   });
   const tool = new ReplayToolPort(resolved, options.toolRegistry, options.replayRunId, sourceRunId);
+  const human = new ReplayHuman(resolved, sourceRunId);
   const sandbox: SandboxBackend = {
     exec: () => Promise.reject(new ReplayExternalAccessError()),
   };
@@ -84,6 +85,7 @@ export async function buildReplayRuntime(
   };
   const runtime = await createRuntime(replayConfig, {
     alreadyTokenized: true,
+    inputChannels: [human.legacyChannel],
     clock,
     ids,
     model: new ReplayModelPort(resolved, {
@@ -103,5 +105,5 @@ export async function buildReplayRuntime(
       return ReplayRuntimeReportSchema.parse({ diagnostics: [...diagnostics] }).diagnostics;
     },
   };
-  return { runtime, human: new ReplayHuman(resolved), report };
+  return { runtime, human, report };
 }

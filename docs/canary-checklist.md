@@ -19,6 +19,11 @@ metrics through an exporting reader and scans metric names, attributes, and exem
 The SDK/CLI metrics export integration sends a run-seeded prompt canary through both public paths
 and checks the local OTLP receiver for the expected counter and histogram without that value.
 
+Hostile elicitation integration tests scan returned and persisted input events, model context,
+and exported telemetry in both protocol eras. Legacy input unit tests also verify that accepted
+and policy-declined requests return the storage-tokenized message rather than the raw server
+message; returning the original event instead makes these regressions fail.
+
 The approval-screen unit tests inject synthetic canaries in invalid payloads and bridge
 errors, checking that the DOM error state and telemetry contain only fixed status text/codes.
 Hostile markup remains text, token display does not call approval/reveal tools, and no

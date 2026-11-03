@@ -6,11 +6,12 @@ import {
   type ElicitResult,
 } from "@modelcontextprotocol/client";
 import { Id, type JsonValue as JsonValueType } from "@rovinos/schemas";
+import { countMcpInputRequest } from "@rovinos/telemetry";
 import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
 import type { ElicitationUrlOptions } from "./elicitation/url.js";
 import { handleLegacyLiveElicitation, legacyUrlInputRequiredResult } from "./elicitation/legacy.js";
 import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
-import { checkElicitationUrl } from "./elicitation/url.js";
+import { checkElicitationUrl, redactUrlCredentials } from "./elicitation/url.js";
 import { validateInputRequiredResult } from "./elicitation/validate.js";
 import { McpProtocolError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
@@ -47,71 +48,23 @@ function createLegacyElicitation(options: CallToolWithInputRoundsOptions) {
   if (elicitation === undefined || !parsedCallId.success) {
     return undefined;
   }
+  const state = { rateLimited: false };
   return {
+    get rateLimited() {
+      return state.rateLimited;
+    },
     signal: options.signal,
-    handle: async (
+    handle: (
       requestParams: ElicitRequest["params"],
       elicitationId: string,
       requestSignal: AbortSignal,
-    ): Promise<ElicitResult> => {
-      const requestFields: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(requestParams)) {
-        if (key !== "elicitationId") {
-          requestFields[key] = value;
+    ): Promise<ElicitResult> =>
+      handleLegacyRequest(options, { requestParams, elicitationId, signal: requestSignal }, () => {
+        if (!state.rateLimited) {
+          countMcpInputRequest("rate_limited");
         }
-      }
-      let requests: ReturnType<typeof validateInputRequiredResult>["inputRequests"];
-      try {
-        requests = validateInputRequiredResult(
-          {
-            resultType: "input_required",
-            inputRequests: {
-              [elicitationId]: { method: "elicitation/create", params: requestFields },
-            },
-          },
-          options.route.server,
-        ).inputRequests;
-      } catch {
-        return { action: "cancel", content: {} };
-      }
-      const request = requests[0];
-      if (request === undefined) {
-        return { action: "cancel", content: {} };
-      }
-      const legacyInput = {
-        callId: parsedCallId.data,
-        serverId: options.route.server.id,
-        elicitationId,
-        request: { ...request, inputKey: elicitationId },
-        timeoutMs: options.route.server.elicitation.legacyLiveTimeoutMs,
-        signal: requestSignal,
-      };
-      if (
-        (request.mode === "url" &&
-          !checkElicitationUrl(request.url ?? "", options.urlOptions).accepted) ||
-        requestsSensitiveFormField(request)
-      ) {
-        await elicitation.recordLegacyPolicyDecline?.(legacyInput);
-        return { action: "decline", content: {} };
-      }
-      return handleLegacyLiveElicitation({
-        active: true,
-        request: legacyInput.request,
-        timeoutMs: legacyInput.timeoutMs,
-        signal: requestSignal,
-        handle: (validatedRequest, liveSignal) =>
-          elicitation.handleLegacyLive?.({
-            ...legacyInput,
-            request: validatedRequest,
-            signal: liveSignal,
-          }) ?? Promise.resolve(undefined),
-        onTimeout: (validatedRequest) =>
-          elicitation.recordLegacyTimeout?.({
-            ...legacyInput,
-            request: validatedRequest,
-          }) ?? Promise.resolve(),
-      });
-    },
+        state.rateLimited = true;
+      }),
     onComplete: (elicitationId: string) => {
       elicitation.onLegacyComplete?.({
         callId: parsedCallId.data,
@@ -120,6 +73,91 @@ function createLegacyElicitation(options: CallToolWithInputRoundsOptions) {
       });
     },
   };
+}
+
+interface LegacyRequestInput {
+  readonly requestParams: ElicitRequest["params"];
+  readonly elicitationId: string;
+  readonly signal: AbortSignal;
+}
+
+async function handleLegacyRequest(
+  options: CallToolWithInputRoundsOptions,
+  input: LegacyRequestInput,
+  onRateLimited: () => void,
+): Promise<ElicitResult> {
+  const { requestParams, elicitationId, signal } = input;
+  const requestFields = Object.fromEntries(
+    Object.entries(requestParams).filter(([key]) => key !== "elicitationId"),
+  );
+  let requests: ReturnType<typeof validateInputRequiredResult>["inputRequests"];
+  try {
+    requests = validateInputRequiredResult(
+      {
+        resultType: "input_required",
+        inputRequests: { [elicitationId]: { method: "elicitation/create", params: requestFields } },
+      },
+      options.route.server,
+    ).inputRequests;
+  } catch {
+    countMcpInputRequest("rejected");
+    return { action: "cancel", content: {} };
+  }
+  const request = requests[0];
+  if (request === undefined) {
+    return { action: "cancel", content: {} };
+  }
+  const state = { rateLimited: false };
+  const legacyInput = {
+    callId: options.call.callId,
+    serverId: options.route.server.id,
+    elicitationId,
+    request: {
+      ...request,
+      inputKey: elicitationId,
+      ...(request.url === undefined ? {} : { url: redactUrlCredentials(request.url) }),
+    },
+    timeoutMs: options.route.server.elicitation.legacyLiveTimeoutMs,
+    maxPerRun: options.route.server.elicitation.maxPerRun,
+    signal,
+    onRateLimited: () => {
+      state.rateLimited = true;
+      onRateLimited();
+    },
+  };
+  const sensitive = requestsSensitiveFormField(request);
+  if (
+    sensitive ||
+    (request.mode === "url" && !checkElicitationUrl(request.url ?? "", options.urlOptions).accepted)
+  ) {
+    await options.elicitation?.recordLegacyPolicyDecline?.(legacyInput);
+    if (!state.rateLimited) {
+      countMcpInputRequest(sensitive ? "declined_sensitive" : "rejected");
+    }
+    return { action: "decline", content: {} };
+  }
+  return handleLegacyLiveElicitation({
+    active: true,
+    request: legacyInput.request,
+    timeoutMs: legacyInput.timeoutMs,
+    signal,
+    handle: async (validatedRequest, liveSignal) => {
+      const response = await options.elicitation?.handleLegacyLive?.({
+        ...legacyInput,
+        request: validatedRequest,
+        signal: liveSignal,
+      });
+      if (!state.rateLimited) {
+        countMcpInputRequest("asked");
+      }
+      return response;
+    },
+    onTimeout: (validatedRequest) =>
+      options.elicitation?.recordLegacyTimeout?.({
+        ...legacyInput,
+        request: validatedRequest,
+      }) ?? Promise.resolve(),
+  });
 }
 
 async function callRound(options: {
@@ -134,20 +172,27 @@ async function callRound(options: {
   { readonly result: CallToolResult; readonly source: "mcp_mrtr" | "mcp_legacy" } | ToolRoundOutcome
 > {
   try {
+    const result = await options.connection.callTool({
+      params: { name: options.route.nativeName, arguments: options.call.args },
+      inputSchema: options.route.inputSchema,
+      options: { signal: options.signal },
+      toolDefinition: options.route.tool,
+      ...(options.inputRetry === undefined ? {} : { inputRetry: options.inputRetry }),
+      ...(options.legacyElicitation === undefined
+        ? {}
+        : { legacyElicitation: options.legacyElicitation }),
+    });
+    if (options.legacyElicitation?.rateLimited === true) {
+      return { kind: "failure", errorCode: "mcp_input_rate_limited" };
+    }
     return {
-      result: await options.connection.callTool({
-        params: { name: options.route.nativeName, arguments: options.call.args },
-        inputSchema: options.route.inputSchema,
-        options: { signal: options.signal },
-        toolDefinition: options.route.tool,
-        ...(options.inputRetry === undefined ? {} : { inputRetry: options.inputRetry }),
-        ...(options.legacyElicitation === undefined
-          ? {}
-          : { legacyElicitation: options.legacyElicitation }),
-      }),
+      result,
       source: "mcp_mrtr",
     };
   } catch (error) {
+    if (options.legacyElicitation?.rateLimited === true) {
+      return { kind: "failure", errorCode: "mcp_input_rate_limited" };
+    }
     if (error instanceof McpProtocolError && error.protocolCode === -32042) {
       const result = legacyUrlInputRequiredResult(error);
       return result === undefined
