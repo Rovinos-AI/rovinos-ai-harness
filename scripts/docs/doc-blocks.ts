@@ -18,6 +18,7 @@ export interface DocTestBlock {
 /** Fixed repository documents supported by the documentation test runner. */
 export type DocTestDocumentPath =
   | "docs/quickstart.md"
+  | "docs/evals-tutorial.md"
   | "examples/basic-agent/README.md"
   | "examples/approval/README.md"
   | "examples/crash-and-resume/README.md"
