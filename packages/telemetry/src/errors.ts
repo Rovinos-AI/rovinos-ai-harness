@@ -12,6 +12,16 @@ export class TelemetrySdkError extends HarnessError {
   }
 }
 
+/** Closed error raised when process-wide metric ownership settings conflict. */
+export class TelemetryMetricsConfigError extends HarnessError {
+  readonly code = "telemetry_metrics_config_conflict";
+
+  constructor() {
+    super("telemetry_metrics_config_conflict");
+    Object.defineProperty(this, "code", { configurable: false, writable: false });
+  }
+}
+
 /** Validation paths returned when span definitions or attributes are invalid. */
 export interface SpanRegistryIssue {
   readonly path: readonly (string | number)[];

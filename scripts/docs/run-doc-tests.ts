@@ -271,6 +271,16 @@ export async function runReplayExampleDocTests(): Promise<void> {
   });
 }
 
+/** Runs the documented synthetic eval suite commands from the repository root. */
+export async function runEvalTutorialDocTests(): Promise<void> {
+  const markdown = await readFile(join(rootDirectory, "docs/evals-tutorial.md"), "utf8");
+  executeDocTestBlocks(markdown, {
+    cwd: rootDirectory,
+    documentPath: "docs/evals-tutorial.md",
+    env: process.env,
+  });
+}
+
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runQuickstartDocTests().then(
     () => process.stdout.write("quickstart documentation passed\n"),

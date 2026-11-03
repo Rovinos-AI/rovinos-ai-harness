@@ -169,6 +169,93 @@ async function readStoredEvents(store: InMemoryEventStore, runId: string): Promi
   return events;
 }
 
+async function seedPendingInput(
+  store: InMemoryEventStore,
+  options: {
+    readonly runId?: Id;
+    readonly requestId?: Id;
+    readonly expiresAt?: number;
+    readonly requestedBy?: string;
+    readonly separationOfDuties?: boolean;
+    readonly withSchema?: boolean;
+  } = {},
+): Promise<{ readonly runId: Id; readonly requestId: Id }> {
+  const runId = options.runId ?? Id.parse("00000000000000000000000081");
+  const requestId = options.requestId ?? Id.parse("00000000000000000000000083");
+  const callId = Id.parse("00000000000000000000000084");
+  const envelope = { runId, traceId: "a".repeat(32), spanId: "b".repeat(16), segmentId: runId };
+  const events: NewEvent[] = [
+    {
+      ...envelope,
+      type: "run_created",
+      v: 1,
+      ts: 100,
+      configHash: "c".repeat(64),
+      policyVersion: "test.policy",
+      ...(options.requestedBy === undefined
+        ? {}
+        : { requestedBy: Principal.parse(options.requestedBy) }),
+      depth: 0,
+    },
+    {
+      ...envelope,
+      type: "run_status_changed",
+      v: 1,
+      ts: 101,
+      from: "pending",
+      to: "running",
+      reason: "started",
+    },
+    {
+      ...envelope,
+      type: "tool_intent",
+      v: 1,
+      ts: 102,
+      callId,
+      toolId: "agent.ask_user",
+      idempotent: false,
+      policyDecision: "allow",
+      ...(options.separationOfDuties === true ? { policySeparationOfDuties: true } : {}),
+      argsHash: "d".repeat(64),
+      args: { question: "Synthetic question" },
+    },
+    {
+      ...envelope,
+      type: "input_requested",
+      v: 1,
+      ts: 103,
+      requestId,
+      source: "agent",
+      callId,
+      inputKey: "answer",
+      round: 1,
+      mode: "form",
+      message: "Synthetic question",
+      ...(options.withSchema === true
+        ? {
+            schema: {
+              type: "object",
+              properties: { answer: { type: "string", enum: ["yes", "no"] } },
+              required: ["answer"],
+            },
+          }
+        : {}),
+      ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
+    },
+    {
+      ...envelope,
+      type: "run_status_changed",
+      v: 1,
+      ts: 104,
+      from: "running",
+      to: "suspended",
+      reason: "awaiting_input",
+    },
+  ];
+  await store.append(runId, events, 0);
+  return { runId, requestId };
+}
+
 class DelayedAppendStore extends InMemoryEventStore {
   private releaseAppend: () => void = () => undefined;
   private signalAppendStarted: () => void = () => undefined;
@@ -214,8 +301,9 @@ async function waitForRun(harness: Harness, runId: string, status?: string) {
         return run;
       }
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      // The run may not be visible yet; retry below.
     }
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error("Run did not reach the expected state.");
 }
@@ -677,25 +765,183 @@ describe("@rovinos/sdk", () => {
         (event) => event.type === "approval_resolved" && event.approvalId === approvalId,
       ),
     ).toMatchObject({ decidedBy: "human", approverId: "cli.test" });
+    await expect(
+      harness.resolveApproval(approvalId, "approve", {
+        principal: Principal.parse("cli.test"),
+      }),
+    ).rejects.toMatchObject({ code: "sdk_run_not_found" });
     const resumed = await harness.resumeRun(started.runId);
     expect(resumed.status).toBe("completed");
   });
 
-  it("validates answer requests and reports the unimplemented input contract safely", async () => {
-    const { harness } = await createTestHarness();
+  it("resolves accepted human input through the durable resolver without returning its answer", async () => {
+    const store = new InMemoryEventStore();
+    const { runId, requestId } = await seedPendingInput(store);
+    const { harness } = await createTestHarness({ store });
+
+    const result = await harness.answerInput(requestId, {
+      action: "accept",
+      content: "sdk-answer-canary@example.test",
+      principal: Principal.parse("cli.test"),
+    });
+
+    expect(result).toEqual({ runId, requestId, action: "accept" });
+    expect(JSON.stringify(result)).not.toContain("sdk-answer-canary@example.test");
+    const events = await readStoredEvents(store, runId);
+    expect(events.find((event) => event.type === "input_resolved")).toMatchObject({
+      action: "accept",
+      decidedBy: "human",
+      approverId: "cli.test",
+      answer: "<EMAIL_1>",
+    });
+    expect(JSON.stringify(events)).not.toContain("sdk-answer-canary@example.test");
+  });
+
+  it.each(["decline", "cancel"] as const)(
+    "resolves a human input with action %s",
+    async (action) => {
+      const store = new InMemoryEventStore();
+      const { runId, requestId } = await seedPendingInput(store);
+      const { harness } = await createTestHarness({ store });
+
+      await expect(
+        harness.answerInput(requestId, { action, principal: Principal.parse("cli.test") }),
+      ).resolves.toEqual({ runId, requestId, action });
+      expect(
+        (await readStoredEvents(store, runId)).find((event) => event.type === "input_resolved"),
+      ).toMatchObject({ action, decidedBy: "human" });
+    },
+  );
+
+  it("validates the stored answer schema before recording a resolution", async () => {
+    const store = new InMemoryEventStore();
+    const { runId, requestId } = await seedPendingInput(store, { withSchema: true });
+    const { harness } = await createTestHarness({ store });
+
+    await expect(
+      harness.answerInput(requestId, {
+        action: "accept",
+        content: { answer: "maybe" },
+        principal: Principal.parse("cli.test"),
+      }),
+    ).rejects.toMatchObject({ code: "input_answer_invalid" });
+    expect(
+      (await readStoredEvents(store, runId)).some((event) => event.type === "input_resolved"),
+    ).toBe(false);
+  });
+
+  it("rejects a valid request id that is not pending on a suspended run", async () => {
+    const store = new InMemoryEventStore();
+    await seedPendingInput(store);
+    const { harness } = await createTestHarness({ store });
+
     await expect(
       harness.answerInput("00000000000000000000000099", {
-        action: Code.parse("answer"),
-        content: { text: "synthetic" },
-        principal: Code.parse("human.test"),
+        action: "decline",
+        principal: Principal.parse("cli.test"),
       }),
-    ).rejects.toMatchObject({ code: "sdk_input_unavailable" });
+    ).rejects.toMatchObject({ code: "sdk_run_not_found" });
+  });
+
+  it("rejects a requester resolving their own input when separation of duties applies", async () => {
+    const store = new InMemoryEventStore();
+    const { runId, requestId } = await seedPendingInput(store, {
+      requestedBy: "cli.requester",
+      separationOfDuties: true,
+    });
+    const { harness } = await createTestHarness({ store });
+
+    await expect(
+      harness.answerInput(requestId, {
+        action: "decline",
+        principal: Principal.parse("cli.requester"),
+      }),
+    ).rejects.toMatchObject({ code: "approver_is_requester" });
+    expect(
+      (await readStoredEvents(store, runId)).some((event) => event.type === "input_resolved"),
+    ).toBe(false);
+  });
+
+  it("records an expired request as cancelled before returning the expiry error", async () => {
+    const store = new InMemoryEventStore();
+    const { runId, requestId } = await seedPendingInput(store, { expiresAt: 9_999 });
+    const { harness } = await createTestHarness({ store });
+
+    await expect(
+      harness.answerInput(requestId, {
+        action: "decline",
+        principal: Principal.parse("cli.test"),
+      }),
+    ).rejects.toMatchObject({ code: "input_expired" });
+    expect(
+      (await readStoredEvents(store, runId)).find((event) => event.type === "input_resolved"),
+    ).toMatchObject({ action: "cancel", decidedBy: "expiry" });
+  });
+
+  it("binds a request to its unique run and rejects duplicate request ids across runs", async () => {
+    const store = new InMemoryEventStore();
+    const requestId = Id.parse("00000000000000000000000083");
+    const first = await seedPendingInput(store, {
+      runId: Id.parse("00000000000000000000000081"),
+      requestId,
+    });
+    const second = await seedPendingInput(store, {
+      runId: Id.parse("00000000000000000000000082"),
+      requestId,
+    });
+    const { harness } = await createTestHarness({ store });
+
+    await expect(
+      harness.answerInput(requestId, {
+        action: "decline",
+        principal: Principal.parse("cli.test"),
+      }),
+    ).rejects.toMatchObject({ code: "sdk_input_ambiguous" });
+    expect(
+      (await readStoredEvents(store, first.runId)).some((event) => event.type === "input_resolved"),
+    ).toBe(false);
+    expect(
+      (await readStoredEvents(store, second.runId)).some(
+        (event) => event.type === "input_resolved",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not append duplicate outcomes for concurrent resolutions", async () => {
+    const store = new InMemoryEventStore();
+    const { runId, requestId } = await seedPendingInput(store);
+    const { harness } = await createTestHarness({ store });
+    const answer = {
+      action: "decline" as const,
+      principal: Principal.parse("cli.test"),
+    };
+
+    const outcomes = await Promise.allSettled([
+      harness.answerInput(requestId, answer),
+      harness.answerInput(requestId, answer),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(
+      (await readStoredEvents(store, runId)).filter((event) => event.type === "input_resolved"),
+    ).toHaveLength(1);
+  });
+
+  it("validates request ids and rejects answer requests after close", async () => {
+    const { harness } = await createTestHarness();
     await expect(
       harness.answerInput("invalid", {
-        action: Code.parse("answer"),
-        principal: Code.parse("human.test"),
+        action: "accept",
+        principal: Principal.parse("cli.test"),
       }),
     ).rejects.toThrow("requestId");
+    await harness.close();
+    await expect(
+      harness.answerInput("00000000000000000000000083", {
+        action: "accept",
+        principal: Principal.parse("cli.test"),
+      }),
+    ).rejects.toMatchObject({ code: "sdk_closed" });
   });
 
   it("stops subscriptions and rejects operations after close", async () => {
@@ -710,8 +956,8 @@ describe("@rovinos/sdk", () => {
     }).rejects.toMatchObject({ code: "sdk_closed" });
     await expect(
       harness.answerInput("00000000000000000000000099", {
-        action: Code.parse("answer"),
-        principal: Code.parse("human.test"),
+        action: "accept",
+        principal: Principal.parse("cli.test"),
       }),
     ).rejects.toMatchObject({ code: "sdk_closed" });
     await harness.close();

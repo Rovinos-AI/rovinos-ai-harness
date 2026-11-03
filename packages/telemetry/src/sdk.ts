@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { logs } from "@opentelemetry/api";
-import type { TelemetryConfig } from "@rovinos/schemas";
+import { TelemetryConfigSchema, type TelemetryConfig } from "@rovinos/schemas";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import type { PushMetricExporter } from "@opentelemetry/sdk-metrics";
 import {
   BatchLogRecordProcessor,
   LoggerProvider,
@@ -15,13 +16,19 @@ import { assertSentinelGate, type SentinelGate } from "./sentinel/gate.js";
 import { SEMCONV_STABILITY_OPT_IN } from "./semconv.js";
 import { POLICY_VERSION } from "./generated/policy-version.js";
 import { env } from "node:process";
+import {
+  forceFlushTelemetryMetrics,
+  initializeTelemetryMetrics,
+  type TelemetryMetricsLifecycle,
+} from "./metrics-sdk.js";
 
 const sdkFlushersByLoggerProvider = new WeakMap<WeakKey, () => Promise<void>>();
 
-/** Inputs for constructing the guarded trace and log SDK providers. */
+/** Inputs for constructing the guarded trace, log, and metric SDK providers. */
 export interface TelemetrySdkOptions {
   readonly spanExporter: SpanExporter;
   readonly logExporter: LogRecordExporter;
+  readonly metricExporter?: PushMetricExporter;
   readonly gate?: SentinelGate;
   readonly telemetry?: TelemetryConfig;
 }
@@ -30,8 +37,10 @@ export interface TelemetrySdkOptions {
 export interface TelemetrySdk {
   readonly tracerProvider: TracerProvider;
   readonly loggerProvider: LoggerProvider;
-  /** Flush pending span and log processors, including in-flight sentinel checks. */
+  /** Flush pending spans, logs, metrics, and in-flight sentinel checks. */
   forceFlush(): Promise<void>;
+  /** Flush and shut down providers created by this SDK. */
+  shutdown(): Promise<void>;
 }
 
 /**
@@ -75,18 +84,42 @@ export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
       ),
     ],
   });
+  const metricsLifecycle: TelemetryMetricsLifecycle = initializeTelemetryMetrics(
+    (options.telemetry ?? TelemetryConfigSchema.parse({})).metrics,
+    options.metricExporter,
+  );
   const forceFlush = async (): Promise<void> => {
+    await Promise.all([
+      tracerProvider.forceFlush(),
+      loggerProvider.forceFlush(),
+      metricsLifecycle.forceFlush(),
+    ]);
+  };
+  const flushTracesAndLogs = async (): Promise<void> => {
     await Promise.all([tracerProvider.forceFlush(), loggerProvider.forceFlush()]);
   };
-  sdkFlushersByLoggerProvider.set(loggerProvider, forceFlush);
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => {
+    shutdownPromise ??= Promise.all([
+      tracerProvider.shutdown(),
+      loggerProvider.shutdown(),
+      metricsLifecycle.shutdown(),
+    ]).then(() => undefined);
+    return shutdownPromise;
+  };
+  sdkFlushersByLoggerProvider.set(loggerProvider, flushTracesAndLogs);
   return {
     tracerProvider,
     loggerProvider,
     forceFlush,
+    shutdown,
   };
 }
 
-/** Flush the span and log processors belonging to the globally registered telemetry SDK. */
+/** Flush providers belonging to the globally registered telemetry SDK. */
 export async function forceFlushTelemetry(): Promise<void> {
-  await sdkFlushersByLoggerProvider.get(logs.getLoggerProvider())?.();
+  await Promise.all([
+    sdkFlushersByLoggerProvider.get(logs.getLoggerProvider())?.() ?? Promise.resolve(),
+    forceFlushTelemetryMetrics(),
+  ]);
 }

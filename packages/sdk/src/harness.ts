@@ -12,20 +12,15 @@ import {
 import type { SafeEvent } from "@rovinos/telemetry";
 import { SdkError } from "./types.js";
 import { contentEntries, readEvents, safeEvents } from "./event-views.js";
+import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
 import { runtimeOverridesFrom } from "./runtime-overrides.js";
 import {
-  AnswerInputOptionsSchema,
-  ApprovalIdInputSchema,
-  ApprovalDecisionSchema,
-  ApprovalResolutionResultSchema,
   CancelRunResultSchema,
   ContinueRunOptionsSchema,
   CreateHarnessOptionsSchema,
   GetRunContentOptionsSchema,
   HarnessOverridesSchema,
   ListRunsFilterSchema,
-  ResolveApprovalOptionsSchema,
-  RequestIdInputSchema,
   RunContentSchema,
   RunIdInputSchema,
   RunPageSchema,
@@ -48,41 +43,6 @@ import {
 const IDEMPOTENCY_ORPHAN_GRACE_MS = 30_000;
 const IDEMPOTENCY_START_WAIT_MS = 5_000;
 const IDEMPOTENCY_POLL_INTERVAL_MS = 10;
-
-/**
- * Finds the suspended run for an approval by streaming its log.
- *
- * This lookup is O(suspended runs × events) until the store exposes a direct approval index.
- */
-async function findPendingApprovalRun(
-  runtime: Runtime,
-  approvalId: ReturnType<typeof Id.parse>,
-): Promise<ReturnType<typeof Id.parse> | undefined> {
-  let cursor: string | undefined;
-  do {
-    const page = await runtime.store.listRuns({
-      status: "suspended",
-      limit: 100,
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    for (const summary of page.runs) {
-      let requested = false;
-      let resolved = false;
-      for await (const event of runtime.store.read(summary.runId)) {
-        if (event.type === "approval_requested" && event.approvalId === approvalId) {
-          requested = true;
-        } else if (event.type === "approval_resolved" && event.approvalId === approvalId) {
-          resolved = true;
-        }
-      }
-      if (requested && !resolved) {
-        return summary.runId;
-      }
-    }
-    cursor = page.nextCursor;
-  } while (cursor !== undefined);
-  return undefined;
-}
 
 class HarnessClient implements Harness {
   private readonly idempotencyKeys = new Map<string, Promise<Id>>();
@@ -252,30 +212,12 @@ class HarnessClient implements Harness {
     options: ResolveApprovalOptions,
   ) {
     this.assertOpen();
-    const parsedApprovalId = ApprovalIdInputSchema.parse({ approvalId }).approvalId;
-    const parsedDecision = ApprovalDecisionSchema.parse(decision);
-    const parsedOptions = ResolveApprovalOptionsSchema.parse(options);
-    const runId = await findPendingApprovalRun(this.runtime, parsedApprovalId);
-    if (runId === undefined) {
-      throw new SdkError("sdk_run_not_found");
-    }
-    await this.runtime.resolveApproval(runId, parsedApprovalId, parsedDecision, {
-      ...(parsedOptions.edits === undefined ? {} : { edits: parsedOptions.edits }),
-      metadata: { decidedBy: "human", approverId: parsedOptions.principal },
-    });
-    return ApprovalResolutionResultSchema.parse({
-      runId,
-      approvalId: parsedApprovalId,
-      decision: parsedDecision,
-    });
+    return resolvePendingApproval(this.runtime, approvalId, decision, options);
   }
 
-  async answerInput(requestId: string, options: AnswerInputOptions): Promise<never> {
+  async answerInput(requestId: string, options: AnswerInputOptions) {
     this.assertOpen();
-    RequestIdInputSchema.parse({ requestId });
-    AnswerInputOptionsSchema.parse(options);
-    await Promise.resolve();
-    throw new SdkError("sdk_input_unavailable");
+    return answerPendingInput(this.runtime, requestId, options);
   }
 
   watch(runId: string, options: WatchOptions = {}): AsyncIterable<SafeEvent> {
