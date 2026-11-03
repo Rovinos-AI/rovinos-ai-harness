@@ -12,18 +12,75 @@ import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { McpConnectionError } from "./errors.js";
 import { invokeMcpTool } from "./mcp-call.js";
 import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
-import { withOAuthWarningsRedacted } from "./oauth/provider.js";
+import { McpAuthRequiredError, withOAuthWarningsRedacted } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
 import {
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
   resourceAdvertisesClientCredentials,
 } from "./oauth/protected-resource.js";
-import type { McpTool } from "./tool-list.js";
+import { listAllTools, type McpTool } from "./tool-list.js";
 import { createMcpTransport } from "./transports.js";
 
 export { OAUTH_CLIENT_CREDENTIALS_EXTENSION } from "./oauth/protected-resource.js";
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 export const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
+
+/** Normalizes discovery failures while invalidating a connection that requires authorization. */
+export function discoveryConnectionError(
+  error: unknown,
+  markUnavailable: () => void,
+): McpConnectionError {
+  if (error instanceof McpAuthRequiredError) {
+    markUnavailable();
+    return new McpConnectionError("mcp_auth_required");
+  }
+  return error instanceof McpConnectionError
+    ? error
+    : new McpConnectionError("mcp_list_tools_failed");
+}
+
+/** Discovers validated pages with one shared signal and metadata-only exclusion logging. */
+export function discoverConnectionTools(
+  client: Client,
+  config: ServerConfig,
+  dependencies: McpConnectionDependencies,
+  options: { readonly era: "legacy" | "modern" | undefined; readonly signal: AbortSignal },
+): ReturnType<typeof listAllTools> {
+  return runWithSafeAuthLogging(
+    config.transport.kind === "http" && config.transport.auth !== undefined,
+    () =>
+      listAllTools({
+        signal: options.signal,
+        now: dependencies.now ?? Date.now,
+        requestPage: async (cursor, requestSignal) => {
+          // Legacy cancellation only sends a notification; closing stops the buffered body read.
+          const onAbort = () => {
+            if (options.era === "legacy") {
+              void client.close().catch(() => undefined);
+            }
+          };
+          requestSignal.addEventListener("abort", onAbort, { once: true });
+          try {
+            return await client.request(
+              { method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }) },
+              ListToolsResultSchema,
+              { timeout: config.timeouts.callMs, signal: requestSignal },
+            );
+          } catch (error) {
+            onAbort();
+            throw error;
+          } finally {
+            requestSignal.removeEventListener("abort", onAbort);
+          }
+        },
+        era: options.era,
+        transport: config.transport.kind,
+        onExcluded: (count) => {
+          dependencies.logger?.log({ code: "mcp_tools_excluded", serverId: config.id, count });
+        },
+      }),
+  );
+}
 
 /** Reconnects with bounded backoff while preserving close and cancellation failures. */
 export async function reconnectWithBackoff(options: {
@@ -144,7 +201,11 @@ export async function clientCredentialsExtensionAvailable(
   signal: AbortSignal,
 ): Promise<boolean> {
   return config.transport.kind === "http" && config.transport.auth?.grant === "client_credentials"
-    ? resourceAdvertisesClientCredentials(config.transport.url, signal)
+    ? resourceAdvertisesClientCredentials(
+        config.transport.url,
+        signal,
+        config.transport.auth.discovery,
+      )
     : false;
 }
 
@@ -152,6 +213,13 @@ export async function clientCredentialsExtensionAvailable(
 export class ClientCredentialsExtensionSupport {
   #supported = false;
   #probe: Promise<boolean> | undefined;
+  readonly #probeClientCredentialsExtension: typeof clientCredentialsExtensionAvailable;
+
+  constructor(
+    probeClientCredentialsExtension: typeof clientCredentialsExtensionAvailable = clientCredentialsExtensionAvailable,
+  ) {
+    this.#probeClientCredentialsExtension = probeClientCredentialsExtension;
+  }
 
   /** Whether the extension has been advertised by the resource or MCP server. */
   get supported(): boolean {
@@ -168,7 +236,7 @@ export class ClientCredentialsExtensionSupport {
     if (skip || this.#supported) {
       return;
     }
-    const probe = (this.#probe ??= clientCredentialsExtensionAvailable(config, signal));
+    const probe = (this.#probe ??= this.#probeClientCredentialsExtension(config, signal));
     try {
       this.#supported ||= await probe;
     } catch (error) {
