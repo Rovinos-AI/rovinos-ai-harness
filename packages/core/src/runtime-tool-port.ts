@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type ToolSpec } from "@rovinos/schemas";
+import { HarnessError, type Code, type Sha256Hex, type ToolSpec } from "@rovinos/schemas";
 import {
   createFsTools,
   createWebFetchTool,
@@ -18,6 +18,20 @@ export class ToolPortCollisionError extends HarnessError {
   constructor(readonly toolId: Code) {
     super("tool_id_collision");
   }
+}
+
+function collectCatalogFingerprints(
+  toolIds: ReadonlySet<Code>,
+  portFor: (toolId: Code) => ToolPort,
+): Record<string, Sha256Hex> {
+  const fingerprints: Record<string, Sha256Hex> = {};
+  for (const toolId of toolIds) {
+    const fingerprint = portFor(toolId).catalogFingerprints?.()[toolId];
+    if (fingerprint !== undefined) {
+      fingerprints[toolId] = fingerprint;
+    }
+  }
+  return fingerprints;
 }
 
 /** Routes a built-in tool alongside an existing runtime tool port. */
@@ -61,6 +75,20 @@ export function composeToolPorts(
         context: Parameters<NonNullable<ToolPort["prepare"]>>[1],
       ) => portFor(call.toolId).prepare?.(call, context) ?? Promise.resolve(call)
     : undefined;
+  const pinForRun = ports.some((port) => port.pinForRun !== undefined)
+    ? async (pinOptions?: Parameters<NonNullable<ToolPort["pinForRun"]>>[0]) =>
+        composeToolPorts(
+          additional.pinForRun === undefined ? additional : await additional.pinForRun(pinOptions),
+          existing.pinForRun === undefined ? existing : await existing.pinForRun(pinOptions),
+          options,
+        )
+    : undefined;
+  const catalogVersion = ports.some((port) => port.catalogVersion !== undefined)
+    ? () => existing.catalogVersion?.() ?? additional.catalogVersion?.()
+    : undefined;
+  const catalogFingerprints = ports.some((port) => port.catalogFingerprints !== undefined)
+    ? () => collectCatalogFingerprints(toolIds, portFor)
+    : undefined;
   const validateInputSchema = ports.some((port) => port.validateInputSchema !== undefined)
     ? (
         toolId: Code,
@@ -73,6 +101,9 @@ export function composeToolPorts(
     : undefined;
   return {
     ...(prepare === undefined ? {} : { prepare }),
+    ...(pinForRun === undefined ? {} : { pinForRun }),
+    ...(catalogVersion === undefined ? {} : { catalogVersion }),
+    ...(catalogFingerprints === undefined ? {} : { catalogFingerprints }),
     ...(validateInputSchema === undefined ? {} : { validateInputSchema }),
     resumeStrategy: (toolId) => portFor(toolId).resumeStrategy?.(toolId),
     describe: (toolId, args) => portFor(toolId).describe(toolId, args),

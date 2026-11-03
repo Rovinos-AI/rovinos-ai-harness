@@ -75,8 +75,12 @@ export class McpConnection {
    *
    * @param config - Validated server configuration.
    * @param dependencies - Secret resolver, logger, and deterministic backoff hooks.
+   * @throws McpConnectionError when outbound MCP Apps are enabled, which this client does not support.
    */
   constructor(config: ServerConfig, dependencies: McpConnectionDependencies) {
+    if (config.apps) {
+      throw new McpConnectionError("mcp_apps_unsupported");
+    }
     this.#config = config;
     this.#dependencies = dependencies;
   }

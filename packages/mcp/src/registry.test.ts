@@ -20,6 +20,7 @@ function config(
     readonly trust?: "internal" | "external";
     readonly useAnnotations?: boolean;
     readonly callMs?: number;
+    readonly command?: string;
   } = {},
 ) {
   return ServerConfigSchema.parse({
@@ -29,7 +30,7 @@ function config(
     idempotentTools: options.idempotentTools,
     trust: options.trust,
     useAnnotations: options.useAnnotations,
-    transport: { kind: "stdio", command: "/bin/false" },
+    transport: { kind: "stdio", command: options.command ?? "/bin/false" },
     timeouts: { callMs: options.callMs ?? 4_000 },
   });
 }
@@ -95,6 +96,52 @@ describe("normalizeToolId", () => {
 });
 
 describe("ToolRegistry", () => {
+  it("fingerprints the exact advertised contract and execution route deterministically", () => {
+    const build = (
+      serverConfig = config("server"),
+      discoveredTool = tool("lookup", { description: "Find a value" }),
+    ) => new ToolRegistry([{ config: serverConfig, tools: [discoveredTool] }]);
+    const baseline = build();
+    const sameSchemaWithDifferentKeyOrder = build(
+      config("server"),
+      tool("lookup", {
+        description: "Find a value",
+        inputSchema: { properties: {}, type: "object" },
+      }),
+    );
+
+    expect(baseline.catalogVersion).toBe(sameSchemaWithDifferentKeyOrder.catalogVersion);
+    expect(build(config("server", { toolPrefix: "alternate" })).catalogVersion).not.toBe(
+      baseline.catalogVersion,
+    );
+    expect(build(config("server", { command: "/usr/bin/other" })).catalogVersion).not.toBe(
+      baseline.catalogVersion,
+    );
+    expect(
+      build(config("server"), tool("lookup", { description: "Changed" })).catalogVersion,
+    ).not.toBe(baseline.catalogVersion);
+    expect(
+      build(
+        config("server"),
+        tool("lookup", {
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+          },
+        }),
+      ).catalogVersion,
+    ).not.toBe(baseline.catalogVersion);
+    expect(
+      build(
+        config("server"),
+        tool("lookup", {
+          description: "Find a value",
+          outputSchema: { type: "object", properties: { result: { type: "string" } } },
+        }),
+      ).catalogVersion,
+    ).not.toBe(baseline.catalogVersion);
+  });
+
   it("keeps allowed tools in discovery order and reports excluded native names", () => {
     const registry = new ToolRegistry([
       {
