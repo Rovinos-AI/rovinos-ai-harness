@@ -77,13 +77,11 @@ export function composeToolPorts(
     : undefined;
   const pinForRun = ports.some((port) => port.pinForRun !== undefined)
     ? async (pinOptions?: Parameters<NonNullable<ToolPort["pinForRun"]>>[0]) =>
-      composeToolPorts(
-        additional.pinForRun === undefined
-          ? additional
-          : await additional.pinForRun(pinOptions),
-        existing.pinForRun === undefined ? existing : await existing.pinForRun(pinOptions),
-        options,
-      )
+        composeToolPorts(
+          additional.pinForRun === undefined ? additional : await additional.pinForRun(pinOptions),
+          existing.pinForRun === undefined ? existing : await existing.pinForRun(pinOptions),
+          options,
+        )
     : undefined;
   const catalogVersion = ports.some((port) => port.catalogVersion !== undefined)
     ? () => existing.catalogVersion?.() ?? additional.catalogVersion?.()

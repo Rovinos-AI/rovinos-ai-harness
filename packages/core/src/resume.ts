@@ -419,7 +419,9 @@ async function resumeFromHistory(
     ...(resumeOptions.checkpointEveryEvents === undefined
       ? {}
       : { checkpointEveryEvents: resumeOptions.checkpointEveryEvents }),
-    ...(resumeOptions.snapshotKeep === undefined ? {} : { snapshotKeep: resumeOptions.snapshotKeep }),
+    ...(resumeOptions.snapshotKeep === undefined
+      ? {}
+      : { snapshotKeep: resumeOptions.snapshotKeep }),
     ...(resumeOptions.workspaceSnapshotter === undefined
       ? {}
       : { workspaceSnapshotter: resumeOptions.workspaceSnapshotter }),

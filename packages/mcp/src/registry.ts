@@ -230,15 +230,15 @@ function catalogEntry(tool: RegisteredTool): JsonValueType {
 
 function toolFingerprint(tool: RegisteredTool): Sha256Hex {
   return Sha256Hex.parse(
-    createHash("sha256").update(canonicalJson(catalogEntry(tool))).digest("hex"),
+    createHash("sha256")
+      .update(canonicalJson(catalogEntry(tool)))
+      .digest("hex"),
   );
 }
 
 function catalogFingerprint(tools: readonly RegisteredTool[]): Sha256Hex {
   const catalog = tools.map(catalogEntry);
-  return Sha256Hex.parse(
-    createHash("sha256").update(canonicalJson(catalog)).digest("hex"),
-  );
+  return Sha256Hex.parse(createHash("sha256").update(canonicalJson(catalog)).digest("hex"));
 }
 
 function schemaRejectionReason(
@@ -293,9 +293,7 @@ export class ToolRegistry {
 
   /** Fingerprints each exposed tool's full contract, route, and execution metadata. */
   catalogFingerprints(): Readonly<Record<string, Sha256Hex>> {
-    return Object.fromEntries(
-      this.#tools.map((tool) => [tool.spec.toolId, toolFingerprint(tool)]),
-    );
+    return Object.fromEntries(this.#tools.map((tool) => [tool.spec.toolId, toolFingerprint(tool)]));
   }
 
   /** Returns the fingerprint for one registered tool. */

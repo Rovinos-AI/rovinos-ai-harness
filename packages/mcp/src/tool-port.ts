@@ -347,16 +347,11 @@ export class McpToolPort {
       expectedToolFingerprints === undefined
         ? refreshedRegistry
         : refreshedRegistry.retainMatchingFingerprints(expectedToolFingerprints);
-    return new McpToolPort(
-      this.catalog,
-      this.options,
-      this.oauthTokenStore,
-      {
-        pinnedRegistry: registry,
-        pinnedFingerprints: expectedToolFingerprints ?? refreshedRegistry.catalogFingerprints(),
-        ownsResources: false,
-      },
-    );
+    return new McpToolPort(this.catalog, this.options, this.oauthTokenStore, {
+      pinnedRegistry: registry,
+      pinnedFingerprints: expectedToolFingerprints ?? refreshedRegistry.catalogFingerprints(),
+      ownsResources: false,
+    });
   }
 
   /** Returns the retry metadata and input schema for a registered tool. */

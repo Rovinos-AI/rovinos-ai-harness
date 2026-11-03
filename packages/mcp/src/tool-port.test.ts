@@ -260,9 +260,7 @@ describe("McpToolPort", () => {
       expect(current.calls).toHaveLength(0);
 
       const newRun = await current.port.pinForRun();
-      expect(newRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual([
-        "mcp_test.replacement",
-      ]);
+      expect(newRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.replacement"]);
       await expect(
         newRun.execute({ ...call, toolId: "mcp_test.replacement" }, context()),
       ).resolves.toMatchObject({ outcome: "ok" });

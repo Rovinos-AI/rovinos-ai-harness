@@ -117,9 +117,9 @@ describe("ToolRegistry", () => {
     expect(build(config("server", { command: "/usr/bin/other" })).catalogVersion).not.toBe(
       baseline.catalogVersion,
     );
-    expect(build(config("server"), tool("lookup", { description: "Changed" })).catalogVersion).not.toBe(
-      baseline.catalogVersion,
-    );
+    expect(
+      build(config("server"), tool("lookup", { description: "Changed" })).catalogVersion,
+    ).not.toBe(baseline.catalogVersion);
     expect(
       build(
         config("server"),

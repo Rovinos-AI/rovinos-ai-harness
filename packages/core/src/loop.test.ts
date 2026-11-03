@@ -628,7 +628,9 @@ describe("approval lifecycle", () => {
     );
     const pinForRun = vi.fn(() => Promise.resolve(tool));
 
-    await resumeRun(createResumeOptions(store, clock, { tool: Object.assign(tool, { pinForRun }) }));
+    await resumeRun(
+      createResumeOptions(store, clock, { tool: Object.assign(tool, { pinForRun }) }),
+    );
 
     expect(pinForRun).toHaveBeenCalledWith({ resumed: true });
     expect(tool.calls).toHaveLength(1);

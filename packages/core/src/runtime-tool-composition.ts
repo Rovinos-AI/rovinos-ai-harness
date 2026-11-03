@@ -66,9 +66,7 @@ function createResumeStrategy(
 }
 
 /** Builds the runtime's PII/offload-wrapped subagent tool port. */
-export function createRuntimeToolPort(
-  options: RuntimeToolPortOptions,
-): ToolPort {
+export function createRuntimeToolPort(options: RuntimeToolPortOptions): ToolPort {
   const builtins = composeToolPorts(new AskUserTool(), new VerifyTool());
   const toolWithBuiltins = composeToolPorts(builtins, options.tool, {
     preferAdditionalSpecs: true,
