@@ -132,12 +132,20 @@ contains the configured server id.
 The `servers_authorized` check covers configured OAuth servers separately from
 reachability.
 
-Registered MCP tool ids are normalized to the harness `Code` format, filtered
-by `toolAllowlist`, and rejected when their schemas exceed the bounded JSON
-Schema compiler limits or contain unsupported references. Server descriptions
-are untrusted text: they may contain prompt injection, are sanitized before
-being exposed as a model-visible tool description, and must pass through the
-model-input PII boundary. They are descriptive only and never grant authority.
+Registered MCP tool ids use the harness `Code` format and are filtered by
+`toolAllowlist`. Native tool names may use any casing, but normalization must
+not replace or collapse any characters. CamelCase names such as `getWeather`
+remain available with a lowercased tool id; names with a trailing space,
+non-ASCII characters, punctuation that normalization replaces, or repeated
+underscores are rejected with `tool_name_invalid`. Servers relying on names
+that require those replacements or collapses must rename their tools; otherwise
+the tools will no longer be available. Case-only duplicate names normalize to
+the same id and fail startup with `tool_id_collision`.
+Schemas exceeding the bounded JSON Schema compiler limits or containing
+unsupported references are also rejected. Server descriptions are untrusted
+text: they may contain prompt injection, are sanitized before being exposed as
+a model-visible tool description, and must pass through the model-input PII
+boundary. They are descriptive only and never grant authority.
 If two discovered tools normalize to the same id, startup fails with
 `tool_id_collision`, including when both tools are from one server; the error
 contains that normalized `Code` and both server ids (which can be identical).
