@@ -291,6 +291,12 @@ async function invokeCli(args: readonly string[], captureOutput = true): Promise
       ),
     });
   };
+  cliContext.createToolPort = () =>
+    syntheticTools(
+      current.callsBeforeApproval,
+      current.callsAfterApproval,
+      current.argsAfterApproval,
+    );
   const code = await main(args, cliContext);
   if (captureOutput) {
     current.stdout.push(...stdout);
@@ -2152,6 +2158,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
           limits: { memoryMb: 2048, pids: 2048, outputBytes: 2048, cpuSeconds: 5 },
         });
         return {
+          getToolSpecs: () => tool.getToolSpecs(),
           describe: (toolId) => tool.describe(toolId),
           execute: async (call, context) => {
             const output = await tool.execute(call, context);
@@ -2859,6 +2866,9 @@ describe("retention", () => {
     let restoredContent: string | undefined;
     let toolRunId: Id | undefined;
     const tool: ToolPort = {
+      getToolSpecs: () => [
+        { toolId, description: "Read the synthetic checkpoint", inputSchema: {} },
+      ],
       describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
       execute: async () => {
         if (toolRunId === undefined) {

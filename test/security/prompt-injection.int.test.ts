@@ -110,6 +110,9 @@ const attackAssertions: Record<Attack["kind"], AttackAssertion> = {
       !requestTools.some(({ toolId }) => toolId === approvalTool || toolId === "approve") &&
       result.result.approvalIds.length > 0 &&
       !result.result.events.some((event) => event.type === "approval_resolved") &&
+      result.result.events.some(
+        (event) => event.type === "tool_result" && event.errorCode === "tool_not_advertised",
+      ) &&
       !result.executedCalls.some((call) => call.toolId === attack.toolId)
     );
   },
