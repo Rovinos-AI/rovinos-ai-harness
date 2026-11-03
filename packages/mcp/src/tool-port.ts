@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client";
-import { Code, compileJsonSchema } from "@rovinos/schemas";
+import { Code, JsonValue, compileJsonSchema } from "@rovinos/schemas";
 import type { JsonValue as JsonValueType, ServerConfig } from "@rovinos/schemas";
 import * as telemetry from "@rovinos/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
@@ -13,7 +13,11 @@ import type { ElicitationUrlOptions } from "./elicitation/url.js";
 import { callToolWithInputRounds } from "./tool-input-rounds.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
-import { normalizedResult } from "./tool-result.js";
+import {
+  McpToolResultError,
+  normalizedResult,
+  type McpResultArtifactPayload,
+} from "./tool-result.js";
 
 const MCP_CALL_SPAN = telemetry.defineSemconvSpan(
   "mcp.client.call",
@@ -48,7 +52,8 @@ export interface McpToolCallContext {
 
 /** Safe tool result structurally compatible with the core tool port. */
 export interface McpToolExecutionResult {
-  readonly binary?: boolean;
+  readonly artifacts?: readonly McpResultArtifactPayload[];
+  readonly resultLimitBytes?: number;
   readonly suspend?: boolean;
   readonly suspendReason?: "awaiting_input";
   readonly outcome: "ok" | "error";
@@ -148,26 +153,26 @@ function mapToolResult(
   route: ResolvedTool,
   offloadBinaryResults: boolean,
 ): McpToolExecutionResult {
-  const mapped = normalizedResult(result);
-  const serialized = JSON.stringify(mapped.offloadValue);
-  if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
+  const mapped = normalizedResult(result, {
+    maxArtifactBytes: route.server.maxArtifactBytes,
+    binaryResults: route.server.binaryResults,
+  });
+  if (mapped.artifacts.length > 0 && !offloadBinaryResults) {
+    return failure("artifact_store_unavailable");
+  }
+  if (
+    mapped.artifacts.length === 0 &&
+    Buffer.byteLength(JSON.stringify(mapped.value), "utf8") > route.server.maxResultBytes
+  ) {
     return failure("result_too_large");
   }
-  if (mapped.hasLargeBinary) {
-    if (!offloadBinaryResults || mapped.binaryPayload === undefined) {
-      return failure("binary_result_unavailable");
-    }
-    return {
-      outcome: result.isError === true ? "error" : "ok",
-      ...(result.isError === true ? { errorCode: Code.parse("tool_reported_error") } : {}),
-      binary: true,
-      result: Array.from(mapped.binaryPayload),
-    };
-  }
-  if (result.isError === true) {
-    return failure("tool_reported_error", mapped.value);
-  }
-  return { outcome: "ok", result: mapped.value };
+  return {
+    outcome: mapped.value.isError ? "error" : "ok",
+    ...(mapped.value.isError ? { errorCode: Code.parse("tool_reported_error") } : {}),
+    ...(mapped.artifacts.length === 0 ? {} : { artifacts: mapped.artifacts }),
+    ...(mapped.artifacts.length === 0 ? {} : { resultLimitBytes: route.server.maxResultBytes }),
+    result: JsonValue.parse(mapped.value),
+  };
 }
 
 async function executeRegisteredTool(options: {
@@ -201,7 +206,14 @@ async function executeRegisteredTool(options: {
   if (roundOutcome.kind === "suspend") {
     return { outcome: "ok", result: null, suspend: true, suspendReason: "awaiting_input" };
   }
-  return mapToolResult(roundOutcome.result, route, options.offloadBinaryResults);
+  try {
+    return mapToolResult(roundOutcome.result, route, options.offloadBinaryResults);
+  } catch (error) {
+    if (error instanceof McpToolResultError) {
+      return failure(error.code);
+    }
+    return failure("mcp_result_invalid");
+  }
 }
 
 /**

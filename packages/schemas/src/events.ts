@@ -8,6 +8,10 @@ import { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from 
 import { Principal } from "./principal.js";
 import { FormSchema } from "./form-schema.js";
 import { refineInputRequestPayload } from "./human-input.js";
+import {
+  LegacyToolResultSchema,
+  McpToolResultEnvelopeSchema,
+} from "./mcp-tool-result.js";
 
 /** Supported run lifecycle states. */
 export const RunStatus = z.enum([
@@ -148,7 +152,7 @@ const toolResultEvent = z
     errorCode: Code.optional(),
     latencyMs: z.number().int().nonnegative(),
     executedArgsHash: Sha256Hex.optional(),
-    result: JsonValue,
+    result: z.union([McpToolResultEnvelopeSchema, LegacyToolResultSchema, JsonValue]),
   })
   .strict();
 

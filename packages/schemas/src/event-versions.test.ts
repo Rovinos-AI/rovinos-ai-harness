@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
+  RawEventEnvelopeSchema,
   applyUpcasterChain,
   upcastEvent,
   upcastSnapshot,
   type EventUpcaster,
 } from "./event-versions.js";
+import { parseJson } from "./parse.js";
+import { JsonValue } from "./json.js";
 
 const envelope = {
   runId: "00000000000000000000000001",
@@ -100,6 +104,61 @@ describe("event schema upcasting", () => {
         waitMs: -1,
       }),
     ).toThrow();
+  });
+
+  it("wraps v1 tool results without changing their original JSON value", () => {
+    const result = {
+      content: [{ type: "text", text: "legacy value" }],
+      binary: [0, 255, 7],
+    };
+    const event = upcastEvent({
+      ...envelope,
+      type: "tool_result",
+      callId: "00000000000000000000000002",
+      toolId: "legacy.tool",
+      outcome: "ok",
+      latencyMs: 1,
+      result,
+    });
+
+    expect(event).toMatchObject({
+      type: "tool_result",
+      v: 2,
+      result: { format: "legacy-json", version: 1, value: result },
+    });
+    expect(result).toEqual({
+      content: [{ type: "text", text: "legacy value" }],
+      binary: [0, 255, 7],
+    });
+  });
+
+  it("reads legacy tool results from the committed v1 log fixture", async () => {
+    const source = await readFile(
+      new URL("../../../test/fixtures/legacy-logs/v1/golden.jsonl", import.meta.url),
+      "utf8",
+    );
+    const events = source
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .filter((line) =>
+        RawEventEnvelopeSchema.safeParse(parseJson(JsonValue, line)).success,
+      )
+      .map((line) => parseJson(RawEventEnvelopeSchema, line));
+    const raw = events.find((event) => event.type === "tool_result");
+    if (raw === undefined) {
+      throw new Error("Missing legacy tool result fixture.");
+    }
+
+    const event = upcastEvent(raw);
+    expect(event.type).toBe("tool_result");
+    if (event.type === "tool_result") {
+      expect(event.v).toBe(2);
+      expect(event.result).toMatchObject({
+        format: "legacy-json",
+        version: 1,
+        value: { tool: "synthetic.idempotent", value: { key: "synthetic" } },
+      });
+    }
   });
 
   it("preserves explicit v1 resolution decisions and rejects malformed or future envelopes", () => {

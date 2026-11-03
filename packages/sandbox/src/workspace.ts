@@ -1,13 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, realpath, rm, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  unlink,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 import { HarnessError, Id, type Id as IdValue } from "@rovinos/schemas";
 import { WorkspaceFileNotFoundError, WorkspacePathError } from "@rovinos/context";
 import type { WorkspacePort, WorkspaceReadRange } from "@rovinos/context";
 import type { Clock } from "./types.js";
 
-const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_RUN_QUOTA_BYTES = 500 * 1024 * 1024;
 const DEFAULT_RECOUNT_INTERVAL_MS = 60_000;
 const DEFAULT_CLOCK: Clock = {
@@ -246,6 +258,85 @@ export class FsWorkspace implements WorkspacePort {
     const write = this.#writes.then(() => this.#write(path, data));
     this.#writes = write.catch(() => undefined);
     return write;
+  }
+
+  /** {@inheritDoc WorkspacePort.writeBatch} */
+  writeBatch(
+    entries: readonly { readonly path: string; readonly data: Uint8Array }[],
+  ): Promise<void> {
+    const write = this.#writes.then(() => this.#writeBatch(entries));
+    this.#writes = write.catch(() => undefined);
+    return write;
+  }
+
+  async #writeBatch(
+    entries: readonly { readonly path: string; readonly data: Uint8Array }[],
+  ): Promise<void> {
+    if (new Set(entries.map(({ path }) => path)).size !== entries.length) {
+      throw new WorkspacePathError();
+    }
+    if (entries.some(({ data }) => data.byteLength > this.#maxFileBytes)) {
+      throw new WorkspaceQuotaExceededError();
+    }
+    await this.#ensureReady();
+    const totalBytes = entries.reduce((total, { data }) => total + data.byteLength, 0);
+    if (this.#usedBytes + totalBytes > this.#quotaBytes) {
+      throw new WorkspaceQuotaExceededError();
+    }
+    const staged: { readonly temporary: string; readonly target: string }[] = [];
+    const published: string[] = [];
+    try {
+      for (const [index, entry] of entries.entries()) {
+        const target = await this.#resolveOffloadPath(entry.path, true);
+        const temporary = await this.#resolveOffloadPath(
+          `.harness/offload/.batch-${randomUUID()}-${index}`,
+          true,
+        );
+        try {
+          await lstat(target);
+          throw new WorkspacePathError();
+        } catch (error) {
+          if (error instanceof WorkspacePathError) {
+            throw error;
+          }
+          if (codeOf(error) !== "ENOENT") {
+            throw new WorkspacePathError();
+          }
+        }
+        const handle = await open(
+          temporary,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW,
+          0o600,
+        ).catch(() => {
+          throw new WorkspacePathError();
+        });
+        staged.push({ temporary, target });
+        try {
+          await handle.writeFile(entry.data);
+        } finally {
+          await handle.close();
+        }
+      }
+      for (const { temporary, target } of staged) {
+        await rename(temporary, target);
+        published.push(target);
+      }
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        const target = published[index];
+        if (entry !== undefined && target !== undefined) {
+          this.#accountedFileSizes.set(target, entry.data.byteLength);
+          this.#usedBytes += entry.data.byteLength;
+        }
+      }
+    } catch (error) {
+      await Promise.allSettled(staged.map(({ temporary }) => unlink(temporary)));
+      await Promise.allSettled(published.map((path) => unlink(path)));
+      if (error instanceof WorkspacePathError || error instanceof WorkspaceQuotaExceededError) {
+        throw error;
+      }
+      throw new WorkspacePathError();
+    }
   }
 
   async #write(path: string, data: Uint8Array): Promise<void> {

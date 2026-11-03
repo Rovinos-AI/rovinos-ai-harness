@@ -1,167 +1,180 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JsonValue, type JsonValue as JsonValueType } from "@rovinos/schemas";
+import { createHash } from "node:crypto";
+import {
+  JsonValue,
+  McpToolResultEnvelopeSchema,
+  Sha256Hex,
+  type JsonValue as JsonValueType,
+  type McpToolResultEnvelope,
+} from "@rovinos/schemas";
 import type { CallToolResult } from "@modelcontextprotocol/client";
 
-const SMALL_BINARY_BYTES = 8_192;
+export interface McpResultArtifactPayload {
+  readonly partIndex: number;
+  readonly target: "data" | "resource.blob";
+  readonly mimeType: string;
+  readonly bytes: Uint8Array;
+  readonly sha256: string;
+}
+
+export class McpToolResultError extends Error {
+  constructor(readonly code: "mcp_binary_result_blocked" | "mcp_result_invalid" | "artifact_too_large") {
+    super(code);
+  }
+}
+
+interface BinarySource {
+  readonly partIndex: number;
+  readonly target: McpResultArtifactPayload["target"];
+  readonly mimeType: string;
+  readonly encoded: string;
+  readonly decodedBytes: number;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function binaryBytes(value: unknown): Uint8Array | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  try {
-    return Buffer.from(value, "base64");
-  } catch {
-    return undefined;
-  }
-}
-
-interface ResourceBytes {
-  readonly bytes?: Uint8Array;
-  readonly data?: string;
-  readonly mimeType: string;
-}
-
-function resourceBytes(block: Record<string, unknown>): ResourceBytes {
-  const resource = block.resource;
-  if (!isRecord(resource)) {
-    return { mimeType: "application/octet-stream" };
-  }
-  const mimeType =
-    typeof resource.mimeType === "string" ? resource.mimeType : "application/octet-stream";
-  if (typeof resource.text === "string") {
-    return { bytes: new TextEncoder().encode(resource.text), data: resource.text, mimeType };
-  }
-  const bytes = binaryBytes(resource.blob);
-  return {
-    ...(bytes === undefined ? {} : { bytes }),
-    ...(typeof resource.blob === "string" ? { data: resource.blob } : {}),
-    mimeType,
-  };
-}
-
-interface NormalizedBlock {
-  readonly block: JsonValueType;
-  readonly offloadBlock: JsonValueType;
-  readonly hasLargeBinary: boolean;
-  readonly binaryPayload?: Uint8Array;
-}
-
-function isGenuineBinary(block: Record<string, unknown>, isResource: boolean): boolean {
-  if (!isResource) {
-    return block.type === "image" || block.type === "audio" || block.type === "blob";
-  }
-  return (
-    isRecord(block.resource) &&
-    typeof block.resource.blob === "string" &&
-    typeof block.resource.text !== "string"
-  );
-}
-
-function blockBytes(
-  block: Record<string, unknown>,
-  isResource: boolean,
-  resource: ResourceBytes | undefined,
-  genuineBinary: boolean,
-): Uint8Array | undefined {
-  if (isResource) {
-    return resource?.bytes;
-  }
-  return genuineBinary ? binaryBytes(block.data) : undefined;
-}
-
-function blockMimeType(
-  block: Record<string, unknown>,
-  isResource: boolean,
-  resource: ResourceBytes | undefined,
-): string {
-  if (isResource) {
-    return resource?.mimeType ?? "application/octet-stream";
-  }
+function binaryMimeType(block: Record<string, unknown>): string {
   return typeof block.mimeType === "string" ? block.mimeType : "application/octet-stream";
 }
 
-function blockData(
-  block: Record<string, unknown>,
-  isResource: boolean,
-  resource: ResourceBytes | undefined,
-): string | undefined {
-  const value = isResource ? resource?.data : block.data;
-  return typeof value === "string" ? value : undefined;
+function decodedBase64Length(encoded: string): number {
+  if (
+    encoded.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)
+  ) {
+    throw new McpToolResultError("mcp_result_invalid");
+  }
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return (encoded.length / 4) * 3 - padding;
 }
 
-function visibleBlock(
-  metadata: { readonly type: string; readonly mimeType: string; readonly bytes: number },
-  data: string | undefined,
-  hasLargeBinary: boolean,
-): JsonValueType {
-  if (data === undefined || hasLargeBinary) {
-    return metadata;
+function findBinarySources(
+  content: readonly unknown[],
+  maxArtifactBytes: number,
+  binaryResults: "block" | "allow",
+): BinarySource[] {
+  const sources: BinarySource[] = [];
+  let totalBytes = 0;
+  for (const [partIndex, part] of content.entries()) {
+    if (!isRecord(part) || typeof part.type !== "string") {
+      throw new McpToolResultError("mcp_result_invalid");
+    }
+    let target: BinarySource["target"] | undefined;
+    let mimeType = binaryMimeType(part);
+    let encoded: unknown;
+    if (["image", "audio", "blob"].includes(part.type)) {
+      target = "data";
+      encoded = part.data;
+    } else if (part.type === "resource" && isRecord(part.resource)) {
+      const resource = part.resource;
+      if (typeof resource.blob === "string" && typeof resource.text !== "string") {
+        target = "resource.blob";
+        encoded = resource.blob;
+        mimeType =
+          typeof resource.mimeType === "string" ? resource.mimeType : "application/octet-stream";
+      } else if (resource.blob !== undefined || resource.text !== undefined) {
+        if (typeof resource.text !== "string" || resource.blob !== undefined) {
+          throw new McpToolResultError("mcp_result_invalid");
+        }
+      } else {
+        throw new McpToolResultError("mcp_result_invalid");
+      }
+    } else if (!["text", "resource", "resource_link"].includes(part.type)) {
+      throw new McpToolResultError("mcp_result_invalid");
+    }
+    if (target === undefined) {
+      continue;
+    }
+    if (binaryResults !== "allow") {
+      throw new McpToolResultError("mcp_binary_result_blocked");
+    }
+    if (typeof encoded !== "string") {
+      throw new McpToolResultError("mcp_result_invalid");
+    }
+    const decodedBytes = decodedBase64Length(encoded);
+    totalBytes += decodedBytes;
+    if (totalBytes > maxArtifactBytes) {
+      throw new McpToolResultError("artifact_too_large");
+    }
+    sources.push({ partIndex, target, mimeType, encoded, decodedBytes });
   }
-  return { ...metadata, data };
+  return sources;
 }
 
-function normalizeBlock(block: unknown): NormalizedBlock {
-  if (!isRecord(block) || typeof block.type !== "string") {
-    return {
-      block: { type: "unknown" },
-      offloadBlock: { type: "unknown" },
-      hasLargeBinary: false,
-    };
-  }
-  if (block.type === "text" && typeof block.text === "string") {
-    const textBlock = { type: "text", text: block.text };
-    return { block: textBlock, offloadBlock: textBlock, hasLargeBinary: false };
-  }
-  const isResource = block.type === "resource";
-  const resource = isResource ? resourceBytes(block) : undefined;
-  const genuineBinary = isGenuineBinary(block, isResource);
-  const bytes = blockBytes(block, isResource, resource, genuineBinary);
-  const mimeType = blockMimeType(block, isResource, resource);
-  const byteCount = bytes?.byteLength ?? 0;
-  const hasLargeBinary = genuineBinary && byteCount > SMALL_BINARY_BYTES;
-  const type = block.type;
-  const metadata = { type, mimeType, bytes: byteCount };
-  const data = blockData(block, isResource, resource);
-  const visible = visibleBlock(metadata, data, hasLargeBinary);
-  const offloadBlock = data === undefined ? metadata : { ...metadata, data };
-  return {
-    block: visible,
-    offloadBlock,
-    hasLargeBinary,
-    ...(hasLargeBinary && bytes !== undefined ? { binaryPayload: bytes } : {}),
-  };
+function normalizedParts(
+  content: readonly unknown[],
+  sources: readonly BinarySource[],
+): JsonValueType[] {
+  const binaryParts = new Map(
+    sources.map((source) => [`${source.partIndex}:${source.target}`, source.partIndex]),
+  );
+  return content.map((part, partIndex) => {
+    if (!isRecord(part)) {
+      throw new McpToolResultError("mcp_result_invalid");
+    }
+    const copy = { ...part };
+    if (binaryParts.has(`${partIndex}:data`)) {
+      Reflect.deleteProperty(copy, "data");
+    }
+    if (binaryParts.has(`${partIndex}:resource.blob`)) {
+      if (!isRecord(copy.resource)) {
+        throw new McpToolResultError("mcp_result_invalid");
+      }
+      const resource = { ...copy.resource };
+      Reflect.deleteProperty(resource, "blob");
+      copy.resource = resource;
+    }
+    try {
+      return JsonValue.parse(copy);
+    } catch {
+      throw new McpToolResultError("mcp_result_invalid");
+    }
+  });
 }
 
-/** Normalizes an MCP result into safe JSON and its optional binary offload payload. */
-export function normalizedResult(result: CallToolResult): {
-  readonly value: JsonValueType;
-  readonly offloadValue: JsonValueType;
-  readonly hasLargeBinary: boolean;
-  readonly binaryPayload?: Uint8Array;
+/** Preserves the ordered MCP result while moving binary bytes to an internal artifact side channel. */
+export function normalizedResult(
+  result: CallToolResult,
+  options: {
+    readonly maxArtifactBytes: number;
+    readonly binaryResults: "block" | "allow";
+  },
+): {
+  readonly value: McpToolResultEnvelope;
+  readonly artifacts: readonly McpResultArtifactPayload[];
 } {
-  const blocks = result.content.map(normalizeBlock);
-  const content = blocks.map(({ block }) => block);
-  const offloadContent = blocks.map(({ offloadBlock }) => offloadBlock);
+  const content: readonly unknown[] = result.content;
+  const sources = findBinarySources(content, options.maxArtifactBytes, options.binaryResults);
+  const artifacts = sources.map((source) => {
+    const bytes = Buffer.from(source.encoded, "base64");
+    if (bytes.byteLength !== source.decodedBytes || bytes.toString("base64") !== source.encoded) {
+      throw new McpToolResultError("mcp_result_invalid");
+    }
+    return {
+      partIndex: source.partIndex,
+      target: source.target,
+      mimeType: source.mimeType,
+      bytes,
+      sha256: Sha256Hex.parse(createHash("sha256").update(bytes).digest("hex")),
+    };
+  });
   const structuredContent: unknown = Reflect.get(result, "structuredContent");
-  const value = JsonValue.parse({
-    content,
-    ...(structuredContent === undefined ? {} : { structured: structuredContent }),
-  });
-  const offloadValue = JsonValue.parse({
-    content: offloadContent,
-    ...(structuredContent === undefined ? {} : { structured: structuredContent }),
-  });
-  const largeBinaryBlock = blocks.find(({ hasLargeBinary }) => hasLargeBinary);
-  return {
-    value,
-    offloadValue,
-    hasLargeBinary: blocks.some(({ hasLargeBinary }) => hasLargeBinary),
-    ...(largeBinaryBlock?.binaryPayload === undefined
-      ? {}
-      : { binaryPayload: largeBinaryBlock.binaryPayload }),
-  };
+  const metadata: unknown = Reflect.get(result, "_meta");
+  try {
+    return {
+      value: McpToolResultEnvelopeSchema.parse({
+        format: "mcp-tool-result",
+        version: 1,
+        isError: result.isError === true,
+        parts: normalizedParts(content, sources),
+        ...(structuredContent === undefined ? {} : { structuredContent }),
+        ...(metadata === undefined ? {} : { metadata }),
+      }),
+      artifacts,
+    };
+  } catch {
+    throw new McpToolResultError("mcp_result_invalid");
+  }
 }

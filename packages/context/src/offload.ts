@@ -6,6 +6,8 @@ import {
   JsonValue,
   ToolSpecSchema,
   ToolBinaryPayloadSchema,
+  McpToolResultEnvelopeSchema,
+  McpResultArtifactReferenceSchema,
   type Code,
   type Id as IdValue,
   type JsonValue as JsonValueType,
@@ -29,6 +31,7 @@ export {
 export type { OffloadedHandle, ReadOffloadedResult } from "./offload-schemas.js";
 
 const MAX_READ_BYTES = 16 * 1024;
+const MAX_BASE64_READ_BYTES = (MAX_READ_BYTES / 4) * 3;
 const OFFLOAD_DIRECTORY = ".harness/offload/";
 
 /** Workspace-relative range in bytes. */
@@ -53,6 +56,9 @@ export interface WorkspacePort {
    * @param data - Bytes to persist.
    */
   write(path: string, data: Uint8Array): Promise<void>;
+
+  /** Publishes every file in a batch or leaves no batch file visible. */
+  writeBatch(entries: readonly { readonly path: string; readonly data: Uint8Array }[]): Promise<void>;
 
   /** Reads bytes from an offload path, optionally selecting a byte range.
    * @param path - Workspace-relative path below `.harness/offload/`.
@@ -85,11 +91,19 @@ export interface OffloadRunContext {
 
 /** Result returned by a tool execution. */
 export interface OffloadToolExecutionResult {
+  readonly artifacts?: readonly {
+    readonly partIndex: number;
+    readonly target: "data" | "resource.blob";
+    readonly mimeType: string;
+    readonly bytes: Uint8Array;
+    readonly sha256: string;
+  }[];
   readonly binary?: boolean;
   readonly metadata?: JsonValueType;
   readonly suspend?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValueType;
+  readonly resultLimitBytes?: number;
   readonly errorCode?: Code;
 }
 
@@ -182,6 +196,26 @@ export class InMemoryWorkspace implements WorkspacePort {
     });
   }
 
+  writeBatch(entries: readonly { readonly path: string; readonly data: Uint8Array }[]): Promise<void> {
+    return Promise.resolve().then(() => {
+      const validated: { readonly path: string; readonly data: Uint8Array }[] = entries.map(
+        ({ path, data }) => {
+          validateWorkspacePath(path);
+          if (this.files.has(path)) {
+            throw new WorkspacePathError();
+          }
+          return { path, data: data.slice() };
+        },
+      );
+      if (new Set(validated.map(({ path }) => path)).size !== validated.length) {
+        throw new WorkspacePathError();
+      }
+      for (const { path, data } of validated) {
+        this.files.set(path, data);
+      }
+    });
+  }
+
   /** {@inheritDoc WorkspacePort.read} */
   read(path: string, range?: WorkspaceReadRange): Promise<Uint8Array> {
     return Promise.resolve().then(() => {
@@ -202,12 +236,16 @@ export class InMemoryWorkspace implements WorkspacePort {
 /** Tool specification for registering the idempotent `read_offloaded` tool. */
 export const READ_OFFLOADED_TOOL_SPEC: ToolSpec = ToolSpecSchema.parse({
   toolId: "read_offloaded",
-  description: "Read a page of a large tool result stored in the run workspace.",
+  description: "Read a page of a large tool result or binary artifact from the run workspace.",
   inputSchema: JsonValue.parse(z.toJSONSchema(ReadOffloadedInputSchema)),
 });
 
 function offloadPath(handle: string): string {
   return `${OFFLOAD_DIRECTORY}${OffloadedHandleSchema.parse(handle)}.json`;
+}
+
+function binaryArtifactPath(handle: string): string {
+  return `${OFFLOAD_DIRECTORY}${OffloadedHandleSchema.parse(handle)}.bin`;
 }
 
 function toolError(errorCode: Code): OffloadToolExecutionResult {
@@ -254,6 +292,7 @@ interface LoadedOffloadPage {
 interface LoadOffloadPageOptions {
   readonly workspace: WorkspacePort;
   readonly handle: OffloadedHandle;
+  readonly encoding: "text" | "base64";
   readonly knownSizes: Map<OffloadedHandle, number>;
   readonly offset: number;
   readonly length: number;
@@ -290,14 +329,15 @@ async function findWorkspaceFileSize(workspace: WorkspacePort, path: string): Pr
 }
 
 async function loadOffloadPage(options: LoadOffloadPageOptions): Promise<LoadedOffloadPage> {
-  const { workspace, handle, knownSizes, offset, length } = options;
+  const { workspace, handle, knownSizes, offset, length, encoding } = options;
+  const path = encoding === "base64" ? binaryArtifactPath(handle) : offloadPath(handle);
   let totalBytes = knownSizes.get(handle);
   if (totalBytes === undefined) {
-    totalBytes = await findWorkspaceFileSize(workspace, offloadPath(handle));
+    totalBytes = await findWorkspaceFileSize(workspace, path);
     knownSizes.set(handle, totalBytes);
   }
   return {
-    page: await workspace.read(offloadPath(handle), { offset, length }),
+    page: await workspace.read(path, { offset, length }),
     totalBytes,
   };
 }
@@ -355,12 +395,15 @@ async function readOffloaded(
 
   const { handle } = input.data;
   const offset = input.data.offset ?? 0;
-  const length = Math.min(input.data.length ?? MAX_READ_BYTES, MAX_READ_BYTES);
+  const encoding = input.data.encoding;
+  const maxBytes = encoding === "base64" ? MAX_BASE64_READ_BYTES : MAX_READ_BYTES;
+  const length = Math.min(input.data.length ?? maxBytes, maxBytes);
   let loaded: LoadedOffloadPage;
   try {
     loaded = await loadOffloadPage({
       workspace,
       handle,
+      encoding,
       knownSizes,
       offset,
       length,
@@ -372,19 +415,23 @@ async function readOffloaded(
     throw error;
   }
 
-  if (loaded.page.length > 0 && isContinuationByte(loaded.page[0] ?? 0)) {
+  if (encoding === "text" && loaded.page.length > 0 && isContinuationByte(loaded.page[0] ?? 0)) {
     return toolError("invalid_offset");
   }
-  const page = await completeUtf8Page({
-    workspace,
-    handle,
-    offset,
-    length,
-    page: loaded.page,
-  });
+  const page =
+    encoding === "base64"
+      ? loaded.page
+      : await completeUtf8Page({
+          workspace,
+          handle,
+          offset,
+          length,
+          page: loaded.page,
+        });
   const nextOffset = offset + page.byteLength;
   const result = {
-    data: new TextDecoder().decode(page),
+    data: encoding === "base64" ? Buffer.from(page).toString("base64") : new TextDecoder().decode(page),
+    ...(encoding === "base64" ? { encoding } : {}),
     ...(page.byteLength > 0 && nextOffset < loaded.totalBytes ? { nextOffset } : {}),
     totalBytes: loaded.totalBytes,
   };
@@ -461,8 +508,74 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     _context: OffloadRunContext,
     execution: OffloadToolExecutionResult,
   ): Promise<OffloadToolExecutionResult> {
+    if (execution.artifacts !== undefined && execution.artifacts.length > 0) {
+      const envelope = McpToolResultEnvelopeSchema.safeParse(execution.result);
+      if (!envelope.success) {
+        return toolError("mcp_result_invalid");
+      }
+      const handles = execution.artifacts.map(() => `wf_${this.ids.next()}`);
+      const parts = [...envelope.data.parts];
+      const writes: { readonly path: string; readonly data: Uint8Array }[] = [];
+      for (const [index, artifact] of execution.artifacts.entries()) {
+        const handle = OffloadedHandleSchema.safeParse(handles[index]);
+        const reference = McpResultArtifactReferenceSchema.safeParse({
+          handle: handles[index],
+          mimeType: artifact.mimeType,
+          bytes: artifact.bytes.byteLength,
+          sha256: artifact.sha256,
+        });
+        const part = parts[artifact.partIndex];
+        if (!handle.success || !reference.success || part === undefined || !isRecord(part)) {
+          return toolError("mcp_result_invalid");
+        }
+        if (artifact.target === "data") {
+          const { data: _data, ...remaining } = part;
+          parts[artifact.partIndex] = { ...remaining, artifact: reference.data };
+        } else {
+          if (!isRecord(part.resource)) {
+            return toolError("mcp_result_invalid");
+          }
+          const { blob: _blob, ...remainingResource } = part.resource;
+          parts[artifact.partIndex] = {
+            ...part,
+            resource: { ...remainingResource, artifact: reference.data },
+          };
+        }
+        writes.push({
+          path: binaryArtifactPath(handle.data),
+          data: artifact.bytes,
+        });
+      }
+      const result = JsonValue.parse({ ...envelope.data, parts });
+      const serialized = JSON.stringify(result);
+      const resultLimitBytes = execution.resultLimitBytes;
+      if (
+        resultLimitBytes !== undefined &&
+        Buffer.byteLength(serialized, "utf8") > resultLimitBytes
+      ) {
+        return toolError("result_too_large");
+      }
+      try {
+        await this.workspace.writeBatch(writes);
+      } catch {
+        return toolError("artifact_write_failed");
+      }
+      for (const [index, artifact] of execution.artifacts.entries()) {
+        const handle = OffloadedHandleSchema.parse(handles[index]);
+        this.knownSizes.set(handle, artifact.bytes.byteLength);
+      }
+      return {
+        outcome: execution.outcome,
+        ...(execution.errorCode === undefined ? {} : { errorCode: execution.errorCode }),
+        result,
+      };
+    }
     if (execution.binary === true && !ToolBinaryPayloadSchema.safeParse(execution.result).success) {
       return toolError("pii_input_invalid");
+    }
+
+    function isRecord(value: unknown): value is Record<string, JsonValueType> {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
     }
     const serialized = JSON.stringify(execution.result);
     const data = new TextEncoder().encode(serialized);
