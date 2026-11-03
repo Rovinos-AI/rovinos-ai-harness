@@ -21,6 +21,7 @@ import {
   type ChatCompletionLike,
 } from "./chat-completions-mapper.js";
 import { mapOpenAIError } from "./openai-error-utils.js";
+import { createProviderToolAliasesForRequest, type ProviderToolAliases } from "./tool-aliases.js";
 
 interface StreamToolCall {
   id: string;
@@ -69,7 +70,6 @@ function toolCallDelta(
     type: "tool_call",
     index: toolDelta.index + 1,
     callId: tool.callId,
-    ...(nameDelta.length === 0 ? {} : { toolId: nameDelta }),
     arguments: argumentDelta,
   };
 }
@@ -141,8 +141,11 @@ function choiceDeltas(
 function* finishOpenAIStream(
   state: OpenAIStreamState,
   context: ProviderContext,
-  provider: Code,
-  startedAt: number,
+  options: {
+    readonly provider: Code;
+    readonly startedAt: number;
+    readonly aliases: ProviderToolAliases;
+  },
 ): Generator<ProviderDelta> {
   if (state.finishReason === null) {
     throw new ProviderError("provider_unavailable");
@@ -168,7 +171,29 @@ function* finishOpenAIStream(
     choices: [{ finish_reason: state.finishReason, message }],
     ...(state.usage === undefined ? {} : { usage: state.usage }),
   };
-  const mapped = fromChatResponse(response, context.ids, provider, state.callIdsByProviderId);
+  const mapped = fromChatResponse(response, context.ids, options.provider, {
+    callIdsByProviderId: state.callIdsByProviderId,
+    aliases: options.aliases,
+  });
+  const indexByCallId = new Map(
+    [...state.toolCalls.entries()].map(([index, tool]) => [tool.callId, index + 1]),
+  );
+  for (const part of mapped.parts) {
+    if (part.type !== "tool_call") {
+      continue;
+    }
+    const index = indexByCallId.get(part.callId);
+    if (index === undefined) {
+      throw new ProviderError("provider_bad_request");
+    }
+    yield {
+      type: "tool_call",
+      index,
+      callId: part.callId,
+      toolId: part.toolId,
+      arguments: "",
+    };
+  }
   for (const part of mapped.parts) {
     if (part.type === "opaque") {
       yield { type: "opaque", part };
@@ -178,7 +203,7 @@ function* finishOpenAIStream(
   yield {
     type: "finish",
     finishReason: mapped.finishReason,
-    latencyMs: Math.max(0, context.clock.now() - startedAt),
+    latencyMs: Math.max(0, context.clock.now() - options.startedAt),
   };
 }
 
@@ -254,24 +279,27 @@ export class OpenAIAdapter implements ProviderAdapter {
   /** {@inheritDoc ProviderAdapter.complete} */
   async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
     const startedAt = context.clock.now();
+    const providerRequest = this.requestForProvider(request);
+    const aliases = createProviderToolAliasesForRequest(providerRequest);
     const capabilities = lookupCapabilities(
-      { ...request.model, provider: this.kind },
-      this.capabilitiesFor(request.model.model),
+      { ...providerRequest.model, provider: this.kind },
+      this.capabilitiesFor(providerRequest.model.model),
     ).capabilities;
     try {
       const response = await this.client.chat.completions.create(
         toChatRequest(
-          this.requestForProvider(request),
+          providerRequest,
           {
             structuredOutput: capabilities.structuredOutput,
             parallelToolCalls: capabilities.parallelToolCalls,
             ...(this.quirks ?? {}),
           },
           this.provider,
+          aliases,
         ),
         { signal: context.signal },
       );
-      const mapped = fromChatResponse(response, context.ids, this.provider);
+      const mapped = fromChatResponse(response, context.ids, this.provider, { aliases });
       return {
         ...mapped,
         latencyMs: Math.max(0, context.clock.now() - startedAt),
@@ -284,19 +312,22 @@ export class OpenAIAdapter implements ProviderAdapter {
   /** @inheritdoc */
   async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
     const startedAt = context.clock.now();
+    const providerRequest = this.requestForProvider(request);
+    const aliases = createProviderToolAliasesForRequest(providerRequest);
     const capabilities = lookupCapabilities(
-      { ...request.model, provider: this.kind },
-      this.capabilitiesFor(request.model.model),
+      { ...providerRequest.model, provider: this.kind },
+      this.capabilitiesFor(providerRequest.model.model),
     ).capabilities;
     const streamRequest: ChatCompletionCreateParamsStreaming = {
       ...toChatRequest(
-        this.requestForProvider(request),
+        providerRequest,
         {
           structuredOutput: capabilities.structuredOutput,
           parallelToolCalls: capabilities.parallelToolCalls,
           ...(this.quirks ?? {}),
         },
         this.provider,
+        aliases,
       ),
       stream: true,
       stream_options: { include_usage: true },
@@ -345,7 +376,11 @@ export class OpenAIAdapter implements ProviderAdapter {
           };
         }
       }
-      yield* finishOpenAIStream(state, context, this.provider, startedAt);
+      yield* finishOpenAIStream(state, context, {
+        provider: this.provider,
+        startedAt,
+        aliases,
+      });
     } catch (error) {
       throw mapOpenAIError(error, context.clock.now());
     }

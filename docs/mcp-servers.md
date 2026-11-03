@@ -11,7 +11,7 @@ transports reject unknown fields.
 | `id` | `Code` | required | Stable server identifier. |
 | `transport` | `stdio` or `http` object | required | How the client connects to the server. |
 | `protocol` | `auto`, `2026-07-28`, or `2025-11-25` | `auto` | Protocol revision; `auto` negotiates a supported revision. |
-| `apps` | boolean | `false` | Advertise the MCP Apps extension to this server. |
+| `apps` | boolean | `false` | Outbound MCP Apps are unsupported; setting `true` fails with `mcp_apps_unsupported`. |
 | `trust` | `internal` or `external` | `external` | Trust level used to gate trace propagation and annotations. |
 | `propagateTrace` | boolean | `false` | Send trace context only to an `internal` server. |
 | `toolAllowlist` | string array | omitted | Server-native tool names permitted for registration. |
@@ -26,6 +26,9 @@ Tool names in `toolAllowlist` and `idempotentTools` are the names returned by
 the server, before harness normalization. Names must be non-empty and unique
 within each list. When `toolAllowlist` is set, every `idempotentTools` entry
 must also be allowlisted. Effective tool prefixes must be unique across servers.
+The outbound client does not host MCP Apps. App-only tools are excluded from
+tool discovery, and setting `apps: true` is rejected rather than advertising
+unsupported capabilities.
 
 ## Stdio transport
 
@@ -129,12 +132,20 @@ contains the configured server id.
 The `servers_authorized` check covers configured OAuth servers separately from
 reachability.
 
-Registered MCP tool ids are normalized to the harness `Code` format, filtered
-by `toolAllowlist`, and rejected when their schemas exceed the bounded JSON
-Schema compiler limits or contain unsupported references. Server descriptions
-are untrusted text: they may contain prompt injection, are sanitized before
-being exposed as a model-visible tool description, and must pass through the
-model-input PII boundary. They are descriptive only and never grant authority.
+Registered MCP tool ids use the harness `Code` format and are filtered by
+`toolAllowlist`. Native tool names may use any casing, but normalization must
+not replace or collapse any characters. CamelCase names such as `getWeather`
+remain available with a lowercased tool id; names with a trailing space,
+non-ASCII characters, punctuation that normalization replaces, or repeated
+underscores are rejected with `tool_name_invalid`. Servers relying on names
+that require those replacements or collapses must rename their tools; otherwise
+the tools will no longer be available. Case-only duplicate names normalize to
+the same id and fail startup with `tool_id_collision`.
+Schemas exceeding the bounded JSON Schema compiler limits or containing
+unsupported references are also rejected. Server descriptions are untrusted
+text: they may contain prompt injection, are sanitized before being exposed as
+a model-visible tool description, and must pass through the model-input PII
+boundary. They are descriptive only and never grant authority.
 If two discovered tools normalize to the same id, startup fails with
 `tool_id_collision`, including when both tools are from one server; the error
 contains that normalized `Code` and both server ids (which can be identical).

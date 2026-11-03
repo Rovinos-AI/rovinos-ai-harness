@@ -53,6 +53,21 @@ function protocolVersionOf(version: string | undefined): string {
     : "unknown";
 }
 
+function unsupportedAppsDiscovery(config: ServerConfig): DiscoveryResult {
+  return {
+    config,
+    protocolEra: "unknown",
+    protocolVersion: undefined,
+    supportsApps: false,
+    tools: [],
+    excludedToolCount: 0,
+    toolCount: 0,
+    connectLatencyMs: 0,
+    reachable: false,
+    errorCode: "mcp_apps_unsupported",
+  };
+}
+
 function propagationFor(server: ServerConfig): {
   readonly tracePropagation: "yes" | "no";
   readonly tracePropagationReason: "external" | "disabled" | "enabled";
@@ -96,8 +111,8 @@ async function discoverServers(
     ...(overrides?.now === undefined ? {} : { now: overrides.now }),
   };
 
-  const discovered: DiscoveryResult[] = [];
-  for (const config of servers) {
+  const discovered = servers.filter((server) => server.apps).map(unsupportedAppsDiscovery);
+  for (const config of servers.filter((server) => !server.apps)) {
     let excludedToolCount = 0;
     const connection = new McpConnection(config, {
       ...dependencies,
