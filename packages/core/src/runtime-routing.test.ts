@@ -16,7 +16,7 @@ import {
   parseJson,
 } from "@rovinos/schemas";
 import { InMemoryEventStore, type RunQueue, type RunQueueJob } from "@rovinos/store";
-import { ProviderError } from "@rovinos/models";
+import { BedrockAdapter, ProviderError } from "@rovinos/models";
 import { PolicyDocumentSchema, policyVersion } from "@rovinos/policy";
 import type { PolicyDocument } from "@rovinos/policy";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
@@ -413,6 +413,7 @@ describe("createRuntime model routing", () => {
     const resolve = vi.fn((_reference: string) =>
       Promise.resolve({ reveal: () => "synthetic-key" }),
     );
+    const adapterKinds: string[] = [];
     const model = await createConfiguredModelPort(
       ModelsConfigSchema.parse({
         providers: [
@@ -453,6 +454,17 @@ describe("createRuntime model routing", () => {
             deployments: { "gpt-4o": "entra-deployment" },
             auth: { kind: "entra" },
           },
+          {
+            id: "openai",
+            kind: "openai",
+            apiKey: "env:OPENAI_API_KEY",
+          },
+          {
+            id: "bedrock",
+            kind: "bedrock",
+            region: "us-east-1",
+            modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+          },
         ],
         routing: { default: [{ provider: "anthropic", model: "claude-model" }] },
       }),
@@ -460,13 +472,56 @@ describe("createRuntime model routing", () => {
         ids: { next: () => "00000000000000000000000000" },
         clock: { now: () => 0 },
         secretResolver: { resolve },
+        decorateAdapter: (adapter) => {
+          adapterKinds.push(adapter.kind);
+          return adapter;
+        },
       },
     );
 
     expect(model).toBeDefined();
-    expect(resolve).toHaveBeenCalledTimes(3);
+    expect(adapterKinds).toEqual([
+      "anthropic",
+      "openai_compatible",
+      "azure_openai",
+      "azure_openai",
+      "openai",
+      "bedrock",
+    ]);
+    expect(resolve).toHaveBeenCalledTimes(4);
     expect(resolve).toHaveBeenCalledWith("env:ANTHROPIC_API_KEY");
     expect(resolve).toHaveBeenCalledWith("env:AZURE_OPENAI_API_KEY");
+    expect(resolve).toHaveBeenCalledWith("env:OPENAI_API_KEY");
+  });
+
+  it("constructs Bedrock through public configuration without an API-key resolver", async () => {
+    const adapters: ProviderAdapter[] = [];
+    const model = await createConfiguredModelPort(
+      ModelsConfigSchema.parse({
+        providers: [
+          {
+            id: "bedrock",
+            kind: "bedrock",
+            region: "us-east-1",
+            modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+          },
+        ],
+        routing: { default: [{ provider: "bedrock", model: "nova-pro" }] },
+      }),
+      {
+        ids: { next: () => "00000000000000000000000000" },
+        clock: { now: () => 0 },
+        decorateAdapter: (adapter) => {
+          adapters.push(adapter);
+          return adapter;
+        },
+      },
+    );
+
+    expect(model).toBeDefined();
+    expect(adapters).toHaveLength(1);
+    expect(adapters[0]).toBeInstanceOf(BedrockAdapter);
+    expect(adapters[0]?.provider).toBe("bedrock");
   });
 
   it("requires a resolver for configured secret references", async () => {

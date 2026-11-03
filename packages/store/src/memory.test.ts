@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, type Event, type HarnessError, type NewEvent, type RunStatus } from "@rovinos/schemas";
+import {
+  EVENT_SCHEMA_VERSIONS,
+  Id,
+  type Event,
+  type HarnessError,
+  type NewEvent,
+  type RunStatus,
+} from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import {
@@ -162,7 +169,7 @@ describe("InMemoryEventStore", () => {
     );
 
     await expect(collect(store.read(runId))).resolves.toMatchObject([
-      { type: "run_created", v: 1 },
+      { type: "run_created", v: EVENT_SCHEMA_VERSIONS.run_created },
       { type: "approval_resolved", v: 2, decidedBy: "human" },
     ]);
     await store.close();

@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { Id, type Event, type KeyProvider, type NewEvent, type RunStatus } from "@rovinos/schemas";
+import {
+  EVENT_SCHEMA_VERSIONS,
+  Id,
+  type Event,
+  type KeyProvider,
+  type NewEvent,
+  type RunStatus,
+} from "@rovinos/schemas";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -547,7 +554,7 @@ describe("SqliteEventStore", () => {
     try {
       await expect(reopenedStore.head(runId)).resolves.toBe(1);
       await expect(collect(reopenedStore.read(runId))).resolves.toEqual([
-        { ...runCreated(runId, 10), seq: 0 },
+        { ...runCreated(runId, 10), v: EVENT_SCHEMA_VERSIONS.run_created, seq: 0 },
       ]);
     } finally {
       await reopenedStore.close();
