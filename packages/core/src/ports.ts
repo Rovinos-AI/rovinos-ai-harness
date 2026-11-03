@@ -24,7 +24,7 @@ import type {
   TokenizedModelGatewayResponse,
   ValueTransform,
 } from "@rovinos/models";
-import type { ElicitationPort, ElicitationRetry } from "@rovinos/mcp";
+import type { ElicitationPort, ElicitationRetry, McpToolExecutionResult } from "@rovinos/mcp";
 import type { ToolResumeStrategy } from "./resume-policy.js";
 import type { AskUserInput } from "./builtin/ask-user-tool.js";
 import { z } from "zod";
@@ -120,7 +120,10 @@ export interface ToolDescription {
 }
 
 /** Result returned after a tool execution. */
-export interface ToolExecutionResult {
+export interface ToolExecutionResult extends Pick<
+  McpToolExecutionResult,
+  "artifacts" | "resultLimitBytes"
+> {
   /** True only for a ToolBinaryPayloadSchema byte array; outer offloading is required. */
   readonly binary?: boolean;
   /** Signals that the run must suspend without recording a tool result. */

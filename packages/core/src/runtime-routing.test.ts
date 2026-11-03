@@ -8,12 +8,15 @@ import {
   Code,
   Id,
   JsonValue,
+  McpResultArtifactReferenceSchema,
+  McpToolResultEnvelopeSchema,
   ModelsConfigSchema,
   QuotasConfigSchema,
   RolesConfigSchema,
   RunConfigSchema,
   ServerConfigSchema,
   parseJson,
+  type Event,
 } from "@rovinos/schemas";
 import { InMemoryEventStore, type RunQueue, type RunQueueJob } from "@rovinos/store";
 import { BedrockAdapter, ProviderError } from "@rovinos/models";
@@ -216,121 +219,183 @@ describe("createRuntime model routing", () => {
     await serverTransport.close();
   });
 
-  it("offloads large MCP binary results before they are written to run events", async () => {
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = new McpServer({ name: "binary-runtime-test", version: "1.0.0" });
-    const inputSchema = {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    } satisfies Tool["inputSchema"];
-    const bytes = Buffer.alloc(9_000, 37);
-    const encoded = bytes.toString("base64");
-    server.server.registerCapabilities({ tools: { listChanged: true } });
-    server.server.setRequestHandler("tools/list", () => ({
-      tools: [{ name: "image", inputSchema }],
-    }));
-    server.server.setRequestHandler("tools/call", () => ({
-      content: [{ type: "image", mimeType: "image/png", data: encoded }],
-    }));
-    await server.connect(serverTransport);
-
-    let completionIndex = 0;
-    const model: ModelPort = {
-      complete: (): Promise<ModelCompletion> => {
-        completionIndex += 1;
-        return Promise.resolve(
-          completionIndex === 1
-            ? {
-                parts: [
-                  {
-                    type: "tool_call",
-                    callId: Id.parse("11111111111111111111111111"),
-                    toolId: Code.parse("runtime_mcp.image"),
-                    args: {},
-                  },
-                ],
-                usage: { inputTokens: 1, outputTokens: 1 },
-                finishReason: "tool_calls",
-                provider: "test",
-                model: "test",
-                latencyMs: 0,
-                schemaValid: true,
-                repairAttempts: 0,
-                fallbackDepth: 0,
-                providerBlobs: null,
-              }
-            : {
-                parts: [{ type: "text", text: "completed" }],
-                usage: { inputTokens: 1, outputTokens: 1 },
-                finishReason: "stop",
-                provider: "test",
-                model: "test",
-                latencyMs: 0,
-                schemaValid: true,
-                repairAttempts: 0,
-                fallbackDepth: 0,
-                providerBlobs: null,
-              },
+  it.each([
+    {
+      mode: "allow",
+      fileCount: 1,
+      verify: (
+        toolResult: Event | undefined,
+        files: ReadonlyMap<string, Uint8Array>,
+        bytes: Uint8Array,
+      ) => {
+        expect(toolResult).toMatchObject({ type: "tool_result", outcome: "ok" });
+        const envelope = McpToolResultEnvelopeSchema.parse(
+          toolResult?.type === "tool_result" ? toolResult.result : undefined,
         );
+        const part = envelope.parts[0];
+        const reference = McpResultArtifactReferenceSchema.parse(
+          part !== null && typeof part === "object" && !Array.isArray(part)
+            ? part.artifact
+            : undefined,
+        );
+        expect(envelope.parts).toEqual([
+          { type: "image", mimeType: "image/png", artifact: reference },
+        ]);
+        expect(reference.bytes).toBe(bytes.byteLength);
+        expect(files.get(`.harness/offload/${reference.handle}.bin`)).toEqual(bytes);
       },
-    };
-    const files = new Map<string, Uint8Array>();
-    const workspace = {
-      write: (path: string, data: Uint8Array) => {
-        files.set(path, data);
-        return Promise.resolve();
+    },
+    {
+      mode: "block",
+      fileCount: 0,
+      verify: (toolResult: Event | undefined) => {
+        expect(toolResult).toMatchObject({
+          type: "tool_result",
+          outcome: "error",
+          errorCode: "mcp_binary_result_blocked",
+          result: null,
+        });
       },
-      writeBatch: (entries: readonly { readonly path: string; readonly data: Uint8Array }[]) => {
-        for (const entry of entries) {
-          files.set(entry.path, entry.data);
-        }
-        return Promise.resolve();
+    },
+    {
+      mode: "legacy",
+      fileCount: 1,
+      verify: (toolResult: Event | undefined) => {
+        expect(toolResult).toMatchObject({
+          type: "tool_result",
+          outcome: "ok",
+          result: { $offloaded: { preview: "" } },
+        });
       },
-      read: (path: string) => {
-        const data = files.get(path);
-        return data === undefined
-          ? Promise.reject(new Error("offload_not_found"))
-          : Promise.resolve(data);
-      },
-    };
-    const runtime = await createRuntime(
-      {
-        run: RunConfigSchema.parse({}),
-        servers: [
-          ServerConfigSchema.parse({
-            id: "runtime_mcp",
-            transport: { kind: "stdio", command: "not-spawned-by-test" },
-            protocol: "2025-11-25",
-          }),
-        ],
-      },
-      {
-        store: new InMemoryEventStore(),
-        model,
-        policy: allowAllPolicy,
-        workspace,
-        mcpTransportFactory: () => clientTransport,
-      },
-    );
+    },
+  ] as const)(
+    "offloads large binary results before they are written to run events ($mode)",
+    async ({ mode, fileCount, verify }) => {
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = new McpServer({ name: "binary-runtime-test", version: "1.0.0" });
+      const inputSchema = {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      } satisfies Tool["inputSchema"];
+      const bytes = Buffer.alloc(9_000, 37);
+      const encoded = bytes.toString("base64");
+      server.server.registerCapabilities({ tools: { listChanged: true } });
+      server.server.setRequestHandler("tools/list", () => ({
+        tools: [{ name: "image", inputSchema }],
+      }));
+      server.server.setRequestHandler("tools/call", () => ({
+        content: [{ type: "image", mimeType: "image/png", data: encoded }],
+      }));
+      await server.connect(serverTransport);
 
-    try {
-      const result = await runtime.run("goal");
-      const toolResult = result.events.find((event) => event.type === "tool_result");
-      expect(toolResult).toMatchObject({
-        type: "tool_result",
-        outcome: "ok",
-        result: { $offloaded: { preview: "" } },
-      });
-      expect(files.size).toBe(1);
-      expect(JSON.stringify(result.events)).not.toContain(encoded);
-      expect(JSON.stringify(result.events)).not.toContain(JSON.stringify(Array.from(bytes)));
-    } finally {
-      await runtime.close();
-      await server.close();
-      await serverTransport.close();
-    }
-  });
+      let completionIndex = 0;
+      const model: ModelPort = {
+        complete: (): Promise<ModelCompletion> => {
+          completionIndex += 1;
+          return Promise.resolve(
+            completionIndex === 1
+              ? {
+                  parts: [
+                    {
+                      type: "tool_call",
+                      callId: Id.parse("11111111111111111111111111"),
+                      toolId: Code.parse("runtime_mcp.image"),
+                      args: {},
+                    },
+                  ],
+                  usage: { inputTokens: 1, outputTokens: 1 },
+                  finishReason: "tool_calls",
+                  provider: "test",
+                  model: "test",
+                  latencyMs: 0,
+                  schemaValid: true,
+                  repairAttempts: 0,
+                  fallbackDepth: 0,
+                  providerBlobs: null,
+                }
+              : {
+                  parts: [{ type: "text", text: "completed" }],
+                  usage: { inputTokens: 1, outputTokens: 1 },
+                  finishReason: "stop",
+                  provider: "test",
+                  model: "test",
+                  latencyMs: 0,
+                  schemaValid: true,
+                  repairAttempts: 0,
+                  fallbackDepth: 0,
+                  providerBlobs: null,
+                },
+          );
+        },
+      };
+      const files = new Map<string, Uint8Array>();
+      const workspace = {
+        write: (path: string, data: Uint8Array) => {
+          files.set(path, data);
+          return Promise.resolve();
+        },
+        writeBatch: (entries: readonly { readonly path: string; readonly data: Uint8Array }[]) => {
+          for (const entry of entries) {
+            files.set(entry.path, entry.data);
+          }
+          return Promise.resolve();
+        },
+        read: (path: string) => {
+          const data = files.get(path);
+          return data === undefined
+            ? Promise.reject(new Error("offload_not_found"))
+            : Promise.resolve(data);
+        },
+      };
+      const runtime = await createRuntime(
+        {
+          run: RunConfigSchema.parse({}),
+          servers: [
+            ServerConfigSchema.parse({
+              id: "runtime_mcp",
+              transport: { kind: "stdio", command: "not-spawned-by-test" },
+              protocol: "2025-11-25",
+              ...(mode === "allow" ? { binaryResults: "allow" } : {}),
+            }),
+          ],
+        },
+        {
+          store: new InMemoryEventStore(),
+          model,
+          policy: allowAllPolicy,
+          workspace,
+          mcpTransportFactory: () => clientTransport,
+          ...(mode !== "legacy"
+            ? {}
+            : {
+                tool: {
+                  describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+                  execute: () =>
+                    Promise.resolve({
+                      outcome: "ok" as const,
+                      binary: true,
+                      result: Array.from(bytes),
+                    }),
+                },
+              }),
+        },
+      );
+
+      try {
+        const result = await runtime.run("goal");
+        const toolResult = result.events.find((event) => event.type === "tool_result");
+        verify(toolResult, files, bytes);
+        expect(files.size).toBe(fileCount);
+        expect(JSON.stringify(result.events)).not.toContain(encoded);
+        expect(JSON.stringify(result.events)).not.toContain(JSON.stringify(Array.from(bytes)));
+      } finally {
+        await runtime.close();
+        await server.close();
+        await serverTransport.close();
+      }
+    },
+  );
 
   it("loads the configured policy once and records its content version on run creation", async () => {
     const configDirectory = await mkdtemp(join(tmpdir(), "harness-runtime-policy-"));
