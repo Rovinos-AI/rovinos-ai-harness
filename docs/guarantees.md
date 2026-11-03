@@ -57,7 +57,9 @@ offloaded binary parts are stored without tokenization in that run's workspace. 
 an explicit exception to the files-carry-tokens rule and is not encrypted with
 the vault key in this release.
 
-- **Evidence:** MCP result validation and workspace artifact tests.
+- **Evidence:** [MCP result validation tests](../packages/mcp/src/tool-port.test.ts)
+  and [workspace artifact tests](../packages/context/src/offload.test.ts).
+  CI job: `unit`.
 - **Assumptions:** operators explicitly allow binary results only for servers
   whose output and workspace access they trust, and protect workspace storage
   and backups. Vault-key encryption is a follow-up.
