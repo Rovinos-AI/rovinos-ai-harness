@@ -65,6 +65,7 @@ export function buildEvalReport(input: unknown): EvalReport {
     .sort(compareTrial);
   return EvalReportSchema.parse({
     schemaVersion: 1,
+    invariantsEnabled: parsed.invariantsEnabled,
     trials,
     aggregates: aggregateEvalMetrics(trials),
   });

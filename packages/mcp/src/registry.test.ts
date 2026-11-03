@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+// cspell:ignore getweather -- normalized lowercase id in the camelCase regression
 import { ServerConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import {
@@ -111,6 +112,20 @@ describe("ToolRegistry", () => {
     ]);
   });
 
+  it.each([
+    "server.Sandbox.Exec",
+    "server.sandbox.exec ",
+    `server.${String.fromCodePoint(0x73, 0x430, 0x6e, 0x64, 0x62, 0x6f, 0x78, 0x2e, 0x65, 0x78, 0x65, 0x63)}`,
+  ])("rejects tool lookup alias %s instead of routing it", (alias) => {
+    const registry = new ToolRegistry([
+      { config: config("server"), tools: [tool("Sandbox.Exec")] },
+    ]);
+
+    expect(registry.resolve("server.sandbox.exec")).toBeDefined();
+    expect(registry.resolve(alias)).toBeUndefined();
+    expect(registry.describe(alias)).toBeUndefined();
+  });
+
   it("fails startup with both server ids when normalized ids collide", () => {
     const build = () =>
       new ToolRegistry([
@@ -131,14 +146,14 @@ describe("ToolRegistry", () => {
     const error = thrownBy(
       () =>
         new ToolRegistry([
-          { config: config("server"), tools: [tool("get_data"), tool("get_data")] },
+          { config: config("server"), tools: [tool("getWeather"), tool("getweather")] },
         ]),
     );
 
     expect(error).toMatchObject({
       code: "tool_id_collision",
       serverIds: ["server", "server"],
-      normalizedToolId: "server.get_data",
+      normalizedToolId: "server.getweather",
     });
   });
 
@@ -244,15 +259,18 @@ describe("ToolRegistry", () => {
   });
 
   it("rejects native names that normalization would change", () => {
-    const rejectedNames = ["exec ", "\u0435xec", "Get-Thing", "tool!", "two__underscores"];
+    const rejectedNames = ["exec ", "\u0435xec", "tool!", "two__underscores"];
     const registry = new ToolRegistry([
       {
         config: config("server", { toolPrefix: "sandbox" }),
-        tools: [tool("exec"), ...rejectedNames.map((name) => tool(name))],
+        tools: [tool("exec"), tool("getWeather"), ...rejectedNames.map((name) => tool(name))],
       },
     ]);
 
-    expect(registry.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["sandbox.exec"]);
+    expect(registry.getToolSpecs().map(({ toolId }) => toolId)).toEqual([
+      "sandbox.exec",
+      "sandbox.getweather",
+    ]);
     expect(registry.rejected()).toEqual(
       rejectedNames.map((nativeName) => ({
         serverId: "server",

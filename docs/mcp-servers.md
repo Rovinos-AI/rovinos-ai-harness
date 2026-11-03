@@ -130,13 +130,14 @@ The `servers_authorized` check covers configured OAuth servers separately from
 reachability.
 
 Registered MCP tool ids use the harness `Code` format and are filtered by
-`toolAllowlist`. Native tool names must already be canonical: lowercase ASCII
-letters, digits, underscores, periods, and hyphens, with no characters that
-normalization would replace and no repeated underscores that normalization
-would collapse. Names such as `Get-Thing`, a name with a trailing space, or
-names containing non-ASCII characters are rejected with `tool_name_invalid` instead of being
-silently changed. Servers relying on normalized aliases must rename those tools
-to canonical native names; otherwise the tools will no longer be available.
+`toolAllowlist`. Native tool names may use any casing, but normalization must
+not replace or collapse any characters. CamelCase names such as `getWeather`
+remain available with a lowercased tool id; names with a trailing space,
+non-ASCII characters, punctuation that normalization replaces, or repeated
+underscores are rejected with `tool_name_invalid`. Servers relying on names
+that require those replacements or collapses must rename their tools; otherwise
+the tools will no longer be available. Case-only duplicate names normalize to
+the same id and fail startup with `tool_id_collision`.
 Schemas exceeding the bounded JSON Schema compiler limits or containing
 unsupported references are also rejected. Server descriptions are untrusted
 text: they may contain prompt injection, are sanitized before being exposed as
