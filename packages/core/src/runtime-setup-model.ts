@@ -74,13 +74,17 @@ async function createRuntimeModel(
         const trust =
           config.models?.providers.find(({ id }) => id === request.model.provider)?.trust ??
           "hosted";
-        const sanitizedRequest = await sanitizeRequest(request, { ...request.model, trust }, {
-          runId: context.runId,
-          signal: context.signal,
-          ...(context.recordPiiAction === undefined
-            ? {}
-            : { recordPiiAction: context.recordPiiAction }),
-        });
+        const sanitizedRequest = await sanitizeRequest(
+          request,
+          { ...request.model, trust },
+          {
+            runId: context.runId,
+            signal: context.signal,
+            ...(context.recordPiiAction === undefined
+              ? {}
+              : { recordPiiAction: context.recordPiiAction }),
+          },
+        );
         return injectedModel.complete(sanitizedRequest, context);
       },
     };
@@ -98,8 +102,7 @@ async function createRuntimeModel(
       ...(options.requestSanitizer === undefined
         ? {}
         : { requestSanitizer: options.requestSanitizer }),
-    })) ??
-    missingModelPort
+    })) ?? missingModelPort
   );
 }
 
