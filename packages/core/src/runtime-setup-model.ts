@@ -74,6 +74,7 @@ async function createRuntimeModel(
         const trust =
           config.models?.providers.find(({ id }) => id === request.model.provider)?.trust ??
           "hosted";
+        const startedAt = performance.now();
         const sanitizedRequest = await sanitizeRequest(
           request,
           { ...request.model, trust },
@@ -85,7 +86,12 @@ async function createRuntimeModel(
               : { recordPiiAction: context.recordPiiAction }),
           },
         );
-        return injectedModel.complete(sanitizedRequest, context);
+        process.stdout.write(
+          `sanitizer ${Math.round(performance.now() - startedAt)}ms messages=${request.messages.length} tools=${request.tools?.length ?? 0}\n`,
+        );
+        const completion = await injectedModel.complete(sanitizedRequest, context);
+        process.stdout.write("injected model returned\n");
+        return completion;
       },
     };
   }
