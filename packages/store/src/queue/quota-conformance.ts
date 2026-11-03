@@ -42,7 +42,7 @@ function registerDeadLetterSlotRelease(factory: RunQueueFactoryCreator): void {
 }
 
 function registerRunningRunReclaim(factory: RunQueueFactoryCreator): void {
-  it("defers other runs while a running run reclaims its expired lease", async () => {
+  it("defers other runs while a running run recovers after lease loss", async () => {
     const clock = new FakeClock(100);
     const instance = await factory(clock);
     try {
@@ -58,6 +58,7 @@ function registerRunningRunReclaim(factory: RunQueueFactoryCreator): void {
       }
       await instance.markRunning(runningRun);
       clock.advance(10);
+      await expect(queue.heartbeat(runningJob.jobId, "worker.first", 10)).resolves.toBe(false);
       await queue.enqueue({ kind: "start", runId: queuedRun, priority: 10 });
 
       const [reclaimed] = await queue.claim("worker.reclaim", 1, 100, { canClaim });
@@ -102,6 +103,78 @@ function registerRunningRunReclaim(factory: RunQueueFactoryCreator): void {
       const [queued] = await queue.claim("worker.queued", 1, 100, { canClaim });
       expect(queued?.runId).toBe(queuedRun);
       expect(queued?.attempts).toBe(1);
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
+function registerCancelledRunSlotRelease(factory: RunQueueFactoryCreator): void {
+  it("claims a deferred matching run after a running run is cancelled", async () => {
+    const instance = await factory(new FakeClock(100));
+    try {
+      const queue = instance.open();
+      const cancelledRun = "00000000000000000000000036";
+      const deferredRun = "00000000000000000000000037";
+      await instance.seedRun(cancelledRun, { requestedBy: "cli.alice", role: "researcher" });
+      await instance.seedRun(deferredRun, { requestedBy: "cli.alice", role: "researcher" });
+      const cancelledJob = await queue.enqueue({ kind: "start", runId: cancelledRun });
+      const [active] = await queue.claim("worker.first", 1, 100);
+      if (active?.leaseOwner === undefined) {
+        throw new Error("A successful claim must have a lease owner");
+      }
+      expect(active.runId).toBe(cancelledRun);
+      expect(active.jobId).toBe(cancelledJob.jobId);
+      await instance.markRunning(cancelledRun);
+      await queue.enqueue({ kind: "start", runId: deferredRun });
+
+      expect(await queue.claim("worker.second", 1, 100, { canClaim })).toEqual([]);
+      await instance.markCancelled(cancelledRun);
+      await expect(queue.complete(cancelledJob.jobId, active.leaseOwner)).resolves.toBe(true);
+
+      const [claimed] = await queue.claim("worker.third", 1, 100, { canClaim });
+      expect(claimed?.runId).toBe(deferredRun);
+      expect(claimed?.attempts).toBe(1);
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
+function registerResumedRunConcurrentClaims(factory: RunQueueFactoryCreator): void {
+  it("allows a matching resumed run but defers concurrent matching claims at capacity", async () => {
+    const instance = await factory(new FakeClock(100));
+    try {
+      const first = instance.open();
+      const second = instance.open();
+      const third = instance.open();
+      const runIds = [
+        "00000000000000000000000038",
+        "00000000000000000000000039",
+        "00000000000000000000000040",
+      ] as const;
+      await Promise.all(
+        runIds.map((runId) =>
+          instance.seedRun(runId, { requestedBy: "cli.alice", role: "researcher" }),
+        ),
+      );
+      await instance.markRunning(runIds[0]);
+      const resumedJob = await first.enqueue({ kind: "resume", runId: runIds[0] });
+      const deferredJobs = await Promise.all([
+        second.enqueue({ kind: "start", runId: runIds[1] }),
+        third.enqueue({ kind: "start", runId: runIds[2] }),
+      ]);
+
+      const claims = await Promise.all([
+        first.claim("worker.resume", 1, 100, { canClaim }),
+        second.claim("worker.second", 1, 100, { canClaim }),
+        third.claim("worker.third", 1, 100, { canClaim }),
+      ]);
+
+      expect(claims.flat()).toMatchObject([{ runId: runIds[0], kind: "resume" }]);
+      expect(claims.flat()).toHaveLength(1);
+      expect(deferredJobs).toHaveLength(2);
+      expect(resumedJob.runId).toBe(runIds[0]);
     } finally {
       await instance.cleanup();
     }
@@ -208,6 +281,8 @@ function registerDeferredNotificationDeduplication(factory: RunQueueFactoryCreat
 export function registerQuotaClaimConformance(factory: RunQueueFactoryCreator): void {
   registerDeadLetterSlotRelease(factory);
   registerRunningRunReclaim(factory);
+  registerCancelledRunSlotRelease(factory);
+  registerResumedRunConcurrentClaims(factory);
   registerDeferredClaim(factory);
   registerDeferredNotificationDeduplication(factory);
   registerNonMatchingClaim(factory);
