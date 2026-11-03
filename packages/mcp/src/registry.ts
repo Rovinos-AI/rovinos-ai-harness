@@ -5,6 +5,7 @@ import {
   ContractError,
   HarnessError,
   JsonValue,
+  Sha256Hex,
   ToolSpecSchema,
   UNREGISTERED_TOOL_ID,
   compileJsonSchema,
@@ -116,6 +117,130 @@ function compileSchema(schema: unknown): JsonValueType {
   return parsed.data;
 }
 
+function compareKeys(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+function canonicalJson(value: JsonValueType): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => compareKeys(left, right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function fingerprintValue(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function transportIdentity(server: ServerConfig): JsonValueType {
+  if (server.transport.kind === "stdio") {
+    return {
+      kind: "stdio",
+      command: server.transport.command,
+      args: server.transport.args,
+      ...(server.transport.cwd === undefined ? {} : { cwd: server.transport.cwd }),
+      ...(server.transport.env === undefined
+        ? {}
+        : {
+            env: Object.fromEntries(
+              Object.entries(server.transport.env).map(([key, value]) => [
+                key,
+                fingerprintValue(value),
+              ]),
+            ),
+          }),
+    };
+  }
+  const url = new URL(server.transport.url);
+  return {
+    kind: "http",
+    origin: url.origin,
+    pathname: url.pathname,
+    search: fingerprintValue(url.search),
+    ...(server.transport.headers === undefined
+      ? {}
+      : {
+          headers: Object.fromEntries(
+            Object.entries(server.transport.headers).map(([key, value]) => [
+              key,
+              fingerprintValue(value),
+            ]),
+          ),
+        }),
+    ...(server.transport.auth === undefined
+      ? {}
+      : {
+          auth: {
+            kind: server.transport.auth.kind,
+            grant: server.transport.auth.grant,
+            ...(server.transport.auth.clientId === undefined
+              ? {}
+              : { clientId: server.transport.auth.clientId }),
+            ...(server.transport.auth.clientIdMetadataUrl === undefined
+              ? {}
+              : { clientIdMetadataUrl: server.transport.auth.clientIdMetadataUrl }),
+            ...(server.transport.auth.clientSecret === undefined
+              ? {}
+              : {
+                  clientSecretRef: fingerprintValue(server.transport.auth.clientSecret),
+                }),
+            ...(server.transport.auth.scopes === undefined
+              ? {}
+              : { scopes: server.transport.auth.scopes }),
+          },
+        }),
+  };
+}
+
+function catalogEntry(tool: RegisteredTool): JsonValueType {
+  const { server, nativeName, spec, outputSchema, idempotent } = tool;
+  return {
+    serverId: server.id,
+    transport: transportIdentity(server),
+    protocol: server.protocol,
+    trust: server.trust,
+    useAnnotations: server.useAnnotations,
+    propagateTrace: server.propagateTrace,
+    elicitation: server.elicitation,
+    toolPrefix: server.toolPrefix,
+    nativeName,
+    idempotent,
+    timeoutMs: server.timeouts.callMs,
+    maxResultBytes: server.maxResultBytes,
+    spec: {
+      toolId: spec.toolId,
+      description: spec.description,
+      inputSchema: spec.inputSchema,
+      ...(outputSchema === undefined ? {} : { outputSchema }),
+    },
+  };
+}
+
+function toolFingerprint(tool: RegisteredTool): Sha256Hex {
+  return Sha256Hex.parse(
+    createHash("sha256")
+      .update(canonicalJson(catalogEntry(tool)))
+      .digest("hex"),
+  );
+}
+
+function catalogFingerprint(tools: readonly RegisteredTool[]): Sha256Hex {
+  const catalog = tools.map(catalogEntry);
+  return Sha256Hex.parse(createHash("sha256").update(canonicalJson(catalog)).digest("hex"));
+}
+
 function schemaRejectionReason(
   error: unknown,
 ): "tool_schema_too_large" | "tool_schema_unsupported" {
@@ -150,6 +275,7 @@ export class ToolRegistry {
   readonly #tools: RegisteredTool[] = [];
   readonly #byId = new Map<Code, RegisteredTool>();
   readonly #rejected: RejectedTool[] = [];
+  #catalogVersion: Sha256Hex;
 
   constructor(servers: readonly ToolRegistryServer[]) {
     for (const { config, tools } of servers) {
@@ -157,6 +283,42 @@ export class ToolRegistry {
         this.#register(config, tool);
       }
     }
+    this.#catalogVersion = catalogFingerprint(this.#tools);
+  }
+
+  /** Stable fingerprint for the exact advertised specs, routes, and execution metadata. */
+  get catalogVersion(): Sha256Hex {
+    return this.#catalogVersion;
+  }
+
+  /** Fingerprints each exposed tool's full contract, route, and execution metadata. */
+  catalogFingerprints(): Readonly<Record<string, Sha256Hex>> {
+    return Object.fromEntries(this.#tools.map((tool) => [tool.spec.toolId, toolFingerprint(tool)]));
+  }
+
+  /** Returns the fingerprint for one registered tool. */
+  fingerprintFor(toolId: Code): Sha256Hex | undefined {
+    const tool = this.#byId.get(toolId);
+    return tool === undefined ? undefined : toolFingerprint(tool);
+  }
+
+  /**
+   * Builds a view containing only tools whose fingerprints still match a persisted run baseline.
+   *
+   * @param expected - Per-tool fingerprints recorded at run creation.
+   * @returns A registry that excludes added, removed, or changed tools.
+   */
+  retainMatchingFingerprints(expected: Readonly<Record<string, Sha256Hex>>): ToolRegistry {
+    const registry = new ToolRegistry([]);
+    for (const tool of this.#tools) {
+      if (expected[tool.spec.toolId] === toolFingerprint(tool)) {
+        registry.#tools.push(tool);
+        registry.#byId.set(tool.spec.toolId, tool);
+      }
+    }
+    registry.#rejected.push(...this.#rejected);
+    registry.#catalogVersion = catalogFingerprint(registry.#tools);
+    return registry;
   }
 
   #register(config: ServerConfig, tool: McpTool): void {
