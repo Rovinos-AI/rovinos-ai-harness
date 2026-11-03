@@ -31,6 +31,7 @@ import {
   createConfiguredTransport,
   createMcpClient,
   discoverConnectionTools,
+  discoveryConnectionError,
   defaultSleep,
   getOrCreateValidator,
   invokeConnectionTool,
@@ -317,13 +318,9 @@ export class McpConnection {
         signal,
       });
     } catch (error) {
-      if (error instanceof McpAuthRequiredError) {
+      throw discoveryConnectionError(error, () => {
         this.#markUnavailable();
-        throw new McpConnectionError("mcp_auth_required");
-      }
-      throw error instanceof McpConnectionError
-        ? error
-        : new McpConnectionError("mcp_list_tools_failed");
+      });
     }
     if (signal.aborted || this.#client !== client) {
       throw new McpConnectionError("mcp_discovery_cancelled");

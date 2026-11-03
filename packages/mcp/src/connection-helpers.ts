@@ -12,7 +12,7 @@ import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { McpConnectionError } from "./errors.js";
 import { invokeMcpTool } from "./mcp-call.js";
 import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
-import { withOAuthWarningsRedacted } from "./oauth/provider.js";
+import { McpAuthRequiredError, withOAuthWarningsRedacted } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
 import {
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
@@ -24,6 +24,20 @@ import { createMcpTransport } from "./transports.js";
 export { OAUTH_CLIENT_CREDENTIALS_EXTENSION } from "./oauth/protected-resource.js";
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 export const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
+
+/** Normalizes discovery failures while invalidating a connection that requires authorization. */
+export function discoveryConnectionError(
+  error: unknown,
+  markUnavailable: () => void,
+): McpConnectionError {
+  if (error instanceof McpAuthRequiredError) {
+    markUnavailable();
+    return new McpConnectionError("mcp_auth_required");
+  }
+  return error instanceof McpConnectionError
+    ? error
+    : new McpConnectionError("mcp_list_tools_failed");
+}
 
 /** Discovers validated pages with one shared signal and metadata-only exclusion logging. */
 export function discoverConnectionTools(
