@@ -144,7 +144,11 @@ export async function clientCredentialsExtensionAvailable(
   signal: AbortSignal,
 ): Promise<boolean> {
   return config.transport.kind === "http" && config.transport.auth?.grant === "client_credentials"
-    ? resourceAdvertisesClientCredentials(config.transport.url, signal)
+    ? resourceAdvertisesClientCredentials(
+        config.transport.url,
+        signal,
+        config.transport.auth.discovery,
+      )
     : false;
 }
 
@@ -152,6 +156,14 @@ export async function clientCredentialsExtensionAvailable(
 export class ClientCredentialsExtensionSupport {
   #supported = false;
   #probe: Promise<boolean> | undefined;
+  readonly #probeClientCredentialsExtension: typeof clientCredentialsExtensionAvailable;
+
+  constructor(
+    probeClientCredentialsExtension: typeof clientCredentialsExtensionAvailable =
+      clientCredentialsExtensionAvailable,
+  ) {
+    this.#probeClientCredentialsExtension = probeClientCredentialsExtension;
+  }
 
   /** Whether the extension has been advertised by the resource or MCP server. */
   get supported(): boolean {
@@ -168,7 +180,7 @@ export class ClientCredentialsExtensionSupport {
     if (skip || this.#supported) {
       return;
     }
-    const probe = (this.#probe ??= clientCredentialsExtensionAvailable(config, signal));
+    const probe = (this.#probe ??= this.#probeClientCredentialsExtension(config, signal));
     try {
       this.#supported ||= await probe;
     } catch (error) {

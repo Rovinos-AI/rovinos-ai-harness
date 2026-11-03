@@ -78,28 +78,15 @@ describe("ClientCredentialsExtensionSupport", () => {
         },
       },
     });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    const extension = new ClientCredentialsExtensionSupport();
-    try {
-      const signal = new AbortController().signal;
-      await extension.probe(serverConfig, signal, false);
-      expect(extension.supported).toBe(false);
-      extension.observe(true);
-      await extension.probe(serverConfig, signal, false);
-      expect(extension.supported).toBe(true);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    const probe = vi.fn().mockResolvedValue(false);
+    const extension = new ClientCredentialsExtensionSupport(probe);
+    const signal = new AbortController().signal;
+    await extension.probe(serverConfig, signal, false);
+    expect(extension.supported).toBe(false);
+    extension.observe(true);
+    await extension.probe(serverConfig, signal, false);
+    expect(extension.supported).toBe(true);
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 
   it("ignores probe failures but preserves cancellation of the connection signal", async () => {
@@ -117,27 +104,22 @@ describe("ClientCredentialsExtensionSupport", () => {
         },
       },
     });
-    const extension = new ClientCredentialsExtensionSupport();
+    const probe = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("transient network failure"))
+      .mockRejectedValueOnce(new TypeError("transient network failure"))
+      .mockRejectedValue(new DOMException("aborted", "AbortError"));
+    const extension = new ClientCredentialsExtensionSupport(probe);
     const signal = new AbortController().signal;
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("transient network failure")));
-    try {
-      await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
-      await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
-      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
+    await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
+    expect(probe).toHaveBeenCalledTimes(2);
 
     const controller = new AbortController();
     controller.abort();
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")));
-    try {
-      await expect(extension.probe(serverConfig, controller.signal, false)).rejects.toMatchObject({
-        name: "AbortError",
-      });
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    await expect(extension.probe(serverConfig, controller.signal, false)).rejects.toMatchObject({
+      name: "AbortError",
+    });
   });
 });
 

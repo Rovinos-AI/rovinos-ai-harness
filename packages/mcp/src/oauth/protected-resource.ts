@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseJson } from "@rovinos/schemas";
+import { parseJson, type OAuthDiscoveryConfig } from "@rovinos/schemas";
 import { z } from "zod";
+import {
+  createOAuthDiscoveryOperation,
+  readOAuthDiscoveryBody,
+  requestOAuthDiscovery,
+} from "./discovery-transport.js";
+import type { OAuthDiscoveryTransportDependencies } from "./discovery-transport.js";
 
 export const OAUTH_CLIENT_CREDENTIALS_EXTENSION =
   "io.modelcontextprotocol/oauth-client-credentials";
@@ -8,10 +14,6 @@ export const OAUTH_CLIENT_CREDENTIALS_EXTENSION =
 const ProtectedResourceMetadataSchema = z.looseObject({
   extensions: z.record(z.string(), z.unknown()).optional(),
 });
-
-function isSafeMetadataUrl(url: URL): boolean {
-  return ["http:", "https:"].includes(url.protocol) && url.username === "" && url.password === "";
-}
 
 function metadataAdvertisesClientCredentials(text: string): boolean {
   try {
@@ -22,45 +24,61 @@ function metadataAdvertisesClientCredentials(text: string): boolean {
   }
 }
 
+function resourceMetadataHint(
+  headers: Readonly<Record<string, string | string[] | undefined>>,
+): string | undefined {
+  const rawHeader = headers["www-authenticate"];
+  const header = Array.isArray(rawHeader) ? rawHeader.join(", ") : rawHeader;
+  return header?.match(/(?:^|,|\s)\s*resource_metadata\s*=\s*"([^"]+)"/iu)?.[1];
+}
+
 /** Reads an explicitly advertised MCP extension before an OAuth retry on initialize. */
 export async function resourceAdvertisesClientCredentials(
   serverUrl: string,
   signal?: AbortSignal,
+  policy: OAuthDiscoveryConfig = { profile: "production" },
+  dependencies: OAuthDiscoveryTransportDependencies = {},
 ): Promise<boolean> {
-  const resourceUrl = new URL(serverUrl);
-  const challenge = await fetch(resourceUrl, {
-    credentials: "omit",
-    headers: { accept: "application/json" },
-    redirect: "follow",
-    ...(signal === undefined ? {} : { signal }),
-  });
-  const resourceMetadata =
-    challenge.status === 401
-      ? challenge.headers
-          .get("www-authenticate")
-          ?.match(/(?:^|,|\s)\s*resource_metadata\s*=\s*"([^"]+)"/iu)?.[1]
-      : undefined;
-  await challenge.body?.cancel();
-  const metadataUrl =
-    resourceMetadata === undefined
-      ? new URL(`/.well-known/oauth-protected-resource${resourceUrl.pathname}`, resourceUrl.origin)
-      : new URL(resourceMetadata);
-  if (!isSafeMetadataUrl(metadataUrl)) {
-    return false;
-  }
-  const response = await fetch(metadataUrl, {
-    credentials: "omit",
-    headers: { accept: "application/json" },
-    redirect: "follow",
-    ...(signal === undefined ? {} : { signal }),
-  });
-  if (response.status >= 500) {
-    await response.body?.cancel();
+  const operation = createOAuthDiscoveryOperation(signal);
+  try {
+    const resourceUrl = new URL(serverUrl);
+    const challenge = await requestOAuthDiscovery(resourceUrl, policy, operation, dependencies);
+    if (challenge === undefined) {
+      return false;
+    }
+    const metadataUrlText = challenge.status === 401 ? resourceMetadataHint(challenge.headers) : undefined;
+    challenge.body.destroy();
+    let metadataUrl: URL;
+    try {
+      metadataUrl =
+        metadataUrlText === undefined
+          ? new URL(`/.well-known/oauth-protected-resource${resourceUrl.pathname}`, resourceUrl.origin)
+          : new URL(metadataUrlText, resourceUrl);
+    } catch {
+      return false;
+    }
+    const response = await requestOAuthDiscovery(metadataUrl, policy, operation, dependencies);
+    if (response === undefined) {
+      return false;
+    }
+    if (response.status >= 500) {
+      response.body.destroy();
+      throw new Error("protected_resource_probe_failed");
+    }
+    if (response.status < 200 || response.status >= 300) {
+      response.body.destroy();
+      return false;
+    }
+    return metadataAdvertisesClientCredentials(
+      await readOAuthDiscoveryBody(response.body, operation),
+    );
+  } catch (error) {
+    operation.throwIfAborted();
+    if (error instanceof Error && error.message === "protected_resource_probe_failed") {
+      throw error;
+    }
     throw new Error("protected_resource_probe_failed");
+  } finally {
+    operation.cleanup();
   }
-  if (!response.ok) {
-    await response.body?.cancel();
-    return false;
-  }
-  return metadataAdvertisesClientCredentials(await response.text());
 }

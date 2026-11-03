@@ -203,6 +203,80 @@ describe("ServerConfigSchema", () => {
     ).toBe(false);
   });
 
+  it("defaults OAuth discovery to production and requires an allowlist for internal destinations", () => {
+    const config = {
+      id: "oauth",
+      transport: {
+        kind: "http",
+        url: "https://mcp.example",
+        auth: { kind: "oauth", grant: "authorization_code" },
+      },
+    };
+    expect(ServerConfigSchema.parse(config).transport).not.toHaveProperty("auth.discovery");
+    expect(
+      ServerConfigSchema.parse({
+        ...config,
+        transport: {
+          ...config.transport,
+          auth: { ...config.transport.auth, discovery: {} },
+        },
+      }).transport,
+    ).toMatchObject({ auth: { discovery: { profile: "production" } } });
+    expect(
+      ServerConfigSchema.parse({
+        ...config,
+        transport: {
+          ...config.transport,
+          auth: {
+            ...config.transport.auth,
+            discovery: { profile: "local-development" },
+          },
+        },
+      }).transport,
+    ).toMatchObject({ auth: { discovery: { profile: "local-development" } } });
+
+    const withoutAllowlist = ServerConfigSchema.safeParse({
+      ...config,
+      transport: {
+        ...config.transport,
+        auth: {
+          ...config.transport.auth,
+          discovery: { profile: "internal" },
+        },
+      },
+    });
+    expect(withoutAllowlist.success).toBe(false);
+    expect(
+      !withoutAllowlist.success &&
+        withoutAllowlist.error.issues.some(
+          (issue) => issue.params?.errorCode === "server_oauth_discovery_allowlist_required",
+        ),
+    ).toBe(true);
+
+    expect(
+      ServerConfigSchema.parse({
+        ...config,
+        transport: {
+          ...config.transport,
+          auth: {
+            ...config.transport.auth,
+            discovery: {
+              profile: "internal",
+              allowlist: [{ host: "database.internal", ports: [443] }],
+            },
+          },
+        },
+      }).transport,
+    ).toMatchObject({
+      auth: {
+        discovery: {
+          profile: "internal",
+          allowlist: [{ host: "database.internal", ports: [443] }],
+        },
+      },
+    });
+  });
+
   it.each(["traceparent", "TrAcEsTaTe", "BAGGAGE"])(
     "rejects reserved HTTP header %s with a stable error code",
     (header) => {
