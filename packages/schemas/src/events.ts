@@ -8,10 +8,7 @@ import { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from 
 import { Principal } from "./principal.js";
 import { FormSchema } from "./form-schema.js";
 import { refineInputRequestPayload } from "./human-input.js";
-import {
-  LegacyToolResultSchema,
-  McpToolResultEnvelopeSchema,
-} from "./mcp-tool-result.js";
+import { LegacyToolResultSchema, McpToolResultEnvelopeSchema } from "./mcp-tool-result.js";
 
 /** Supported run lifecycle states. */
 export const RunStatus = z.enum([
@@ -44,6 +41,8 @@ const runCreatedEvent = z
     ...eventEnvelopeShape,
     type: z.literal("run_created"),
     configHash: Sha256Hex,
+    toolCatalogVersion: Sha256Hex.optional(),
+    toolCatalogFingerprints: z.record(Code, Sha256Hex).optional(),
     policyVersion: Code,
     replayOf: Id.optional(),
     parentRunId: Id.optional(),

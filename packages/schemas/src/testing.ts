@@ -15,7 +15,10 @@ export const eventSamples = [
   {
     ...envelope,
     type: "run_created",
+    v: 3,
     configHash: sha256,
+    toolCatalogVersion: sha256,
+    toolCatalogFingerprints: { "test.tool": sha256 },
     policyVersion: "policy.v1",
     replayOf: "00000000000000000000000001",
     quotaRole: "worker",

@@ -30,6 +30,37 @@ function addFlag(payload: unknown, key: string): unknown {
 }
 
 describe("event schema upcasting", () => {
+  it("upcasts v1 run metadata without inventing a catalog fingerprint", () => {
+    const raw = {
+      ...envelope,
+      type: "run_created",
+      seq: 0,
+      configHash: "c".repeat(64),
+      policyVersion: "policy.v1",
+      depth: 0,
+    };
+
+    expect(upcastEvent(raw)).toEqual({ ...raw, v: 3 });
+    expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogVersion");
+    expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogFingerprints");
+  });
+
+  it("upcasts v2 run metadata without inventing per-tool fingerprints", () => {
+    const raw = {
+      ...envelope,
+      type: "run_created",
+      seq: 0,
+      v: 2,
+      configHash: "c".repeat(64),
+      toolCatalogVersion: "d".repeat(64),
+      policyVersion: "policy.v1",
+      depth: 0,
+    };
+
+    expect(upcastEvent(raw)).toEqual({ ...raw, v: 3 });
+    expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogFingerprints");
+  });
+
   it("upcasts v1 model requests without inventing hashes of unrecorded parameters", () => {
     const raw = {
       ...envelope,
@@ -140,9 +171,7 @@ describe("event schema upcasting", () => {
     const events = source
       .split("\n")
       .filter((line) => line.length > 0)
-      .filter((line) =>
-        RawEventEnvelopeSchema.safeParse(parseJson(JsonValue, line)).success,
-      )
+      .filter((line) => RawEventEnvelopeSchema.safeParse(parseJson(JsonValue, line)).success)
       .map((line) => parseJson(RawEventEnvelopeSchema, line));
     const raw = events.find((event) => event.type === "tool_result");
     if (raw === undefined) {

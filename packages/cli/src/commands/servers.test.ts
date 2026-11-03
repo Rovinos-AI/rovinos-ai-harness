@@ -548,6 +548,39 @@ describe("harness servers check", () => {
     expect(stdout.join("") + stderr.join("")).not.toContain(errorCanary);
   });
 
+  it("reports unsupported outbound Apps without exposing server content", async () => {
+    const createTransport = vi.fn();
+    const { context, stdout, stderr } = createContext(() =>
+      Promise.resolve(
+        config([
+          {
+            id: "apps-disabled",
+            transport: { kind: "stdio", command: "unused" },
+            apps: true,
+          },
+        ]),
+      ),
+    );
+
+    const exitCode = await main(["--json", "servers", "check"], context, [
+      createServersCommand({ createTransport }),
+    ]);
+    const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(result.servers).toContainEqual(
+      expect.objectContaining({
+        id: "apps-disabled",
+        reachable: false,
+        supportsApps: false,
+        errorCode: "mcp_apps_unsupported",
+      }),
+    );
+    expect(createTransport).not.toHaveBeenCalled();
+    expect(stdout.join("") + stderr.join("")).not.toContain(errorCanary);
+    expect(stderr).toEqual(["servers_check_failed\n"]);
+  });
+
   it("passes connect cancellation to secret resolution and continues with the next server", async () => {
     const secretRefs: string[] = [];
     const { context, stdout } = createContext(

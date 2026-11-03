@@ -975,9 +975,12 @@ export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
 export declare const RunContentEntrySchema: z.ZodObject<{
     seq: z.ZodNumber;
     type: z.ZodEnum<{
+        app_content: "app_content";
         approval_requested: "approval_requested";
         approval_resolved: "approval_resolved";
         context_compacted: "context_compacted";
+        input_requested: "input_requested";
+        input_resolved: "input_resolved";
         model_request: "model_request";
         model_response: "model_response";
         run_input: "run_input";
@@ -990,9 +993,12 @@ export declare const RunContentEntrySchema: z.ZodObject<{
 export declare const RunContentSchema: z.ZodArray<z.ZodObject<{
     seq: z.ZodNumber;
     type: z.ZodEnum<{
+        app_content: "app_content";
         approval_requested: "approval_requested";
         approval_resolved: "approval_resolved";
         context_compacted: "context_compacted";
+        input_requested: "input_requested";
+        input_resolved: "input_resolved";
         model_request: "model_request";
         model_response: "model_response";
         run_input: "run_input";
