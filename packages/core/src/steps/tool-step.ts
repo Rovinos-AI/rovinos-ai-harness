@@ -220,15 +220,10 @@ async function executeRecordedIntent(
 ): Promise<Event> {
   const executedArgsHash = executedArgsHashFor(call, input.behavior);
   if (preparationError !== undefined || input.description === undefined) {
-    return recordDeniedResultAndPush(
-      input.options.recorder,
-      input.events,
-      call,
-      {
-        code: preparationError ?? "unknown_tool",
-        ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
-      },
-    );
+    return recordDeniedResultAndPush(input.options.recorder, input.events, call, {
+      code: preparationError ?? "unknown_tool",
+      ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+    });
   }
   const appApproval = input.behavior.existingIntent?.policyReason === APP_APPROVAL_REASON;
   if (input.behavior.checkEditedPolicy === true || appApproval) {
@@ -258,15 +253,10 @@ async function executeRecordedIntent(
       edited: input.behavior.checkEditedPolicy === true,
     });
     if (decision.decision !== "allow" && !authorizedAsk) {
-      return recordDeniedResultAndPush(
-        input.options.recorder,
-        input.events,
-        call,
-        {
-          code: decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
-          ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
-        },
-      );
+      return recordDeniedResultAndPush(input.options.recorder, input.events, call, {
+        code: decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
+        ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+      });
     }
   }
   return executeAndRecord(input, {

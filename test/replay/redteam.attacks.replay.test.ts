@@ -551,9 +551,9 @@ describe("runtime-backed red-team attacks", () => {
       });
       const request = result.events.find((event) => event.type === "model_request");
 
-      expect(request?.type === "model_request" ? request.advertisedToolIds : undefined).not.toContain(
-        hiddenId,
-      );
+      expect(
+        request?.type === "model_request" ? request.advertisedToolIds : undefined,
+      ).not.toContain(hiddenId);
       expect(result.events).toContainEqual(
         expect.objectContaining({
           type: "tool_result",

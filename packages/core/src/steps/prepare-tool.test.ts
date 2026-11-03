@@ -188,8 +188,7 @@ describe("tool preparation", () => {
       VERIFY_TOOL_SPEC.toolId,
       APP_TELEMETRY_TOOL_NAME,
     ]);
-    const advertisedToolIds =
-      modelToolOptions(scoped, []).tools?.map(({ toolId }) => toolId) ?? [];
+    const advertisedToolIds = modelToolOptions(scoped, []).tools?.map(({ toolId }) => toolId) ?? [];
     const builtInCalls = [
       {
         type: "tool_call" as const,

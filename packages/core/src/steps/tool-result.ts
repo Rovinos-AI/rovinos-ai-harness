@@ -41,12 +41,7 @@ export async function recordDeniedResultAndPush(
   call: ModelToolCall,
   options: { readonly code: Code; readonly executedArgsHash?: string },
 ): Promise<Event> {
-  const event = await recordDeniedResult(
-    recorder,
-    call,
-    options.code,
-    options.executedArgsHash,
-  );
+  const event = await recordDeniedResult(recorder, call, options.code, options.executedArgsHash);
   events.push(event);
   return event;
 }
