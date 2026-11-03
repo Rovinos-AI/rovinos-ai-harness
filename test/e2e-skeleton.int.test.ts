@@ -119,8 +119,10 @@ import {
   createTelemetrySdk,
   defineLogRecord,
   defineSpan,
+  countModelUsage,
   listLogDefinitions,
   listSpanDefinitions,
+  METRIC_ALLOWLIST,
   SentinelGate,
   toSafeEvent,
   type TelemetrySdkOptions,
@@ -149,6 +151,7 @@ const logDefinition = defineLogRecord("harness.e2e.skeleton", {
 });
 type ExportedSpan = Parameters<TelemetrySdkOptions["spanExporter"]["export"]>[0][number];
 type ExportedLogRecord = Parameters<TelemetrySdkOptions["logExporter"]["export"]>[0][number];
+type ExportedMetric = Parameters<NonNullable<TelemetrySdkOptions["metricExporter"]>["export"]>[0];
 
 interface CliCapture {
   readonly code: number;
@@ -175,6 +178,7 @@ interface Skeleton {
   readonly context: CliContext;
   readonly spans: ExportedSpan[];
   readonly logs: ExportedLogRecord[];
+  readonly metrics: ExportedMetric[];
   readonly telemetry: ReturnType<typeof createTelemetrySdk>;
   runId?: Id;
   approvalId?: Id;
@@ -437,6 +441,7 @@ beforeAll(async () => {
   process.env.HARNESS_E2E_KEY = key;
   const spans: ExportedSpan[] = [];
   const records: ExportedLogRecord[] = [];
+  const metrics: ExportedMetric[] = [];
   let canaryAvailable = false;
   let probePending = false;
   const sentinelProbe = { enabled: false };
@@ -467,9 +472,18 @@ beforeAll(async () => {
     forceFlush: () => Promise.resolve(),
     shutdown: () => Promise.resolve(),
   };
+  const metricExporter: NonNullable<TelemetrySdkOptions["metricExporter"]> = {
+    export: (data, callback) => {
+      metrics.push(data);
+      completeExportSuccessfully(callback);
+    },
+    forceFlush: () => Promise.resolve(),
+    shutdown: () => Promise.resolve(),
+  };
   const telemetry = createTelemetrySdk({
     spanExporter,
     logExporter,
+    metricExporter,
     gate: new SentinelGate(
       new VaultRunView({
         listRawValueEntries: async () => {
@@ -488,6 +502,7 @@ beforeAll(async () => {
     telemetry: {
       sentinel: { minValueLength: 6, enabled: true },
       correlation: { enabled: false },
+      metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
     },
   });
   const forceFlush = telemetry.tracerProvider.forceFlush.bind(telemetry.tracerProvider);
@@ -534,6 +549,14 @@ beforeAll(async () => {
   const complete = model.complete.bind(model);
   model.complete = async (request, context) => {
     const response = await complete(request, context);
+    countModelUsage(
+      {
+        inputTokens: response.usage.inputTokens,
+        outputTokens: response.usage.outputTokens,
+      },
+      "synthetic",
+      "synthetic",
+    );
     if (response.finishReason === "stop" && sentinelProbe.enabled) {
       canaryAvailable = true;
       probePending = true;
@@ -626,6 +649,7 @@ beforeAll(async () => {
     context: createDefaultContext(new Command(), createOutput()),
     spans,
     logs: records,
+    metrics,
     telemetry,
   };
 });
@@ -633,8 +657,7 @@ beforeAll(async () => {
 afterAll(async () => {
   const current = skeleton;
   if (current !== undefined) {
-    await current.telemetry.tracerProvider.shutdown();
-    await current.telemetry.loggerProvider.shutdown();
+    await current.telemetry.shutdown();
     await rm(current.directory, { recursive: true, force: true });
   }
   if (previousConfig === undefined) {
@@ -3102,10 +3125,31 @@ describe("SDK", () => {
 describe("invariants", () => {
   it("keeps the canary out of telemetry, CLI output, and log captures", async () => {
     const current = fixture();
-    await current.telemetry.tracerProvider.forceFlush();
-    await current.telemetry.loggerProvider.forceFlush();
+    await current.telemetry.forceFlush();
     expect(current.spans.length).toBeGreaterThan(0);
     expect(current.logs.length).toBeGreaterThan(0);
+    const metricData = current.metrics.flatMap(({ scopeMetrics }) =>
+      scopeMetrics.flatMap(({ metrics: entries }) => entries),
+    );
+    expect(metricData.some(({ descriptor }) => descriptor.name === "harness.model.tokens")).toBe(
+      true,
+    );
+    for (const { descriptor, dataPoints } of metricData) {
+      const definition = Object.entries(METRIC_ALLOWLIST).find(
+        ([name]) => name === descriptor.name,
+      );
+      expect(definition).toBeDefined();
+      const allowedKeys = definition?.[1] ?? [];
+      for (const dataPoint of dataPoints) {
+        expect(
+          Object.keys(dataPoint.attributes).every((key) =>
+            allowedKeys.some((allowedKey) => allowedKey === key),
+          ),
+        ).toBe(true);
+      }
+    }
+    expect(JSON.stringify(metricData)).not.toContain(current.canary);
+    expect(JSON.stringify(metricData).toLowerCase()).not.toContain("exemplar");
 
     for (const span of current.spans) {
       expect(JSON.stringify(span)).not.toContain(current.canary);

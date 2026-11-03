@@ -33,6 +33,7 @@ describe("web.fetch URL telemetry canary", () => {
       telemetry: {
         sentinel: { enabled: false, minValueLength: 6 },
         correlation: { enabled: false },
+        metrics: { enabled: false, ownership: "harness", maxSeries: 100 },
       },
     });
     const tool = new WebFetchTool({
@@ -63,8 +64,7 @@ describe("web.fetch URL telemetry canary", () => {
       expect(`${spans.join("\n")}\n${logs.join("\n")}`).not.toContain(canary);
       expect(`${spans.join("\n")}\n${logs.join("\n")}`).not.toContain("docs.example.test");
     } finally {
-      await telemetry.tracerProvider.shutdown();
-      await telemetry.loggerProvider.shutdown();
+      await telemetry.shutdown();
     }
   });
 });

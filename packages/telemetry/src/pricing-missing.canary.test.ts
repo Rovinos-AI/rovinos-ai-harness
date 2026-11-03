@@ -15,6 +15,7 @@ describe("pricing_missing telemetry canary", () => {
       telemetry: {
         sentinel: { enabled: false, minValueLength: 6 },
         correlation: { enabled: false },
+        metrics: { enabled: false, ownership: "harness", maxSeries: 100 },
       },
     });
 
@@ -36,8 +37,7 @@ describe("pricing_missing telemetry canary", () => {
         "harness.model.provider",
       ]);
     } finally {
-      await sdk.loggerProvider.shutdown();
-      await sdk.tracerProvider.shutdown();
+      await sdk.shutdown();
     }
   });
 
@@ -49,6 +49,7 @@ describe("pricing_missing telemetry canary", () => {
       telemetry: {
         sentinel: { enabled: false, minValueLength: 6 },
         correlation: { enabled: false },
+        metrics: { enabled: false, ownership: "harness", maxSeries: 100 },
       },
     });
 
@@ -71,8 +72,7 @@ describe("pricing_missing telemetry canary", () => {
         "harness.model.provider",
       ]);
     } finally {
-      await sdk.loggerProvider.shutdown();
-      await sdk.tracerProvider.shutdown();
+      await sdk.shutdown();
     }
   });
 });

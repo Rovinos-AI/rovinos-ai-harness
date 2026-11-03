@@ -5,8 +5,10 @@ import {
   type Counter,
   type Histogram,
   type Meter,
+  type MeterProvider,
 } from "@opentelemetry/api";
 import { Code, type Code as CodeType, type ModelUsage } from "@rovinos/schemas";
+import { isValidModelUsage } from "./metric-validation.js";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
 
@@ -135,16 +137,48 @@ let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
 let mcpInputRequestsCounter: Counter<McpInputRequestAttributes> | undefined;
 let workerJobsCounter: Counter<WorkerJobAttributes> | undefined;
 let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
+let telemetryMeterProvider: MeterProvider | undefined;
+
+function getTelemetryMeter(): Meter {
+  return (
+    telemetryMeterProvider?.getMeter("@rovinos/telemetry") ?? metrics.getMeter("@rovinos/telemetry")
+  );
+}
+
+/** Selects the harness-owned provider and invalidates cached instruments when ownership changes. */
+export function selectTelemetryMeterProvider(provider: MeterProvider | undefined): void {
+  if (telemetryMeterProvider === provider) {
+    return;
+  }
+  telemetryMeterProvider = provider;
+  droppedCounter = undefined;
+  hostAppRejectedCounter = undefined;
+  policyDecisionsCounter = undefined;
+  piiBlobHitCounter = undefined;
+  piiDetectorDegradedCounter = undefined;
+  hostAppSpansAcceptedCounter = undefined;
+  skippedShortValuesCounter = undefined;
+  scopeReducedCounter = undefined;
+  modelTokensCounter = undefined;
+  modelCostCounter = undefined;
+  modelCacheReadCounter = undefined;
+  modelCacheWriteCounter = undefined;
+  mcpDiscoveryFailedCounter = undefined;
+  quotaRejectionsCounter = undefined;
+  mcpInputRequestsCounter = undefined;
+  workerJobsCounter = undefined;
+  workerQueueLagHistogram = undefined;
+}
 
 function createCounter<TAttributes extends Attributes>(
   name: keyof typeof METRIC_ALLOWLIST,
   factory: (meter: Meter, name: keyof typeof METRIC_ALLOWLIST) => Counter<TAttributes>,
 ): Counter<TAttributes> {
-  return factory(metrics.getMeter("@rovinos/telemetry"), name);
+  return factory(getTelemetryMeter(), name);
 }
 
 function createMetricHistogram(name: keyof typeof METRIC_ALLOWLIST): Histogram<NoMetricAttributes> {
-  return metrics.getMeter("@rovinos/telemetry").createHistogram<NoMetricAttributes>(name);
+  return getTelemetryMeter().createHistogram<NoMetricAttributes>(name);
 }
 
 function getDroppedCounter(): Counter<TelemetryDropAttributes> {
@@ -360,26 +394,6 @@ export function countSentinelScopeReduced(): void {
   } catch {
     return;
   }
-}
-
-function isNonnegativeSafeInteger(value: number): boolean {
-  return Number.isSafeInteger(value) && value >= 0;
-}
-
-function isValidModelUsage(
-  usage: Pick<
-    ModelUsage,
-    "inputTokens" | "outputTokens" | "costMicros" | "cacheReadTokens" | "cacheWriteTokens"
-  >,
-): boolean {
-  return (
-    isNonnegativeSafeInteger(usage.inputTokens) &&
-    isNonnegativeSafeInteger(usage.outputTokens) &&
-    Number.isSafeInteger(usage.inputTokens + usage.outputTokens) &&
-    (usage.cacheReadTokens === undefined || isNonnegativeSafeInteger(usage.cacheReadTokens)) &&
-    (usage.cacheWriteTokens === undefined || isNonnegativeSafeInteger(usage.cacheWriteTokens)) &&
-    (usage.costMicros === undefined || isNonnegativeSafeInteger(usage.costMicros))
-  );
 }
 
 /** Counts total input and output tokens and optional cost for one provider/model. */

@@ -163,7 +163,7 @@ async function runExample() {
       await runtime.close();
     }
     await telemetry.forceFlush();
-    await Promise.all([telemetry.tracerProvider.shutdown(), telemetry.loggerProvider.shutdown()]);
+    await telemetry.shutdown();
     context.disable();
     trace.disable();
   }

@@ -24,6 +24,7 @@ import {
   type DeploymentConfig,
   type ElicitationConfig,
   type VaultConfig,
+  type TelemetryConfig,
 } from "@rovinos/schemas";
 import { z } from "zod";
 import type { Context } from "@opentelemetry/api";
@@ -106,6 +107,7 @@ export interface RuntimeOverrides {
 /** Runtime configuration required by the currently implemented run loop. */
 export interface RuntimeConfig {
   readonly run: RunConfig;
+  readonly telemetry?: TelemetryConfig;
   readonly deployment?: DeploymentConfig;
   readonly pii?: PiiConfig;
   readonly store?: StoreConfig;

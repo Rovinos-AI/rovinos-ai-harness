@@ -44,6 +44,7 @@ beforeAll(() => {
     telemetry: {
       sentinel: { enabled: false, minValueLength: 6 },
       correlation: { enabled: false },
+      metrics: { enabled: false, ownership: "harness", maxSeries: 100 },
     },
   });
   if (!trace.setGlobalTracerProvider(telemetrySdk.tracerProvider)) {
@@ -54,8 +55,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   await telemetrySdk?.forceFlush();
-  await telemetrySdk?.tracerProvider.shutdown();
-  await telemetrySdk?.loggerProvider.shutdown();
+  await telemetrySdk?.shutdown();
 });
 
 function flushTelemetry(): Promise<void> {

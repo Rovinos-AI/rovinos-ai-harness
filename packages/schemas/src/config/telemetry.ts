@@ -17,10 +17,21 @@ const TelemetryCorrelationConfigSchema = z
   .strict()
   .prefault({});
 
+// Metrics provider ownership and bounded-series settings are owned by task 11.7.
+const TelemetryMetricsConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    ownership: z.enum(["harness", "host"]).default("harness"),
+    maxSeries: z.number().int().min(1).max(1_000).default(100),
+  })
+  .strict()
+  .prefault({});
+
 export const TelemetryConfigSchema = z
   .object({
     sentinel: TelemetrySentinelConfigSchema,
     correlation: TelemetryCorrelationConfigSchema,
+    metrics: TelemetryMetricsConfigSchema,
   })
   .strict()
   .prefault({});
