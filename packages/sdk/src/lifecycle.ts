@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { Runtime } from "@rovinos/core";
+import type { Event, Id } from "@rovinos/schemas";
+import type { SafeEvent } from "@rovinos/telemetry";
+import { SdkError, type WatchOptionsSchema } from "./types.js";
+
 interface ManagedExecution {
   readonly controller: AbortController;
   readonly settled: Promise<void>;
   readonly resolveSettled: () => void;
 }
 
+/** Represents a client-owned event watcher that must stop before runtime disposal. */
 export interface ClientWatcher {
   readonly controller: AbortController;
   readonly finished: Promise<void>;
@@ -88,7 +94,9 @@ export class LifecycleTracker {
     const expired = await Promise.race([
       Promise.all(active.map(({ settled }) => settled)).then(() => false),
       new Promise<boolean>((resolve) => {
-        timeout = setTimeout(() => resolve(true), this.shutdownGraceMs);
+        timeout = setTimeout(() => {
+          resolve(true);
+        }, this.shutdownGraceMs);
       }),
     ]);
     if (timeout !== undefined) {
@@ -119,5 +127,54 @@ export class LifecycleTracker {
       return;
     }
     execution.resolveSettled();
+  }
+}
+
+/** Streams safe events for a run and tracks the watcher until iteration ends. */
+export async function* watchRunEvents({
+  runtime,
+  tracker,
+  runId,
+  options,
+  projectSafeEvents,
+}: {
+  readonly runtime: Runtime;
+  readonly tracker: LifecycleTracker;
+  readonly runId: Id;
+  readonly options: ReturnType<typeof WatchOptionsSchema.parse>;
+  readonly projectSafeEvents: (events: readonly Event[]) => Promise<readonly SafeEvent[]>;
+}): AsyncGenerator<SafeEvent> {
+  const controller = new AbortController();
+  const watcher = tracker.addWatcher(controller);
+  const onAbort = (): void => {
+    controller.abort();
+  };
+  if (options.signal?.aborted === true) {
+    controller.abort();
+  } else {
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+  }
+  try {
+    let created: Event | undefined;
+    for await (const event of runtime.store.read(runId)) {
+      created = event;
+      break;
+    }
+    if (created?.type !== "run_created") {
+      throw new SdkError("sdk_run_not_found");
+    }
+    if (controller.signal.aborted) {
+      return;
+    }
+    for await (const event of runtime.store.watch(runId, {
+      fromSeq: options.fromSeq,
+      signal: controller.signal,
+      ...(options.maxBuffered === undefined ? {} : { maxBuffered: options.maxBuffered }),
+    })) {
+      yield* await projectSafeEvents([event]);
+    }
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
+    tracker.finishWatcher(watcher);
   }
 }

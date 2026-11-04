@@ -13,7 +13,7 @@ import type { SafeEvent } from "@rovinos/telemetry";
 import { SdkError } from "./types.js";
 import { contentEntries, readEvents, safeEvents } from "./event-views.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
-import { LifecycleTracker } from "./lifecycle.js";
+import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
 import { runtimeOverridesFrom } from "./runtime-overrides.js";
 import {
   CancelRunResultSchema,
@@ -393,39 +393,13 @@ class HarnessClient implements Harness {
     if (this.closed || this.disposed) {
       throw new SdkError("sdk_closed");
     }
-    const controller = new AbortController();
-    const watcher = this.lifecycle.addWatcher(controller);
-    const onAbort = (): void => {
-      controller.abort();
-    };
-    if (options.signal?.aborted === true) {
-      controller.abort();
-    } else {
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-    }
-    try {
-      let created: Event | undefined;
-      for await (const event of this.runtime.store.read(runId)) {
-        created = event;
-        break;
-      }
-      if (created?.type !== "run_created") {
-        throw new SdkError("sdk_run_not_found");
-      }
-      if (controller.signal.aborted) {
-        return;
-      }
-      for await (const event of this.runtime.store.watch(runId, {
-        fromSeq: options.fromSeq,
-        signal: controller.signal,
-        ...(options.maxBuffered === undefined ? {} : { maxBuffered: options.maxBuffered }),
-      })) {
-        yield* await this.projectSafeEvents([event]);
-      }
-    } finally {
-      options.signal?.removeEventListener("abort", onAbort);
-      this.lifecycle.finishWatcher(watcher);
-    }
+    yield* watchRunEvents({
+      runtime: this.runtime,
+      tracker: this.lifecycle,
+      runId,
+      options,
+      projectSafeEvents: (events) => this.projectSafeEvents(events),
+    });
   }
 }
 
