@@ -214,6 +214,10 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         }
         completion = response;
       } catch (error) {
+        if (options.signal.aborted && options.signal.reason === "shutdown") {
+          result = { outcome: "aborted", events: recorded };
+          return requestEvent;
+        }
         const failure = await recordModelFailure({
           options,
           requestId,
