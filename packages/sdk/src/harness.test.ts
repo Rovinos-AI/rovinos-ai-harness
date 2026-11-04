@@ -1128,6 +1128,7 @@ describe("@rovinos/sdk", () => {
       expect(modelSignal?.reason).toBe("shutdown");
       await execution;
       await closing;
+      expect(harness.close()).toBe(closing);
       expect(closeFinished).toBe(true);
       expect(closeStore).toHaveBeenCalledOnce();
       modelResult.resolve(modelCompletion());
