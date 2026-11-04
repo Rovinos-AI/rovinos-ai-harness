@@ -372,6 +372,13 @@ describe("createRuntime model routing", () => {
             : {
                 tool: {
                   describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+                  getToolSpecs: () => [
+                    {
+                      toolId: Code.parse("runtime_mcp.image"),
+                      description: "Synthetic image tool",
+                      inputSchema,
+                    },
+                  ],
                   execute: () =>
                     Promise.resolve({
                       outcome: "ok" as const,
