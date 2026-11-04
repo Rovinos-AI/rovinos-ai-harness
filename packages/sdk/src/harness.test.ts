@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
-import { allowAllPolicy } from "@rovinos/core/testing";
-import { CrashingEventStore } from "@rovinos/core/testing";
+import { allowAllPolicy, CrashingEventStore } from "@rovinos/core/testing";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { InMemoryEventStore } from "@rovinos/store";
 import { SqliteEventStore } from "@rovinos/store-sqlite";
@@ -46,11 +45,11 @@ function fakeModel(responses?: readonly string[]): ModelPort {
 }
 
 function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
+  let settle: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => {
+    settle = resolve;
   });
-  return { promise, resolve };
+  return { promise, resolve: settle };
 }
 
 function modelCompletion(text = "synthetic completion"): ModelCompletion {
@@ -182,7 +181,7 @@ async function createTestHarness(
       model: options.model ?? (options.approval === true ? approvalModel() : fakeModel()),
       ...(options.approval === true || options.tool !== undefined
         ? {
-            ...((options.policy !== undefined || options.approval === true)
+            ...(options.policy !== undefined || options.approval === true
               ? {
                   policy:
                     options.policy ??
@@ -373,7 +372,9 @@ async function waitForRun(harness: Harness, runId: string, status?: string) {
 
 afterEach(async () => {
   vi.useRealTimers();
-  releasePendingOperations.splice(0).forEach((release) => release());
+  releasePendingOperations.splice(0).forEach((release) => {
+    release();
+  });
   await Promise.all(harnesses.splice(0).map((harness) => harness.close()));
 });
 
@@ -1050,9 +1051,11 @@ describe("@rovinos/sdk", () => {
         runId = "";
       }
 
-      const modelStarted = deferred<void>();
+      const modelStarted = deferred<undefined>();
       const modelResult = deferred<ModelCompletion>();
-      releasePendingOperations.push(() => modelResult.resolve(modelCompletion()));
+      releasePendingOperations.push(() => {
+        modelResult.resolve(modelCompletion());
+      });
       let modelSignal: AbortSignal | undefined;
       let blockModel = false;
       const blockingModel: ModelPort = {
@@ -1061,7 +1064,7 @@ describe("@rovinos/sdk", () => {
             return Promise.resolve(modelCompletion());
           }
           modelSignal = context.signal;
-          modelStarted.resolve();
+          modelStarted.resolve(undefined);
           return modelResult.promise;
         },
       };
@@ -1072,9 +1075,7 @@ describe("@rovinos/sdk", () => {
         idStart: 400n,
         shutdownGraceMs: 25,
       });
-      const cancelableRunId = (
-        await harness.startRun({ goal: "Synthetic terminal task" })
-      ).runId;
+      const cancelableRunId = (await harness.startRun({ goal: "Synthetic terminal task" })).runId;
       await waitForRun(harness, cancelableRunId, "completed");
       const closeStore = vi.spyOn(store, "close");
       if (entryPoint === "start") {
@@ -1093,12 +1094,14 @@ describe("@rovinos/sdk", () => {
       } else {
         blockModel = true;
       }
-      const execution =
-        entryPoint === "start"
-          ? Promise.resolve(undefined)
-          : entryPoint === "resume"
-            ? harness.resumeRun(runId)
-            : harness.continueRun(runId, { goal: "Synthetic follow-up task" });
+      let execution: Promise<unknown>;
+      if (entryPoint === "start") {
+        execution = Promise.resolve(undefined);
+      } else if (entryPoint === "resume") {
+        execution = harness.resumeRun(runId);
+      } else {
+        execution = harness.continueRun(runId, { goal: "Synthetic follow-up task" });
+      }
       await modelStarted.promise;
 
       vi.useFakeTimers();
@@ -1142,13 +1145,44 @@ describe("@rovinos/sdk", () => {
     },
   );
 
+  it("reuses the close promise for concurrent and later calls", async () => {
+    const store = new InMemoryEventStore();
+    const modelStarted = deferred<undefined>();
+    const modelResult = deferred<ModelCompletion>();
+    releasePendingOperations.push(() => {
+      modelResult.resolve(modelCompletion());
+    });
+    const model: ModelPort = {
+      complete: () => {
+        modelStarted.resolve(undefined);
+        return modelResult.promise;
+      },
+    };
+    const { harness } = await createTestHarness({ model, store });
+    const closeStore = vi.spyOn(store, "close");
+    await harness.startRun({ goal: "Synthetic close promise task" });
+    await modelStarted.promise;
+
+    const firstClose = harness.close();
+    const concurrentClose = harness.close();
+    expect(concurrentClose).toBe(firstClose);
+    await expect(harness.startRun({ goal: "Rejected while closing" })).rejects.toMatchObject({
+      code: "sdk_closed",
+    });
+
+    modelResult.resolve(modelCompletion());
+    await firstClose;
+    expect(harness.close()).toBe(firstClose);
+    expect(closeStore).toHaveBeenCalledOnce();
+  });
+
   it("suspends after an in-flight tool settles without replaying its effect", async () => {
     const store = new InMemoryEventStore();
     const toolStarted = deferred<AbortSignal>();
     const toolResult = deferred<{ readonly outcome: "ok"; readonly result: string }>();
-    releasePendingOperations.push(() =>
-      toolResult.resolve({ outcome: "ok", result: "synthetic effect" }),
-    );
+    releasePendingOperations.push(() => {
+      toolResult.resolve({ outcome: "ok", result: "synthetic effect" });
+    });
     let executions = 0;
     const tool: ToolPort = {
       describe: () => ({ idempotent: false, timeoutMs: 60_000, longRunning: true }),
