@@ -157,32 +157,22 @@ function completeUnlessShutdown(
   completion: Promise<ModelCompletion>,
   signal: AbortSignal,
 ): Promise<ModelCompletion | undefined> {
-  if (signal.aborted && signal.reason === "shutdown") {
-    return Promise.resolve(undefined);
-  }
-  return new Promise((resolve, reject) => {
-    const cleanup = (): void => {
-      signal.removeEventListener("abort", onAbort);
-    };
-    const onAbort = (): void => {
+  let onAbort: (() => void) | undefined;
+  const shutdown = new Promise<undefined>((resolve) => {
+    onAbort = (): void => {
       if (signal.reason === "shutdown") {
-        cleanup();
         resolve(undefined);
       }
     };
-    signal.addEventListener("abort", onAbort, { once: true });
-    void completion.then(
-      (value) => {
-        cleanup();
-        resolve(value);
-      },
-      (error: unknown) => {
-        cleanup();
-        reject(error instanceof Error ? error : new Error("Model call failed"));
-      },
-    );
     if (signal.aborted) {
       onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  return Promise.race([completion, shutdown]).finally(() => {
+    if (onAbort !== undefined) {
+      signal.removeEventListener("abort", onAbort);
     }
   });
 }
@@ -224,10 +214,6 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         }
         completion = response;
       } catch (error) {
-        if (options.signal.reason === "shutdown") {
-          result = { outcome: "aborted", events: recorded };
-          return requestEvent;
-        }
         const failure = await recordModelFailure({
           options,
           requestId,
