@@ -29,11 +29,12 @@ export const eventSamples = [
   {
     ...envelope,
     type: "model_request",
-    v: 2,
+    v: 3,
     requestId: id,
     provider: "test",
     model: "test",
     messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+    advertisedToolIds: [],
   },
   {
     ...envelope,

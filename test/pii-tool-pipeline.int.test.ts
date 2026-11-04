@@ -123,6 +123,9 @@ async function pipeline(
   const tool = new OffloadingToolPort(
     new PiiToolPort(
       {
+        getToolSpecs: () => [
+          { toolId: "mail.send", description: "Send synthetic mail", inputSchema: {} },
+        ],
         describe: () => ({ idempotent: true, timeoutMs: 1000 }),
         execute,
       },
@@ -412,6 +415,9 @@ describe("PII tool pipeline", () => {
         model: new FakeModelPort([completion(true), completion()]),
         policy: allowAllPolicy,
         tool: {
+          getToolSpecs: () => [
+            { toolId: "mail.send", description: "Send synthetic mail", inputSchema: {} },
+          ],
           describe: () => ({ idempotent: true, timeoutMs: 1000 }),
           execute: () => Promise.resolve({ outcome: "ok", result: null satisfies JsonValue }),
         },

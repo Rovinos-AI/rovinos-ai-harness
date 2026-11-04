@@ -61,7 +61,7 @@ describe("event schema upcasting", () => {
     expect(upcastEvent(raw)).not.toHaveProperty("toolCatalogFingerprints");
   });
 
-  it("upcasts v1 model requests without inventing hashes of unrecorded parameters", () => {
+  it("upcasts v1 model requests without inventing hashes or advertised tools", () => {
     const raw = {
       ...envelope,
       type: "model_request",
@@ -71,7 +71,12 @@ describe("event schema upcasting", () => {
       requestHash: "c".repeat(64),
       messages: [{ role: "user", parts: [{ type: "text", text: "<EMAIL_1>" }] }],
     };
-    expect(upcastEvent(raw)).toEqual({ ...raw, v: 2, requestParametersHash: null });
+    expect(upcastEvent(raw)).toEqual({
+      ...raw,
+      v: 3,
+      requestParametersHash: null,
+      advertisedToolIds: [],
+    });
     expect(raw).not.toHaveProperty("requestParametersHash");
     expect(() => upcastEvent({ ...raw, unexpected: true })).toThrow();
   });
@@ -201,7 +206,7 @@ describe("event schema upcasting", () => {
     });
 
     expect(event).toMatchObject({ v: 2, decidedBy: "expiry", reason: "expired" });
-    expect(() => upcastEvent({ ...envelope, v: 3 })).toThrow();
+    expect(() => upcastEvent({ ...envelope, v: 4 })).toThrow();
     expect(() => upcastEvent({ ...envelope, seq: -1 })).toThrow();
   });
 

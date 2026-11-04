@@ -97,6 +97,12 @@ export function createCanaryToolPort(
       [ECHO_TOOL, FAIL_TOOL, SAMPLE_MCP_FAIL_TOOL, ASK_TOOL].includes(toolId)
         ? { idempotent: true, timeoutMs: 1_000 }
         : undefined,
+    getToolSpecs: () =>
+      [ECHO_TOOL, FAIL_TOOL, SAMPLE_MCP_FAIL_TOOL, ASK_TOOL].map((toolId) => ({
+        toolId,
+        description: "Synthetic canary tool",
+        inputSchema: {},
+      })),
     execute: (call) => {
       executed.push(call.toolId);
       captured.toolBoundary.push(JSON.stringify(call.args));

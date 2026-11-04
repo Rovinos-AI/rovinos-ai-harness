@@ -199,6 +199,9 @@ describe("runtime tracing fallback", () => {
             }),
           },
           tool: {
+            getToolSpecs: () => [
+              { toolId: "test.tool", description: "Test tool", inputSchema: { type: "object" } },
+            ],
             describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
             execute: () => Promise.resolve({ outcome: "ok", result: null }),
           },
@@ -437,6 +440,9 @@ describe("runtime tracing fallback", () => {
       signalToolAborted = resolve;
     });
     const tool: ToolPort = {
+      getToolSpecs: () => [
+        { toolId: "slow_tool", description: "Slow tool", inputSchema: { type: "object" } },
+      ],
       describe: () => ({ idempotent: false, timeoutMs: 60_000 }),
       execute: (_call, { signal }: RunContext) =>
         new Promise<ToolExecutionResult>((_resolve, reject) => {
@@ -516,6 +522,9 @@ describe("runtime tracing fallback", () => {
       signalToolAborted = resolve;
     });
     const tool: ToolPort = {
+      getToolSpecs: () => [
+        { toolId: "slow_tool", description: "Slow tool", inputSchema: { type: "object" } },
+      ],
       describe: () => ({ idempotent: false, timeoutMs: 60_000 }),
       execute: (_call, { signal }) =>
         new Promise<ToolExecutionResult>((_resolve, reject) => {
@@ -624,6 +633,9 @@ describe("runtime tracing fallback", () => {
       })(),
     );
     const tool: ToolPort = {
+      getToolSpecs: () => [
+        { toolId: "slow_tool", description: "Slow tool", inputSchema: { type: "object" } },
+      ],
       describe: () => ({ idempotent: false, timeoutMs: 60_000 }),
       execute: () =>
         new Promise<ToolExecutionResult>((resolve) => {
@@ -739,6 +751,9 @@ describe("runtime tracing fallback", () => {
       },
     };
     const tool: ToolPort = {
+      getToolSpecs: () => [
+        { toolId: "slow_tool", description: "Slow tool", inputSchema: { type: "object" } },
+      ],
       describe: () => ({ idempotent: false, timeoutMs: 60_000 }),
       execute: (_call, { signal }) =>
         new Promise<ToolExecutionResult>((_resolve, reject) => {
@@ -804,11 +819,12 @@ describe("runtime tracing fallback", () => {
           [
             {
               type: "model_request",
-              v: 1,
+              v: 3,
               requestId: Id.parse("33333333333333333333333333"),
               provider: "other_worker",
               model: "other_worker",
               messages: [],
+              advertisedToolIds: [],
               runId,
               ts: 1_001,
               traceId: "a".repeat(32),

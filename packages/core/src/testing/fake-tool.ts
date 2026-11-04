@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code } from "@rovinos/schemas";
+import type { Code, ToolSpec } from "@rovinos/schemas";
 import type {
   ModelToolCall,
   RunContext,
@@ -54,6 +54,15 @@ export class FakeToolPort implements ToolPort {
       ...(definition.longRunning === undefined ? {} : { longRunning: definition.longRunning }),
       ...(definition.inputSchema === undefined ? {} : { inputSchema: definition.inputSchema }),
     };
+  }
+
+  /** Advertises the fake's registered definitions in model requests. */
+  getToolSpecs(): readonly ToolSpec[] {
+    return [...this.definitions].map(([toolId, definition]) => ({
+      toolId,
+      description: toolId,
+      inputSchema: definition.inputSchema ?? {},
+    }));
   }
 
   /** {@inheritDoc ToolPort.execute} */

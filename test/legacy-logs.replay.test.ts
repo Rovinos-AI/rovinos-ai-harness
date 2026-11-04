@@ -13,6 +13,7 @@ import {
 import { parseJson, RawEventEnvelopeSchema, upcastEvent } from "@rovinos/schemas";
 import { toSafeEvent } from "@rovinos/telemetry";
 import { resumeLegacyRun, withGoldenTracing } from "./replay/golden/scenario.js";
+import { resumeLegacyApproval } from "./replay/legacy-approval.js";
 import { LegacyLogHeaderSchema } from "./legacy-log-schema.js";
 
 const fixturesDirectory = join(import.meta.dirname, "fixtures", "legacy-logs");
@@ -26,8 +27,9 @@ it("upcasts the v1 model-request fixture while preserving legacy hash verificati
   const event = upcastEvent(fixture.event);
   expect(event).toMatchObject({
     type: "model_request",
-    v: 2,
+    v: 3,
     requestParametersHash: null,
+    advertisedToolIds: [],
     requestHash: fixture.event.requestHash,
   });
   if (event.type !== "model_request") {
@@ -41,6 +43,41 @@ it("upcasts the v1 model-request fixture while preserving legacy hash verificati
       stablePrefixMessages: 0,
     }),
   );
+});
+
+it("upcasts a v2 model request with no recorded tool advertisement to an empty list", async () => {
+  const text = await readFile(join(fixturesDirectory, "model-request-v2.json"), "utf8");
+  const fixture = parseJson(
+    z.object({ containsRealData: z.literal(false), event: RawEventEnvelopeSchema }).strict(),
+    text,
+  );
+  expect(upcastEvent(fixture.event)).toMatchObject({
+    type: "model_request",
+    v: 3,
+    advertisedToolIds: [],
+  });
+});
+
+it("resumes a legacy approval and executes its approved call despite an empty advertised-tool list", async () => {
+  const text = await readFile(join(fixturesDirectory, "v1", "golden.jsonl"), "utf8");
+  const lines = text.trimEnd().split("\n");
+  const header = lines[0];
+  if (header === undefined) {
+    throw new Error("Legacy log is missing its provenance header.");
+  }
+  const parsedHeader = parseJson(LegacyLogHeaderSchema, header);
+  expect(parsedHeader).toMatchObject({ version: "v1", containsRealData: false });
+  const events = lines.slice(1).map((line) => upcastEvent(parseJson(RawEventEnvelopeSchema, line)));
+  expect(events.find((event) => event.type === "model_request")).toMatchObject({
+    v: 3,
+    advertisedToolIds: [],
+  });
+
+  await withGoldenTracing(async () => {
+    const resumed = await resumeLegacyApproval(events);
+    expect(resumed.status).toBe("completed");
+    expect(resumed.executedToolIds).toEqual(["synthetic.editable"]);
+  });
 });
 
 it("loads, projects, replays, and resumes every committed synthetic legacy log", async () => {

@@ -102,6 +102,9 @@ const separationAskPolicy: PolicyPort = {
 
 const fakeTool: ToolPort = {
   describe: () => ({ idempotent: true, timeoutMs: 1000 }),
+  getToolSpecs: () => [
+    { toolId: Code.parse("synthetic.tool"), description: "Synthetic tool", inputSchema: {} },
+  ],
   execute: () => Promise.resolve({ outcome: "ok", result: "synthetic tool result" }),
 };
 

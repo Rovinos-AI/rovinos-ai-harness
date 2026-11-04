@@ -124,6 +124,13 @@ describe("eval scripted human input cassette replay", () => {
         const retryStates: { round: number; requestState?: string }[] = [];
         const tool: ToolPort = {
           describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+          getToolSpecs: () => [
+            {
+              toolId: "sample.confirm",
+              description: "Synthetic confirmation tool",
+              inputSchema: {},
+            },
+          ],
           execute: async (
             _call,
             context: RunContext & Pick<PiiToolContext, "protectInputMetadata">,

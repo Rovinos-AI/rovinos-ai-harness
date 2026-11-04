@@ -323,6 +323,7 @@ describe("foldRunState", () => {
         model: "test",
         role: "judge",
         messages: [],
+        advertisedToolIds: [],
       };
 
       expect(
@@ -344,6 +345,7 @@ describe("foldRunState", () => {
         model: "test",
         role: "judge",
         messages: [],
+        advertisedToolIds: [],
       };
 
       expect(
@@ -366,6 +368,7 @@ describe("foldRunState", () => {
         model: "test",
         role: "judge",
         messages: [],
+        advertisedToolIds: [],
       };
 
       expect(
@@ -404,6 +407,7 @@ describe("foldRunState", () => {
         provider: "test",
         model: "test",
         messages: [],
+        advertisedToolIds: [],
       };
 
       expect(planLastModelResponseRecovery([runCreated(0), response, request])).toEqual({

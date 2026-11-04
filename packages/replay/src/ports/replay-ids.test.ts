@@ -32,10 +32,12 @@ function fixtureEvents(): Event[] {
     EventSchema.parse({
       ...envelope(1),
       type: "model_request",
+      v: 3,
       requestId,
       provider: "test",
       model: "model",
       messages: [],
+      advertisedToolIds: [],
     }),
     EventSchema.parse({
       ...envelope(2),

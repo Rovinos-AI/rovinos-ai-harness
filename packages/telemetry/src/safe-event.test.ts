@@ -262,10 +262,12 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
 const unexportedEvents = [
   validEvent({
     type: "model_request",
+    v: 3,
     requestId: "00000000000000000000000002",
     provider: "provider.test",
     model: "model.test",
     messages: [{ role: "user", parts: [{ type: "text", text: "MODEL_REQUEST_CANARY" }] }],
+    advertisedToolIds: [],
   }),
   validEvent({
     type: "run_input",
@@ -469,7 +471,7 @@ describe("SafeEvent projection", () => {
 
   it("never exports canaries from any classified content field", () => {
     for (const [index, sample] of eventSamples.entries()) {
-      const canary = `CANARY_${sample.type}_${index.toString()}`;
+      const canary = `CANARY_${sample.type}_${index.toString()}`.toLowerCase();
       const contentFields = Object.entries(EVENT_FIELD_CLASS[sample.type])
         .filter(([, classification]) => classification === "content")
         .filter(([field]) => !(sample.type === "input_requested" && field === "url"))

@@ -149,6 +149,9 @@ async function createRuntimeApproval(payload: ApprovalPayload): Promise<{
     },
   };
   const tool: ToolPort = {
+    getToolSpecs: () => [
+      { toolId, description: "Send synthetic mail for approval", inputSchema: { type: "object" } },
+    ],
     prepare: (call) => Promise.resolve(call),
     validateInputSchema: () => Promise.resolve(true),
     describe: (id) =>

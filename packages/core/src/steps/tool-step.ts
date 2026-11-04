@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tool calls are sequential here; parallel execution can be added independently.
-import { APP_TELEMETRY_TOOL_NAME, HarnessError, type Code, type Event } from "@rovinos/schemas";
+import { APP_TELEMETRY_TOOL_NAME, type Code, type Event } from "@rovinos/schemas";
 import type { Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@rovinos/pii";
 import { countPolicyDecision } from "@rovinos/telemetry";
 import type { Checkpointer } from "../checkpoint.js";
 import type { EventPartial } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
-import { recordDeniedResult } from "./tool-result.js";
+import {
+  recordDeniedResultAndPush,
+  recordUnadvertisedCallAndPush,
+  ToolStepEventMissingError,
+} from "./tool-result.js";
 import type { IdGenerator, ModelToolCall, PolicyPort, RunContext, ToolPort } from "../ports.js";
 import { foldRunState } from "../run-state.js";
 import {
@@ -95,7 +99,10 @@ export async function runToolCall(
   behavior: RunToolCallBehavior = {},
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
-  const unregistered = normalizeUnregisteredToolCall(proposedCall, description, behavior.prepared);
+  const unregistered =
+    behavior.prepared?.errorCode === "tool_not_advertised"
+      ? undefined
+      : normalizeUnregisteredToolCall(proposedCall, description, behavior.prepared);
   const call = unregistered?.call ?? proposedCall;
   const safeBehavior =
     unregistered === undefined ? behavior : { ...behavior, prepared: unregistered.prepared };
@@ -134,6 +141,14 @@ async function runToolCallWithinSpan(input: RunToolCallSpanOptions): Promise<Eve
     setPolicySpanAttributes(
       input.behavior.existingIntent.policyDecision,
       input.behavior.existingIntent.ruleId,
+    );
+  }
+  if (input.behavior.prepared?.errorCode === "tool_not_advertised") {
+    return recordUnadvertisedCallAndPush(
+      input.options.recorder,
+      input.events,
+      input.proposedCall,
+      input.description,
     );
   }
   const prepared = await prepareRunToolCall(
@@ -205,12 +220,10 @@ async function executeRecordedIntent(
 ): Promise<Event> {
   const executedArgsHash = executedArgsHashFor(call, input.behavior);
   if (preparationError !== undefined || input.description === undefined) {
-    return recordDeniedResultAndPush(
-      input,
-      call,
-      preparationError ?? "unknown_tool",
-      executedArgsHash,
-    );
+    return recordDeniedResultAndPush(input.options.recorder, input.events, call, {
+      code: preparationError ?? "unknown_tool",
+      ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+    });
   }
   const appApproval = input.behavior.existingIntent?.policyReason === APP_APPROVAL_REASON;
   if (input.behavior.checkEditedPolicy === true || appApproval) {
@@ -240,12 +253,10 @@ async function executeRecordedIntent(
       edited: input.behavior.checkEditedPolicy === true,
     });
     if (decision.decision !== "allow" && !authorizedAsk) {
-      return recordDeniedResultAndPush(
-        input,
-        call,
-        decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
-        executedArgsHash,
-      );
+      return recordDeniedResultAndPush(input.options.recorder, input.events, call, {
+        code: decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
+        ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+      });
     }
   }
   return executeAndRecord(input, {
@@ -315,26 +326,6 @@ async function recordDeniedIntentAndResultAndPush(
   }
   input.events.push(...recorded);
   return result;
-}
-
-async function recordDeniedResultAndPush(
-  input: RunToolCallSpanOptions,
-  call: ModelToolCall,
-  code: Code,
-  executedArgsHash?: string,
-): Promise<Event> {
-  const event = await recordDeniedResult(input.options.recorder, call, code, executedArgsHash);
-  input.events.push(event);
-  return event;
-}
-
-class ToolStepEventMissingError extends HarnessError {
-  readonly code = "tool_step_event_missing";
-
-  constructor() {
-    super("Expected a recorded tool event.");
-    this.name = "ToolStepEventMissingError";
-  }
 }
 
 async function executeAndRecord(

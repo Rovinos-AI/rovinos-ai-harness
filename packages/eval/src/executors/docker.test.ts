@@ -118,6 +118,9 @@ function approvalScenario(repeatApprovals = false): ApprovalScenario {
     tool: {
       prepare: (call) => Promise.resolve(call),
       describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      getToolSpecs: () => [
+        { toolId: "fake.echo", description: "Synthetic echo tool", inputSchema: {} },
+      ],
       execute: () => Promise.resolve({ outcome: "ok", result: null }),
     },
     policy: {

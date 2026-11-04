@@ -57,6 +57,9 @@ function contentCanaryValue(type: EventType, field: string, canary: string): unk
   if (type === "model_request" && field === "messages") {
     return [{ role: "user", parts: [{ type: "text", text: canary }] }];
   }
+  if (type === "model_request" && field === "advertisedToolIds") {
+    return [canary];
+  }
   if (type === "model_response" && field === "content") {
     return [{ type: "text", text: canary }];
   }
@@ -681,8 +684,8 @@ describe("control-plane inspection tools", () => {
           const store = new InMemoryEventStore();
           const builders = createEventBuilders();
           const runId = builders.nextRunId();
-          const canaries = suffixes.map(
-            (suffix, index) => `GENERATED_CONTENT_CANARY_${String(index)}_${String(suffix)}`,
+          const canaries = suffixes.map((suffix, index) =>
+            `GENERATED_CONTENT_CANARY_${String(index)}_${String(suffix)}`.toLowerCase(),
           );
           await store.append(runId, eventsWithContentCanaries(runId, canaries), 0);
           await addRun(store, builders);

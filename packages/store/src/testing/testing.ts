@@ -100,7 +100,7 @@ export function createEventBuilders(): EventStoreTestBuilders {
       return {
         runId,
         ts: nextTimestamp(),
-        v: 2,
+        v: 3,
         traceId: "a".repeat(32),
         spanId: "b".repeat(16),
         segmentId: runId,
@@ -109,6 +109,7 @@ export function createEventBuilders(): EventStoreTestBuilders {
         provider: "test",
         model: "test",
         messages: [{ role: "user", parts: [{ type: "text", text: content }] }],
+        advertisedToolIds: [],
         ...(options.role === undefined ? {} : { role: options.role }),
         ...(options.schemaHash === undefined ? {} : { schemaHash: options.schemaHash }),
       };

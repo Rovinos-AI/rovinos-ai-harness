@@ -28,10 +28,15 @@ through registered and unregistered model-visible tools and text claims; edits
 outside `editableFields`; stale approval IDs across runs; racing resolutions;
 raw case, homoglyph, and trailing-space aliases; nested-pointer argument
 smuggling; cross-run PII token scope; subagent privilege escalation; app-only
-tools; cancel/resume manipulation; and self-answering both `agent.ask_user` and
-MCP elicitation. Each attack uses real runtime events and checks the relevant
-safe status and invariant behavior. Mutation checks cover deny bypass and
-execution before approval.
+tools; registered tools omitted from the recorded request's advertised tools;
+cancel/resume manipulation; and self-answering both `agent.ask_user` and MCP
+elicitation. Hidden-tool coverage verifies the model sees a `tool_not_advertised`
+error, policy is not evaluated, the tool never executes, and the event log
+passes `verifyInvariants`. A test-only adapter mutation confirms the assertions
+fail if advertised tools are stripped after recording. Each attack uses real
+runtime events and checks the relevant safe status and invariant behavior.
+Mutation checks cover deny bypass, execution before approval, and hidden-tool
+rejection.
 
 Raw model aliases are rejected before policy evaluation. The runtime replay
 also checks that server-advertised names with trailing whitespace or Unicode

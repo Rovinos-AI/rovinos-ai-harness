@@ -56,10 +56,12 @@ function modelRequest(seq: number, text = "") {
   return EventSchema.parse({
     ...envelope(seq),
     type: "model_request",
+    v: 3,
     requestId: runId,
     provider: "synthetic",
     model: "synthetic",
     messages: [{ role: "user", parts: [{ type: "text", text }] }],
+    advertisedToolIds: [],
   });
 }
 

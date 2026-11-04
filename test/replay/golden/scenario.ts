@@ -51,6 +51,7 @@ export interface GoldenScenario {
   readonly crashResumed: boolean;
   readonly model: FakeModelPort;
   readonly policy: PolicyPort;
+  readonly toolRegistry: ToolPort;
   readonly resolved: ResolvedRun;
   readonly responses: readonly ModelCompletion[];
   readonly coverageEvents: readonly Event[];
@@ -68,6 +69,7 @@ interface GoldenRuntimeOptions {
   readonly ids: SequentialIdGenerator;
   readonly model: FakeModelPort;
   readonly policy: PolicyPort;
+  readonly tool: ToolPort;
 }
 
 class TrackingEventStore extends InMemoryEventStore {
@@ -232,6 +234,7 @@ function createGoldenRuntime({
   ids,
   model,
   policy,
+  tool,
 }: GoldenRuntimeOptions): Promise<Runtime> {
   return createRuntime(config, {
     dataDir,
@@ -240,7 +243,7 @@ function createGoldenRuntime({
     ids,
     model,
     policy,
-    tool: createTool(),
+    tool,
     transientVault: true,
     sandboxBackend: {
       exec: () => Promise.reject(new Error("Unused synthetic sandbox backend.")),
@@ -257,10 +260,11 @@ async function executeScenario(
   const responses = createResponses(reverseToolCalls);
   const model = new FakeModelPort(responses);
   const policy = createPolicy();
+  const toolRegistry = createTool();
   const clock = new FakeClock(1_000);
   const ids = new SequentialIdGenerator();
   const dataDir = await mkdtemp(join(tmpdir(), "harness-golden-replay-"));
-  const runtimeOptions = { dataDir, store, clock, ids, model, policy };
+  const runtimeOptions = { dataDir, store, clock, ids, model, policy, tool: toolRegistry };
   const createRuntimeWithPorts = () => createGoldenRuntime(runtimeOptions);
   let runtime = await createRuntimeWithPorts();
   let crashResumed = false;
@@ -303,6 +307,7 @@ async function executeScenario(
       crashResumed,
       model,
       policy,
+      toolRegistry,
       responses,
       coverageEvents: [],
       resolved: ResolvedRunSchema.parse({
@@ -370,6 +375,7 @@ export async function resumeLegacyRun(events: readonly Event[]): Promise<RunLoop
     ids: new SequentialIdGenerator(),
     model: new FakeModelPort([completion([{ type: "text", text: "synthetic resumed answer" }])]),
     policy: createPolicy(),
+    tool: createTool(),
   });
   try {
     return await runtime.resume(first.runId);

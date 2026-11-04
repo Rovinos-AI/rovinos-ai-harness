@@ -120,6 +120,7 @@ function remoteSandbox(allow: readonly { readonly host: string; readonly ports: 
 function metadataTool(backend: SandboxBackend, remote: boolean): ToolPort {
   return {
     describe: (id) => (id === toolId ? { idempotent: false, timeoutMs: 5000 } : undefined),
+    getToolSpecs: () => [{ toolId, description: "Synthetic sandbox probe", inputSchema: {} }],
     execute: async (_call, context) => {
       const output = await backend.exec(
         context.runId,

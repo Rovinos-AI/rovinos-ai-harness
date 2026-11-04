@@ -60,6 +60,7 @@ export async function runReplayGolden(options: ReplayGoldenOptions): Promise<voi
     const outcome = await replayRun(scenario.resolved, {
       config: scenario.config,
       policy: scenario.policy,
+      toolRegistry: scenario.toolRegistry,
     });
     if (outcome.status !== "completed" || outcome.divergence !== undefined) {
       throw new Error("Golden scenario replay did not complete.");

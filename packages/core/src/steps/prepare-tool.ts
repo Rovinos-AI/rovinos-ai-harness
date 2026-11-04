@@ -186,6 +186,7 @@ export async function prepareCompletion(
   completion: ModelCompletion,
   tool: ToolPort | undefined,
   context: RunContext,
+  advertisedToolIds: readonly Code[],
 ): Promise<{ completion: ModelCompletion; preparedCalls: PreparedToolCall[] }> {
   const preparedCalls: PreparedToolCall[] = [];
   const parts: Part[] = [];
@@ -204,7 +205,11 @@ export async function prepareCompletion(
       tool === undefined || unregistered
         ? { call, errorCode: "unknown_tool" }
         : await prepareToolCall(tool, call, context);
-    preparedCalls.push(prepared);
+    preparedCalls.push(
+      advertisedToolIds.includes(part.toolId)
+        ? prepared
+        : { ...prepared, errorCode: "tool_not_advertised" },
+    );
     parts.push({ type: "tool_call", ...prepared.call });
   }
   return {

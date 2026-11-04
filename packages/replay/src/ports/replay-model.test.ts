@@ -41,7 +41,7 @@ function requestEvent(seq: number, req: ModelRequest, eventRunId = runId): Event
   const requestParametersHash = modelRequestParametersHash(req);
   return EventSchema.parse({
     ...base(seq, eventRunId),
-    v: 2,
+    v: 3,
     type: "model_request",
     requestId: req.requestId,
     provider: req.model.provider,
@@ -50,6 +50,7 @@ function requestEvent(seq: number, req: ModelRequest, eventRunId = runId): Event
     requestHash: storedModelRequestHash(req.messages, requestParametersHash),
     requestParametersHash,
     messages: req.messages,
+    advertisedToolIds: req.tools?.map(({ toolId }) => toolId) ?? [],
   });
 }
 

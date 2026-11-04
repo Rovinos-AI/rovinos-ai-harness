@@ -169,7 +169,11 @@ async function executeReplay(
     if (root === undefined) {
       throw new ReplayMissingRootError();
     }
-    const outcome = await replayRun(resolved, { config: { run: config.run } });
+    const toolRegistry = await context.createToolPort?.(config);
+    const outcome = await replayRun(resolved, {
+      config: { run: config.run },
+      ...(toolRegistry === undefined ? {} : { toolRegistry }),
+    });
     const comparison = comparisonFor(root.events, outcome, options, previousGolden);
     const updated = await updateBaseline(options, outcome);
     const goldenMatch = updated ? true : comparison.goldenMatch;

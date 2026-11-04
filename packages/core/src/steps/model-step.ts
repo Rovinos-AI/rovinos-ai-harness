@@ -2,6 +2,7 @@
 import {
   APP_TELEMETRY_TOOL_NAME,
   Code,
+  HarnessError,
   JsonValue as JsonValueSchema,
   ModelRequestSchema,
   ModelUsageSchema,
@@ -29,6 +30,14 @@ import {
   toolRunContext,
   type PreparedToolCall,
 } from "./prepare-tool.js";
+
+class ModelStepEventMissingError extends HarnessError {
+  readonly code = "model_step_event_missing";
+
+  constructor() {
+    super("The model step did not record its expected event.");
+  }
+}
 
 /** Inputs needed to perform one recorded model call. */
 export interface ModelStepOptions {
@@ -131,11 +140,12 @@ function requestParts(
     modelRequest,
     requestPartial: {
       type: "model_request",
-      v: 2,
+      v: 3,
       requestId,
       provider: options.provider ?? "unknown",
       model: options.modelName ?? "unknown",
       messages: options.messages,
+      advertisedToolIds: modelRequest.tools?.map(({ toolId }) => toolId) ?? [],
       requestHash: storedModelRequestHash(modelRequest.messages, requestParametersHash),
       requestParametersHash,
       ...(role === undefined ? {} : { role }),
@@ -187,10 +197,14 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         return failure.event ?? requestEvent;
       }
 
+      if (requestEvent.type !== "model_request") {
+        throw new ModelStepEventMissingError();
+      }
       const prepared = await prepareCompletion(
         completion,
         options.tool,
         toolRunContext(modelRunContext(options), options.recorder, recorded),
+        requestEvent.advertisedToolIds,
       );
       completion = prepared.completion;
       const structuredValue = tokenizedStructuredValue(completion);
@@ -210,7 +224,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
   );
 
   if (result === undefined) {
-    throw new Error("Expected the model step to record an outcome.");
+    throw new ModelStepEventMissingError();
   }
   return result;
 }

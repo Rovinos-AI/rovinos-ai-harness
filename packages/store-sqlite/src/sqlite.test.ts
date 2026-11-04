@@ -352,7 +352,7 @@ function modelRequest(id: typeof runId, ts: number, text = "synthetic prompt"): 
   return {
     runId: id,
     ts,
-    v: 1,
+    v: 3,
     traceId,
     spanId,
     segmentId: id,
@@ -361,6 +361,7 @@ function modelRequest(id: typeof runId, ts: number, text = "synthetic prompt"): 
     provider: "test",
     model: "test",
     messages: [{ role: "user", parts: [{ type: "text", text }] }],
+    advertisedToolIds: [],
   };
 }
 

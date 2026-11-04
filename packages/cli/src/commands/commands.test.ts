@@ -186,11 +186,12 @@ async function seedPendingApproval(harness: CliHarness): Promise<{
       },
       {
         type: "model_request",
-        v: 1,
+        v: 3,
         requestId: harness.ids.next(),
         provider: "test",
         model: "script",
         messages: [{ role: "user", parts: [{ type: "text", text: "approval test" }] }],
+        advertisedToolIds: [],
       },
       {
         type: "tool_intent",
