@@ -13,6 +13,7 @@ import type { SafeEvent } from "@rovinos/telemetry";
 import { SdkError } from "./types.js";
 import { contentEntries, readEvents, safeEvents } from "./event-views.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
+import { LifecycleTracker } from "./lifecycle.js";
 import { runtimeOverridesFrom } from "./runtime-overrides.js";
 import {
   CancelRunResultSchema,
@@ -44,25 +45,10 @@ const IDEMPOTENCY_ORPHAN_GRACE_MS = 30_000;
 const IDEMPOTENCY_START_WAIT_MS = 5_000;
 const IDEMPOTENCY_POLL_INTERVAL_MS = 10;
 
-interface ManagedExecution {
-  readonly controller: AbortController;
-  readonly settled: Promise<void>;
-  readonly resolveSettled: () => void;
-  tracked: boolean;
-}
-
-interface ClientWatcher {
-  readonly controller: AbortController;
-  readonly finished: Promise<void>;
-  readonly resolveFinished: () => void;
-}
-
 class HarnessClient implements Harness {
   private readonly idempotencyKeys = new Map<string, Promise<Id>>();
-  private readonly managedExecutions = new Set<ManagedExecution>();
+  private readonly lifecycle: LifecycleTracker;
   private readonly admittedRunIds = new Set<string>();
-  private readonly activeOperations = new Set<Promise<void>>();
-  private readonly watchers = new Set<ClientWatcher>();
   private closed = false;
   private drainingFinished = false;
   private disposed = false;
@@ -73,7 +59,9 @@ class HarnessClient implements Harness {
     private readonly piiEnabled: boolean,
     private readonly correlationEnabled: boolean,
     private readonly shutdownGraceMs: number,
-  ) {}
+  ) {
+    this.lifecycle = new LifecycleTracker(shutdownGraceMs);
+  }
 
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
     this.assertOpen();
@@ -102,11 +90,15 @@ class HarnessClient implements Harness {
       if (claim !== undefined && "result" in claim) {
         return claim.result;
       }
-      return await this.launchRun(input, runInput, keyHash, claim?.runId, managed);
+      return await this.launchRun({
+        input,
+        runInput,
+        keyHash,
+        candidateRunId: claim?.runId,
+        managed,
+      });
     } finally {
-      if (!managed.tracked) {
-        this.finishExecution(managed);
-      }
+      this.lifecycle.finishIfUntracked(managed);
     }
   }
 
@@ -130,13 +122,14 @@ class HarnessClient implements Harness {
     return safeEvents(events, this.correlationEnabled, this.runtime.keys);
   }
 
-  private async launchRun(
-    input: StartRunOptions,
-    runInput: ReturnType<typeof JsonValueSchema.parse>,
-    keyHash: string | undefined,
-    candidateRunId: Id | undefined,
-    managed: ManagedExecution,
-  ): Promise<RunStartResult> {
+  private async launchRun(options: {
+    readonly input: StartRunOptions;
+    readonly runInput: ReturnType<typeof JsonValueSchema.parse>;
+    readonly keyHash: string | undefined;
+    readonly candidateRunId: Id | undefined;
+    readonly managed: ReturnType<LifecycleTracker["admitExecution"]>;
+  }): Promise<RunStartResult> {
+    const { input, runInput, keyHash, candidateRunId, managed } = options;
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
@@ -191,16 +184,14 @@ class HarnessClient implements Harness {
       }
       return RunStartResultSchema.parse({ runId: created.runId, status: result.status });
     } finally {
-      if (!managed.tracked) {
-        this.finishExecution(managed);
-      }
+      this.lifecycle.finishIfUntracked(managed);
     }
   }
 
   async getRun(runId: string) {
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
     this.assertAvailable(parsedRunId);
-    return this.trackOperation(
+    return this.lifecycle.trackOperation(
       (async () => {
         const events = await readEvents(this.runtime, parsedRunId);
         const firstEvent = events[0];
@@ -227,7 +218,7 @@ class HarnessClient implements Harness {
   async listRuns(filter: ListRunsFilter = {}) {
     this.assertAvailable();
     const input = ListRunsFilterSchema.parse(filter);
-    return this.trackOperation(
+    return this.lifecycle.trackOperation(
       this.runtime.store
         .listRuns({
           limit: input.limit,
@@ -250,16 +241,14 @@ class HarnessClient implements Harness {
       const result = await completion;
       return RunStartResultSchema.parse({ runId: parsedRunId, status: result.status });
     } finally {
-      if (!managed.tracked) {
-        this.finishExecution(managed);
-      }
+      this.lifecycle.finishIfUntracked(managed);
     }
   }
 
   async cancelRun(runId: string) {
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
     this.assertAvailable(parsedRunId);
-    return this.trackOperation(
+    return this.lifecycle.trackOperation(
       this.runtime.cancel(parsedRunId).then((result) => CancelRunResultSchema.parse(result)),
     );
   }
@@ -270,14 +259,14 @@ class HarnessClient implements Harness {
     options: ResolveApprovalOptions,
   ) {
     this.assertOpen();
-    return this.trackOperation(
+    return this.lifecycle.trackOperation(
       resolvePendingApproval(this.runtime, approvalId, decision, options),
     );
   }
 
   async answerInput(requestId: string, options: AnswerInputOptions) {
     this.assertOpen();
-    return this.trackOperation(answerPendingInput(this.runtime, requestId, options));
+    return this.lifecycle.trackOperation(answerPendingInput(this.runtime, requestId, options));
   }
 
   watch(runId: string, options: WatchOptions = {}): AsyncIterable<SafeEvent> {
@@ -295,7 +284,7 @@ class HarnessClient implements Harness {
     if (!this.piiEnabled) {
       throw new SdkError("sdk_content_unavailable");
     }
-    return this.trackOperation(
+    return this.lifecycle.trackOperation(
       (async () => {
         const events = await readEvents(this.runtime, parsedRunId);
         if (events[0]?.type !== "run_created") {
@@ -331,50 +320,18 @@ class HarnessClient implements Harness {
     }
   }
 
-  private trackOperation<Result>(operation: Promise<Result>): Promise<Result> {
-    const settled = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.activeOperations.add(settled);
-    void settled.then(() => this.activeOperations.delete(settled));
-    return operation;
-  }
-
-  private admitExecution(): ManagedExecution {
+  private admitExecution(): ReturnType<LifecycleTracker["admitExecution"]> {
     this.assertOpen();
-    let resolveSettled: () => void = () => undefined;
-    const settled = new Promise<void>((resolve) => {
-      resolveSettled = resolve;
-    });
-    const managed: ManagedExecution = {
-      controller: new AbortController(),
-      settled,
-      resolveSettled,
-      tracked: false,
-    };
-    this.managedExecutions.add(managed);
-    return managed;
+    return this.lifecycle.admitExecution();
   }
 
   private trackExecution(
-    managed: ManagedExecution,
+    managed: ReturnType<LifecycleTracker["admitExecution"]>,
     runId: string,
     completion: Promise<unknown>,
   ): void {
-    managed.tracked = true;
     this.admittedRunIds.add(runId);
-    void completion.then(
-      () => this.finishExecution(managed),
-      () => this.finishExecution(managed),
-    );
-  }
-
-  private finishExecution(managed: ManagedExecution): void {
-    if (!this.managedExecutions.delete(managed)) {
-      return;
-    }
-    managed.resolveSettled();
+    this.lifecycle.trackExecution(managed, completion);
   }
 
   private async existingRunResult(runId: Id): Promise<RunStartResult> {
@@ -421,30 +378,10 @@ class HarnessClient implements Harness {
   }
 
   private async closeRuntime(): Promise<void> {
-    const active = Array.from(this.managedExecutions);
-    if (active.length > 0) {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      const expired = await Promise.race([
-        Promise.all(active.map(({ settled }) => settled)).then(() => false),
-        new Promise<boolean>((resolve) => {
-          timeout = setTimeout(() => resolve(true), this.shutdownGraceMs);
-        }),
-      ]);
-      if (timeout !== undefined) {
-        clearTimeout(timeout);
-      }
-      if (expired) {
-        for (const execution of this.managedExecutions) {
-          execution.controller.abort("shutdown");
-        }
-      }
-      await Promise.all(Array.from(this.managedExecutions, ({ settled }) => settled));
-    }
+    await this.lifecycle.drainExecutions();
     this.drainingFinished = true;
-    const watchers = Array.from(this.watchers);
-    watchers.forEach(({ controller }) => controller.abort());
-    await Promise.all(watchers.map(({ finished }) => finished));
-    await Promise.all(Array.from(this.activeOperations));
+    await this.lifecycle.stopWatchers();
+    await this.lifecycle.waitForOperations();
     try {
       await this.runtime.close();
     } finally {
@@ -457,12 +394,7 @@ class HarnessClient implements Harness {
       throw new SdkError("sdk_closed");
     }
     const controller = new AbortController();
-    let resolveFinished: () => void = () => undefined;
-    const finished = new Promise<void>((resolve) => {
-      resolveFinished = resolve;
-    });
-    const watcher: ClientWatcher = { controller, finished, resolveFinished };
-    this.watchers.add(watcher);
+    const watcher = this.lifecycle.addWatcher(controller);
     const onAbort = (): void => {
       controller.abort();
     };
@@ -492,8 +424,7 @@ class HarnessClient implements Harness {
       }
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
-      this.watchers.delete(watcher);
-      watcher.resolveFinished();
+      this.lifecycle.finishWatcher(watcher);
     }
   }
 }

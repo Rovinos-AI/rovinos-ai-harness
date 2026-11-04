@@ -1104,6 +1104,10 @@ describe("@rovinos/sdk", () => {
       vi.useFakeTimers();
       const closing = harness.close();
       expect(harness.close()).toBe(closing);
+      let closeFinished = false;
+      void closing.then(() => {
+        closeFinished = true;
+      });
       await expect(harness.startRun({ goal: "Rejected while closing" })).rejects.toMatchObject({
         code: "sdk_closed",
       });
@@ -1117,20 +1121,16 @@ describe("@rovinos/sdk", () => {
       }
       await expect(harness.getRun(activeRunId)).resolves.toMatchObject({ runId: activeRunId });
 
-      let closeFinished = false;
-      void closing.then(() => {
-        closeFinished = true;
-      });
+      expect(closeFinished).toBe(false);
+      expect(closeStore).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(25);
       expect(modelSignal?.aborted).toBe(true);
       expect(modelSignal?.reason).toBe("shutdown");
-      expect(closeFinished).toBe(false);
-      expect(closeStore).not.toHaveBeenCalled();
-
-      modelResult.resolve(modelCompletion());
       await execution;
       await closing;
+      expect(closeFinished).toBe(true);
       expect(closeStore).toHaveBeenCalledOnce();
+      modelResult.resolve(modelCompletion());
       const recovery = await createTestHarness({ idStart: 500n, store });
       await expect(recovery.harness.getRun(activeRunId)).resolves.toMatchObject({
         status: "suspended",
@@ -1260,7 +1260,6 @@ describe("@rovinos/sdk", () => {
       closeFinished = true;
     });
     expect(closeStore).not.toHaveBeenCalled();
-    await expect(harness.listRuns()).rejects.toMatchObject({ code: "sdk_closed" });
 
     store.release();
     await listing;

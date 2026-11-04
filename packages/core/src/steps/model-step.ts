@@ -153,6 +153,40 @@ function requestParts(
   };
 }
 
+function completeUnlessShutdown(
+  completion: Promise<ModelCompletion>,
+  signal: AbortSignal,
+): Promise<ModelCompletion | undefined> {
+  if (signal.aborted && signal.reason === "shutdown") {
+    return Promise.resolve(undefined);
+  }
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = (): void => {
+      if (signal.reason === "shutdown") {
+        cleanup();
+        resolve(undefined);
+      }
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void completion.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error instanceof Error ? error : new Error("Model call failed"));
+      },
+    );
+    if (signal.aborted) {
+      onAbort();
+    }
+  });
+}
+
 /**
  * Records a model request, performs the provider call, and records its outcome.
  *
@@ -180,7 +214,15 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       const runContext = piiActionRunContext(modelRunContext(options), options.recorder, recorded);
       let completion: ModelCompletion;
       try {
-        completion = await options.model.complete(modelRequest, runContext);
+        const response = await completeUnlessShutdown(
+          options.model.complete(modelRequest, runContext),
+          options.signal,
+        );
+        if (response === undefined) {
+          result = { outcome: "aborted", events: recorded };
+          return requestEvent;
+        }
+        completion = response;
       } catch (error) {
         if (options.signal.reason === "shutdown") {
           result = { outcome: "aborted", events: recorded };
