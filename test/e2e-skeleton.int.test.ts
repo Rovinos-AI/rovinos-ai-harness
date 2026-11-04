@@ -1129,7 +1129,12 @@ describe("MCP runtime", () => {
         expect(errorEvents.find((event) => event.type === "tool_result")).toMatchObject({
           outcome: "error",
           errorCode: "tool_reported_error",
-          result: { content: [{ text: MCP_ERROR_CANARY }] },
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: true,
+            parts: [{ type: "text", text: MCP_ERROR_CANARY }],
+          },
         });
         expect(JSON.stringify(errorEvents)).toContain(MCP_ERROR_CANARY);
       } finally {

@@ -310,7 +310,7 @@ async function recordDeniedIntentAndResultAndPush(
     denial.intent,
     {
       type: "tool_result",
-      v: 1,
+      v: 2,
       callId: denial.call.callId,
       toolId: denial.call.toolId,
       outcome: "denied",

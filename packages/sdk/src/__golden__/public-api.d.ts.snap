@@ -288,6 +288,11 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 callMs: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
             maxResultBytes: z.ZodDefault<z.ZodNumber>;
+            maxArtifactBytes: z.ZodDefault<z.ZodNumber>;
+            binaryResults: z.ZodDefault<z.ZodEnum<{
+                allow: "allow";
+                block: "block";
+            }>>;
         }, z.core.$strict>, z.ZodTransform<{
             toolPrefix: string;
             id: string;
@@ -337,6 +342,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 callMs: number;
             };
             maxResultBytes: number;
+            maxArtifactBytes: number;
+            binaryResults: "allow" | "block";
             toolAllowlist?: string[] | undefined;
             idempotentTools?: string[] | undefined;
         }, {
@@ -387,6 +394,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 callMs: number;
             };
             maxResultBytes: number;
+            maxArtifactBytes: number;
+            binaryResults: "allow" | "block";
             toolAllowlist?: string[] | undefined;
             toolPrefix?: string | undefined;
             idempotentTools?: string[] | undefined;

@@ -156,6 +156,8 @@ const ServerConfigObjectSchema = z
     elicitation: ServerElicitationConfigSchema,
     timeouts: ServerTimeoutsSchema,
     maxResultBytes: z.number().int().positive().default(1_048_576),
+    maxArtifactBytes: z.number().int().positive().default(52_428_800),
+    binaryResults: z.enum(["block", "allow"]).default("block"),
   })
   .strict();
 

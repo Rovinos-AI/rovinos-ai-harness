@@ -274,6 +274,46 @@ describe("per-run filesystem workspace", () => {
     ).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
   });
 
+  it("publishes artifact batches completely and removes files when batch quota validation fails", async () => {
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-batch-")));
+    await ensureRunWorkspace(root, runA);
+    const workspace = new FsWorkspace({
+      workspaceRoot: root,
+      runId: runA,
+      maxFileBytes: 5,
+      quotaBytes: 8,
+      recountIntervalMs: 0,
+    });
+
+    await expect(
+      workspace.writeBatch([
+        { path: ".harness/offload/first.bin", data: new TextEncoder().encode("12345") },
+        { path: ".harness/offload/second.bin", data: new TextEncoder().encode("1234") },
+      ]),
+    ).rejects.toBeInstanceOf(WorkspaceQuotaExceededError);
+    await expect(workspace.read(".harness/offload/first.bin")).rejects.toMatchObject({
+      code: "workspace_file_not_found",
+    });
+
+    await expect(
+      workspace.writeBatch([
+        { path: ".harness/offload/first.bin", data: new TextEncoder().encode("123") },
+        { path: ".harness/offload/nested/second.bin", data: new TextEncoder().encode("45") },
+      ]),
+    ).rejects.toMatchObject({ code: "workspace_path_invalid" });
+    await expect(workspace.read(".harness/offload/first.bin")).rejects.toMatchObject({
+      code: "workspace_file_not_found",
+    });
+    await expect(readdir(join(root, runA, ".harness", "offload"))).resolves.toEqual([]);
+
+    await workspace.writeBatch([
+      { path: ".harness/offload/first.bin", data: new TextEncoder().encode("123") },
+      { path: ".harness/offload/second.bin", data: new TextEncoder().encode("45") },
+    ]);
+    await expect(workspace.read(".harness/offload/first.bin")).resolves.toEqual(Buffer.from("123"));
+    await expect(workspace.read(".harness/offload/second.bin")).resolves.toEqual(Buffer.from("45"));
+  });
+
   it("does not grant quota credit for an externally enlarged file before recount", async () => {
     root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-quota-stale-")));
     const clock = new FakeClock();

@@ -94,7 +94,7 @@ type SemanticEvent =
       readonly type: "tool_result";
       readonly toolId: string;
       readonly outcome: string;
-      readonly result: JsonValue;
+      readonly result: Extract<Event, { readonly type: "tool_result" }>["result"];
       readonly errorCode?: string;
     };
 

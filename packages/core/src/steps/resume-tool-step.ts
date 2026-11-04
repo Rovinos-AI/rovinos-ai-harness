@@ -51,7 +51,7 @@ async function recordDanglingFailure(
     setPolicySpanAttributes(intent);
     const result = await options.recorder.record({
       type: "tool_result",
-      v: 1,
+      v: 2,
       callId: intent.callId,
       toolId: resultToolId(options, intent),
       outcome: "error",
@@ -77,7 +77,7 @@ async function recordPolicyDenied(
     setPolicySpanAttributes(intent);
     return options.recorder.record({
       type: "tool_result",
-      v: 1,
+      v: 2,
       callId: intent.callId,
       toolId: resultToolId(options, intent),
       outcome: "denied",
@@ -233,7 +233,7 @@ async function applyToolResumeDecision(
   }
   batch.push({
     type: "tool_result",
-    v: 1,
+    v: 2,
     callId: intent.callId,
     toolId: intent.toolId,
     outcome: decision.execution.outcome,
@@ -279,7 +279,7 @@ export async function applyApprovalDecision(
       setPolicySpanAttributes(intent);
       return options.recorder.record({
         type: "tool_result",
-        v: 1,
+        v: 2,
         callId: intent.callId,
         toolId: resultToolId(options, intent),
         outcome: "denied",

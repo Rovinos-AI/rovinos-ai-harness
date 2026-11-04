@@ -332,7 +332,7 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
     setActiveSpanAttribute("harness.error.code", code);
     return options.recorder.record({
       type: "tool_result",
-      v: 1,
+      v: 2,
       callId: options.call.callId,
       toolId: options.call.toolId,
       outcome: timedOut ? "timeout" : "error",
@@ -390,7 +390,7 @@ function executionPayload(
 ): EventPartial {
   const payload: Extract<EventPartial, { type: "tool_result" }> = {
     type: "tool_result",
-    v: 1,
+    v: 2,
     callId: call.callId,
     toolId: call.toolId,
     outcome: execution.outcome,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { EVENT_FIELD_CLASS, joinEvent, splitEvent } from "./classification.js";
+import { upcastEvent } from "./event-versions.js";
 import { EventSchema, type EventType, type PayloadKeys } from "./events.js";
 import type { EventFieldClass } from "./classification.js";
 import { ContractError } from "./parse.js";
@@ -57,6 +58,54 @@ describe("EVENT_FIELD_CLASS", () => {
     }
   });
 
+  it("keeps artifact digests, resource URIs, and binary data inside tool-result content", () => {
+    const event = EventSchema.parse({
+      runId: "00000000000000000000000001",
+      seq: 4,
+      ts: 10,
+      type: "tool_result",
+      v: 2,
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      segmentId: "00000000000000000000000001",
+      callId: "00000000000000000000000002",
+      toolId: "mcp.test",
+      outcome: "ok",
+      latencyMs: 1,
+      result: {
+        format: "mcp-tool-result",
+        version: 1,
+        isError: false,
+        parts: [
+          {
+            type: "resource",
+            resource: {
+              uri: "file:///synthetic/resource",
+              artifact: {
+                handle: "wf_00000000000000000000000000",
+                mimeType: "application/octet-stream",
+                bytes: 1,
+                sha256: "c".repeat(64),
+              },
+            },
+          },
+          { type: "image", data: "SYNTHETIC_BINARY_CANARY" },
+        ],
+      },
+    });
+    if (event.type !== "tool_result") {
+      throw new Error("Expected a tool-result event.");
+    }
+    const { meta, content } = splitEvent(event);
+
+    expect(EVENT_FIELD_CLASS.tool_result.result).toBe("content");
+    expect(content.result).toEqual(event.result);
+    expect(JSON.stringify(meta)).not.toMatch(
+      /file:\/\/\/synthetic\/resource|c{64}|SYNTHETIC_BINARY_CANARY/u,
+    );
+    expect(joinEvent(meta, content)).toEqual(upcastEvent(event));
+  });
+
   it.each(eventSamples)("splits and rejoins $type without content in meta", (event) => {
     const { meta, content } = splitEvent(event);
     const expectedContentKeys = Object.entries(EVENT_FIELD_CLASS[event.type])
@@ -68,7 +117,7 @@ describe("EVENT_FIELD_CLASS", () => {
     for (const key of expectedContentKeys) {
       expect(meta).not.toHaveProperty(key);
     }
-    expect(joinEvent(meta, content)).toEqual(event);
+    expect(joinEvent(meta, content)).toEqual(upcastEvent(event));
   });
 
   it("omits undefined optional fields and validates joined records", () => {

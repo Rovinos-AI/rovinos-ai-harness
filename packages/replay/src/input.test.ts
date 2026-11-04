@@ -167,6 +167,12 @@ describe("recorded human-input runtime", () => {
         .map((event) => event.messages),
     );
     expect(outcome.status).toBe("completed");
+    expect(outcome.divergence).toBeUndefined();
+    expect(outcome.events.find((event) => event.type === "tool_result")).toMatchObject({
+      v: 2,
+      outcome: "ok",
+      result: { action: "accept", answer: { email: "<EMAIL_1>" } },
+    });
     expect(outcome.events.find((event) => event.type === "input_resolved")).toMatchObject({
       source: "agent",
       answer: { email: "<EMAIL_1>" },

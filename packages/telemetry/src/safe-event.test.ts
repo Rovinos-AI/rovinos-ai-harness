@@ -350,6 +350,46 @@ describe("SafeEvent projection", () => {
     expect(toSafeEvent(event)).toMatchObject({ policyVersion: POLICY_VERSION });
   });
 
+  it("keeps binary data, resource URIs, and artifact digests out of safe events", () => {
+    const uri = "file:///synthetic/RESOURCE_URI_CANARY";
+    const digest = "d".repeat(64);
+    const binary = "RAW_BINARY_CANARY";
+    const event = validEvent({
+      type: "tool_result",
+      callId: "00000000000000000000000002",
+      toolId: "tool.test",
+      outcome: "ok",
+      latencyMs: 4,
+      result: {
+        format: "mcp-tool-result",
+        version: 1,
+        isError: false,
+        parts: [
+          { type: "resource_link", uri, name: "synthetic" },
+          { type: "image", data: binary },
+          {
+            type: "blob",
+            artifact: {
+              handle: "wf_00000000000000000000000000",
+              mimeType: "application/octet-stream",
+              bytes: 1,
+              sha256: digest,
+            },
+          },
+        ],
+      },
+    });
+    const safeEvent = toSafeEvent(event, "sanitizer.v1");
+    const eventText = JSON.stringify(event);
+    const safeEventText = JSON.stringify(safeEvent);
+
+    for (const canary of [binary, uri, digest]) {
+      expect(eventText).toContain(canary);
+      expect(safeEventText).not.toContain(canary);
+    }
+    expect(safeEvent).not.toHaveProperty("result");
+  });
+
   it.each(unexportedEvents)("does not export $type", (event) => {
     expect(toSafeEvent(event, "sanitizer.v1")).toBeNull();
   });

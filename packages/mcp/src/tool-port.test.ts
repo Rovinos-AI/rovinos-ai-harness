@@ -60,6 +60,8 @@ async function fixture(
     readonly neverResolve?: boolean;
     readonly callMs?: number;
     readonly maxResultBytes?: number;
+    readonly maxArtifactBytes?: number;
+    readonly binaryResults?: "block" | "allow";
     readonly offloadBinaryResults?: boolean;
     readonly authRequiredMethod?: "tools/list" | "tools/call";
     readonly elicitation?: ServerConfig["elicitation"];
@@ -105,6 +107,8 @@ async function fixture(
     ...(options.elicitation === undefined ? {} : { elicitation: options.elicitation }),
     timeouts: { callMs: options.callMs ?? 1_000 },
     maxResultBytes: options.maxResultBytes ?? 1_048_576,
+    maxArtifactBytes: options.maxArtifactBytes ?? 52_428_800,
+    ...(options.binaryResults === undefined ? {} : { binaryResults: options.binaryResults }),
   });
   const transport: Transport =
     options.authRequiredMethod === undefined
@@ -403,7 +407,12 @@ describe("McpToolPort", () => {
       const result = await current.port.execute(call, context());
       expect(result).toEqual({
         outcome: "ok",
-        result: { content: [{ type: "text", text: "success" }] },
+        result: {
+          format: "mcp-tool-result",
+          version: 1,
+          isError: false,
+          parts: [{ type: "text", text: "success" }],
+        },
       });
       expect(current.calls).toHaveLength(1);
       expect(current.port.describe("mcp_test.echo")).toMatchObject({
@@ -440,7 +449,12 @@ describe("McpToolPort", () => {
       expect(result).toEqual({
         outcome: "error",
         errorCode: "tool_reported_error",
-        result: { content: [{ type: "text", text: canary }] },
+        result: {
+          format: "mcp-tool-result",
+          version: 1,
+          isError: true,
+          parts: [{ type: "text", text: canary }],
+        },
       });
       expect(JSON.stringify(spanCollector.getFinishedSpans().at(-1)?.attributes)).not.toContain(
         canary,
@@ -521,7 +535,7 @@ describe("McpToolPort", () => {
     }
   });
 
-  it("keeps small binary blocks reduced to metadata and bounded data", async () => {
+  it("blocks binary result parts by default", async () => {
     const current = await fixture({
       result: {
         content: [
@@ -531,37 +545,131 @@ describe("McpToolPort", () => {
     });
     try {
       await expect(current.port.execute(call, context())).resolves.toEqual({
-        outcome: "ok",
-        result: {
-          content: [{ type: "image", mimeType: "image/png", bytes: 2, data: "AQI=" }],
-        },
+        outcome: "error",
+        errorCode: "mcp_binary_result_blocked",
+        result: null,
       });
     } finally {
       await current.close();
     }
   });
 
-  it("returns a valid binary payload only when an offloader is configured", async () => {
+  it("limits the combined decoded bytes of allowed binary result parts", async () => {
+    const first = Buffer.from([1, 2, 3, 4]).toString("base64");
+    const second = Buffer.from([5, 6, 7]).toString("base64");
+    const uri = "file:///synthetic/ERROR_URI_CANARY";
+    const digest = "e".repeat(64);
+    const current = await fixture({
+      binaryResults: "allow",
+      maxArtifactBytes: 6,
+      offloadBinaryResults: true,
+      result: {
+        content: [
+          { type: "resource_link", uri, name: "synthetic" },
+          { type: "image", mimeType: "image/png", data: first },
+          { type: "audio", mimeType: "audio/wav", data: second },
+        ],
+        structuredContent: { sha256: digest },
+      },
+    });
+    try {
+      const execution = await current.port.execute(call, context());
+      expect(execution).toEqual({
+        outcome: "error",
+        errorCode: "artifact_too_large",
+        result: null,
+      });
+      expect(JSON.stringify(execution)).not.toContain(first);
+      expect(JSON.stringify(execution)).not.toContain(second);
+      expect(JSON.stringify(execution)).not.toContain(uri);
+      expect(JSON.stringify(execution)).not.toContain(digest);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("offloads every allowed binary part into a separate payload", async () => {
     const bytes = Buffer.alloc(9_000, 1);
     const current = await fixture({
       offloadBinaryResults: true,
+      binaryResults: "allow",
       result: {
-        content: [{ type: "audio", mimeType: "audio/wav", data: bytes.toString("base64") }],
+        content: [
+          { type: "text", text: "before" },
+          { type: "audio", mimeType: "audio/wav", data: bytes.toString("base64") },
+          { type: "text", text: "after" },
+        ],
       },
     });
     try {
       const result = await current.port.execute(call, context());
       expect(result.outcome).toBe("ok");
-      expect(result.binary).toBe(true);
-      expect(result.result).toEqual(Array.from(bytes));
+      expect(result.artifacts).toHaveLength(1);
+      expect(result.artifacts?.[0]?.bytes).toEqual(bytes);
+      expect(result.result).toMatchObject({
+        format: "mcp-tool-result",
+        parts: [
+          { type: "text", text: "before" },
+          { type: "audio", mimeType: "audio/wav" },
+          { type: "text", text: "after" },
+        ],
+      });
+      expect(JSON.stringify(result.result)).not.toContain(bytes.toString("base64"));
       expect(JsonValue.safeParse(result.result).success).toBe(true);
     } finally {
       await current.close();
     }
   });
 
-  it("fails closed for a large binary result without an offloader", async () => {
+  it("does not export allowed artifact bytes, URIs, or digests through call spans", async () => {
+    const bytes = Buffer.from("RAW_BINARY_CANARY");
+    const uri = "file:///synthetic/TELEMETRY_URI_CANARY";
+    const base64 = bytes.toString("base64");
     const current = await fixture({
+      offloadBinaryResults: true,
+      binaryResults: "allow",
+      result: {
+        content: [
+          { type: "resource_link", uri, name: "synthetic" },
+          { type: "image", mimeType: "image/png", data: base64 },
+        ],
+      },
+    });
+    try {
+      const before = spanCollector.getFinishedSpans().length;
+      const execution = await current.port.execute(call, context());
+      const artifact = execution.artifacts?.[0];
+      if (artifact === undefined) {
+        throw new Error("Expected one binary artifact.");
+      }
+      const telemetry = JSON.stringify(
+        spanCollector
+          .getFinishedSpans()
+          .slice(before)
+          .map(({ name, attributes, events, status }) => ({ name, attributes, events, status })),
+      );
+
+      expect(execution.outcome).toBe("ok");
+      expect(artifact.bytes).toEqual(bytes);
+      expect(execution.result).toMatchObject({
+        parts: [{ type: "resource_link", uri }, { type: "image" }],
+      });
+      for (const value of [bytes.toString(), base64, uri, artifact.sha256]) {
+        expect(
+          JSON.stringify({
+            rawResult: { bytes: bytes.toString(), base64, uri, digest: artifact.sha256 },
+          }),
+        ).toContain(value);
+        expect(telemetry).not.toContain(value);
+      }
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("fails closed for allowed binary output when no artifact store is configured", async () => {
+    const current = await fixture({
+      binaryResults: "allow",
       result: {
         content: [
           { type: "image", mimeType: "image/png", data: Buffer.alloc(9_000, 1).toString("base64") },
@@ -571,7 +679,7 @@ describe("McpToolPort", () => {
     try {
       await expect(current.port.execute(call, context())).resolves.toEqual({
         outcome: "error",
-        errorCode: "binary_result_unavailable",
+        errorCode: "artifact_store_unavailable",
         result: null,
       });
     } finally {
@@ -595,7 +703,7 @@ describe("McpToolPort", () => {
     try {
       await expect(complete.port.execute(call, context())).resolves.toMatchObject({
         outcome: "ok",
-        result: { content: [{ type: "text", text: "success" }] },
+        result: { format: "mcp-tool-result", parts: [{ type: "text", text: "success" }] },
       });
     } finally {
       await complete.close();
@@ -755,7 +863,7 @@ describe("McpToolPort", () => {
         );
         expect(result).toMatchObject({
           outcome: "ok",
-          result: { content: [{ type: "text", text: "complete" }] },
+          result: { format: "mcp-tool-result", parts: [{ type: "text", text: "complete" }] },
         });
         expect(handleInputRequired).toHaveBeenCalledWith(
           expect.objectContaining({ policyDeclinedInputKeys }),
@@ -805,7 +913,7 @@ describe("McpToolPort", () => {
       );
       expect(result).toMatchObject({
         outcome: "ok",
-        result: { content: [{ type: "text", text: "complete" }] },
+        result: { format: "mcp-tool-result", parts: [{ type: "text", text: "complete" }] },
       });
       expect(handleInputRequired).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -918,7 +1026,7 @@ describe("McpToolPort", () => {
         ),
       ).resolves.toMatchObject({
         outcome: "ok",
-        result: { content: [{ type: "text", text: "accept" }] },
+        result: { format: "mcp-tool-result", parts: [{ type: "text", text: "accept" }] },
       });
       expect(handleLegacyLive).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1029,7 +1137,7 @@ describe("McpToolPort", () => {
         ),
       ).resolves.toMatchObject({
         outcome: "ok",
-        result: { content: [{ type: "text", text: "decline" }] },
+        result: { format: "mcp-tool-result", parts: [{ type: "text", text: "decline" }] },
       });
       expect(recordLegacyPolicyDecline).toHaveBeenCalledWith(
         expect.objectContaining({ elicitationId: "unsafe-url-id" }),
@@ -1078,7 +1186,7 @@ describe("McpToolPort", () => {
         ),
       ).resolves.toMatchObject({
         outcome: "ok",
-        result: { content: [{ type: "text", text: "cancel" }] },
+        result: { format: "mcp-tool-result", parts: [{ type: "text", text: "cancel" }] },
       });
       expect(recordLegacyTimeout).toHaveBeenCalledWith(
         expect.objectContaining({ elicitationId: "timed-out-url-id" }),
@@ -1146,7 +1254,7 @@ describe("McpToolPort", () => {
       );
       expect(result).toMatchObject({
         outcome: "ok",
-        result: { content: [{ type: "text", text: "complete" }] },
+        result: { format: "mcp-tool-result", parts: [{ type: "text", text: "complete" }] },
       });
       expect(handleInputRequired).toHaveBeenCalledWith(
         expect.objectContaining({ requestState, round: 1 }),
@@ -1309,11 +1417,20 @@ describe("McpToolPort", () => {
     });
     try {
       const result = await current.port.execute(call, context());
-      expect(result.binary).toBeUndefined();
       expect(result).toMatchObject({
         outcome: "ok",
         result: {
-          content: [{ type: "resource", mimeType: "text/plain", data: text }],
+          format: "mcp-tool-result",
+          parts: [
+            {
+              type: "resource",
+              resource: {
+                uri: "file:///synthetic",
+                mimeType: "text/plain",
+                text,
+              },
+            },
+          ],
         },
       });
     } finally {
@@ -1396,7 +1513,7 @@ describe("McpToolPort", () => {
     }
   });
 
-  it("preserves structured results and normalizes embedded text resources", async () => {
+  it("preserves structured content and embedded resource fields in order", async () => {
     const current = await fixture({
       result: {
         content: [
@@ -1416,8 +1533,20 @@ describe("McpToolPort", () => {
       await expect(current.port.execute(call, context())).resolves.toEqual({
         outcome: "ok",
         result: {
-          content: [{ type: "resource", mimeType: "text/plain", bytes: 13, data: "resource text" }],
-          structured: { status: "ok" },
+          format: "mcp-tool-result",
+          version: 1,
+          isError: false,
+          parts: [
+            {
+              type: "resource",
+              resource: {
+                uri: "file:///synthetic",
+                mimeType: "text/plain",
+                text: "resource text",
+              },
+            },
+          ],
+          structuredContent: { status: "ok" },
         },
       });
     } finally {
@@ -1425,7 +1554,34 @@ describe("McpToolPort", () => {
     }
   });
 
-  it("reduces malformed and absent resource data to safe metadata", async () => {
+  it("preserves resource-link URIs, names, and optional fields in order", async () => {
+    const resourceLink = {
+      type: "resource_link",
+      uri: "file:///synthetic/linked-resource",
+      name: "linked-resource",
+      title: "Synthetic linked resource",
+      description: "Synthetic description",
+      mimeType: "text/plain",
+      annotations: { audience: ["assistant"], priority: 0.5 },
+    } satisfies Extract<NonNullable<CallToolResult["content"]>[number], { type: "resource_link" }>;
+    const current = await fixture({
+      result: {
+        content: [{ type: "text", text: "before" }, resourceLink, { type: "text", text: "after" }],
+      },
+    });
+    try {
+      await expect(current.port.execute(call, context())).resolves.toMatchObject({
+        outcome: "ok",
+        result: {
+          parts: [{ type: "text", text: "before" }, resourceLink, { type: "text", text: "after" }],
+        },
+      });
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("blocks embedded binary resources unless explicitly allowed", async () => {
     const current = await fixture({
       result: {
         content: [
@@ -1442,12 +1598,8 @@ describe("McpToolPort", () => {
     });
     try {
       await expect(current.port.execute(call, context())).resolves.toMatchObject({
-        outcome: "ok",
-        result: {
-          content: [
-            { type: "resource", mimeType: "application/octet-stream", bytes: 2, data: "AQI=" },
-          ],
-        },
+        outcome: "error",
+        errorCode: "mcp_binary_result_blocked",
       });
     } finally {
       await current.close();

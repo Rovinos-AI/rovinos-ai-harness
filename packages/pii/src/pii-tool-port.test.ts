@@ -140,6 +140,62 @@ describe("PiiToolPort", () => {
     expect(isSanitizedField(result, "result")).toBe(true);
   });
 
+  it.each(["execute", "recover"] as const)(
+    "preserves artifacts and the inline limit while sanitizing JSON on %s",
+    async (mode) => {
+      const { port, context, execute, summaries } = fixture();
+      const artifacts = [
+        {
+          partIndex: 0,
+          target: "data" as const,
+          mimeType: "image/png",
+          bytes: new Uint8Array([0, 255]),
+          sha256: "a".repeat(64),
+        },
+      ];
+      const execution = {
+        outcome: "ok" as const,
+        result: { text: "canary@example.test" },
+        artifacts,
+        resultLimitBytes: 200,
+      };
+      execute.mockResolvedValue(execution);
+      const prepared = await port.prepare(call, context);
+      const result =
+        mode === "execute"
+          ? await port.execute(prepared, context)
+          : await port.sanitizeRecoveredResult(prepared, context, execution);
+      expect(result.result).toEqual({ text: "<EMAIL_1>" });
+      expect(result.artifacts).toBe(artifacts);
+      expect(result.resultLimitBytes).toBe(200);
+      expect(isSanitizedField(result, "result")).toBe(true);
+      expect(JSON.stringify(summaries)).not.toContain(artifacts[0]?.sha256);
+    },
+  );
+
+  it("discards artifacts when output tokenization is blocked", async () => {
+    const { port, context, execute } = fixture({ block: true });
+    execute.mockResolvedValue({
+      outcome: "ok",
+      result: "canary@example.test",
+      artifacts: [
+        {
+          partIndex: 0,
+          target: "data",
+          mimeType: "image/png",
+          bytes: new Uint8Array([0, 255]),
+          sha256: "a".repeat(64),
+        },
+      ],
+      resultLimitBytes: 200,
+    });
+    await expect(port.execute({ ...call, args: {} }, context)).resolves.toEqual({
+      outcome: "error",
+      errorCode: "pii_blocked",
+      result: null,
+    });
+  });
+
   it("forwards metadata, tool specs and inner preparation on tokens", async () => {
     const { inner, port, context } = fixture();
     const inputSchema = { type: "object" };
@@ -288,6 +344,11 @@ describe("PiiToolPort", () => {
   });
 
   it.each([
+    "artifact_store_unavailable",
+    "artifact_too_large",
+    "artifact_write_failed",
+    "mcp_binary_result_blocked",
+    "mcp_result_invalid",
     "tool_reported_error",
     "mcp_internal_error",
     "mcp_timeout",

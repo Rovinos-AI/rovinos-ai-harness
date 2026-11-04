@@ -23,7 +23,7 @@ export function recordDeniedResult(
 ): Promise<Event> {
   return recorder.record({
     type: "tool_result",
-    v: 1,
+    v: 2,
     callId: call.callId,
     toolId: call.toolId,
     outcome: "denied",

@@ -13,6 +13,8 @@
     "../src/fs-tools.ts",
     "../src/types.ts",
     "../src/workspace.ts",
+    "../src/workspace-batch.ts",
+    "../src/workspace-path.ts",
     "../src/workspace-file-helpers.ts",
     "../src/workspace-file-quota.ts",
     "../src/workspace-file-search.ts",
