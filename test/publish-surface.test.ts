@@ -1,12 +1,69 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { execFileAsync } from "../scripts/release/check-publish-surface.js";
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const temporaryDirectories: string[] = [];
+const packageManifestSchema = z.looseObject({
+  name: z.string(),
+  private: z.boolean().optional(),
+});
+
+async function privateWorkspacePackages(): Promise<readonly string[]> {
+  const packageDirectories = await Promise.all(
+    ["packages", "tools"].map(async (workspaceRoot) => {
+      const directory = join(repositoryRoot, workspaceRoot);
+      const entries = await readdir(directory, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(directory, entry.name, "package.json"));
+    }),
+  );
+  const manifests = await Promise.all(
+    packageDirectories
+      .flat()
+      .map(async (manifestPath) =>
+        packageManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8"))),
+      ),
+  );
+  return manifests.filter((manifest) => manifest.private === true).map((manifest) => manifest.name);
+}
+
+function codeExamples(markdown: string): readonly string[] {
+  return [...markdown.matchAll(/```[^\n]*\n([\s\S]*?)```/gu)].map((match) => match[1] ?? "");
+}
+
+function privateImportsInExamples(
+  markdown: string,
+  privatePackages: readonly string[],
+): readonly string[] {
+  const exampleText = codeExamples(markdown).join("\n");
+  return privatePackages
+    .filter((packageName) => {
+      const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      return new RegExp(
+        String.raw`(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["']${escapedName}["']`,
+        "u",
+      ).test(exampleText);
+    })
+    .sort();
+}
+
+function typescriptExamplesInSection(markdown: string, heading: string): readonly string[] {
+  const sectionStart = markdown.indexOf(`## ${heading}`);
+  if (sectionStart < 0) {
+    throw new Error(`Documentation section is missing: ${heading}`);
+  }
+  const nextSection = markdown.indexOf("\n## ", sectionStart + heading.length + 3);
+  const section = markdown.slice(sectionStart, nextSection < 0 ? undefined : nextSection);
+  return [...section.matchAll(/```(?:ts|typescript)[ \t]*\n([\s\S]*?)```/gu)].map(
+    (match) => match[1] ?? "",
+  );
+}
 
 async function withCommandDiagnostics<T>(command: string, run: () => Promise<T>): Promise<T> {
   try {
@@ -92,6 +149,24 @@ describe("published package smoke test", () => {
     expect(failureMessage).toContain("Tail of stderr:\nstderr line 6");
     expect(failureMessage).toContain("stderr line 45");
     expect(failureMessage).not.toContain("stderr line 1\n");
+  });
+
+  it("rejects private workspace imports in public documentation examples", async () => {
+    const privatePackages = await privateWorkspacePackages();
+    const docs = await Promise.all(
+      ["sdk.md", "quickstart.md"].map((file) =>
+        readFile(join(repositoryRoot, "docs", file), "utf8"),
+      ),
+    );
+    expect(docs.flatMap((markdown) => privateImportsInExamples(markdown, privatePackages))).toEqual(
+      [],
+    );
+    expect(
+      privateImportsInExamples(
+        '```ts\nimport { Principal } from "@rovinos/schemas";\n```',
+        privatePackages,
+      ),
+    ).toEqual(["@rovinos/schemas"]);
   });
 
   it("installs the SDK and CLI tarballs outside the workspace", async () => {
@@ -189,6 +264,72 @@ describe("published package smoke test", () => {
     );
     await withCommandDiagnostics("corepack yarn node sdk-smoke.mjs", () =>
       execFileAsync("corepack", ["yarn", "node", smokeFile], {
+        cwd: projectDirectory,
+        maxBuffer: 10_000_000,
+        timeout: 120_000,
+      }),
+    );
+
+    const sdkDocs = await readFile(join(repositoryRoot, "docs", "sdk.md"), "utf8");
+    const examples = typescriptExamplesInSection(sdkDocs, "Approvals and human input");
+    expect(examples).toHaveLength(2);
+    const compiledDirectory = join(projectDirectory, "compiled");
+    await mkdir(compiledDirectory);
+    const exampleFiles = await Promise.all(
+      examples.map(async (example, index) => {
+        const sourceFile = join(projectDirectory, `sdk-example-${String(index)}.mts`);
+        await writeFile(sourceFile, example);
+        return sourceFile;
+      }),
+    );
+    await withCommandDiagnostics("TypeScript compile SDK documentation examples", () =>
+      execFileAsync(
+        process.execPath,
+        [
+          join(repositoryRoot, "node_modules", "typescript", "bin", "tsc"),
+          "--target",
+          "ES2022",
+          "--module",
+          "NodeNext",
+          "--moduleResolution",
+          "NodeNext",
+          "--strict",
+          "--skipLibCheck",
+          "--types",
+          "node",
+          "--outDir",
+          compiledDirectory,
+          ...exampleFiles,
+        ],
+        { cwd: projectDirectory, maxBuffer: 10_000_000, timeout: 120_000 },
+      ),
+    );
+    const exampleRunner = join(projectDirectory, "run-sdk-examples.mjs");
+    await writeFile(
+      exampleRunner,
+      [
+        'import { answerHumanInput } from "./compiled/sdk-example-0.mjs";',
+        'import { resolveApproval } from "./compiled/sdk-example-1.mjs";',
+        "const calls = [];",
+        "const harness = {",
+        "  async answerInput(requestId, options) {",
+        '    calls.push({ operation: "answerInput", requestId, options });',
+        "    return {};",
+        "  },",
+        "  async resolveApproval(approvalId, decision, options) {",
+        '    calls.push({ operation: "resolveApproval", approvalId, decision, options });',
+        "    return {};",
+        "  },",
+        "};",
+        'await answerHumanInput(harness, "synthetic-request-id");',
+        'await resolveApproval(harness, "synthetic-approval-id");',
+        'if (calls.length !== 2 || calls[0]?.options.principal !== "cli.operator" || calls[1]?.options.principal !== "cli.operator") {',
+        '  throw new Error("SDK documentation examples did not use validated principals");',
+        "}",
+      ].join("\n"),
+    );
+    await withCommandDiagnostics("Run packed SDK documentation examples", () =>
+      execFileAsync(process.execPath, [exampleRunner], {
         cwd: projectDirectory,
         maxBuffer: 10_000_000,
         timeout: 120_000,
