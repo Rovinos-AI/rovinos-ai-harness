@@ -6,6 +6,8 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./harness.js";
+export { Principal as PrincipalSchema } from "@rovinos/schemas";
+export type { Principal } from "@rovinos/schemas";
 export {
   SdkError,
   type ApprovalDecision,

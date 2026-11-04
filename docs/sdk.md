@@ -19,10 +19,11 @@ Without a configured run queue, `startRun` launches execution in-process and ret
 Idempotency keys are deduplicated across `Harness` instances sharing the same store and persist
 across restarts. Use opaque identifiers only; do not include sensitive data. The store retains only
 the domain-separated, unsalted SHA-256 hash, never the raw key, so low-entropy keys may be guessed
-from the table. Run the worker-backed queue mode only after task 24.2 is available.
+from the table. When a run queue is configured, operate a worker for that queue; otherwise, execution
+continues in-process.
 
-`InMemoryEventStore` is exported for ephemeral runs and tests. Durable SQLite and Postgres stores
-are available through their separate adapter packages.
+The SDK uses SQLite by default. Supply a custom event store through `overrides.store` when needed;
+durable SQLite and Postgres stores can also be selected through configuration.
 
 An optional `role` is passed to model routing. `requestedBy` records the run's requesting principal
 in `run_created` metadata; it is not an authorization mechanism.
@@ -61,13 +62,33 @@ against the recorded schema, tokenized before it is durably recorded, and never 
 metadata-only resolution result. Treat the answer as sensitive while collecting it; do not log it.
 
 ```ts
-import { Principal } from "@rovinos/schemas";
+import { PrincipalSchema, type Harness, type RunId } from "@rovinos/sdk";
 
-const resolution = await harness.answerInput(requestId, {
-  action: "accept",
-  content: { email: "synthetic@example.test" },
-  principal: Principal.parse("cli.operator"),
-});
+export async function answerHumanInput(
+  harness: Pick<Harness, "answerInput">,
+  requestId: RunId,
+): Promise<void> {
+  await harness.answerInput(requestId, {
+    action: "accept",
+    content: { email: "synthetic@example.test" },
+    principal: PrincipalSchema.parse("cli.operator"),
+  });
+}
+```
+
+Resolve a pending approval with the same validated principal contract:
+
+```ts
+import { PrincipalSchema, type Harness, type RunId } from "@rovinos/sdk";
+
+export async function resolveApproval(
+  harness: Pick<Harness, "resolveApproval">,
+  approvalId: RunId,
+): Promise<void> {
+  await harness.resolveApproval(approvalId, "approve", {
+    principal: PrincipalSchema.parse("cli.operator"),
+  });
+}
 ```
 
 With a configured run queue, resolution enqueues the run for a worker. Without a queue, resume it
