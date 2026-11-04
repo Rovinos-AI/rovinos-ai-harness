@@ -15,6 +15,7 @@ const { runId } = await harness.startRun({
 
 Without a configured run queue, `startRun` launches execution in-process and returns its id with
 `pending` status after the initial run events are durable, while execution continues detached.
+`continueRun` and `resumeRun` instead wait until their in-process execution finishes or suspends.
 Idempotency keys are deduplicated across `Harness` instances sharing the same store and persist
 across restarts. Use opaque identifiers only; do not include sensitive data. The store retains only
 the domain-separated, unsalted SHA-256 hash, never the raw key, so low-entropy keys may be guessed
@@ -31,7 +32,11 @@ in `run_created` metadata; it is not an authorization mechanism.
 `getRun` and `listRuns` return run status, usage totals, approval identifiers, pagination metadata,
 and `SafeEvent`s only. `watch` yields safe events in sequence order and supports `fromSeq` and an
 optional `AbortSignal`. Call `close` to stop subscriptions, wait for detached runs, and release
-resources.
+resources. Closing a harness rejects new starts, continuations, and resumes. Existing reads and
+cancellation requests remain available while admitted executions drain. `close()` waits up to
+`run.shutdownGraceMs`, then aborts remaining in-process executions with shutdown semantics; they
+suspend and can be resumed by a later client. The runtime and its resources are closed only after
+those executions settle. Jobs owned by external queue workers are not cancelled.
 
 Requester and approver principals are omitted from safe events by default. When
 `telemetry.correlation.enabled` is true, safe events include keyed pseudonyms for recorded

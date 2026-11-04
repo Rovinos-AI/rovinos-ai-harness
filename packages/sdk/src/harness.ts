@@ -44,45 +44,62 @@ const IDEMPOTENCY_ORPHAN_GRACE_MS = 30_000;
 const IDEMPOTENCY_START_WAIT_MS = 5_000;
 const IDEMPOTENCY_POLL_INTERVAL_MS = 10;
 
+interface ManagedExecution {
+  readonly controller: AbortController;
+  readonly settled: Promise<void>;
+  readonly resolveSettled: () => void;
+  tracked: boolean;
+}
+
 class HarnessClient implements Harness {
   private readonly idempotencyKeys = new Map<string, Promise<Id>>();
-  private readonly activeRuns = new Map<string, Promise<void>>();
+  private readonly managedExecutions = new Set<ManagedExecution>();
+  private readonly admittedRunIds = new Set<string>();
   private readonly watchers = new Set<AbortController>();
   private closed = false;
+  private disposed = false;
   private closePromise: Promise<void> | undefined;
 
   constructor(
     private readonly runtime: Runtime,
     private readonly piiEnabled: boolean,
     private readonly correlationEnabled: boolean,
+    private readonly shutdownGraceMs: number,
   ) {}
 
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
     this.assertOpen();
     const input = StartRunOptionsSchema.parse(options);
-    const keyHash =
-      input.idempotencyKey === undefined
-        ? undefined
-        : createHash("sha256")
-            .update("harness/sdk/idempotency/v1\0")
-            .update(input.idempotencyKey)
-            .digest("hex");
-    const existingStart = keyHash === undefined ? undefined : this.idempotencyKeys.get(keyHash);
-    if (existingStart !== undefined) {
-      return this.existingRunResult(await existingStart);
-    }
+    const managed = this.admitExecution();
+    try {
+      const keyHash =
+        input.idempotencyKey === undefined
+          ? undefined
+          : createHash("sha256")
+              .update("harness/sdk/idempotency/v1\0")
+              .update(input.idempotencyKey)
+              .digest("hex");
+      const existingStart = keyHash === undefined ? undefined : this.idempotencyKeys.get(keyHash);
+      if (existingStart !== undefined) {
+        return await this.existingRunResult(await existingStart);
+      }
 
-    const runInput = JsonValueSchema.parse(
-      RunInputSchema.parse({
-        goal: input.goal,
-        ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-      }),
-    );
-    const claim = keyHash === undefined ? undefined : await this.claimOrRecoverStart(keyHash);
-    if (claim !== undefined && "result" in claim) {
-      return claim.result;
+      const runInput = JsonValueSchema.parse(
+        RunInputSchema.parse({
+          goal: input.goal,
+          ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+        }),
+      );
+      const claim = keyHash === undefined ? undefined : await this.claimOrRecoverStart(keyHash);
+      if (claim !== undefined && "result" in claim) {
+        return claim.result;
+      }
+      return await this.launchRun(input, runInput, keyHash, claim?.runId, managed);
+    } finally {
+      if (!managed.tracked) {
+        this.finishExecution(managed);
+      }
     }
-    return this.launchRun(input, runInput, keyHash, claim?.runId);
   }
 
   private async claimOrRecoverStart(
@@ -110,13 +127,15 @@ class HarnessClient implements Harness {
     runInput: ReturnType<typeof JsonValueSchema.parse>,
     keyHash: string | undefined,
     candidateRunId: Id | undefined,
+    managed: ManagedExecution,
   ): Promise<RunStartResult> {
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
       ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
+      signal: managed.controller.signal,
     });
-    this.trackRun(runId, completion);
+    this.trackExecution(managed, runId, completion);
     const start = started.then(() => runId);
     if (keyHash !== undefined) {
       this.idempotencyKeys.set(keyHash, start);
@@ -150,17 +169,29 @@ class HarnessClient implements Harness {
       goal: input.goal,
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     });
-    const result = await this.runtime.continueRun(parsedRunId, runInput).completion;
-    const created = result.events.find((event) => event.type === "run_created");
-    if (created?.type !== "run_created") {
-      throw new SdkError("sdk_run_not_found");
+    const managed = this.admitExecution();
+    this.admittedRunIds.add(parsedRunId);
+    try {
+      const execution = this.runtime.continueRun(parsedRunId, runInput, {
+        signal: managed.controller.signal,
+      });
+      this.trackExecution(managed, execution.runId, execution.completion);
+      const result = await execution.completion;
+      const created = result.events.find((event) => event.type === "run_created");
+      if (created?.type !== "run_created") {
+        throw new SdkError("sdk_run_not_found");
+      }
+      return RunStartResultSchema.parse({ runId: created.runId, status: result.status });
+    } finally {
+      if (!managed.tracked) {
+        this.finishExecution(managed);
+      }
     }
-    return RunStartResultSchema.parse({ runId: created.runId, status: result.status });
   }
 
   async getRun(runId: string) {
-    this.assertOpen();
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
+    this.assertAvailable(parsedRunId);
     const events = await readEvents(this.runtime, parsedRunId);
     const firstEvent = events[0];
     const lastEvent = events.at(-1);
@@ -182,7 +213,7 @@ class HarnessClient implements Harness {
   }
 
   async listRuns(filter: ListRunsFilter = {}) {
-    this.assertOpen();
+    this.assertAvailable();
     const input = ListRunsFilterSchema.parse(filter);
     const page = await this.runtime.store.listRuns({
       limit: input.limit,
@@ -196,13 +227,23 @@ class HarnessClient implements Harness {
   async resumeRun(runId: string): Promise<RunStartResult> {
     this.assertOpen();
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
-    const result = await this.runtime.resume(parsedRunId);
-    return RunStartResultSchema.parse({ runId: parsedRunId, status: result.status });
+    const managed = this.admitExecution();
+    this.admittedRunIds.add(parsedRunId);
+    try {
+      const completion = this.runtime.resume(parsedRunId, { signal: managed.controller.signal });
+      this.trackExecution(managed, parsedRunId, completion);
+      const result = await completion;
+      return RunStartResultSchema.parse({ runId: parsedRunId, status: result.status });
+    } finally {
+      if (!managed.tracked) {
+        this.finishExecution(managed);
+      }
+    }
   }
 
   async cancelRun(runId: string) {
-    this.assertOpen();
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
+    this.assertAvailable(parsedRunId);
     return CancelRunResultSchema.parse(await this.runtime.cancel(parsedRunId));
   }
 
@@ -223,13 +264,14 @@ class HarnessClient implements Harness {
   watch(runId: string, options: WatchOptions = {}): AsyncIterable<SafeEvent> {
     this.assertOpen();
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
+    this.assertAvailable(parsedRunId);
     const input = WatchOptionsSchema.parse(options);
     return this.watchEvents(parsedRunId, input);
   }
 
   async getRunContent(runId: string, options: GetRunContentOptions) {
-    this.assertOpen();
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
+    this.assertAvailable(parsedRunId);
     GetRunContentOptionsSchema.parse(options);
     if (!this.piiEnabled) {
       throw new SdkError("sdk_content_unavailable");
@@ -241,22 +283,61 @@ class HarnessClient implements Harness {
     return RunContentSchema.parse(contentEntries(events));
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     if (this.closePromise !== undefined) {
       return this.closePromise;
     }
     this.closed = true;
-    this.watchers.forEach((watcher) => {
-      watcher.abort();
-    });
     this.closePromise = this.closeRuntime();
     return this.closePromise;
   }
 
   private assertOpen(): void {
-    if (this.closed) {
+    if (this.closed || this.disposed) {
       throw new SdkError("sdk_closed");
     }
+  }
+
+  private assertAvailable(runId?: string): void {
+    if (this.disposed || (this.closed && runId !== undefined && !this.admittedRunIds.has(runId))) {
+      throw new SdkError("sdk_closed");
+    }
+  }
+
+  private admitExecution(): ManagedExecution {
+    this.assertOpen();
+    let resolveSettled: () => void = () => undefined;
+    const settled = new Promise<void>((resolve) => {
+      resolveSettled = resolve;
+    });
+    const managed: ManagedExecution = {
+      controller: new AbortController(),
+      settled,
+      resolveSettled,
+      tracked: false,
+    };
+    this.managedExecutions.add(managed);
+    return managed;
+  }
+
+  private trackExecution(
+    managed: ManagedExecution,
+    runId: string,
+    completion: Promise<unknown>,
+  ): void {
+    managed.tracked = true;
+    this.admittedRunIds.add(runId);
+    void completion.then(
+      () => this.finishExecution(managed),
+      () => this.finishExecution(managed),
+    );
+  }
+
+  private finishExecution(managed: ManagedExecution): void {
+    if (!this.managedExecutions.delete(managed)) {
+      return;
+    }
+    managed.resolveSettled();
   }
 
   private async existingRunResult(runId: Id): Promise<RunStartResult> {
@@ -302,26 +383,36 @@ class HarnessClient implements Harness {
     throw new SdkError("sdk_run_not_found");
   }
 
-  private trackRun(runId: Id, completion: Promise<unknown>): void {
-    const settled = completion.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.activeRuns.set(runId, settled);
-    void settled.then(() => {
-      if (this.activeRuns.get(runId) === settled) {
-        this.activeRuns.delete(runId);
-      }
-    });
-  }
-
   private async closeRuntime(): Promise<void> {
-    await Promise.all(this.activeRuns.values());
-    await this.runtime.close();
+    const active = Array.from(this.managedExecutions);
+    if (active.length > 0) {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const expired = await Promise.race([
+        Promise.all(active.map(({ settled }) => settled)).then(() => false),
+        new Promise<boolean>((resolve) => {
+          timeout = setTimeout(() => resolve(true), this.shutdownGraceMs);
+        }),
+      ]);
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+      }
+      if (expired) {
+        for (const execution of this.managedExecutions) {
+          execution.controller.abort("shutdown");
+        }
+      }
+      await Promise.all(Array.from(this.managedExecutions, ({ settled }) => settled));
+    }
+    this.watchers.forEach((watcher) => watcher.abort());
+    try {
+      await this.runtime.close();
+    } finally {
+      this.disposed = true;
+    }
   }
 
   private async *watchEvents(runId: Id, options: ReturnType<typeof WatchOptionsSchema.parse>) {
-    if (this.closed) {
+    if (this.disposed) {
       throw new SdkError("sdk_closed");
     }
     const controller = new AbortController();
@@ -376,5 +467,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
       ? parsedOptions.config
       : await loadConfig({ configPath: parsedOptions.configPath });
   const runtime = await createRuntime(config, runtimeOverrides);
-  return new HarnessClient(runtime, config.pii.enabled, config.telemetry.correlation.enabled);
+  return new HarnessClient(
+    runtime,
+    config.pii.enabled,
+    config.telemetry.correlation.enabled,
+    config.run.shutdownGraceMs,
+  );
 }

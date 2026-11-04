@@ -172,6 +172,7 @@ export interface Runtime {
       readonly parentRunId?: Id;
       readonly rootSpanParent?: Context;
       readonly evalMetadata?: EvalRunMetadata;
+      readonly signal?: AbortSignal;
     },
   ): Promise<RunLoopResult>;
   /** Starts a run and exposes when its initial events are durable and when execution settles. */
@@ -186,13 +187,14 @@ export interface Runtime {
       readonly requestedBy?: Principal;
       readonly onProgress?: NonNullable<RunContext["onProgress"]>;
       readonly evalMetadata?: EvalRunMetadata;
+      readonly signal?: AbortSignal;
     },
   ): RuntimeRunHandle;
   /** Starts a follow-up run and exposes durable startup and eventual completion. */
   continueRun(
     runId: Id,
     input: RunInput,
-    options?: { readonly requestedBy?: Principal },
+    options?: { readonly requestedBy?: Principal; readonly signal?: AbortSignal },
   ): RuntimeRunHandle;
   resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */
