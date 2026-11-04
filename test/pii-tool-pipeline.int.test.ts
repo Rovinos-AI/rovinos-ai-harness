@@ -104,6 +104,12 @@ async function pipeline(
       files.set(path, data.slice());
       return Promise.resolve();
     },
+    writeBatch: (entries) => {
+      for (const { path, data } of entries) {
+        files.set(path, data.slice());
+      }
+      return Promise.resolve();
+    },
     read: (path, range) =>
       Promise.resolve(
         (files.get(path) ?? new Uint8Array()).slice(

@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, SequentialIdGenerator, type Event, type JsonValue } from "@rovinos/schemas";
+import {
+  Id,
+  McpResultArtifactReferenceSchema,
+  McpToolResultEnvelopeSchema,
+  SequentialIdGenerator,
+  type Event,
+  type JsonValue,
+} from "@rovinos/schemas";
 import { describe, expect, it, vi } from "vitest";
 import {
   InMemoryWorkspace,
@@ -104,6 +111,174 @@ describe("InMemoryWorkspace", () => {
 });
 
 describe("OffloadingToolPort", () => {
+  it("writes ordered binary artifacts in a batch and substitutes per-part references", async () => {
+    const workspace = new InMemoryWorkspace();
+    const writeBatch = vi.spyOn(workspace, "writeBatch");
+    const imageBytes = new Uint8Array([0, 255, 7]);
+    const resourceBytes = new Uint8Array([1, 2]);
+    const envelope: JsonValue = {
+      format: "mcp-tool-result",
+      version: 1,
+      isError: false,
+      parts: [
+        { type: "text", text: "before" },
+        { type: "image", mimeType: "image/png" },
+        {
+          type: "resource",
+          resource: { uri: "file:///synthetic", mimeType: "application/octet-stream" },
+        },
+        { type: "text", text: "after" },
+      ],
+      structuredContent: { status: "ok" },
+    };
+    const inner: OffloadToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () =>
+        Promise.resolve({
+          outcome: "ok",
+          result: envelope,
+          resultLimitBytes: 2_000,
+          artifacts: [
+            {
+              partIndex: 1,
+              target: "data",
+              mimeType: "image/png",
+              bytes: imageBytes,
+              sha256: "a".repeat(64),
+            },
+            {
+              partIndex: 2,
+              target: "resource.blob",
+              mimeType: "application/octet-stream",
+              bytes: resourceBytes,
+              sha256: "b".repeat(64),
+            },
+          ],
+        }),
+    };
+    const port = new OffloadingToolPort(inner, workspace, {}, new SequentialIdGenerator());
+
+    const execution = await port.execute(call(), context);
+    const result = McpToolResultEnvelopeSchema.parse(execution.result);
+    const imageReference = McpResultArtifactReferenceSchema.parse(
+      result.parts[1] !== null &&
+        typeof result.parts[1] === "object" &&
+        !Array.isArray(result.parts[1])
+        ? result.parts[1].artifact
+        : undefined,
+    );
+    const resourcePart = result.parts[2];
+    if (
+      resourcePart === null ||
+      typeof resourcePart !== "object" ||
+      Array.isArray(resourcePart) ||
+      resourcePart.resource === null ||
+      typeof resourcePart.resource !== "object" ||
+      Array.isArray(resourcePart.resource)
+    ) {
+      throw new Error("Missing resource result part.");
+    }
+    const resourceReference = McpResultArtifactReferenceSchema.parse(
+      resourcePart.resource.artifact,
+    );
+
+    expect(result.parts[0]).toEqual({ type: "text", text: "before" });
+    expect(result.parts[3]).toEqual({ type: "text", text: "after" });
+    expect(resourcePart.resource.uri).toBe("file:///synthetic");
+    expect(writeBatch).toHaveBeenCalledTimes(1);
+    expect(await workspace.read(`.harness/offload/${imageReference.handle}.bin`)).toEqual(
+      imageBytes,
+    );
+    expect(await workspace.read(`.harness/offload/${resourceReference.handle}.bin`)).toEqual(
+      resourceBytes,
+    );
+    expect(JSON.stringify(execution)).not.toContain(Buffer.from(imageBytes).toString("base64"));
+    expect(JSON.stringify(execution)).not.toContain(Buffer.from(resourceBytes).toString("base64"));
+
+    const page = await port.execute(
+      call("read_offloaded", { handle: imageReference.handle, encoding: "base64" }),
+      context,
+    );
+    const decoded = ReadOffloadedResultSchema.parse(page.result);
+    expect(decoded.encoding).toBe("base64");
+    expect([...Buffer.from(decoded.data, "base64")]).toEqual([...imageBytes]);
+  });
+
+  it("checks the substituted envelope limit before atomically writing artifacts", async () => {
+    const workspace = new InMemoryWorkspace();
+    const writeBatch = vi.spyOn(workspace, "writeBatch");
+    const bytes = new Uint8Array([1, 2, 3]);
+    const inner: OffloadToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () =>
+        Promise.resolve({
+          outcome: "ok",
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: false,
+            parts: [{ type: "blob", mimeType: "application/octet-stream" }],
+          },
+          resultLimitBytes: 1,
+          artifacts: [
+            {
+              partIndex: 0,
+              target: "data",
+              mimeType: "application/octet-stream",
+              bytes,
+              sha256: "c".repeat(64),
+            },
+          ],
+        }),
+    };
+    const port = new OffloadingToolPort(inner, workspace, {}, new SequentialIdGenerator());
+
+    await expect(port.execute(call(), context)).resolves.toMatchObject({
+      outcome: "error",
+      errorCode: "result_too_large",
+      result: null,
+    });
+    expect(writeBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns only a closed code when a batch artifact write fails", async () => {
+    const workspace = new InMemoryWorkspace();
+    vi.spyOn(workspace, "writeBatch").mockRejectedValue(new Error("synthetic binary detail"));
+    const bytes = new Uint8Array([1, 2, 3]);
+    const inner: OffloadToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () =>
+        Promise.resolve({
+          outcome: "ok",
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: false,
+            parts: [{ type: "image", mimeType: "image/png" }],
+          },
+          resultLimitBytes: 2_000,
+          artifacts: [
+            {
+              partIndex: 0,
+              target: "data",
+              mimeType: "image/png",
+              bytes,
+              sha256: "d".repeat(64),
+            },
+          ],
+        }),
+    };
+    const port = new OffloadingToolPort(inner, workspace, {}, new SequentialIdGenerator());
+
+    const execution = await port.execute(call(), context);
+    expect(execution).toEqual({
+      outcome: "error",
+      errorCode: "artifact_write_failed",
+      result: null,
+    });
+    expect(JSON.stringify(execution)).not.toContain("synthetic binary detail");
+  });
+
   it("leaves results at or below the serialized string-length threshold untouched", async () => {
     const workspace = new InMemoryWorkspace();
     const { inner, execution } = fakePort("é");
@@ -353,6 +528,7 @@ describe("OffloadingToolPort", () => {
   it("propagates workspace errors other than a missing file", async () => {
     const workspace: WorkspacePort = {
       write: () => Promise.resolve(),
+      writeBatch: () => Promise.resolve(),
       read: () => Promise.reject(new Error("synthetic workspace failure")),
     };
     const port = new OffloadingToolPort(fakePort(null).inner, workspace);

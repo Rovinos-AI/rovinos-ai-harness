@@ -48,6 +48,15 @@ export {
 } from "./approval-tools.js";
 export { ToolBinaryPayloadSchema, type ToolBinaryPayload } from "./tool-binary.js";
 export {
+  LegacyToolResultSchema,
+  McpResultArtifactReferenceSchema,
+  McpToolResultEnvelopeSchema,
+  unwrapLegacyToolResult,
+  type LegacyToolResult,
+  type McpResultArtifactReference,
+  type McpToolResultEnvelope,
+} from "./mcp-tool-result.js";
+export {
   createVerdictSchema,
   VerdictCriterionSchema,
   VerdictSchema,

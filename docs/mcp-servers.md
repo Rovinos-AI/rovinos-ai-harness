@@ -21,6 +21,15 @@ transports reject unknown fields.
 | `timeouts.connectMs` | positive integer | `10000` | Connection timeout in milliseconds. |
 | `timeouts.callMs` | positive integer | `60000` | Tool-call timeout in milliseconds. |
 | `maxResultBytes` | positive integer | `1048576` | Maximum accepted tool-result size in bytes. |
+| `maxArtifactBytes` | positive integer | `52428800` | Maximum combined decoded size of binary result artifacts for one call. |
+| `binaryResults` | `block` or `allow` | `block` | Whether binary MCP result parts may be stored as run-workspace artifacts. |
+
+MCP binary result parts are blocked by default (`mcp_binary_result_blocked`). To
+enable them for a server, set `binaryResults: allow`. The combined decoded bytes
+of all offloaded parts must fit `maxArtifactBytes`; the inline envelope after
+artifact substitution must fit `maxResultBytes`. Allowed binary artifacts are
+stored without tokenization in the run workspace; see the explicit privacy exception in
+[the guarantees](guarantees.md#binary-mcp-artifacts).
 
 Tool names in `toolAllowlist` and `idempotentTools` are the names returned by
 the server, before harness normalization. Names must be non-empty and unique

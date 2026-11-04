@@ -31,6 +31,7 @@ export type OffloadedStub = z.infer<typeof OffloadedStub>;
 export const ReadOffloadedResultSchema = z
   .object({
     data: z.string(),
+    encoding: z.enum(["text", "base64"]).optional(),
     nextOffset: z.number().int().nonnegative().optional(),
     totalBytes: z.number().int().nonnegative(),
   })
@@ -43,6 +44,7 @@ export type ReadOffloadedResult = z.infer<typeof ReadOffloadedResultSchema>;
 export const ReadOffloadedInputSchema = z
   .object({
     handle: OffloadedHandleSchema,
+    encoding: z.enum(["text", "base64"]).default("text"),
     offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
     length: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   })

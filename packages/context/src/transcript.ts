@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, JsonValue, Message } from "@rovinos/schemas";
+import { unwrapLegacyToolResult, type Event, type JsonValue, type Message } from "@rovinos/schemas";
 import { TranscriptSchema, type TranscriptGroup } from "./types.js";
 
 function inputText(input: JsonValue): string {
@@ -17,7 +17,7 @@ function toolResultMessage(event: Extract<Event, { type: "tool_result" }>): Mess
       {
         type: "tool_result",
         callId: event.callId,
-        result: event.result,
+        result: unwrapLegacyToolResult(event.result),
         isError: event.outcome !== "ok",
       },
     ],

@@ -37,6 +37,8 @@ describe("ServerConfigSchema", () => {
       },
       timeouts: { connectMs: 10_000, callMs: 60_000 },
       maxResultBytes: 1_048_576,
+      maxArtifactBytes: 52_428_800,
+      binaryResults: "block",
     });
   });
 
@@ -61,6 +63,8 @@ describe("ServerConfigSchema", () => {
       useAnnotations: true,
       timeouts: { connectMs: 500, callMs: 2_000 },
       maxResultBytes: 100_000,
+      maxArtifactBytes: 12_345,
+      binaryResults: "allow",
     });
 
     expect(parsed).toMatchObject({
@@ -74,6 +78,8 @@ describe("ServerConfigSchema", () => {
       useAnnotations: true,
       timeouts: { connectMs: 500, callMs: 2_000 },
       maxResultBytes: 100_000,
+      maxArtifactBytes: 12_345,
+      binaryResults: "allow",
     });
   });
 
@@ -351,6 +357,10 @@ describe("ServerConfigSchema", () => {
       false,
     );
     expect(ServerConfigSchema.safeParse({ ...config, maxResultBytes: 0 }).success).toBe(false);
+    expect(ServerConfigSchema.safeParse({ ...config, maxArtifactBytes: 0 }).success).toBe(false);
+    expect(ServerConfigSchema.safeParse({ ...config, binaryResults: "always" }).success).toBe(
+      false,
+    );
     expect(
       ServerConfigSchema.safeParse({
         ...config,

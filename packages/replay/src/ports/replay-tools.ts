@@ -4,6 +4,7 @@ import {
   Code,
   HarnessError,
   Sha256Hex,
+  unwrapLegacyToolResult,
   type Event,
   type Id,
   type JsonValue,
@@ -174,7 +175,11 @@ export class ReplayToolPort implements ToolPort {
     const errorCode =
       result.errorCode ??
       (result.outcome === "timeout" ? Code.parse("tool_timeout") : Code.parse("tool_failed"));
-    return { outcome, result: result.result, ...(outcome === "error" ? { errorCode } : {}) };
+    return {
+      outcome,
+      result: unwrapLegacyToolResult(result.result),
+      ...(outcome === "error" ? { errorCode } : {}),
+    };
   }
 }
 

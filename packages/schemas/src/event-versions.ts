@@ -14,7 +14,7 @@ export const EVENT_SCHEMA_VERSIONS = {
   model_response: 1,
   tool_intent: 1,
   tool_execution_started: 1,
-  tool_result: 1,
+  tool_result: 2,
   approval_requested: 1,
   approval_resolved: 2,
   input_requested: 1,
@@ -50,6 +50,9 @@ export const UPCASTERS: EventUpcasterMap = {
   approval_resolved: {
     1: approvalResolvedV1ToV2,
   },
+  tool_result: {
+    1: toolResultV1ToV2,
+  },
 };
 
 /** Keeps v1 run metadata valid while adding the optional pinned catalog fingerprint in v2. */
@@ -73,6 +76,17 @@ function approvalResolvedV1ToV2(payload: unknown): unknown {
     return payload;
   }
   return Object.hasOwn(payload, "decidedBy") ? payload : { ...payload, decidedBy: "human" };
+}
+
+/** Preserves an untagged v1 result as its exact legacy JSON value. */
+function toolResultV1ToV2(payload: unknown): unknown {
+  if (!isRecord(payload) || !Object.hasOwn(payload, "result")) {
+    return payload;
+  }
+  return {
+    ...payload,
+    result: { format: "legacy-json", version: 1, value: payload.result },
+  };
 }
 
 /** Raw event envelope schema; payload keys are validated by the current strict schema after upcasting. */

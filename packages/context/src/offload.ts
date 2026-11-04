@@ -13,11 +13,12 @@ import {
   type PiiActionSummary,
 } from "@rovinos/schemas";
 import { SystemOffloadIdGenerator } from "./offload-id.js";
+import { offloadArtifactResult } from "./offload-artifacts.js";
+import { readOffloaded } from "./offload-read.js";
 import {
   OffloadedHandleSchema,
   OffloadedStub,
   ReadOffloadedInputSchema,
-  ReadOffloadedResultSchema,
 } from "./offload-schemas.js";
 import type { OffloadedHandle } from "./offload-schemas.js";
 export {
@@ -28,7 +29,6 @@ export {
 } from "./offload-schemas.js";
 export type { OffloadedHandle, ReadOffloadedResult } from "./offload-schemas.js";
 
-const MAX_READ_BYTES = 16 * 1024;
 const OFFLOAD_DIRECTORY = ".harness/offload/";
 
 /** Workspace-relative range in bytes. */
@@ -53,6 +53,11 @@ export interface WorkspacePort {
    * @param data - Bytes to persist.
    */
   write(path: string, data: Uint8Array): Promise<void>;
+
+  /** Publishes every file in a batch or leaves no batch file visible. */
+  writeBatch(
+    entries: readonly { readonly path: string; readonly data: Uint8Array }[],
+  ): Promise<void>;
 
   /** Reads bytes from an offload path, optionally selecting a byte range.
    * @param path - Workspace-relative path below `.harness/offload/`.
@@ -85,11 +90,19 @@ export interface OffloadRunContext {
 
 /** Result returned by a tool execution. */
 export interface OffloadToolExecutionResult {
+  readonly artifacts?: readonly {
+    readonly partIndex: number;
+    readonly target: "data" | "resource.blob";
+    readonly mimeType: string;
+    readonly bytes: Uint8Array;
+    readonly sha256: string;
+  }[];
   readonly binary?: boolean;
   readonly metadata?: JsonValueType;
   readonly suspend?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValueType;
+  readonly resultLimitBytes?: number;
   readonly errorCode?: Code;
 }
 
@@ -182,6 +195,28 @@ export class InMemoryWorkspace implements WorkspacePort {
     });
   }
 
+  writeBatch(
+    entries: readonly { readonly path: string; readonly data: Uint8Array }[],
+  ): Promise<void> {
+    return Promise.resolve().then(() => {
+      const validated: { readonly path: string; readonly data: Uint8Array }[] = entries.map(
+        ({ path, data }) => {
+          validateWorkspacePath(path);
+          if (this.files.has(path)) {
+            throw new WorkspacePathError();
+          }
+          return { path, data: data.slice() };
+        },
+      );
+      if (new Set(validated.map(({ path }) => path)).size !== validated.length) {
+        throw new WorkspacePathError();
+      }
+      for (const { path, data } of validated) {
+        this.files.set(path, data);
+      }
+    });
+  }
+
   /** {@inheritDoc WorkspacePort.read} */
   read(path: string, range?: WorkspaceReadRange): Promise<Uint8Array> {
     return Promise.resolve().then(() => {
@@ -202,7 +237,7 @@ export class InMemoryWorkspace implements WorkspacePort {
 /** Tool specification for registering the idempotent `read_offloaded` tool. */
 export const READ_OFFLOADED_TOOL_SPEC: ToolSpec = ToolSpecSchema.parse({
   toolId: "read_offloaded",
-  description: "Read a page of a large tool result stored in the run workspace.",
+  description: "Read a page of a large tool result or binary artifact from the run workspace.",
   inputSchema: JsonValue.parse(z.toJSONSchema(ReadOffloadedInputSchema)),
 });
 
@@ -212,187 +247,6 @@ function offloadPath(handle: string): string {
 
 function toolError(errorCode: Code): OffloadToolExecutionResult {
   return { outcome: "error", errorCode, result: null };
-}
-
-function isContinuationByte(byte: number): boolean {
-  return byte >= 0x80 && byte <= 0xbf;
-}
-
-function expectedUtf8Length(leadByte: number): number {
-  if (leadByte <= 0x7f) {
-    return 1;
-  }
-  if (leadByte >= 0xc2 && leadByte <= 0xdf) {
-    return 2;
-  }
-  if (leadByte >= 0xe0 && leadByte <= 0xef) {
-    return 3;
-  }
-  if (leadByte >= 0xf0 && leadByte <= 0xf4) {
-    return 4;
-  }
-  return 1;
-}
-
-function incompleteUtf8TailStart(bytes: Uint8Array): number {
-  let start = bytes.byteLength - 1;
-  while (start >= 0 && isContinuationByte(bytes[start] ?? 0)) {
-    start -= 1;
-  }
-  if (start < 0) {
-    return bytes.byteLength;
-  }
-  const expectedLength = expectedUtf8Length(bytes[start] ?? 0);
-  return bytes.byteLength - start < expectedLength ? start : bytes.byteLength;
-}
-
-interface LoadedOffloadPage {
-  readonly page: Uint8Array;
-  readonly totalBytes: number;
-}
-
-interface LoadOffloadPageOptions {
-  readonly workspace: WorkspacePort;
-  readonly handle: OffloadedHandle;
-  readonly knownSizes: Map<OffloadedHandle, number>;
-  readonly offset: number;
-  readonly length: number;
-}
-
-async function hasWorkspaceByte(
-  workspace: WorkspacePort,
-  path: string,
-  offset: number,
-): Promise<boolean> {
-  return (await workspace.read(path, { offset, length: 1 })).byteLength > 0;
-}
-
-async function findWorkspaceFileSize(workspace: WorkspacePort, path: string): Promise<number> {
-  let lowerBound = 0;
-  let upperBound = 1;
-  while (await hasWorkspaceByte(workspace, path, upperBound)) {
-    if (upperBound === Number.MAX_SAFE_INTEGER) {
-      throw new RangeError("Workspace file exceeds the supported size.");
-    }
-    lowerBound = upperBound + 1;
-    upperBound = Math.min(lowerBound * 2, Number.MAX_SAFE_INTEGER);
-  }
-
-  while (lowerBound < upperBound) {
-    const midpoint = Math.floor((lowerBound + upperBound) / 2);
-    if (await hasWorkspaceByte(workspace, path, midpoint)) {
-      lowerBound = midpoint + 1;
-    } else {
-      upperBound = midpoint;
-    }
-  }
-  return lowerBound;
-}
-
-async function loadOffloadPage(options: LoadOffloadPageOptions): Promise<LoadedOffloadPage> {
-  const { workspace, handle, knownSizes, offset, length } = options;
-  let totalBytes = knownSizes.get(handle);
-  if (totalBytes === undefined) {
-    totalBytes = await findWorkspaceFileSize(workspace, offloadPath(handle));
-    knownSizes.set(handle, totalBytes);
-  }
-  return {
-    page: await workspace.read(offloadPath(handle), { offset, length }),
-    totalBytes,
-  };
-}
-
-interface CompleteUtf8PageOptions {
-  readonly workspace: WorkspacePort;
-  readonly handle: OffloadedHandle;
-  readonly offset: number;
-  readonly length: number;
-  readonly page: Uint8Array;
-}
-
-async function completeUtf8Page(options: CompleteUtf8PageOptions): Promise<Uint8Array> {
-  const { workspace, handle, offset, length, page } = options;
-  const boundedPage = page.byteLength > MAX_READ_BYTES ? page.slice(0, MAX_READ_BYTES) : page;
-  const incompleteTailStart = incompleteUtf8TailStart(boundedPage);
-  if (incompleteTailStart === boundedPage.byteLength) {
-    return boundedPage;
-  }
-
-  const incompleteLength = boundedPage.byteLength - incompleteTailStart;
-  const remainingLength =
-    expectedUtf8Length(boundedPage[incompleteTailStart] ?? 0) - incompleteLength;
-  if (
-    length >= MAX_READ_BYTES ||
-    remainingLength <= 0 ||
-    boundedPage.byteLength + remainingLength > MAX_READ_BYTES
-  ) {
-    return boundedPage.slice(0, incompleteTailStart);
-  }
-
-  const remaining = await workspace.read(offloadPath(handle), {
-    offset: offset + boundedPage.byteLength,
-    length: remainingLength,
-  });
-  if (remaining.byteLength !== remainingLength) {
-    return boundedPage.slice(0, incompleteTailStart);
-  }
-
-  const combined = new Uint8Array(boundedPage.byteLength + remaining.byteLength);
-  combined.set(boundedPage);
-  combined.set(remaining, boundedPage.byteLength);
-  return combined;
-}
-
-async function readOffloaded(
-  workspace: WorkspacePort,
-  knownSizes: Map<OffloadedHandle, number>,
-  call: OffloadToolCall,
-): Promise<OffloadToolExecutionResult> {
-  const input = ReadOffloadedInputSchema.safeParse(call.args);
-  if (!input.success) {
-    return toolError("invalid_arguments");
-  }
-
-  const { handle } = input.data;
-  const offset = input.data.offset ?? 0;
-  const length = Math.min(input.data.length ?? MAX_READ_BYTES, MAX_READ_BYTES);
-  let loaded: LoadedOffloadPage;
-  try {
-    loaded = await loadOffloadPage({
-      workspace,
-      handle,
-      knownSizes,
-      offset,
-      length,
-    });
-  } catch (error) {
-    if (error instanceof WorkspaceFileNotFoundError) {
-      return toolError("handle_not_found");
-    }
-    throw error;
-  }
-
-  if (loaded.page.length > 0 && isContinuationByte(loaded.page[0] ?? 0)) {
-    return toolError("invalid_offset");
-  }
-  const page = await completeUtf8Page({
-    workspace,
-    handle,
-    offset,
-    length,
-    page: loaded.page,
-  });
-  const nextOffset = offset + page.byteLength;
-  const result = {
-    data: new TextDecoder().decode(page),
-    ...(page.byteLength > 0 && nextOffset < loaded.totalBytes ? { nextOffset } : {}),
-    totalBytes: loaded.totalBytes,
-  };
-  ReadOffloadedResultSchema.parse(result);
-  return {
-    outcome: "ok",
-    result: JsonValue.parse(result),
-  };
 }
 
 /** Decorates a tool port to store large results and expose them through `read_offloaded`. */
@@ -461,9 +315,13 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     _context: OffloadRunContext,
     execution: OffloadToolExecutionResult,
   ): Promise<OffloadToolExecutionResult> {
+    if (execution.artifacts !== undefined && execution.artifacts.length > 0) {
+      return offloadArtifactResult(execution, this.workspace, this.ids, this.knownSizes);
+    }
     if (execution.binary === true && !ToolBinaryPayloadSchema.safeParse(execution.result).success) {
       return toolError("pii_input_invalid");
     }
+
     const serialized = JSON.stringify(execution.result);
     const data = new TextEncoder().encode(serialized);
     if (execution.binary !== true && serialized.length <= this.options.thresholdBytes) {

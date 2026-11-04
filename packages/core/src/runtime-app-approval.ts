@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Apps use the same tool step, approval request, and resume executor as model calls.
-import { Code, Id, JsonValue, type Event } from "@rovinos/schemas";
+import { Code, Id, JsonValue, unwrapLegacyToolResult, type Event } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import { Checkpointer } from "./checkpoint.js";
 import {
@@ -121,7 +121,7 @@ async function waitForAppResult(store: EventStore, runId: Id, callId: Id, fromSe
     for await (const event of store.watch(runId, { fromSeq, signal: controller.signal })) {
       if (event.type === "tool_result" && event.callId === callId) {
         return event.outcome === "ok"
-          ? appResult(JSON.stringify(event.result), false)
+          ? appResult(JSON.stringify(unwrapLegacyToolResult(event.result)), false)
           : appResult(event.errorCode ?? "app_tool_failed");
       }
       if (

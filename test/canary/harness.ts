@@ -165,6 +165,12 @@ export class CanaryHarness {
         await this.memoryWorkspace.write(path, data);
         this.captured.workspace.set(path, data.slice());
       },
+      writeBatch: async (entries) => {
+        await this.memoryWorkspace.writeBatch(entries);
+        for (const { path, data } of entries) {
+          this.captured.workspace.set(path, data.slice());
+        }
+      },
       read: (path, range) => this.memoryWorkspace.read(path, range),
     };
   }

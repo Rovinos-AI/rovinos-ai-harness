@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Each run keeps its discovered registry; refreshes never widen a pinned view.
-import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client";
-import { Code, compileJsonSchema, HarnessError } from "@rovinos/schemas";
+import type { CallToolResult } from "@modelcontextprotocol/client";
+import { Code, compileJsonSchema, HarnessError, JsonValue } from "@rovinos/schemas";
 import type { JsonValue as JsonValueType, ServerConfig, Sha256Hex } from "@rovinos/schemas";
 import * as telemetry from "@rovinos/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
 import type { McpConnection, McpConnectionDependencies } from "./connection.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
-import { McpProtocolError } from "./errors.js";
 import type { ElicitationPort, ElicitationRetry } from "./elicitation/mrtr.js";
 import type { ElicitationUrlOptions } from "./elicitation/url.js";
 import { callToolWithInputRounds } from "./tool-input-rounds.js";
+import { errorCode } from "./tool-error-code.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
-import { normalizedResult } from "./tool-result.js";
+import {
+  McpToolResultError,
+  normalizedResult,
+  type McpResultArtifactPayload,
+} from "./tool-result.js";
 
 const MCP_CALL_SPAN = telemetry.defineSemconvSpan(
   "mcp.client.call",
@@ -49,7 +53,8 @@ export interface McpToolCallContext {
 
 /** Safe tool result structurally compatible with the core tool port. */
 export interface McpToolExecutionResult {
-  readonly binary?: boolean;
+  readonly artifacts?: readonly McpResultArtifactPayload[];
+  readonly resultLimitBytes?: number;
   readonly suspend?: boolean;
   readonly suspendReason?: "awaiting_input";
   readonly outcome: "ok" | "error";
@@ -101,68 +106,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function protocolErrorCode(protocolCode: number): string {
-  switch (protocolCode) {
-    case -32602:
-      return "mcp_invalid_params";
-    case -32601:
-      return "mcp_method_not_found";
-    case -32603:
-      return "mcp_internal_error";
-    case -32020:
-      return "mcp_header_mismatch";
-    case -32021:
-      return "mcp_capability_missing";
-    case -32022:
-      return "mcp_protocol_unsupported";
-    default:
-      return "mcp_error";
-  }
-}
-
-function connectionErrorCode(code: McpConnectionError["code"]): string {
-  switch (code) {
-    case "mcp_auth_required":
-      return "mcp_auth_required";
-    case "mcp_tool_arguments_invalid":
-      return "args_invalid";
-    case "mcp_connect_timeout":
-    case "mcp_discovery_timeout":
-    case "mcp_discovery_cancelled":
-      return "mcp_timeout";
-    case "mcp_connection_lost":
-      return "mcp_connection_lost";
-    case "mcp_apps_unsupported":
-      return "mcp_apps_unsupported";
-    case "mcp_connect_failed":
-    case "mcp_list_tools_failed":
-    case "mcp_too_many_tools":
-    case "mcp_discovery_data_limit":
-    case "mcp_discovery_page_limit":
-    case "mcp_discovery_schema_limit":
-    case "mcp_tool_call_failed":
-      return "mcp_error";
-    default:
-      return "mcp_error";
-  }
-}
-
-function errorCode(error: unknown, signal: AbortSignal): string {
-  if (signal.aborted) {
-    return "mcp_timeout";
-  }
-  if (error instanceof McpProtocolError) {
-    return protocolErrorCode(error.protocolCode);
-  }
-  if (error instanceof ProtocolError) {
-    return protocolErrorCode(error.code);
-  }
-  if (error instanceof McpConnectionError) {
-    return connectionErrorCode(error.code);
-  }
-  return "mcp_error";
-}
-
 function failure(code: string, result: JsonValueType = null): McpToolExecutionResult {
   return { outcome: "error", errorCode: Code.parse(code), result };
 }
@@ -189,26 +132,26 @@ function mapToolResult(
   route: ResolvedTool,
   offloadBinaryResults: boolean,
 ): McpToolExecutionResult {
-  const mapped = normalizedResult(result);
-  const serialized = JSON.stringify(mapped.offloadValue);
-  if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
+  const mapped = normalizedResult(result, {
+    maxArtifactBytes: route.server.maxArtifactBytes,
+    binaryResults: route.server.binaryResults,
+  });
+  if (mapped.artifacts.length > 0 && !offloadBinaryResults) {
+    return failure("artifact_store_unavailable");
+  }
+  if (
+    mapped.artifacts.length === 0 &&
+    Buffer.byteLength(JSON.stringify(mapped.value), "utf8") > route.server.maxResultBytes
+  ) {
     return failure("result_too_large");
   }
-  if (mapped.hasLargeBinary) {
-    if (!offloadBinaryResults || mapped.binaryPayload === undefined) {
-      return failure("binary_result_unavailable");
-    }
-    return {
-      outcome: result.isError === true ? "error" : "ok",
-      ...(result.isError === true ? { errorCode: Code.parse("tool_reported_error") } : {}),
-      binary: true,
-      result: Array.from(mapped.binaryPayload),
-    };
-  }
-  if (result.isError === true) {
-    return failure("tool_reported_error", mapped.value);
-  }
-  return { outcome: "ok", result: mapped.value };
+  return {
+    outcome: mapped.value.isError ? "error" : "ok",
+    ...(mapped.value.isError ? { errorCode: Code.parse("tool_reported_error") } : {}),
+    ...(mapped.artifacts.length === 0 ? {} : { artifacts: mapped.artifacts }),
+    ...(mapped.artifacts.length === 0 ? {} : { resultLimitBytes: route.server.maxResultBytes }),
+    result: JsonValue.parse(mapped.value),
+  };
 }
 
 async function executeRegisteredTool(options: {
@@ -242,7 +185,14 @@ async function executeRegisteredTool(options: {
   if (roundOutcome.kind === "suspend") {
     return { outcome: "ok", result: null, suspend: true, suspendReason: "awaiting_input" };
   }
-  return mapToolResult(roundOutcome.result, route, options.offloadBinaryResults);
+  try {
+    return mapToolResult(roundOutcome.result, route, options.offloadBinaryResults);
+  } catch (error) {
+    if (error instanceof McpToolResultError) {
+      return failure(error.code);
+    }
+    return failure("mcp_result_invalid");
+  }
 }
 
 /**

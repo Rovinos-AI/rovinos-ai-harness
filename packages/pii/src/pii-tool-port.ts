@@ -44,6 +44,16 @@ export interface PiiToolContext {
 
 /** JSON execution contract with a validated numeric-byte binary representation. */
 export interface PiiToolResult {
+  /** Opted-in binary payloads retained only until the outer offloader persists them. */
+  readonly artifacts?: readonly {
+    readonly partIndex: number;
+    readonly target: "data" | "resource.blob";
+    readonly mimeType: string;
+    readonly bytes: Uint8Array;
+    readonly sha256: string;
+  }[];
+  /** Inline-envelope limit enforced after artifact substitution. */
+  readonly resultLimitBytes?: number;
   readonly binary?: boolean;
   readonly metadata?: JsonValue;
   readonly suspend?: boolean;
@@ -80,6 +90,9 @@ export interface PiiToolPortDependencies {
 
 const safeToolErrorCodes = new Set([
   "args_invalid",
+  "artifact_store_unavailable",
+  "artifact_too_large",
+  "artifact_write_failed",
   "binary_result_unavailable",
   "edit_ambiguous",
   "edit_no_match",
@@ -91,6 +104,7 @@ const safeToolErrorCodes = new Set([
   "fs_operation_failed",
   "fs_path_invalid",
   "mcp_capability_missing",
+  "mcp_binary_result_blocked",
   "mcp_connection_lost",
   "mcp_error",
   "mcp_header_mismatch",
@@ -101,6 +115,7 @@ const safeToolErrorCodes = new Set([
   "mcp_invalid_params",
   "mcp_method_not_found",
   "mcp_protocol_unsupported",
+  "mcp_result_invalid",
   "mcp_timeout",
   "mcp_tool_not_found",
   "result_too_large",
@@ -353,6 +368,10 @@ async function tokenizeToolOutput(
     const result = {
       outcome: execution.outcome,
       result: markJsonSanitized(stored.value),
+      ...(execution.artifacts === undefined ? {} : { artifacts: execution.artifacts }),
+      ...(execution.resultLimitBytes === undefined
+        ? {}
+        : { resultLimitBytes: execution.resultLimitBytes }),
       ...(execution.suspend === true ? { suspend: true } : {}),
       ...(execution.suspendReason === undefined ? {} : { suspendReason: execution.suspendReason }),
       ...(execution.outcome === "error"
