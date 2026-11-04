@@ -319,6 +319,29 @@ class DelayedAppendStore extends InMemoryEventStore {
   }
 }
 
+class DelayedListStore extends InMemoryEventStore {
+  private releaseList: () => void = () => undefined;
+  private signalListStarted: () => void = () => undefined;
+  private readonly listGate = new Promise<void>((resolve) => {
+    this.releaseList = resolve;
+  });
+  readonly listStarted = new Promise<void>((resolve) => {
+    this.signalListStarted = resolve;
+  });
+
+  release(): void {
+    this.releaseList();
+  }
+
+  override async listRuns(
+    ...args: Parameters<InMemoryEventStore["listRuns"]>
+  ): ReturnType<InMemoryEventStore["listRuns"]> {
+    this.signalListStarted();
+    await this.listGate;
+    return super.listRuns(...args);
+  }
+}
+
 class OrphaningCrashStore extends CrashingEventStore {
   override claimIdempotencyKey(
     keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
@@ -1222,5 +1245,27 @@ describe("@rovinos/sdk", () => {
     await expect(workerOwned.harness.getRun(runId)).resolves.toMatchObject({
       status: "suspended",
     });
+  });
+
+  it("waits for in-flight reads before closing runtime resources", async () => {
+    const store = new DelayedListStore();
+    const { harness } = await createTestHarness({ store });
+    const closeStore = vi.spyOn(store, "close");
+    const listing = harness.listRuns();
+    await store.listStarted;
+
+    const closing = harness.close();
+    let closeFinished = false;
+    void closing.then(() => {
+      closeFinished = true;
+    });
+    expect(closeStore).not.toHaveBeenCalled();
+    await expect(harness.listRuns()).rejects.toMatchObject({ code: "sdk_closed" });
+
+    store.release();
+    await listing;
+    await closing;
+    expect(closeFinished).toBe(true);
+    expect(closeStore).toHaveBeenCalledOnce();
   });
 });
