@@ -113,6 +113,7 @@ export interface RuntimeRunOptions {
   readonly evalMetadata?: EvalRunMetadata;
   readonly onStarted?: () => void;
   readonly onProgress?: (progress: ModelProgress) => void;
+  readonly signal?: AbortSignal;
 }
 
 /** Runtime control and optional metadata used to start one run. */
@@ -139,6 +140,8 @@ export function startRun(
     ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
   };
   return options.runWithControl(runId, async (signal) => {
+    const executionSignal =
+      options.signal === undefined ? signal : AbortSignal.any([signal, options.signal]);
     await quotaService.assertCanStart(quotaIdentity);
     const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
     return runLoop({
@@ -153,7 +156,7 @@ export function startRun(
       ...(options.replayOf === undefined ? {} : { replayOf: options.replayOf }),
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.rootSpanParent === undefined ? {} : { rootSpanParent: options.rootSpanParent }),
-      signal,
+      signal: executionSignal,
       ...(options.role === undefined ? {} : { role: options.role }),
       ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
       scopeId: runId,
@@ -195,7 +198,7 @@ export function createRuntimeContinuation(
   return (
     previousRunId: Id,
     input: RunInput,
-    runOptions?: { readonly requestedBy?: Principal },
+    runOptions?: { readonly requestedBy?: Principal; readonly signal?: AbortSignal },
   ) => {
     const runId = ids.next();
     let resolveStarted: () => void = () => undefined;
@@ -210,6 +213,8 @@ export function createRuntimeContinuation(
         ? { goal: input.goal }
         : { goal: input.goal, metadata: input.metadata };
     const completion = runWithControl(runId, async (signal) => {
+      const executionSignal =
+        runOptions?.signal === undefined ? signal : AbortSignal.any([signal, runOptions.signal]);
       const stored = await readStoredQuotaIdentity(store, previousRunId);
       // An explicit caller is charged for the continuation; the role is inherited.
       const identity: QuotaIdentity =
@@ -228,7 +233,7 @@ export function createRuntimeContinuation(
         tool,
         policy,
         context,
-        signal,
+        signal: executionSignal,
         budgets: config.run.budgets,
         checkpointEveryEvents: config.run.checkpointEveryEvents,
         ...(config.store?.snapshotKeep === undefined

@@ -153,6 +153,30 @@ function requestParts(
   };
 }
 
+function completeUnlessShutdown(
+  completion: Promise<ModelCompletion>,
+  signal: AbortSignal,
+): Promise<ModelCompletion | undefined> {
+  let onAbort: (() => void) | undefined;
+  const shutdown = new Promise<undefined>((resolve) => {
+    onAbort = (): void => {
+      if (signal.reason === "shutdown") {
+        resolve(undefined);
+      }
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  return Promise.race([completion, shutdown]).finally(() => {
+    if (onAbort !== undefined) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  });
+}
+
 /**
  * Records a model request, performs the provider call, and records its outcome.
  *
@@ -180,9 +204,17 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       const runContext = piiActionRunContext(modelRunContext(options), options.recorder, recorded);
       let completion: ModelCompletion;
       try {
-        completion = await options.model.complete(modelRequest, runContext);
+        const response = await completeUnlessShutdown(
+          options.model.complete(modelRequest, runContext),
+          options.signal,
+        );
+        if (response === undefined) {
+          result = { outcome: "aborted", events: recorded };
+          return requestEvent;
+        }
+        completion = response;
       } catch (error) {
-        if (options.signal.reason === "shutdown") {
+        if (options.signal.aborted && options.signal.reason === "shutdown") {
           result = { outcome: "aborted", events: recorded };
           return requestEvent;
         }

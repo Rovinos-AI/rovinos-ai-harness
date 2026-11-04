@@ -1868,6 +1868,44 @@ describe("runLoop", () => {
     expect(processLike.exitCode).toBe(130);
   });
 
+  it("suspends instead of recording a model failure when shutdown rejects a model call", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const controller = new AbortController();
+    const model: ModelPort = {
+      complete: () => {
+        controller.abort("shutdown");
+        return Promise.reject(new Error("model call aborted"));
+      },
+    };
+
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "shutdown during model call",
+      configHash,
+      budgets: defaultBudgets,
+      policyVersion: "test.policy",
+      signal: controller.signal,
+    });
+
+    expect(result.status).toBe("suspended");
+    expect(result.events).not.toContainEqual(
+      expect.objectContaining({ type: "run_status_changed", to: "failed" }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: "run_status_changed",
+        to: "suspended",
+        reason: "shutdown",
+      }),
+    );
+  });
+
   it("completes a scripted one-step run with a deterministic golden event sequence", async () => {
     const startingSpanIndex = tracerProvider.spans.length;
     const store = new InMemoryEventStore();

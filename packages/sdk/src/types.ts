@@ -389,13 +389,15 @@ export interface Harness {
    * `requestedBy` is recorded as the run creator's principal when provided.
    */
   startRun(options: StartRunOptions): Promise<RunStartResult>;
-  /** Start a linked follow-up run for a completed run. */
+  /**
+   * Start a linked follow-up run and resolve when execution finishes or suspends.
+   */
   continueRun(runId: RunId, options: ContinueRunOptions): Promise<RunStartResult>;
   /** Read run status, usage, approval identifiers, and recent safe events. */
   getRun(runId: RunId): Promise<RunView>;
   /** List metadata-only run summaries using an opaque continuation cursor. */
   listRuns(filter?: ListRunsFilter): Promise<RunPage>;
-  /** Resume a suspended run in-process and return its resulting status. */
+  /** Resume a suspended run in-process and resolve when execution finishes or suspends. */
   resumeRun(runId: RunId): Promise<RunStartResult>;
   /** Request cooperative cancellation of a run. */
   cancelRun(runId: RunId): Promise<CancelRunResult>;
@@ -419,7 +421,11 @@ export interface Harness {
   watch(runId: RunId, options?: WatchOptions): AsyncIterable<SafeEvent>;
   /** Explicitly read tokenized content. This method returns sensitive data. */
   getRunContent(runId: RunId, options: GetRunContentOptions): Promise<RunContent>;
-  /** Stop subscriptions, wait for detached operations, and release runtime resources. */
+  /**
+   * Stop admitting executions, drain them for `run.shutdownGraceMs`, then request suspension.
+   * The returned promise resolves after managed executions settle and runtime resources close.
+   * Work owned by external queue workers is not cancelled.
+   */
   close(): Promise<void>;
 }
 

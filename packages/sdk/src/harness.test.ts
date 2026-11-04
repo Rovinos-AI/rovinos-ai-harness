@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
-import { CrashingEventStore } from "@rovinos/core/testing";
+import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
+import { allowAllPolicy, CrashingEventStore } from "@rovinos/core/testing";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { InMemoryEventStore } from "@rovinos/store";
 import { SqliteEventStore } from "@rovinos/store-sqlite";
@@ -16,7 +16,7 @@ import {
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness } from "./index.js";
 import { GetRunContentOptionsSchema, ListRunsFilterSchema } from "./types.js";
 import type { Harness } from "./types.js";
@@ -41,6 +41,29 @@ function fakeModel(responses?: readonly string[]): ModelPort {
         providerBlobs: null,
       });
     },
+  };
+}
+
+function deferred<T>() {
+  let settle: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, resolve: settle };
+}
+
+function modelCompletion(text = "synthetic completion"): ModelCompletion {
+  return {
+    parts: [{ type: "text", text }],
+    usage: { inputTokens: 2, outputTokens: 3 },
+    finishReason: "stop",
+    provider: Code.parse("test"),
+    model: Code.parse("test-model"),
+    latencyMs: 0,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    providerBlobs: null,
   };
 }
 
@@ -109,6 +132,7 @@ const fakeTool: ToolPort = {
 };
 
 const harnesses: Harness[] = [];
+const releasePendingOperations: (() => void)[] = [];
 
 function idsStartingAt(start: bigint) {
   let nextId = start;
@@ -120,6 +144,8 @@ function idsStartingAt(start: bigint) {
 async function createTestHarness(
   options: {
     readonly model?: ModelPort;
+    readonly tool?: ToolPort;
+    readonly policy?: PolicyPort;
     readonly approval?: boolean;
     readonly piiEnabled?: boolean;
     readonly correlationEnabled?: boolean;
@@ -127,6 +153,7 @@ async function createTestHarness(
     readonly ruleSeparation?: boolean;
     readonly store?: InMemoryEventStore;
     readonly idStart?: bigint;
+    readonly shutdownGraceMs?: number;
   } = {},
 ): Promise<{ readonly harness: Harness; readonly store: InMemoryEventStore }> {
   const store = options.store ?? new InMemoryEventStore();
@@ -139,6 +166,9 @@ async function createTestHarness(
       ...(options.globalSeparation === true
         ? { policy: { approvals: { separationOfDuties: true } } }
         : {}),
+      ...(options.shutdownGraceMs === undefined
+        ? {}
+        : { run: { shutdownGraceMs: options.shutdownGraceMs } }),
     }),
     overrides: {
       store,
@@ -149,11 +179,20 @@ async function createTestHarness(
           : idsStartingAt(options.idStart),
       transientVault: true,
       model: options.model ?? (options.approval === true ? approvalModel() : fakeModel()),
-      ...(options.approval === true
+      ...(options.approval === true || options.tool !== undefined
         ? {
-            policy: options.ruleSeparation === true ? separationAskPolicy : askPolicy,
-            tool: fakeTool,
+            ...(options.policy !== undefined || options.approval === true
+              ? {
+                  policy:
+                    options.policy ??
+                    (options.ruleSeparation === true ? separationAskPolicy : askPolicy),
+                }
+              : {}),
+            tool: options.tool ?? fakeTool,
           }
+        : {}),
+      ...(options.policy !== undefined && options.approval !== true
+        ? { policy: options.policy }
         : {}),
     },
   });
@@ -279,6 +318,29 @@ class DelayedAppendStore extends InMemoryEventStore {
   }
 }
 
+class DelayedListStore extends InMemoryEventStore {
+  private releaseList: () => void = () => undefined;
+  private signalListStarted: () => void = () => undefined;
+  private readonly listGate = new Promise<void>((resolve) => {
+    this.releaseList = resolve;
+  });
+  readonly listStarted = new Promise<void>((resolve) => {
+    this.signalListStarted = resolve;
+  });
+
+  release(): void {
+    this.releaseList();
+  }
+
+  override async listRuns(
+    ...args: Parameters<InMemoryEventStore["listRuns"]>
+  ): ReturnType<InMemoryEventStore["listRuns"]> {
+    this.signalListStarted();
+    await this.listGate;
+    return super.listRuns(...args);
+  }
+}
+
 class OrphaningCrashStore extends CrashingEventStore {
   override claimIdempotencyKey(
     keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
@@ -309,6 +371,10 @@ async function waitForRun(harness: Harness, runId: string, status?: string) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
+  releasePendingOperations.splice(0).forEach((release) => {
+    release();
+  });
   await Promise.all(harnesses.splice(0).map((harness) => harness.close()));
 });
 
@@ -961,5 +1027,279 @@ describe("@rovinos/sdk", () => {
       }),
     ).rejects.toMatchObject({ code: "sdk_closed" });
     await harness.close();
+  });
+
+  it.each(["start", "resume", "continue"] as const)(
+    "tracks %s execution through graceful close and resumes it later",
+    async (entryPoint) => {
+      const store = new InMemoryEventStore();
+      let runId: string;
+
+      if (entryPoint === "resume") {
+        const preparer = await createTestHarness({ approval: true, idStart: 200n, store });
+        const started = await preparer.harness.startRun({ goal: "Synthetic approved task" });
+        const suspended = await waitForRun(preparer.harness, started.runId, "suspended");
+        if (suspended.pendingApprovals[0] === undefined) {
+          throw new Error("Expected a pending approval.");
+        }
+        runId = started.runId;
+      } else if (entryPoint === "continue") {
+        const preparer = await createTestHarness({ idStart: 300n, store });
+        runId = (await preparer.harness.startRun({ goal: "Synthetic source task" })).runId;
+        await waitForRun(preparer.harness, runId, "completed");
+      } else {
+        runId = "";
+      }
+
+      const modelStarted = deferred<undefined>();
+      const modelResult = deferred<ModelCompletion>();
+      releasePendingOperations.push(() => {
+        modelResult.resolve(modelCompletion());
+      });
+      let modelSignal: AbortSignal | undefined;
+      let blockModel = false;
+      const blockingModel: ModelPort = {
+        complete: (_request, context) => {
+          if (!blockModel) {
+            return Promise.resolve(modelCompletion());
+          }
+          modelSignal = context.signal;
+          modelStarted.resolve(undefined);
+          return modelResult.promise;
+        },
+      };
+      const { harness } = await createTestHarness({
+        approval: entryPoint === "resume",
+        model: blockingModel,
+        store,
+        idStart: 400n,
+        shutdownGraceMs: 25,
+      });
+      const cancelableRunId = (await harness.startRun({ goal: "Synthetic terminal task" })).runId;
+      await waitForRun(harness, cancelableRunId, "completed");
+      const closeStore = vi.spyOn(store, "close");
+      if (entryPoint === "start") {
+        blockModel = true;
+        runId = (await harness.startRun({ goal: "Synthetic managed task" })).runId;
+      } else if (entryPoint === "resume") {
+        const current = await harness.getRun(runId);
+        const approvalId = current.pendingApprovals[0];
+        if (approvalId === undefined) {
+          throw new Error("Expected a pending approval.");
+        }
+        await harness.resolveApproval(approvalId, "approve", {
+          principal: Principal.parse("cli.test"),
+        });
+        blockModel = true;
+      } else {
+        blockModel = true;
+      }
+      let execution: Promise<unknown>;
+      if (entryPoint === "start") {
+        execution = Promise.resolve(undefined);
+      } else if (entryPoint === "resume") {
+        execution = harness.resumeRun(runId);
+      } else {
+        execution = harness.continueRun(runId, { goal: "Synthetic follow-up task" });
+      }
+      await modelStarted.promise;
+
+      vi.useFakeTimers();
+      const closing = harness.close();
+      expect(harness.close()).toBe(closing);
+      let closeFinished = false;
+      void closing.then(() => {
+        closeFinished = true;
+      });
+      await expect(harness.startRun({ goal: "Rejected while closing" })).rejects.toMatchObject({
+        code: "sdk_closed",
+      });
+      await expect(harness.cancelRun(cancelableRunId)).resolves.toBe("already_terminal");
+      const activeRunId =
+        entryPoint === "continue"
+          ? (await harness.listRuns({ continuationOf: runId })).runs[0]?.runId
+          : runId;
+      if (activeRunId === undefined) {
+        throw new Error("Expected an admitted run.");
+      }
+      await expect(harness.getRun(activeRunId)).resolves.toMatchObject({ runId: activeRunId });
+
+      expect(closeFinished).toBe(false);
+      expect(closeStore).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(25);
+      expect(modelSignal?.aborted).toBe(true);
+      expect(modelSignal?.reason).toBe("shutdown");
+      await execution;
+      await closing;
+      expect(harness.close()).toBe(closing);
+      expect(closeFinished).toBe(true);
+      expect(closeStore).toHaveBeenCalledOnce();
+      modelResult.resolve(modelCompletion());
+      const recovery = await createTestHarness({ idStart: 500n, store });
+      await expect(recovery.harness.getRun(activeRunId)).resolves.toMatchObject({
+        status: "suspended",
+      });
+      await expect(recovery.harness.resumeRun(activeRunId)).resolves.toMatchObject({
+        status: "completed",
+      });
+    },
+  );
+
+  it("reuses the close promise for concurrent and later calls", async () => {
+    const store = new InMemoryEventStore();
+    const modelStarted = deferred<undefined>();
+    const modelResult = deferred<ModelCompletion>();
+    releasePendingOperations.push(() => {
+      modelResult.resolve(modelCompletion());
+    });
+    const model: ModelPort = {
+      complete: () => {
+        modelStarted.resolve(undefined);
+        return modelResult.promise;
+      },
+    };
+    const { harness } = await createTestHarness({ model, store });
+    const closeStore = vi.spyOn(store, "close");
+    await harness.startRun({ goal: "Synthetic close promise task" });
+    await modelStarted.promise;
+
+    const firstClose = harness.close();
+    const concurrentClose = harness.close();
+    expect(concurrentClose).toBe(firstClose);
+    await expect(harness.startRun({ goal: "Rejected while closing" })).rejects.toMatchObject({
+      code: "sdk_closed",
+    });
+
+    modelResult.resolve(modelCompletion());
+    await firstClose;
+    expect(harness.close()).toBe(firstClose);
+    expect(closeStore).toHaveBeenCalledOnce();
+  });
+
+  it("suspends after an in-flight tool settles without replaying its effect", async () => {
+    const store = new InMemoryEventStore();
+    const toolStarted = deferred<AbortSignal>();
+    const toolResult = deferred<{ readonly outcome: "ok"; readonly result: string }>();
+    releasePendingOperations.push(() => {
+      toolResult.resolve({ outcome: "ok", result: "synthetic effect" });
+    });
+    let executions = 0;
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: false, timeoutMs: 60_000, longRunning: true }),
+      getToolSpecs: () => [
+        { toolId: Code.parse("synthetic.tool"), description: "Synthetic tool", inputSchema: {} },
+      ],
+      execute: (_call, context) => {
+        executions += 1;
+        toolStarted.resolve(context.signal);
+        return toolResult.promise;
+      },
+    };
+    let requestedTool = false;
+    const model: ModelPort = {
+      complete: () => {
+        if (requestedTool) {
+          return Promise.resolve(modelCompletion());
+        }
+        requestedTool = true;
+        return Promise.resolve({
+          ...modelCompletion(),
+          parts: [
+            {
+              type: "tool_call",
+              callId: Id.parse("00000000000000000000000092"),
+              toolId: Code.parse("synthetic.tool"),
+              args: {},
+            },
+          ],
+          finishReason: "tool_calls",
+        });
+      },
+    };
+    const { harness, store: eventStore } = await createTestHarness({
+      model,
+      policy: allowAllPolicy,
+      tool,
+      store,
+      idStart: 600n,
+      shutdownGraceMs: 25,
+    });
+    const started = await harness.startRun({ goal: "Synthetic tool task" });
+    const signal = await toolStarted.promise;
+    vi.useFakeTimers();
+    const closeFinished = harness.close();
+    await vi.advanceTimersByTimeAsync(25);
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason).toBe("shutdown");
+    toolResult.resolve({ outcome: "ok", result: "synthetic effect" });
+    await closeFinished;
+
+    const recovery = await createTestHarness({ idStart: 700n, store: eventStore });
+    await expect(recovery.harness.resumeRun(started.runId)).resolves.toMatchObject({
+      status: "completed",
+    });
+    expect(executions).toBe(1);
+  });
+
+  it("keeps an admitted start alive when close reaches its grace deadline during startup", async () => {
+    const store = new DelayedAppendStore();
+    const { harness } = await createTestHarness({
+      idStart: 800n,
+      shutdownGraceMs: 25,
+      store,
+    });
+    const starting = harness.startRun({ goal: "Synthetic delayed startup" });
+    await store.appendStarted;
+
+    vi.useFakeTimers();
+    const closing = harness.close();
+    let closeFinished = false;
+    void closing.then(() => {
+      closeFinished = true;
+    });
+    await vi.advanceTimersByTimeAsync(25);
+    expect(closeFinished).toBe(false);
+
+    store.release();
+    const { runId } = await starting;
+    await closing;
+    const recovery = await createTestHarness({ idStart: 900n, store });
+    await expect(recovery.harness.getRun(runId)).resolves.toMatchObject({
+      status: "suspended",
+    });
+  });
+
+  it("does not cancel a suspended run that is not managed by the client", async () => {
+    const store = new InMemoryEventStore();
+    const workerOwned = await createTestHarness({ approval: true, store });
+    const { runId } = await workerOwned.harness.startRun({ goal: "Synthetic worker-owned task" });
+    await waitForRun(workerOwned.harness, runId, "suspended");
+
+    const client = await createTestHarness({ store });
+    await client.harness.close();
+    await expect(workerOwned.harness.getRun(runId)).resolves.toMatchObject({
+      status: "suspended",
+    });
+  });
+
+  it("waits for in-flight reads before closing runtime resources", async () => {
+    const store = new DelayedListStore();
+    const { harness } = await createTestHarness({ store });
+    const closeStore = vi.spyOn(store, "close");
+    const listing = harness.listRuns();
+    await store.listStarted;
+
+    const closing = harness.close();
+    let closeFinished = false;
+    void closing.then(() => {
+      closeFinished = true;
+    });
+    expect(closeStore).not.toHaveBeenCalled();
+
+    store.release();
+    await listing;
+    await closing;
+    expect(closeFinished).toBe(true);
+    expect(closeStore).toHaveBeenCalledOnce();
   });
 });
