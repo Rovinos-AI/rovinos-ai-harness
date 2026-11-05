@@ -32,3 +32,24 @@ payload is written to browser storage.
 Eval trials reuse the seeded canary generator and scanner from `@rovinos/eval`. The
 `no_canary_leak` grader checks event/vault databases, telemetry, workspaces, and captured
 stdout/stderr; workspace values already present in the original fixture are allowed.
+
+The deterministic live-eval model-path integration uses a seeded synthetic API-key canary
+with a loopback OpenAI-compatible provider. It scans gateway/client request and response
+payloads, runtime events, MCP arguments, and provider request bodies for the raw,
+percent-encoded, and base64 forms. The captured host-only authorization header is the
+positive control: the scanner must find that sink and no other captured sink. The same
+scenario checks allow, deny, and human approval/resume through the ordinary runtime.
+A negative control deliberately inserts each credential form into a client-payload
+capture and requires the scan to identify that sink.
+The end-to-end skeleton also routes its MCP CLI approval/edit/deny scenario through the
+Unix-socket eval gateway. These checks make no paid provider calls and do not demonstrate
+container isolation or coverage of every possible credential encoding.
+
+The separate `test/live-eval-model-path.live.test.ts` smoke is disabled unless
+`HARNESS_LIVE_EVAL=1`, `HARNESS_LIVE_EVAL_PROFILE=restricted-staging`,
+`HARNESS_LIVE_EVAL_API_KEY`, and `HARNESS_LIVE_EVAL_MODEL` are supplied. Operators must
+provide a restricted staging key; the profile flag is an operator attestation, not
+remote verification of that key's permissions. It uses only an in-memory synthetic MCP
+fixture and caps the host session at four provider requests. Run it explicitly with
+`yarn exec vitest run --project live test/live-eval-model-path.live.test.ts`;
+it is not part of deterministic integration blockers.

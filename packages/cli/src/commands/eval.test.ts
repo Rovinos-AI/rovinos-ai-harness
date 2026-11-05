@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessConfigSchema } from "@rovinos/config";
 import * as evalApi from "@rovinos/eval";
 import { parseJson } from "@rovinos/schemas";
 import type { TrialExecutor, TrialSpec } from "@rovinos/eval";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
@@ -81,6 +81,9 @@ function createExecutor(
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   if (temporaryDirectory !== undefined) {
     await rm(temporaryDirectory, { recursive: true, force: true });
     temporaryDirectory = undefined;
@@ -139,6 +142,27 @@ describe("harness eval run", () => {
     let executorOptions:
       Parameters<NonNullable<EvalCommandDependencies["createExecutor"]>>[1] | undefined;
     const { context, stdout, stderr } = createContext();
+    context.loadConfig = () =>
+      Promise.resolve(
+        HarnessConfigSchema.parse({
+          models: {
+            providers: [
+              {
+                id: "openai",
+                kind: "openai_compatible",
+                trust: "local",
+                baseUrl: "https://provider.example.invalid/v1",
+              },
+              {
+                id: "anthropic",
+                kind: "openai_compatible",
+                trust: "local",
+                baseUrl: "https://provider.example.invalid/v1",
+              },
+            ],
+          },
+        }),
+      );
     const command = createEvalCommand({
       loadEval: () => Promise.resolve(evalApi),
       createExecutor: (_api, options) => {
@@ -166,6 +190,9 @@ describe("harness eval run", () => {
         "inprocess",
         "--cassette",
         "off",
+        "--live",
+        "--max-model-calls",
+        "7",
         "--export-telemetry",
         "--out",
         outputDirectory,
@@ -189,7 +216,7 @@ describe("harness eval run", () => {
       exportTelemetry: true,
     });
     expect(stdout.join("")).toContain("selected_task");
-    expect(stderr).toEqual([]);
+    expect(stderr).toEqual(["eval_live_inprocess_not_isolated\n"]);
     expect(await readdir(outputDirectory)).toEqual(
       expect.arrayContaining(["trials.jsonl", "eval-report.json", "eval-report.md", "junit.xml"]),
     );
@@ -338,7 +365,6 @@ describe("harness eval run", () => {
     expect(exitCode).toBe(ExitCode.failure);
     expect(executorStarted).toBe(true);
     expect(stderr).toEqual(["eval_failed\n"]);
-    const { readFile } = await import("node:fs/promises");
     expect(await readFile(join(output, "eval-report.json"), "utf8")).toContain(
       "eval_test_command_context_unavailable",
     );
@@ -409,5 +435,260 @@ describe("harness eval run", () => {
     expect(exitCode).toBe(ExitCode.failure);
     expect(executorStarted).toBe(false);
     expect(stderr).toEqual(["eval_docker_live_model_unavailable\n"]);
+  });
+
+  it("requires live opt-in for in-process calls before constructing an executor", async () => {
+    const suitePath = await createSuite();
+    let executorStarted = false;
+    const { context, stderr } = createContext();
+    const exitCode = await main(
+      ["eval", "run", suitePath, "--isolation", "inprocess", "--cassette", "off"],
+      context,
+      [
+        createEvalCommand({
+          createExecutor: () => {
+            executorStarted = true;
+            return createExecutor("completed", 0, []);
+          },
+        }),
+      ],
+    );
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(executorStarted).toBe(false);
+    expect(stderr).toEqual(["eval_inprocess_live_model_unavailable\n"]);
+  });
+
+  it.each(["docker", "inprocess"] as const)(
+    "shares a bounded live session with the %s executor and closes it",
+    async (isolation) => {
+      const suitePath = await createSuite();
+      const config = HarnessConfigSchema.parse({
+        models: {
+          providers: [
+            {
+              id: "local",
+              kind: "openai_compatible",
+              trust: "local",
+              baseUrl: "https://provider.example.invalid/v1",
+            },
+          ],
+          routing: { default: [{ provider: "local", model: "synthetic" }] },
+        },
+      });
+      const session = await evalApi.createLiveModelSession({ models: config.models, maxCalls: 7 });
+      const close = vi.spyOn(session, "close");
+      const start = vi.spyOn(evalApi, "createLiveModelSession").mockResolvedValue(session);
+      const { context, stderr } = createContext();
+      context.loadConfig = () => Promise.resolve(config);
+      let received:
+        Parameters<NonNullable<EvalCommandDependencies["createExecutor"]>>[1] | undefined;
+      const exit = await main(
+        [
+          "eval",
+          "run",
+          suitePath,
+          "--cassette",
+          "off",
+          "--live",
+          "--isolation",
+          isolation,
+          "--max-model-calls",
+          "7",
+          "--out",
+          join(temporaryDirectory ?? "", "live"),
+        ],
+        context,
+        [
+          createEvalCommand({
+            createExecutor: (_api, options) => {
+              received = options;
+              return createExecutor("completed", 0, []);
+            },
+          }),
+        ],
+      );
+
+      expect(exit).toBe(ExitCode.ok);
+      expect(start).toHaveBeenCalledWith(expect.objectContaining({ maxCalls: 7 }));
+      expect(received?.liveSession).toBe(session);
+      expect(received?.isolation).toBe(isolation);
+      expect(close).toHaveBeenCalledExactlyOnceWith();
+      expect(stderr).toEqual(
+        isolation === "inprocess" ? ["eval_live_inprocess_not_isolated\n"] : [],
+      );
+    },
+  );
+
+  it("passes the credential canary grader through a live host model port", async () => {
+    const suitePath = await createSuite();
+    const credential = "synthetic-live-staging-credential";
+    await writeFile(
+      suitePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        tasks: [
+          {
+            id: "live_canary",
+            input: { goal: "synthetic goal" },
+            tags: [],
+            graders: [{ type: "no_canary_leak" }],
+            canaries: [credential],
+          },
+        ],
+      }),
+    );
+    const config = HarnessConfigSchema.parse({
+      models: {
+        providers: [
+          {
+            id: "openai",
+            kind: "openai",
+            apiKey: "env:STAGING_SYNTHETIC_KEY",
+            streaming: false,
+          },
+        ],
+        routing: { default: [{ provider: "openai", model: "synthetic" }] },
+        retry: { maxAttempts: 1 },
+      },
+    });
+    const transport = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        Response.json({
+          id: "synthetic_response",
+          object: "chat.completion",
+          created: 0,
+          model: "synthetic",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "synthetic answer" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", transport);
+    vi.stubEnv("OPENAI_LOG", "debug");
+    const { context, stdout, stderr } = createContext();
+    context.loadConfig = () => Promise.resolve(config);
+    context.secretResolver = { resolve: () => Promise.resolve({ reveal: () => credential }) };
+    const out = join(temporaryDirectory ?? "", "live-canary");
+    const exit = await main(
+      [
+        "eval",
+        "run",
+        suitePath,
+        "--cassette",
+        "off",
+        "--live",
+        "--isolation",
+        "inprocess",
+        "--out",
+        out,
+        "--fail-under",
+        "1",
+      ],
+      context,
+      [createEvalCommand()],
+    );
+    expect(exit).toBe(ExitCode.ok);
+    expect(transport).toHaveBeenCalledTimes(1);
+    const report = parseJson(
+      evalApi.EvalReportSchema,
+      await readFile(join(out, "eval-report.json"), "utf8"),
+    );
+    expect(report.trials[0]?.graders).toContainEqual({
+      graderId: "no_canary_leak",
+      pass: true,
+      codes: [],
+    });
+    expect(JSON.stringify({ stdout, stderr, report })).not.toContain(credential);
+  });
+
+  it.each(["cap", "cancel", "setup"] as const)(
+    "fails a live run on %s and always closes the host session",
+    async (failure) => {
+      const suitePath = await createSuite();
+      const config = HarnessConfigSchema.parse({
+        models: {
+          providers: [
+            {
+              id: "local",
+              kind: "openai_compatible",
+              trust: "local",
+              baseUrl: "https://provider.example.invalid/v1",
+            },
+          ],
+          routing: { default: [{ provider: "local", model: "synthetic" }] },
+        },
+      });
+      const session = await evalApi.createLiveModelSession({ models: config.models, maxCalls: 1 });
+      const close = vi.spyOn(session, "close");
+      vi.spyOn(evalApi, "createLiveModelSession").mockResolvedValue(session);
+      if (failure === "cap") {
+        vi.spyOn(session, "failureCode", "get").mockReturnValue("eval_live_call_limit_exceeded");
+      }
+      const { context, stderr } = createContext();
+      context.loadConfig = () => Promise.resolve(config);
+      const listeners = process.listenerCount("SIGINT");
+      const exit = await main(
+        [
+          "eval",
+          "run",
+          suitePath,
+          "--cassette",
+          "off",
+          "--live",
+          "--out",
+          join(temporaryDirectory ?? "", "live"),
+        ],
+        context,
+        [
+          createEvalCommand({
+            createExecutor: () => {
+              if (failure === "setup") {
+                throw new Error("synthetic private setup details");
+              }
+              if (failure === "cancel") {
+                process.emit("SIGINT");
+              }
+              return createExecutor("completed", 0, []);
+            },
+          }),
+        ],
+      );
+      expect(exit).toBe(ExitCode.failure);
+      expect(close).toHaveBeenCalledExactlyOnceWith();
+      expect(process.listenerCount("SIGINT")).toBe(listeners);
+      expect(stderr.join("")).not.toContain("private");
+      const expectedCode = {
+        cap: "eval_live_call_limit_exceeded",
+        cancel: "eval_live_cancelled",
+        setup: "failure",
+      }[failure];
+      expect(stderr.join("")).toContain(expectedCode);
+    },
+  );
+
+  it.each([
+    ["--live", "--cassette", "replay", "eval_live_cassette_conflict"],
+    [
+      "--live",
+      "--isolation",
+      "docker",
+      "--cassette",
+      "record",
+      "eval_docker_cassette_record_unavailable",
+    ],
+    ["--live", "--cassette", "off", "--max-model-calls", "0", "usage"],
+  ])("rejects unsupported live configuration %j", async (...flags) => {
+    const suitePath = await createSuite();
+    const code = flags.pop();
+    const { context, stderr } = createContext();
+    const exit = await main(["eval", "run", suitePath, ...flags], context, [createEvalCommand()]);
+    expect(exit).not.toBe(ExitCode.ok);
+    expect(stderr.join("")).toContain(code);
   });
 });

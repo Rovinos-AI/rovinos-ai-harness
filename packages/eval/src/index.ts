@@ -1,4 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
+export {
+  createLiveModelSession,
+  type LiveModelSession,
+  type LiveModelSessionOptions,
+} from "./live-model.js";
+export {
+  startLiveModelGateway,
+  createLiveModelClient,
+  type LiveModelGateway,
+} from "./live-model-gateway.js";
+export {
+  LiveModelError,
+  LiveModelErrorCodeSchema,
+  type LiveModelErrorCode,
+} from "./live-model-contract.js";
 export { defineSuite, loadSuite, type LoadSuiteOptions } from "./load.js";
 export {
   EvalSuiteSchema,

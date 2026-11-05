@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { HarnessError, parseJson } from "@rovinos/schemas";
+import type { ModelsConfig } from "@rovinos/schemas";
 import { Option } from "commander";
 import type { EvalSuite } from "@rovinos/eval";
 import type { CommandModule } from "../command.js";
@@ -63,11 +64,23 @@ function executionModes(options: EvalOptions, suite: EvalSuite) {
     if (suite.tasks.some((task) => task.graders.some((grader) => grader.type === "llm_judge"))) {
       throw new EvalCliError("eval_llm_judge_docker_unavailable");
     }
+    if (cassette !== "off") {
+      throw new EvalCliError(
+        cassette === "replay"
+          ? "eval_docker_cassette_replay_unavailable"
+          : "eval_docker_cassette_record_unavailable",
+      );
+    }
+  }
+  if (cassette !== "replay" && options.live !== true) {
     throw new EvalCliError(
-      cassette === "replay"
-        ? "eval_docker_cassette_replay_unavailable"
-        : "eval_docker_live_model_unavailable",
+      isolation === "docker"
+        ? "eval_docker_live_model_unavailable"
+        : "eval_inprocess_live_model_unavailable",
     );
+  }
+  if (cassette === "replay" && options.live === true) {
+    throw new EvalCliError("eval_live_cassette_conflict");
   }
   return { cassette, isolation };
 }
@@ -101,12 +114,57 @@ async function runTrialPlan(args: {
   });
 }
 
+function validateLivePlan(
+  options: EvalOptions,
+  models: ModelsConfig,
+  suite: EvalSuite,
+  variants: ReturnType<typeof createVariants>,
+): void {
+  if (options.live !== true) {
+    return;
+  }
+  if (variants.some((variant) => variant.configOverrides?.models !== undefined)) {
+    throw new EvalCliError("eval_live_model_override_unavailable");
+  }
+  const providers = new Set(models.providers.map(({ id }) => id));
+  for (const variant of variants) {
+    for (const task of suite.tasks) {
+      const route = variant.models ?? task.models ?? models.routing.default;
+      if (route.length === 0 || route.some(({ provider }) => !providers.has(provider))) {
+        throw new EvalCliError("eval_live_route_unavailable");
+      }
+    }
+  }
+}
+
+async function liveSessionFor(
+  args: EvalRunCommandArgs,
+  models: ModelsConfig,
+  maxCalls: number,
+  signal: AbortSignal,
+) {
+  if (args.options.live !== true) {
+    return undefined;
+  }
+  return args.api.createLiveModelSession({
+    models,
+    maxCalls,
+    clock: args.context.clock,
+    signal,
+    ...(args.context.secretResolver === undefined
+      ? {}
+      : { secretResolver: args.context.secretResolver }),
+  });
+}
+
 async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
-  const { api, context, suitePath, options, dependencies } = args;
+  const { api, context, suitePath, options } = args;
   const config = await context.loadConfig();
   const absoluteSuitePath = resolve(suitePath);
   const suite = filterSuite(api, await api.loadSuite(absoluteSuitePath), options.filter);
   const { cassette, isolation } = executionModes(options, suite);
+  const maxCalls =
+    options.maxModelCalls === undefined ? 100 : positiveInteger(options.maxModelCalls);
   const failUnder = parseFailUnder(options);
   if (options.model !== undefined && options.variants !== undefined) {
     throw new EvalCliError("usage");
@@ -121,17 +179,66 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
           cassette,
           config,
         });
+  validateLivePlan(options, config.models, suite, variants);
   const outDir = resolve(
     options.out ?? join(process.cwd(), "eval-out", String(context.clock.now())),
   );
-  const executorOptions: EvalExecutorOptions = {
-    isolation,
-    cassette,
-    suiteDirectory: dirname(absoluteSuitePath),
-    config,
-    exportTelemetry: options.exportTelemetry ?? false,
-    context,
+  const controller = new AbortController();
+  const cancel = () => {
+    controller.abort();
   };
+  const liveSession = await liveSessionFor(args, config.models, maxCalls, controller.signal);
+  if (liveSession !== undefined) {
+    process.once("SIGINT", cancel);
+    process.once("SIGTERM", cancel);
+    if (isolation === "inprocess") {
+      context.out.error("eval_live_inprocess_not_isolated");
+    }
+  }
+  try {
+    return await executeEvalCommand({
+      ...args,
+      suite,
+      variants,
+      outDir,
+      failUnder,
+      executorOptions: {
+        isolation,
+        cassette,
+        suiteDirectory: dirname(absoluteSuitePath),
+        config,
+        exportTelemetry: options.exportTelemetry ?? false,
+        context,
+        ...(liveSession === undefined ? {} : { liveSession, signal: controller.signal }),
+      },
+    });
+  } finally {
+    process.removeListener("SIGINT", cancel);
+    process.removeListener("SIGTERM", cancel);
+    await liveSession?.close();
+  }
+}
+
+async function executeEvalCommand(
+  args: EvalRunCommandArgs & {
+    readonly suite: EvalSuite;
+    readonly variants: ReturnType<typeof createVariants>;
+    readonly outDir: string;
+    readonly failUnder: number | undefined;
+    readonly executorOptions: EvalExecutorOptions;
+  },
+): Promise<ExitCode> {
+  const {
+    api,
+    context,
+    options,
+    dependencies,
+    suite,
+    variants,
+    outDir,
+    failUnder,
+    executorOptions,
+  } = args;
   const baseExecutor = await (dependencies.createExecutor ?? createDefaultExecutor)(
     api,
     executorOptions,
@@ -163,8 +270,8 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
     records,
     executor,
   });
-  if (cassette === "record") {
-    await recordCassettes(dirname(absoluteSuitePath), records, eventsByTrial);
+  if (executorOptions.cassette === "record") {
+    await recordCassettes(executorOptions.suiteDirectory, records, eventsByTrial);
   }
   const report = api.buildEvalReport({
     trials: records,
@@ -174,12 +281,33 @@ async function runEvalCommand(args: EvalRunCommandArgs): Promise<ExitCode> {
   await writeReportFiles(api, outDir, report);
   writeSummaryTable(context, report);
   context.out.json(api.EvalReportSchema, report);
+  if (executorOptions.liveSession?.failureCode !== undefined) {
+    throw new EvalCliError(executorOptions.liveSession.failureCode);
+  }
+  if (executorOptions.signal?.aborted === true) {
+    throw new EvalCliError("eval_live_cancelled");
+  }
   if (results.some(({ status }) => status === "skipped_budget")) {
     return ExitCode.budgetExceeded;
   }
   return failUnder !== undefined && report.aggregates.some(({ passRate }) => passRate < failUnder)
     ? ExitCode.failure
     : ExitCode.ok;
+}
+
+async function runEvalAction(
+  suitePath: string,
+  options: EvalOptions,
+  context: EvalRunCommandArgs["context"],
+  dependencies: EvalCommandDependencies,
+): Promise<void> {
+  const api = await (dependencies.loadEval ?? (() => import("@rovinos/eval")))();
+  const result = await runEvalCommand({ api, context, suitePath, options, dependencies });
+  if (result !== ExitCode.ok) {
+    throw new EvalCommandExitError(
+      result === ExitCode.budgetExceeded ? "budget_exceeded" : "eval_failed",
+    );
+  }
 }
 
 /** Registers the `harness eval run` and `harness eval compare` commands. */
@@ -210,26 +338,16 @@ export function createEvalCommand(dependencies: EvalCommandDependencies = {}): C
         .option("--seed <n>", "deterministic suite seed")
         .option("--fail-under <rate>", "fail when any pass rate is below this value")
         .option("--max-cost-usd <amount>", "stop starting trials after this cumulative cost")
+        .option("--live", "permit live model calls", false)
+        .option("--max-model-calls <n>", "per-run live provider request cap (default: 100)")
         .option(
           "--export-telemetry",
           "export eval telemetry through the configured pipeline",
           false,
         )
-        .action(async (suitePath: string, options: EvalOptions) => {
-          const api = await (dependencies.loadEval ?? (() => import("@rovinos/eval")))();
-          const result = await runEvalCommand({
-            api,
-            context,
-            suitePath,
-            options,
-            dependencies,
-          });
-          if (result !== ExitCode.ok) {
-            throw new EvalCommandExitError(
-              result === ExitCode.budgetExceeded ? "budget_exceeded" : "eval_failed",
-            );
-          }
-        });
+        .action((suitePath: string, options: EvalOptions) =>
+          runEvalAction(suitePath, options, context, dependencies),
+        );
       evalCommand
         .command("compare <report-a> <report-b>")
         .description("Compare two evaluation reports")

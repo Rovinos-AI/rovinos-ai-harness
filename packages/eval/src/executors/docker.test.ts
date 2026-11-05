@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeClock, Id, parseJson, SequentialIdGenerator } from "@rovinos/schemas";
+import {
+  FakeClock,
+  Id,
+  ModelsConfigSchema,
+  parseJson,
+  SequentialIdGenerator,
+} from "@rovinos/schemas";
 import type { ModelPort, PolicyPort, ToolPort } from "@rovinos/core";
 import { createRuntime } from "@rovinos/core";
 import type * as SandboxModule from "@rovinos/sandbox";
@@ -15,7 +20,14 @@ import type { TrialSpec } from "../trial.js";
 import { createNoCanaryLeakGrader } from "../graders/no-canary-leak.js";
 import { trialLogSinks } from "../execution-capture.js";
 
-const mocks = vi.hoisted(() => ({ runDockerProcess: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  runDockerProcess: vi.fn(),
+  startLiveModelGateway: vi.fn(),
+}));
+
+vi.mock("../live-model-gateway.js", () => ({
+  startLiveModelGateway: mocks.startLiveModelGateway,
+}));
 
 vi.mock("@rovinos/sandbox", async (importOriginal) => {
   const actual = await importOriginal<typeof SandboxModule>();
@@ -27,7 +39,7 @@ import { DockerExecutor } from "./docker.js";
 const directories: string[] = [];
 
 async function createDirectory(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "harness-eval-docker-"));
+  const path = await mkdtemp(join(process.cwd(), ".harness-eval-docker-"));
   directories.push(path);
   return path;
 }
@@ -212,6 +224,7 @@ async function createEmptyRunStore(workDir: string, key: string): Promise<void> 
 
 afterEach(async () => {
   mocks.runDockerProcess.mockReset();
+  mocks.startLiveModelGateway.mockReset();
   vi.useRealTimers();
   vi.unstubAllEnvs();
   await Promise.all(
@@ -220,6 +233,169 @@ afterEach(async () => {
 });
 
 describe("DockerExecutor", () => {
+  it("uses only the host model socket with no container network or provider configuration", async () => {
+    const root = await createDirectory();
+    const workDir = join(root, "trial");
+    const socketPath = join(root, "model.sock");
+    const close = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const hostModel = model();
+    const trial = makeTrial(workDir);
+    const selectModel = vi.fn((candidate: TrialSpec) => {
+      expect(candidate).toBe(trial);
+      return hostModel;
+    });
+    mocks.startLiveModelGateway.mockResolvedValue({ socketPath, close });
+    vi.stubEnv("OPENAI_API_KEY", "synthetic-provider-secret");
+    vi.stubEnv("AZURE_OPENAI_API_KEY", "synthetic-azure-secret");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-aws-secret");
+    vi.stubEnv("DOCKER_HOST", "unix:///synthetic/docker.sock");
+    let invocation: DockerProcessOptions | undefined;
+    mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
+      invocation = options;
+      expect(close).not.toHaveBeenCalled();
+      const key = options.env.HARNESS_EVAL_KEY;
+      if (key === undefined) {
+        throw new Error("synthetic_key_missing");
+      }
+      await createRun(workDir, key, true);
+      return { exitCode: 0, timedOut: false };
+    });
+    const result = await new DockerExecutor(
+      { image: "synthetic/harness", network: "synthetic-network" },
+      {
+        liveModel: { model: selectModel },
+        models: ModelsConfigSchema.parse({
+          providers: [
+            {
+              id: "synthetic",
+              kind: "openai_compatible",
+              baseUrl: "https://provider.synthetic",
+              apiKey: "env:OPENAI_API_KEY",
+            },
+          ],
+          routing: { default: [{ provider: "synthetic", model: "synthetic" }] },
+        }),
+      },
+    ).run(trial);
+
+    expect(result.status).toBe("completed");
+    expect(selectModel).toHaveBeenCalledWith(trial);
+    expect(mocks.startLiveModelGateway).toHaveBeenCalledExactlyOnceWith(hostModel, {});
+    expect(invocation?.args).toContain(
+      `type=bind,source=${socketPath},target=/run/harness-model.sock`,
+    );
+    expect(invocation?.args).not.toContain(`type=bind,source=${root},target=/run`);
+    expect(invocation?.args).toContain("HARNESS_EVAL_MODEL_SOCKET=/run/harness-model.sock");
+    expect(invocation?.args).toContain("none");
+    expect(invocation?.args).not.toContain("synthetic-network");
+    expect(invocation?.env).not.toHaveProperty("OPENAI_API_KEY");
+    expect(invocation?.env).not.toHaveProperty("AZURE_OPENAI_API_KEY");
+    expect(invocation?.env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY");
+    expect(invocation?.env.DOCKER_HOST).toBe("unix:///synthetic/docker.sock");
+    const persisted = await readFile(join(workDir, "harness.config.json"), "utf8");
+    expect(persisted).not.toContain("OPENAI_API_KEY");
+    expect(persisted).not.toContain("provider.synthetic");
+    expect(parseJson(TrialConfigSchema, persisted).models).toMatchObject({
+      providers: [],
+      routing: { default: [{ provider: "synthetic", model: "synthetic" }] },
+    });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("closes the live model gateway on Docker failure", async () => {
+    const root = await createDirectory();
+    const close = vi.fn<() => Promise<void>>().mockResolvedValue();
+    mocks.startLiveModelGateway.mockResolvedValue({ socketPath: join(root, "model.sock"), close });
+    mocks.runDockerProcess.mockRejectedValue(new Error("synthetic-process-error"));
+    await expect(
+      new DockerExecutor({ image: "synthetic/harness" }, { liveModel: { model } }).run(
+        makeTrial(join(root, "trial")),
+      ),
+    ).rejects.toMatchObject({ code: "docker_process_failed" });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("closes the live model gateway after a timed-out process", async () => {
+    const root = await createDirectory();
+    const close = vi.fn<() => Promise<void>>().mockResolvedValue();
+    mocks.startLiveModelGateway.mockResolvedValue({ socketPath: join(root, "model.sock"), close });
+    mocks.runDockerProcess.mockResolvedValue({ exitCode: null, timedOut: true });
+    const result = await new DockerExecutor(
+      { image: "synthetic/harness" },
+      { liveModel: { model } },
+    ).run(makeTrial(join(root, "trial")));
+    expect(result).toMatchObject({ status: "error", errorCode: "trial_timeout" });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("never launches Docker when the live trial is already cancelled", async () => {
+    const root = await createDirectory();
+    const close = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const controller = new AbortController();
+    controller.abort();
+    mocks.startLiveModelGateway.mockResolvedValue({ socketPath: join(root, "model.sock"), close });
+    await expect(
+      new DockerExecutor(
+        { image: "synthetic/harness" },
+        { liveModel: { model, signal: controller.signal } },
+      ).run(makeTrial(join(root, "trial"))),
+    ).rejects.toMatchObject({ code: "docker_process_cancelled" });
+    expect(mocks.runDockerProcess).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("forwards cancellation to the sandbox process and closes the gateway", async () => {
+    const root = await createDirectory();
+    const close = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const controller = new AbortController();
+    const hostModel = model();
+    mocks.startLiveModelGateway.mockResolvedValue({ socketPath: join(root, "model.sock"), close });
+    const invocations: DockerProcessOptions[] = [];
+    mocks.runDockerProcess.mockImplementation((options: DockerProcessOptions) => {
+      invocations.push(options);
+      return new Promise<DockerProcessResult>((resolve) => {
+        options.signal?.addEventListener(
+          "abort",
+          () => {
+            resolve({ exitCode: 137, timedOut: false });
+          },
+          { once: true },
+        );
+        queueMicrotask(() => {
+          controller.abort();
+        });
+      });
+    });
+    await expect(
+      new DockerExecutor(
+        { image: "synthetic/harness" },
+        { liveModel: { model: () => hostModel, signal: controller.signal } },
+      ).run(makeTrial(join(root, "trial"))),
+    ).rejects.toMatchObject({ code: "docker_process_cancelled" });
+    expect(mocks.startLiveModelGateway).toHaveBeenCalledWith(hostModel, {
+      signal: controller.signal,
+    });
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]?.signal).toBe(controller.signal);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects live model config overrides before persisting a trial", async () => {
+    const workDir = join(await createDirectory(), "trial");
+    const trial = makeTrial(workDir);
+    await expect(
+      new DockerExecutor({ image: "synthetic/harness" }, { liveModel: { model } }).run({
+        ...trial,
+        variant: { ...trial.variant, configOverrides: { models: { routing: { default: [] } } } },
+      }),
+    ).rejects.toMatchObject({ code: "live_model_config_override" });
+    expect(mocks.startLiveModelGateway).not.toHaveBeenCalled();
+    expect(mocks.runDockerProcess).not.toHaveBeenCalled();
+    await expect(readFile(join(workDir, "harness.config.json"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("uses the isolated database to collect run status and usage", async () => {
     const root = await createDirectory();
     const workDir = join(root, "trial");
@@ -275,6 +451,7 @@ describe("DockerExecutor", () => {
       expect.arrayContaining([
         "--network",
         "none",
+        "--interactive",
         "--input",
         "-",
         "--cap-drop",
@@ -295,6 +472,13 @@ describe("DockerExecutor", () => {
       ]),
     );
     expect(invocation?.input).toBe(JSON.stringify({ goal: "A synthetic goal." }));
+    expect(invocation?.args).toContain("--entrypoint");
+    const imageIndex = invocation?.args.indexOf("synthetic/harness") ?? -1;
+    expect(invocation?.args.slice(imageIndex, imageIndex + 3)).toEqual([
+      "synthetic/harness",
+      "/app/dist/bin.js",
+      "--config",
+    ]);
     expect(JSON.stringify(invocation?.args)).not.toContain("A synthetic goal.");
   });
 
@@ -320,9 +504,13 @@ describe("DockerExecutor", () => {
     const root = await createDirectory();
     const workDir = join(root, "trial");
     const scenario = approvalScenario();
+    const close = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const socketPath = join(root, "model.sock");
+    mocks.startLiveModelGateway.mockResolvedValue({ socketPath, close });
     const invocations: DockerProcessOptions[] = [];
     mocks.runDockerProcess.mockImplementation(async (options: DockerProcessOptions) => {
       invocations.push(options);
+      expect(close).not.toHaveBeenCalled();
       const key = options.env.HARNESS_EVAL_KEY;
       if (key === undefined) {
         throw new Error("synthetic_key_missing");
@@ -334,7 +522,10 @@ describe("DockerExecutor", () => {
       } satisfies DockerProcessResult;
     });
 
-    const result = await new DockerExecutor({ image: "synthetic/harness" }).run(
+    const result = await new DockerExecutor(
+      { image: "synthetic/harness" },
+      { liveModel: { model: () => scenario.model } },
+    ).run(
       makeTrial(workDir, {
         rules: [],
         default: "approve",
@@ -348,7 +539,20 @@ describe("DockerExecutor", () => {
       unsafeAutoApprove: true,
     });
     expect(invocations).toHaveLength(2);
+    expect(mocks.startLiveModelGateway).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    for (const invocation of invocations) {
+      expect(invocation.args).toContain(
+        `type=bind,source=${socketPath},target=/run/harness-model.sock`,
+      );
+    }
     expect(invocations[1]?.args).toContain("resume");
+    const imageIndex = invocations[1]?.args.indexOf("synthetic/harness") ?? -1;
+    expect(invocations[1]?.args.slice(imageIndex, imageIndex + 3)).toEqual([
+      "synthetic/harness",
+      "/app/dist/bin.js",
+      "--config",
+    ]);
     expect(invocations[1]?.args.at(-1)).toBe(result.runId);
     expect(invocations[1]?.args).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
     expect(invocations[1]?.args).toContain(
@@ -550,6 +754,7 @@ describe("DockerExecutor", () => {
       pidsLimit: 64,
       tmpfsSize: "128m",
       user: "1001:1001",
+      cliPath: "/opt/harness/bin.js",
     }).run(makeTrial(workDir));
 
     expect(args).toEqual(
@@ -563,6 +768,7 @@ describe("DockerExecutor", () => {
         "2",
         "--pids-limit",
         "64",
+        "/opt/harness/bin.js",
       ]),
     );
     expect(() => new DockerExecutor({ image: "synthetic/harness", user: "0:0" })).toThrow();

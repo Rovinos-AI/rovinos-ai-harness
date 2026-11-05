@@ -119,6 +119,62 @@ describe("runDockerProcess", () => {
   });
 
   // threat: T-10
+  it("does not spawn a Docker launcher for an already cancelled run", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(runDockerProcess(options({ signal: controller.signal }))).rejects.toMatchObject({
+      code: "docker_process_cancelled",
+    });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  // threat: T-10
+  it.each([false, true])(
+    "terminates the launcher before container cleanup when container exists=%s",
+    async (created) => {
+      vi.useFakeTimers();
+      const main = makeChild();
+      const killer = makeChild();
+      const controller = new AbortController();
+      let containerStarted = created;
+      let launcherStoppedBeforeCleanup = false;
+      const delayedLaunch = setTimeout(() => {
+        containerStarted = true;
+      }, 100);
+      main.kill.mockImplementation(() => {
+        clearTimeout(delayedLaunch);
+        main.child.emit("close", null, "SIGKILL");
+        return true;
+      });
+      mocks.spawn.mockImplementation((_command: string, args: string[]) => {
+        if (args[0] === "kill") {
+          launcherStoppedBeforeCleanup = main.kill.mock.calls.some((call) => call[0] === "SIGKILL");
+          queueMicrotask(() => {
+            killer.child.emit("close", created ? 0 : 1, null);
+          });
+          return killer.child;
+        }
+        return main.child;
+      });
+      const pending = runDockerProcess(options({ signal: controller.signal })).catch(
+        (error: unknown) => error,
+      );
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(await pending).toMatchObject({ code: "docker_process_cancelled" });
+      expect(containerStarted).toBe(created);
+      expect(launcherStoppedBeforeCleanup).toBe(true);
+      expect(mocks.spawn).toHaveBeenNthCalledWith(
+        2,
+        "docker",
+        ["kill", "harness-eval-synthetic"],
+        expect.objectContaining({ env: options().env, shell: false }),
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  // threat: T-10
   it("kills the named container and local process after a timeout", async () => {
     const main = makeChild();
     const killer = makeChild();
@@ -141,7 +197,7 @@ describe("runDockerProcess", () => {
       ["kill", "harness-eval-synthetic"],
       expect.objectContaining({ shell: false, stdio: "ignore" }),
     );
-    expect(main.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(main.kill).toHaveBeenCalledWith("SIGKILL");
   });
 
   it("still terminates the local process if Docker kill cannot start", async () => {
@@ -156,6 +212,6 @@ describe("runDockerProcess", () => {
       timedOut: true,
     });
 
-    expect(main.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(main.kill).toHaveBeenCalledWith("SIGKILL");
   });
 });

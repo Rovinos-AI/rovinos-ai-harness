@@ -186,6 +186,7 @@ export class AzureOpenAIAdapter extends OpenAIAdapter {
       baseURL: `${config.endpoint.replace(/\/+$/u, "")}/openai`,
       apiVersion: config.apiVersion,
       maxRetries: 0,
+      logLevel: "off",
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...azureAuthentication,
     });

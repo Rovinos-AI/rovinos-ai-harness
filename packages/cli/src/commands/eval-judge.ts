@@ -131,6 +131,9 @@ export async function judgeGrader(
             ],
           }
         : {
+            ...(options.liveSession === undefined
+              ? {}
+              : { providerAdapters: options.liveSession.providerAdapters }),
             ...(options.context.secretResolver === undefined
               ? {}
               : { secretResolver: options.context.secretResolver }),

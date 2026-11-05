@@ -16,7 +16,7 @@ import {
 } from "@rovinos/schemas";
 import type { Event, ModelsConfig, RunBudgetsSchema, SecretRef } from "@rovinos/schemas";
 import { z } from "zod";
-import type { Clock, RuntimeConfig } from "@rovinos/core";
+import type { Clock, ModelPort, RuntimeConfig } from "@rovinos/core";
 import type { GradeContext } from "./graders/types.js";
 import type { EvalTask } from "./schema.js";
 import { EvalCassetteModeSchema } from "./trial.js";
@@ -71,6 +71,11 @@ export interface TrialExecutionDependencies {
   readonly exportTelemetry?: boolean;
   /** Provider configuration and secret resolver used for live model evaluations. */
   readonly models?: ModelsConfig;
+  /** Host-owned model transport; provider credentials never enter the trial configuration. */
+  readonly liveModel?: {
+    readonly model: (trial: TrialSpec) => ModelPort;
+    readonly signal?: AbortSignal;
+  };
   readonly secretResolver?: {
     resolve(ref: SecretRef, signal?: AbortSignal): Promise<{ reveal(): string }>;
   };
@@ -83,9 +88,12 @@ export const systemClock: Clock = Object.freeze({ now: () => Date.now() });
 export const systemRandomBytes = (size: number): Uint8Array => randomBytes(size);
 
 class TrialSetupError extends HarnessError {
-  readonly code: "trial_workdir_invalid" | "trial_random_source_invalid";
+  readonly code:
+    "trial_workdir_invalid" | "trial_random_source_invalid" | "live_model_config_override";
 
-  constructor(code: "trial_workdir_invalid" | "trial_random_source_invalid") {
+  constructor(
+    code: "trial_workdir_invalid" | "trial_random_source_invalid" | "live_model_config_override",
+  ) {
     super(code);
     this.code = code;
   }
@@ -196,6 +204,9 @@ export async function prepareTrial(
   trial: TrialSpec,
   dependencies: TrialExecutionDependencies = {},
 ): Promise<PreparedTrial> {
+  if (dependencies.liveModel !== undefined && trial.variant.configOverrides?.models !== undefined) {
+    throw new TrialSetupError("live_model_config_override");
+  }
   const workDir = resolve(trial.workDir);
   if (basename(workDir) === "" || workDir === resolve(workDir, "..")) {
     throw new TrialSetupError("trial_workdir_invalid");
@@ -220,6 +231,10 @@ export async function prepareTrial(
 
   const key = secretForTrial(dependencies.randomBytes ?? systemRandomBytes);
   const config = configForTrial(trial.task, trial.variant, keyIdFor(trial), dependencies.models);
+  if (dependencies.liveModel !== undefined) {
+    // The host gateway owns providers; retain routing but persist no endpoint or secret reference.
+    config.models.providers = [];
+  }
   const configPath = join(workDir, "harness.config.json");
   await writeFile(configPath, `${JSON.stringify(config)}\n`, { encoding: "utf8", flag: "wx" });
   const evalOptionsPath = join(workDir, "eval.options.json");

@@ -259,6 +259,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       this.client = new OpenAI({
         apiKey: options.apiKey.reveal(),
         maxRetries: 0,
+        logLevel: "off",
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
       });

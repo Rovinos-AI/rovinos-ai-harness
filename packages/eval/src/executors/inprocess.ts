@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, FakeClock, SequentialIdGenerator, type Event, type Id } from "@rovinos/schemas";
-import { createRuntime } from "@rovinos/core";
+import { createRuntime, foldRunState } from "@rovinos/core";
 import type {
   Clock,
   ModelPort,
@@ -25,6 +25,7 @@ import { cp } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ensureRunWorkspace } from "@rovinos/sandbox";
 import type { GradeContext } from "../graders/types.js";
+import { LiveModelError } from "../live-model-contract.js";
 
 /** Factories for isolated model, tool, and policy ports. */
 export interface InProcessExecutorOptions extends TrialExecutionDependencies {
@@ -72,7 +73,10 @@ function runtimeOverrides(options: {
     dataDir: prepared.dataDir,
     roleConfigDirectory: dirname(prepared.configPath),
     transientVault: false,
-    clock: new FakeClock(1_700_000_000_000 + trial.seed),
+    clock:
+      executor.liveModel === undefined
+        ? new FakeClock(1_700_000_000_000 + trial.seed)
+        : (executor.clock ?? systemClock),
     ids,
     ...(model === undefined
       ? {}
@@ -146,45 +150,112 @@ interface ExecutedTrialRun {
   readonly maxResumesExceeded: boolean;
 }
 
-async function executeTrialRun(
+function simulatedHuman(
   runtime: Runtime,
   trial: TrialSpec,
-  runId: Id,
-): Promise<ExecutedTrialRun> {
+  assertActive: () => void,
+): SimulatedHuman | undefined {
+  return trial.task.human === undefined
+    ? undefined
+    : new SimulatedHuman(trial.task.human, {
+        store: runtime.store,
+        resolveApproval: (...args) => {
+          assertActive();
+          return runtime.resolveApproval(...args);
+        },
+        resolveInput: (...args) => {
+          assertActive();
+          return runtime.resolveInput(...args);
+        },
+      });
+}
+
+async function cancelledRun(runtime: Runtime, runId: Id): Promise<RuntimeRunResult> {
+  const events = await readTokenizedEvents(runtime, runId);
+  const state = foldRunState(events);
+  return { status: state.status, state, events, approvalIds: [...state.pendingApprovals.keys()] };
+}
+
+function startTrial(runtime: Runtime, trial: TrialSpec, runId: Id, signal?: AbortSignal) {
   const goal =
     trial.task.input.metadata === undefined
       ? { goal: trial.task.input.goal }
       : { goal: trial.task.input.goal, metadata: trial.task.input.metadata };
   const hasContextStrategy =
     trial.variant.contextStrategy !== undefined || trial.task.contextStrategy !== undefined;
-  let run = await runtime.start(goal, {
+  return runtime.start(goal, {
     runId,
+    ...(signal === undefined ? {} : { signal }),
     ...(hasContextStrategy ? { role: "eval" } : {}),
     evalMetadata: {
       suite: evalSuiteCode(trial.suite),
       task: trial.task.id,
       trial: trial.trialIndex,
     },
-  }).completion;
-  const human =
-    trial.task.human === undefined ? undefined : new SimulatedHuman(trial.task.human, runtime);
-  if (human === undefined) {
+  });
+}
+
+async function executeTrialRun(
+  runtime: Runtime,
+  trial: TrialSpec,
+  runId: Id,
+  signal?: AbortSignal,
+): Promise<ExecutedTrialRun> {
+  const assertActive = (): void => {
+    if (signal?.aborted === true) {
+      throw new LiveModelError("eval_live_cancelled");
+    }
+  };
+  assertActive();
+  let started: Promise<void> | undefined;
+  let cancellation: Promise<unknown> | undefined;
+  const cancel = (): void => {
+    if (started !== undefined) {
+      // Wait for durable startup before cancelling, including aborts during startup.
+      cancellation ??= started.then(() => runtime.cancel(runId));
+      void cancellation.catch(() => undefined);
+    }
+  };
+  let human: SimulatedHuman | undefined;
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    assertActive();
+    const handle = startTrial(runtime, trial, runId, signal);
+    started = handle.started;
+    if (signal?.aborted === true) {
+      cancel();
+    }
+    let run = await handle.completion;
+    assertActive();
+    human = simulatedHuman(runtime, trial, assertActive);
+    const humanResult = await human?.runUntilSettled(runId, run.status, async () => {
+      assertActive();
+      run = await runtime.resume(runId, signal === undefined ? {} : { signal });
+      return run.status;
+    });
+    assertActive();
     return {
       run,
       runId,
+      ...(human === undefined ? {} : { human }),
+      maxResumesExceeded: humanResult?.maxResumesExceeded ?? false,
+    };
+  } catch (error) {
+    if (signal?.aborted !== true || started === undefined) {
+      throw error;
+    }
+    cancel();
+    await cancellation;
+    return {
+      run: await cancelledRun(runtime, runId),
+      runId,
+      ...(human === undefined ? {} : { human }),
       maxResumesExceeded: false,
     };
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    await cancellation;
   }
-  const humanResult = await human.runUntilSettled(runId, run.status, async () => {
-    run = await runtime.resume(runId);
-    return run.status;
-  });
-  return {
-    run,
-    runId,
-    human,
-    maxResumesExceeded: humanResult.maxResumesExceeded,
-  };
 }
 
 function trialResult(
@@ -242,14 +313,16 @@ export class InProcessExecutor implements TrialExecutor {
     finish: (context: GradeContext) => Promise<TrialResult>,
   ): Promise<TrialResult> {
     configureEvalTelemetry(this.options.exportTelemetry);
+    if (this.options.liveModel?.signal?.aborted === true) {
+      throw new LiveModelError("eval_live_cancelled");
+    }
     const clock = this.options.clock ?? systemClock;
     const startedAt = clock.now();
     const prepared = await prepareTrial(trial, this.options);
     const ids = new SequentialIdGenerator();
     const runId = ids.next();
-    const workspaceDir = await prepareRuntimeWorkspace(prepared, runId);
     let modelFailureCode: string | undefined;
-    const model = this.options.model?.(trial);
+    const model = this.options.liveModel?.model(trial) ?? this.options.model?.(trial);
     const runtime = await createRuntime(
       prepared.runtimeConfig,
       runtimeOverrides({
@@ -266,21 +339,24 @@ export class InProcessExecutor implements TrialExecutor {
     let result: TrialResult;
     let events: readonly Event[] = [];
     try {
+      const workspaceDir = await prepareRuntimeWorkspace(prepared, runId);
       const captured = await captureProcessOutput(
         () => {
-          return executeTrialRun(runtime, trial, runId).then(async (executed) => {
-            events = await readTokenizedEvents(runtime, executed.runId);
-            const outcome = TrialResultSchema.parse({
-              ...trialResult(prepared, startedAt, clock, executed),
-              workspaceDir,
-              ...(modelFailureCode === undefined ? {} : { errorCode: modelFailureCode }),
-            });
-            return finishWithBackend(runtime, runId, finish, {
-              result: outcome,
-              events,
-              backend: runtime.sandboxBackend,
-            });
-          });
+          return executeTrialRun(runtime, trial, runId, this.options.liveModel?.signal).then(
+            async (executed) => {
+              events = await readTokenizedEvents(runtime, executed.runId);
+              const outcome = TrialResultSchema.parse({
+                ...trialResult(prepared, startedAt, clock, executed),
+                workspaceDir,
+                ...(modelFailureCode === undefined ? {} : { errorCode: modelFailureCode }),
+              });
+              return finishWithBackend(runtime, runId, finish, {
+                result: outcome,
+                events,
+                backend: runtime.sandboxBackend,
+              });
+            },
+          );
         },
         (stdout, stderr) => {
           setTrialProcessOutput(prepared.dbPath, stdout, stderr);

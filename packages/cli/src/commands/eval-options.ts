@@ -29,6 +29,8 @@ export interface EvalOptions {
   readonly failUnder?: string;
   readonly maxCostUsd?: string;
   readonly exportTelemetry?: boolean;
+  readonly live?: boolean;
+  readonly maxModelCalls?: string;
 }
 
 /** Parses a positive integer command-line value. */

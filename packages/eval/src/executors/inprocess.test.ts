@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Id } from "@rovinos/schemas";
@@ -23,7 +22,7 @@ import {
 const directories: string[] = [];
 
 async function createDirectory(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "harness-eval-inprocess-"));
+  const path = await mkdtemp(join(process.cwd(), ".harness-eval-inprocess-"));
   directories.push(path);
   return path;
 }
