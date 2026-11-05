@@ -147,7 +147,7 @@ describe("runDockerProcess", () => {
         return true;
       });
       mocks.spawn.mockImplementation((_command: string, args: string[]) => {
-        if (args[0] === "kill") {
+        if (args[0] === "rm") {
           launcherStoppedBeforeCleanup = main.kill.mock.calls.some((call) => call[0] === "SIGKILL");
           queueMicrotask(() => {
             killer.child.emit("close", created ? 0 : 1, null);
@@ -167,7 +167,7 @@ describe("runDockerProcess", () => {
       expect(mocks.spawn).toHaveBeenNthCalledWith(
         2,
         "docker",
-        ["kill", "harness-eval-synthetic"],
+        ["rm", "--force", "harness-eval-synthetic"],
         expect.objectContaining({ env: options().env, shell: false }),
       );
       expect(vi.getTimerCount()).toBe(0);
@@ -175,11 +175,11 @@ describe("runDockerProcess", () => {
   );
 
   // threat: T-10
-  it("kills the named container and local process after a timeout", async () => {
+  it("force-removes the named container after terminating the timed-out launcher", async () => {
     const main = makeChild();
     const killer = makeChild();
     mocks.spawn.mockImplementation((_command: string, args: string[]) => {
-      if (args[0] === "kill") {
+      if (args[0] === "rm") {
         setImmediate(() => killer.child.emit("close", 0, null));
         return killer.child;
       }
@@ -194,13 +194,13 @@ describe("runDockerProcess", () => {
     expect(mocks.spawn).toHaveBeenNthCalledWith(
       2,
       "docker",
-      ["kill", "harness-eval-synthetic"],
+      ["rm", "--force", "harness-eval-synthetic"],
       expect.objectContaining({ shell: false, stdio: "ignore" }),
     );
     expect(main.kill).toHaveBeenCalledWith("SIGKILL");
   });
 
-  it("still terminates the local process if Docker kill cannot start", async () => {
+  it("still terminates the local process if Docker cleanup cannot start", async () => {
     const main = makeChild();
     mocks.spawn
       .mockImplementationOnce(() => main.child)

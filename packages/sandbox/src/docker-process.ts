@@ -62,10 +62,10 @@ export function isDockerAvailable(dockerPath = "docker"): boolean {
   }
 }
 
-function stopContainer(options: DockerProcessOptions): Promise<void> {
+function removeContainer(options: DockerProcessOptions): Promise<void> {
   let child: ChildProcess;
   try {
-    child = spawn(options.dockerPath, ["kill", options.containerName], {
+    child = spawn(options.dockerPath, ["rm", "--force", options.containerName], {
       stdio: "ignore",
       shell: false,
       env: options.env,
@@ -196,7 +196,7 @@ export async function runDockerProcess(
     child.kill("SIGKILL");
   }
   await waitForExit(exited);
-  await stopContainer(options);
+  await removeContainer(options);
   if (cancellation.cancelled()) {
     throw new DockerProcessError("docker_process_cancelled");
   }
