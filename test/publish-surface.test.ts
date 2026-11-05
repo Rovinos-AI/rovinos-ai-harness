@@ -11,6 +11,7 @@ const temporaryDirectories: string[] = [];
 const packageManifestSchema = z.looseObject({
   name: z.string(),
   private: z.boolean().optional(),
+  version: z.string(),
 });
 
 async function privateWorkspacePackages(): Promise<readonly string[]> {
@@ -343,6 +344,11 @@ describe("published package smoke test", () => {
         timeout: 30_000,
       }),
     );
+    const cliPackage = packageManifestSchema.parse(
+      JSON.parse(
+        await readFile(join(projectDirectory, "node_modules/@rovinos/cli/package.json"), "utf8"),
+      ),
+    );
     const help = await withCommandDiagnostics("corepack yarn run harness --help", () =>
       execFileAsync("corepack", ["yarn", "run", "harness", "--help"], {
         cwd: projectDirectory,
@@ -350,7 +356,8 @@ describe("published package smoke test", () => {
         timeout: 30_000,
       }),
     );
-    expect(version.stdout).toContain("0.0.0");
+    expect(version.stdout.trim()).toBe(cliPackage.version);
+    expect(version.stdout.trim()).not.toBe("0.0.0");
     expect(help.stdout).toContain("Usage");
   }, 240_000);
 });

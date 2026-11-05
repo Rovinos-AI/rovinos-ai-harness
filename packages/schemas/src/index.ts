@@ -342,5 +342,5 @@ export {
 } from "./cli/servers.js";
 export { eventSamples, FakeClock, SequentialIdGenerator } from "./testing.js";
 
-/** The current harness version. */
+/** Internal schemas-workspace placeholder; not the released CLI version. */
 export const HARNESS_VERSION = "0.0.0";

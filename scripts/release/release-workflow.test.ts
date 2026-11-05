@@ -95,6 +95,8 @@ describe("release workflow", () => {
     expect(publish?.needs).toBe("verify");
     expect(imageBuild?.run).toContain("ghcr.io/$owner/harness");
     expect(imageBuild?.run).toContain("ghcr.io/$owner/harness-sandbox");
+    expect(imageBuild?.run).toContain('tag="$GITHUB_REF_NAME"');
+    expect(imageBuild?.run).toContain('--tag "$image:$tag"');
     expect(imageBuild?.run).not.toContain("sandbox-runner");
     expect(imageBuild?.run).not.toContain("sandbox-egress-proxy");
     expect(imageBuild?.run).toContain('build_and_sign "ghcr.io/$owner/harness" Dockerfile');

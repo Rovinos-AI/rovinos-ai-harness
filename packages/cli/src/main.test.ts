@@ -8,6 +8,7 @@ import { HarnessConfigSchema } from "@rovinos/config";
 import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import cliPackage from "../package.json" with { type: "json" };
 import type { CliContext, CommandModule } from "./command.js";
 import { ERROR_EXIT_CODES, errorCodeOf, ExitCode, exitCodeForError } from "./exit-codes.js";
 import { createOutput } from "./output.js";
@@ -181,13 +182,14 @@ describe("CLI main", () => {
     expect(stderr).toEqual(["usage\n"]);
   });
 
-  it("maps the built-in version option through the output boundary", async () => {
+  it("reports the CLI package version through the output boundary", async () => {
     const { context, stdout } = createContext();
 
     const code = await main(["--version"], context, []);
 
     expect(code).toBe(ExitCode.ok);
-    expect(stdout).toEqual(["0.0.0\n"]);
+    expect(stdout).toEqual([`${cliPackage.version}\n`]);
+    expect(stdout).not.toEqual(["0.0.0\n"]);
   });
 
   it.each(Object.entries(ERROR_EXIT_CODES))("maps %s to exit code %i", (errorCode, expected) => {
