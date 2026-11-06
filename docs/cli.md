@@ -307,7 +307,7 @@ directory. A cassette miss is a coded failure and never falls back to a live pro
 Cassette recording writes sanitized model events to that location.
 
 Isolation defaults to in-process with cassette replay; cassette off defaults to Docker.
-Docker uses `ghcr.io/rovinos-ai/harness:<CLI version>` unless `HARNESS_EVAL_IMAGE`
+Docker uses `ghcr.io/rovinos-ai/harness:v<CLI version>` unless `HARNESS_EVAL_IMAGE`
 overrides the image. `--export-telemetry` is off by default. Human output contains
 task/variant pass rates, cost, and steps; global `--json` emits the validated report
 as one document. Exit code `1` indicates a failed `--fail-under` threshold, and `6`
