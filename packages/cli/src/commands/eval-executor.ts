@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { HarnessConfig } from "@rovinos/config";
-import { HARNESS_VERSION, HarnessError } from "@rovinos/schemas";
+import { HarnessError } from "@rovinos/schemas";
 import type { CommandModule } from "../command.js";
 import type { EvalSuite, EvalVariant, TrialExecutor, createLiveModelSession } from "@rovinos/eval";
 import type { Event } from "@rovinos/schemas";
+import cliPackage from "../../package.json" with { type: "json" };
 import { resolve } from "node:path";
 import type { EvalPackage } from "./eval-types.js";
 import { cassetteModelFactory } from "./eval-cassettes.js";
@@ -124,7 +125,8 @@ export function createDefaultExecutor(
         }),
   };
   if (options.isolation === "docker") {
-    const image = process.env.HARNESS_EVAL_IMAGE ?? `ghcr.io/rovinos-ai/harness:${HARNESS_VERSION}`;
+    const image =
+      process.env.HARNESS_EVAL_IMAGE ?? `ghcr.io/rovinos-ai/harness:v${cliPackage.version}`;
     return new api.DockerExecutor(
       { image, ...(liveModel === undefined ? {} : { user: liveDockerUser() }) },
       dependencies,

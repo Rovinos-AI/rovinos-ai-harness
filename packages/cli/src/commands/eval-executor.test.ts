@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessConfigSchema } from "@rovinos/config";
 import * as evalApi from "@rovinos/eval";
-import { HARNESS_VERSION } from "@rovinos/schemas";
 import type { TrialExecutor } from "@rovinos/eval";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import cliPackage from "../../package.json" with { type: "json" };
 import { createOutput } from "../output.js";
 import type { CliContext } from "../command.js";
 import type { EvalPackage } from "./eval-types.js";
@@ -109,7 +109,7 @@ describe("CLI eval executor", () => {
     createDefaultExecutor(api, options);
 
     expect(captured).toEqual([
-      `ghcr.io/rovinos-ai/harness:${HARNESS_VERSION}`,
+      `ghcr.io/rovinos-ai/harness:v${cliPackage.version}`,
       "synthetic/image:override",
     ]);
   });

@@ -2,16 +2,18 @@
 // Docker calls are asynchronous on purpose: a cold image build can take minutes, and a
 // synchronous child process would block the Vitest worker long enough for its RPC to time out.
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { HARNESS_VERSION } from "@rovinos/schemas";
+import { parseJson } from "@rovinos/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const composeFile = "infra/compose/docker-compose.test.yml";
+const cliPackageSchema = z.object({ version: z.string() });
 const imageName = `harness:integration-${String(process.pid)}`;
 const projectName = `harness-docker-${String(process.pid)}`;
 const composeEnvironment = { ...process.env, HARNESS_IMAGE: imageName };
@@ -55,7 +57,11 @@ describe("Docker image", () => {
 
     const version = (await runDocker(["run", "--rm", imageName, "--version"])).trim();
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(version).toBe(HARNESS_VERSION);
+    const cliPackage = parseJson(
+      cliPackageSchema,
+      await readFile(join(repositoryRoot, "packages/cli/package.json"), "utf8"),
+    );
+    expect(version).toBe(cliPackage.version);
   });
 
   it("includes package-relative assets and opens a SQLite store", async () => {

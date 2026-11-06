@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import { execFileAsync } from "../scripts/release/check-publish-surface.js";
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -11,6 +12,7 @@ const temporaryDirectories: string[] = [];
 const packageManifestSchema = z.looseObject({
   name: z.string(),
   private: z.boolean().optional(),
+  version: z.string(),
 });
 
 async function privateWorkspacePackages(): Promise<readonly string[]> {
@@ -343,6 +345,10 @@ describe("published package smoke test", () => {
         timeout: 30_000,
       }),
     );
+    const cliPackage = parseJson(
+      packageManifestSchema,
+      await readFile(join(projectDirectory, "node_modules/@rovinos/cli/package.json"), "utf8"),
+    );
     const help = await withCommandDiagnostics("corepack yarn run harness --help", () =>
       execFileAsync("corepack", ["yarn", "run", "harness", "--help"], {
         cwd: projectDirectory,
@@ -350,7 +356,8 @@ describe("published package smoke test", () => {
         timeout: 30_000,
       }),
     );
-    expect(version.stdout).toContain("0.0.0");
+    expect(version.stdout.trim()).toBe(cliPackage.version);
+    expect(version.stdout.trim()).not.toBe("0.0.0");
     expect(help.stdout).toContain("Usage");
   }, 240_000);
 });

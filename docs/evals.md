@@ -102,7 +102,7 @@ routes.
 cassette miss instead of calling a live provider. `--cassette off` defaults to Docker
 isolation. `--isolation inprocess|docker` selects the executor explicitly, and
 `--export-telemetry` opts into the caller-configured telemetry exporters (off by default).
-Docker uses `ghcr.io/rovinos-ai/harness:<CLI version>` unless `HARNESS_EVAL_IMAGE`
+Docker uses `ghcr.io/rovinos-ai/harness:v<CLI version>` unless `HARNESS_EVAL_IMAGE`
 overrides the image.
 
 Live calls require explicit `--live` opt-in, including `--cassette record`.

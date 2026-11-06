@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CompositeSecretResolver, loadConfig, type HarnessConfig } from "@rovinos/config";
-import { HARNESS_VERSION } from "@rovinos/schemas";
 import { emitKeysRotated } from "@rovinos/telemetry";
 import { AkvSecretResolver } from "@rovinos/vault";
 import { Command, CommanderError } from "commander";
+import cliPackage from "../package.json" with { type: "json" };
 import { dirname, resolve } from "node:path";
 import type { CliContext, Clock, CommandModule } from "./command.js";
 import { errorCodeOf, exitCodeForError, ExitCode } from "./exit-codes.js";
@@ -102,7 +102,7 @@ function createProgram(out: Output, inputJsonFile: boolean): Command {
   program
     .name("harness")
     .description("Rovinos AI Harness command line interface")
-    .version(HARNESS_VERSION, "-V, --version", "output version number")
+    .version(cliPackage.version, "-V, --version", "output version number")
     .option("-c, --config <path>", "path to harness configuration")
     .option("--log-level <level>", "set the log level", "info")
     .configureOutput({
