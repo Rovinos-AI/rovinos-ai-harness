@@ -2882,6 +2882,7 @@ __metadata:
     ajv-formats: "npm:3.0.1"
     better-sqlite3: "npm:13.0.3"
     commander: "npm:15.0.0"
+    fast-check: "npm:4.10.2"
     openai: "npm:7.45.1"
     parse5: "npm:8.0.1"
     pg: "npm:8.23.1"

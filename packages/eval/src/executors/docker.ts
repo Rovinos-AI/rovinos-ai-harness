@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createRuntime, foldRunState } from "@rovinos/core";
-import { HarnessError, type Event, type RunStatus } from "@rovinos/schemas";
-import { runDockerProcess } from "@rovinos/sandbox";
+import { createRuntime, foldRunState, type ModelPort } from "@rovinos/core";
+import { type Event, type RunStatus } from "@rovinos/schemas";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import { z } from "zod";
 import {
@@ -14,10 +12,11 @@ import {
 } from "../trial.js";
 import { prepareTrial, systemClock } from "../executor.js";
 import type { PreparedTrial, TrialExecutionDependencies, TrialExecutor } from "../executor.js";
-import { appendTrialProcessOutput } from "../execution-capture.js";
-import { dockerBaseArgs } from "./docker-args.js";
+import { dockerBaseArgs, dockerTrialInput, dockerTrialName } from "./docker-args.js";
+import { DockerExecutorError, dockerInvocationDependencies, runDocker } from "./docker-process.js";
 import { runDockerHuman } from "./docker-human.js";
 import { executionMetricsFromEvents } from "../report/metrics.js";
+import { startLiveModelGateway } from "../live-model-gateway.js";
 
 const DockerMemorySchema = z
   .string()
@@ -54,6 +53,7 @@ const DockerTmpfsSizeSchema = z
 const DockerOptionsSchema = z
   .object({
     image: z.string().min(1),
+    cliPath: z.string().startsWith("/").default("/app/dist/bin.js"),
     dockerPath: z.string().min(1).default("docker"),
     network: z.string().min(1).default("none"),
     timeoutMs: z.number().int().positive().default(3_600_000),
@@ -68,40 +68,17 @@ const DockerOptionsSchema = z
   })
   .strict();
 
-/** Options for running an isolated trial in a container. */
+/**
+ * Options for an isolated trial. Images must provide node on PATH and the CLI script
+ * at cliPath (default /app/dist/bin.js); their configured entrypoint is overridden.
+ */
 export type DockerExecutorOptions = z.input<typeof DockerOptionsSchema>;
 
-/** Closed error codes raised by Docker trial setup and process execution. */
-export type DockerExecutorErrorCode = "docker_mount_path_invalid" | "docker_process_failed";
-
-/** Stable, message-safe Docker executor error. */
-export class DockerExecutorError extends HarnessError {
-  readonly code: DockerExecutorErrorCode;
-
-  constructor(code: DockerExecutorErrorCode) {
-    super(code);
-    this.code = code;
-  }
-}
-
-function codeFromTrial(trial: TrialSpec): string {
-  const hash = createHash("sha256")
-    .update(`${trial.task.id}\u0000${trial.variantId}\u0000${String(trial.trialIndex)}`)
-    .digest("hex")
-    .slice(0, 20);
-  return `harness-eval-${hash}`;
-}
+export { DockerExecutorError } from "./docker-process.js";
+export type { DockerExecutorErrorCode } from "./docker-process.js";
 
 function trialKey(trial: TrialSpec): string {
   return `${trial.task.id}\u0000${trial.variantId}\u0000${String(trial.trialIndex)}`;
-}
-
-function inputForTrial(trial: TrialSpec): string {
-  return JSON.stringify(
-    trial.task.input.metadata === undefined
-      ? { goal: trial.task.input.goal }
-      : { goal: trial.task.input.goal, metadata: trial.task.input.metadata },
-  );
 }
 
 function mapStatus(status: z.infer<typeof RunStatus>): TrialResult["status"] | undefined {
@@ -120,6 +97,7 @@ async function readRunResult(
   prepared: PreparedTrial,
   durationMs: number,
   dependencies: TrialExecutionDependencies,
+  model?: ModelPort,
 ): Promise<TrialResult> {
   if (!existsSync(prepared.dbPath)) {
     return TrialResultSchema.parse({
@@ -136,6 +114,7 @@ async function readRunResult(
     dataDir: prepared.dataDir,
     readOnlyStore: true,
     transientVault: false,
+    ...(model === undefined ? {} : { model }),
     ...(dependencies.clock === undefined ? {} : { clock: dependencies.clock }),
     secretResolver: {
       resolve: () => Promise.resolve({ reveal: () => prepared.key }),
@@ -177,35 +156,6 @@ async function readRunResult(
     });
   } finally {
     await runtime.close();
-  }
-}
-
-interface DockerInvocation {
-  readonly options: z.output<typeof DockerOptionsSchema>;
-  readonly prepared: PreparedTrial;
-  readonly name: string;
-  readonly args: readonly string[];
-  readonly input: string;
-}
-
-async function runDocker(invocation: DockerInvocation): Promise<DockerProcessResult> {
-  try {
-    const outcome = await runDockerProcess({
-      dockerPath: invocation.options.dockerPath,
-      args: invocation.args,
-      input: invocation.input,
-      timeoutMs: invocation.options.timeoutMs,
-      containerName: invocation.name,
-      env: { ...process.env, HARNESS_EVAL_KEY: invocation.prepared.key },
-    });
-    appendTrialProcessOutput(
-      invocation.prepared.dbPath,
-      outcome.stdout ?? "",
-      outcome.stderr ?? "",
-    );
-    return outcome;
-  } catch {
-    throw new DockerExecutorError("docker_process_failed");
   }
 }
 
@@ -252,7 +202,7 @@ function finishDockerResult(
   });
 }
 
-async function completeDockerTrial(options: {
+interface DockerCompletionOptions {
   readonly trial: TrialSpec;
   readonly prepared: PreparedTrial;
   readonly dockerOptions: z.output<typeof DockerOptionsSchema>;
@@ -262,11 +212,14 @@ async function completeDockerTrial(options: {
   readonly startedAt: number;
   readonly clock: { now(): number };
   readonly dependencies: TrialExecutionDependencies;
-}): Promise<TrialResult> {
+}
+
+async function completeDockerTrial(options: DockerCompletionOptions): Promise<TrialResult> {
   let result = await readRunResult(
     options.prepared,
     Math.max(0, Math.floor(options.clock.now() - options.startedAt)),
     options.dependencies,
+    options.dependencies.liveModel?.model(options.trial),
   );
   const unsafeAutoApprove = options.trial.task.human?.unsafeAutoApprove === true;
   if (options.outcome.timedOut) {
@@ -295,6 +248,9 @@ async function completeDockerTrial(options: {
     script: options.trial.task.human,
     prepared: options.prepared,
     dependencies: options.dependencies,
+    ...(options.dependencies.liveModel === undefined
+      ? {}
+      : { model: options.dependencies.liveModel.model(options.trial) }),
     runId,
     initialStatus: result.status,
     initialExitCode: options.outcome.exitCode ?? 1,
@@ -305,20 +261,21 @@ async function completeDockerTrial(options: {
         name: options.containerName,
         args: [
           ...options.dockerArgs,
-          "node",
-          "dist/bin.js",
+          options.dockerOptions.cliPath,
           "--config",
           "/harness/harness.config.json",
           "resume",
           runId,
         ],
         input: "",
+        ...dockerInvocationDependencies(options.dependencies),
       }),
   });
   result = await readRunResult(
     options.prepared,
     Math.max(0, Math.floor(options.clock.now() - options.startedAt)),
     options.dependencies,
+    options.dependencies.liveModel?.model(options.trial),
   );
   return finishDockerResult(
     { ...result, inputs: human.inputs ?? { accepted: 0, declined: 0, cancelled: 0 } },
@@ -360,6 +317,9 @@ export class DockerExecutor implements TrialExecutor {
       dataDir: prepared.dataDir,
       readOnlyStore: true,
       transientVault: false,
+      ...(this.dependencies.liveModel === undefined
+        ? {}
+        : { model: this.dependencies.liveModel.model(trial) }),
       secretResolver: {
         resolve: (reference, signal) =>
           reference === "env:HARNESS_EVAL_KEY"
@@ -395,12 +355,48 @@ export class DockerExecutor implements TrialExecutor {
     }
     const prepared = await prepareTrial(trial, this.dependencies);
     this.preparedTrials.set(trialKey(trial), prepared);
-    const name = codeFromTrial(trial);
-    const dockerArgs = dockerBaseArgs(this.options, trial, name, this.dependencies.exportTelemetry);
+    const liveModel = this.dependencies.liveModel;
+    const gateway =
+      liveModel === undefined
+        ? undefined
+        : await startLiveModelGateway(
+            liveModel.model(trial),
+            liveModel.signal === undefined ? {} : { signal: liveModel.signal },
+          );
+    try {
+      if (gateway?.socketPath.includes(",") === true) {
+        throw new DockerExecutorError("docker_mount_path_invalid");
+      }
+      return await this.runPrepared(trial, prepared, {
+        startedAt,
+        clock,
+        ...(gateway === undefined ? {} : { socketPath: gateway.socketPath }),
+      });
+    } finally {
+      await gateway?.close();
+    }
+  }
+
+  private async runPrepared(
+    trial: TrialSpec,
+    prepared: PreparedTrial,
+    execution: {
+      readonly startedAt: number;
+      readonly clock: { now(): number };
+      readonly socketPath?: string;
+    },
+  ): Promise<TrialResult> {
+    const { startedAt, clock, socketPath } = execution;
+    const name = dockerTrialName(trial);
+    const dockerArgs = dockerBaseArgs(
+      { ...this.options, ...(socketPath === undefined ? {} : { modelSocket: socketPath }) },
+      trial,
+      name,
+      this.dependencies.exportTelemetry,
+    );
     const args = [
       ...dockerArgs,
-      "node",
-      "dist/bin.js",
+      this.options.cliPath,
       "--config",
       "/harness/harness.config.json",
       "run",
@@ -412,7 +408,8 @@ export class DockerExecutor implements TrialExecutor {
       prepared,
       name,
       args,
-      input: inputForTrial(trial),
+      input: dockerTrialInput(trial),
+      ...dockerInvocationDependencies(this.dependencies),
     });
     return completeDockerTrial({
       trial,

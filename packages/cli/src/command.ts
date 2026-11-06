@@ -111,10 +111,18 @@ export async function createCommandRuntime(
   config: HarnessConfig,
   overrides?: RuntimeOverrides,
 ): Promise<Runtime> {
+  const socketPath = process.env.HARNESS_EVAL_MODEL_SOCKET;
+  const runtimeOverrides =
+    socketPath === undefined
+      ? overrides
+      : {
+          ...overrides,
+          model: (await import("@rovinos/eval")).createLiveModelClient(socketPath),
+        };
   if (context.createRuntime !== undefined) {
-    return context.createRuntime(config, overrides);
+    return context.createRuntime(config, runtimeOverrides);
   }
 
   const core = await import("@rovinos/core");
-  return core.createRuntime(config, overrides);
+  return core.createRuntime(config, runtimeOverrides);
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createRuntime, type Runtime } from "@rovinos/core";
+import { createRuntime, type ModelPort, type Runtime } from "@rovinos/core";
 import { HarnessError, type Id, type RunStatus } from "@rovinos/schemas";
 import type { DockerProcessResult } from "@rovinos/sandbox";
 import type { PreparedTrial, TrialExecutionDependencies } from "../executor.js";
@@ -52,10 +52,12 @@ export async function runDockerHuman(options: {
   readonly initialStatus: RunStatus;
   readonly initialExitCode: number;
   readonly resumeProcess: () => Promise<DockerProcessResult>;
+  readonly model?: ModelPort;
 }): Promise<DockerHumanResult> {
   const runtime = await createRuntime(options.prepared.runtimeConfig, {
     dataDir: options.prepared.dataDir,
     transientVault: false,
+    ...(options.model === undefined ? {} : { model: options.model }),
     ...(options.dependencies.clock === undefined ? {} : { clock: options.dependencies.clock }),
     secretResolver: {
       resolve: () => Promise.resolve({ reveal: () => options.prepared.key }),

@@ -103,10 +103,55 @@ cassette miss instead of calling a live provider. `--cassette off` defaults to D
 isolation. `--isolation inprocess|docker` selects the executor explicitly, and
 `--export-telemetry` opts into the caller-configured telemetry exporters (off by default).
 Docker uses `ghcr.io/rovinos-ai/harness:v<CLI version>` unless `HARNESS_EVAL_IMAGE`
-overrides the image. Docker execution is currently blocked by default-deny network
-isolation: `--isolation docker --cassette off` fails before trials start with
-`eval_docker_live_model_unavailable`. Network access and credential forwarding are
-tracked separately in [issue #660](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/660).
+overrides the image.
+
+Live calls require explicit `--live` opt-in, including `--cassette record`.
+Without it, cassette-off execution fails before starting trials with
+`eval_docker_live_model_unavailable` or `eval_inprocess_live_model_unavailable`.
+For example:
+
+```sh
+harness eval run examples/evals/basic.suite.ts --cassette off --live --max-model-calls 10
+```
+
+Docker keeps `--network none`. Trials call a host-process model gateway over a
+bind-mounted Unix socket; provider credentials are resolved and attached only on
+the host. Only configured provider destinations are permitted; redirects are denied.
+The socket is removed after the trial, including failed or cancelled trials.
+For local development, add `--isolation inprocess`: this uses the host model port
+directly without a gateway or container and warns `eval_live_inprocess_not_isolated`.
+Do not use this path for untrusted suites.
+
+`--max-model-calls <n>` caps outgoing provider requests across the entire run
+(default 100), including retries, repairs, concurrent trials, and judges. Exceeding
+it fails the command with `eval_live_call_limit_exceeded`, independently of
+`--fail-under`. This is a request limit, not a monetary or token limit; keep task
+budgets and `--max-cost-usd` appropriate to the provider. Live variant
+`configOverrides.models` are rejected; select models using routes instead.
+Unsupported provider/authentication configurations fail before trials start.
+Docker cassette replay/record remain unsupported.
+Docker live CLI execution uses the current non-root host UID/GID so the trial can
+write its own bind-mounted workspace; unsupported host identities fail with
+`eval_live_docker_user_unavailable`. Socket mounts require a local Linux Docker
+daemon; remote daemons and non-default contexts fail with
+`eval_live_docker_host_unavailable`. Use the explicit in-process path on other hosts.
+The initial live provider set is OpenAI,
+Anthropic, OpenAI-compatible endpoints, and Azure OpenAI API-key authentication.
+Bedrock and Azure Entra authentication fail with `eval_live_provider_unsupported`
+rather than attempting unbounded host credential discovery.
+
+Paid live tests must be invoked separately from blocking CI, using a restricted
+staging credential and synthetic data, not personal keys or production inputs.
+`yarn test:live:eval` runs the optional MCP model-path smoke only when
+`HARNESS_LIVE_EVAL=1`, `HARNESS_LIVE_EVAL_PROFILE=restricted-staging`,
+`HARNESS_LIVE_EVAL_API_KEY`, and `HARNESS_LIVE_EVAL_MODEL` are supplied.
+The profile is an operator attestation, not proof of the credential's permissions;
+provision and restrict the staging key outside the harness. Without these
+settings the paid smoke is skipped. Its run is capped at four provider requests.
+Deterministic MCP model-path fixtures exercise the same gateway without paid calls;
+they are not evidence of live-provider compatibility. See
+[ADR 0006](./decisions/0006-live-eval-model-gateway.md) for the trust assumptions,
+credential boundary, rejected alternatives, and remaining restrictions.
 
 In-process trials run `test_command` graders through the trial's sandbox backend,
 using argv only, a 60-second timeout, and the same isolated project workspace as

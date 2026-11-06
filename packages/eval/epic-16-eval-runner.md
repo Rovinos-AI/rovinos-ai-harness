@@ -200,6 +200,22 @@ Shared design for this epic:
 - [ ] Cost caps stop spending and report skipped trials.
 - [ ] Exit codes reflect pass-rate thresholds.
 
+### 16.8.2 Live eval model gateway
+
+Issue [#660](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/660), approved
+by the maintainer on 5 November 2026, extends the CLI task with the host-side
+model gateway in [ADR 0006](../../docs/decisions/0006-live-eval-model-gateway.md).
+Docker trials retain `--network none` and use a socket-only bind mount; credentials
+stay on the host. Live calls require explicit opt-in and a run-wide provider request
+cap. In-process live trials use the host port directly with an isolation warning.
+Unsupported modes fail early with closed codes.
+
+Deterministic `unit` and `integration` tests cover configured-provider-only egress,
+redirect and destination denial, credential canaries, cancellation, the request cap,
+and the MCP model-selected tool/result/continuation path. Paid staging smoke tests
+are optional and separate from blocking CI. No sandbox or MCP egress policy changes
+are authorized by this subtask.
+
 ---
 
 ## 16.9 A/B comparison with sound statistics

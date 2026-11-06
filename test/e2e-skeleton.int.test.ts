@@ -65,6 +65,7 @@ import {
   type ToolPort,
 } from "@rovinos/core";
 import { FakeModelPort } from "@rovinos/core/testing";
+import { createLiveModelClient, startLiveModelGateway } from "@rovinos/eval";
 import {
   ExecSpecSchema,
   FsOperationRequestSchema,
@@ -308,7 +309,7 @@ async function invokeCli(args: readonly string[], captureOutput = true): Promise
 async function invokeMcpCli(
   configPath: string,
   dataDirectory: string,
-  model: FakeModelPort,
+  model: ModelPort,
   createTransport: () => Promise<Transport>,
   args: readonly string[],
 ): Promise<CliCapture> {
@@ -809,7 +810,7 @@ describe("MCP runtime", () => {
     expect(stderr).toEqual([]);
   });
 
-  it("executes MCP tools through the CLI and validates edited approvals before recording", async () => {
+  it("executes MCP tools through the CLI eval gateway and validates edited approvals before recording", async () => {
     const current = fixture();
     const directory = join(current.directory, "mcp");
     const configPath = join(directory, "harness.yaml");
@@ -940,14 +941,17 @@ describe("MCP runtime", () => {
       toolId: "e2e_mcp.send",
       args: { value },
     });
-    const model = new FakeModelPort([
-      completion([toolCall("original")], "request approval"),
-      completion([], "completed"),
-      completion([toolCall("original")], "request approval"),
-      completion([], "completed"),
-      completion([toolCall("server_error")], "call MCP"),
-      completion([], "completed"),
-    ]);
+    const gateway = await startLiveModelGateway(
+      new FakeModelPort([
+        completion([toolCall("original")], "request approval"),
+        completion([], "completed"),
+        completion([toolCall("original")], "request approval"),
+        completion([], "completed"),
+        completion([toolCall("server_error")], "call MCP"),
+        completion([], "completed"),
+      ]),
+    );
+    const model = createLiveModelClient(gateway.socketPath);
 
     try {
       const firstRun = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
@@ -1146,7 +1150,9 @@ describe("MCP runtime", () => {
       expect(JSON.stringify({ stdout: errorRun.stdout, stderr: errorRun.stderr })).not.toContain(
         MCP_ERROR_CANARY,
       );
+      expect(gateway.rejections).toBe(0);
     } finally {
+      await gateway.close();
       await Promise.all(serverPeers.map(async ({ server }) => server.close()));
       await Promise.all(serverPeers.map(async ({ serverTransport }) => serverTransport.close()));
     }

@@ -36,7 +36,21 @@ async function setup(): Promise<{ suitePath: string; context: CliContext; output
     "utf8",
   );
   const context: CliContext = {
-    loadConfig: () => Promise.resolve(HarnessConfigSchema.parse({})),
+    loadConfig: () =>
+      Promise.resolve(
+        HarnessConfigSchema.parse({
+          models: {
+            providers: [
+              {
+                id: "openai",
+                kind: "openai_compatible",
+                trust: "local",
+                baseUrl: "https://provider.example.invalid/v1",
+              },
+            ],
+          },
+        }),
+      ),
     out: createOutput({ stdout: () => undefined, stderr: () => undefined }),
     clock: { now: () => 1_234 },
   };
@@ -93,6 +107,7 @@ it("records and replays two variants across five trials without a provider durin
       "5",
       "--cassette",
       "record",
+      "--live",
       "--isolation",
       "inprocess",
       "--out",

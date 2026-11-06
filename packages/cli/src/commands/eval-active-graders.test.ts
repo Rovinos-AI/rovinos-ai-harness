@@ -94,13 +94,16 @@ async function setup(
       ],
     }),
   );
-  const secrets = vi.fn(() => Promise.reject(new Error("live_secret_resolution_forbidden")));
+  const secrets = vi.fn<NonNullable<CliContext["secretResolver"]>["resolve"]>(() =>
+    Promise.reject(new Error("live_secret_resolution_forbidden")),
+  );
   const context: CliContext = {
     loadConfig: () =>
       Promise.resolve(
         HarnessConfigSchema.parse({
           models: {
             providers: [{ id: "openai", kind: "openai", apiKey: "env:EVAL_SYNTHETIC_KEY" }],
+            routing: { default: [{ provider: "openai", model: "synthetic" }] },
             pricing: {
               "openai/judge": { inputMicrosPerMTok: 1_000_000_000_000, outputMicrosPerMTok: 0 },
             },
@@ -211,6 +214,7 @@ it("checks privacy after command graders finish writing trial artifacts", async 
 
 it("records and replays voted judges with configured pricing and stops scheduling at judge cost", async () => {
   const { suite, context, secrets } = await setup([judge]);
+  secrets.mockResolvedValue({ reveal: () => "synthetic-staging-credential" });
   let callNumber = 0;
   const complete = vi.fn<ProviderAdapter["complete"]>(() => {
     callNumber += 1;
@@ -247,6 +251,7 @@ it("records and replays voted judges with configured pricing and stops schedulin
       suite,
       "--cassette",
       "record",
+      "--live",
       "--isolation",
       "inprocess",
       "--trials",
@@ -263,7 +268,9 @@ it("records and replays voted judges with configured pricing and stops schedulin
   );
   expect(exit).toBe(ExitCode.budgetExceeded);
   expect(complete).toHaveBeenCalledTimes(3);
-  expect(configured.mock.calls[0]?.[0]?.routing.roles).toEqual({ judge: [judge.model] });
+  expect(
+    configured.mock.calls.some(([config]) => config?.routing.roles.judge?.[0]?.model === "judge"),
+  ).toBe(true);
   const records = evalApi.parseEvalTrialJsonl(await readFile(join(output, "trials.jsonl"), "utf8"));
   expect(records.map((record) => record.result.status)).toEqual([
     "completed",
@@ -283,6 +290,8 @@ it("records and replays voted judges with configured pricing and stops schedulin
   expect(JSON.stringify(cassette)).not.toContain("synthetic goal");
   expect(cassette.entries).toHaveLength(3);
   configured.mockRestore();
+  expect(secrets).toHaveBeenCalled();
+  secrets.mockClear();
   const replay = join(root ?? "", "replay");
   expect(await main(["eval", "run", suite, "--out", replay], context, [createEvalCommand()])).toBe(
     ExitCode.ok,
@@ -307,7 +316,8 @@ it("records and replays voted judges with configured pricing and stops schedulin
 });
 
 it("keeps malformed judge output off disk while charging failed verdict usage", async () => {
-  const { suite, context } = await setup([judge]);
+  const { suite, context, secrets } = await setup([judge]);
+  secrets.mockResolvedValue({ reveal: () => "synthetic-staging-credential" });
   const original = core.createConfiguredModelPort;
   vi.spyOn(core, "createConfiguredModelPort").mockImplementation((config, overrides) =>
     original(config, {
@@ -330,7 +340,18 @@ it("keeps malformed judge output off disk while charging failed verdict usage", 
   const output = join(root ?? "", "invalid");
   expect(
     await main(
-      ["eval", "run", suite, "--cassette", "record", "--isolation", "inprocess", "--out", output],
+      [
+        "eval",
+        "run",
+        suite,
+        "--cassette",
+        "record",
+        "--live",
+        "--isolation",
+        "inprocess",
+        "--out",
+        output,
+      ],
       context,
       [
         createEvalCommand({
@@ -352,6 +373,7 @@ it("keeps malformed judge output off disk while charging failed verdict usage", 
 
 it("replays repaired judge verdicts under the original vote identity with all attempt usage", async () => {
   const { suite, context, secrets } = await setup([judge], 1);
+  secrets.mockResolvedValue({ reveal: () => "synthetic-staging-credential" });
   let callNumber = 0;
   const complete = vi.fn<ProviderAdapter["complete"]>(() => {
     callNumber += 1;
@@ -382,7 +404,18 @@ it("replays repaired judge verdicts under the original vote identity with all at
   const recorded = join(root ?? "", "repaired-record");
   expect(
     await main(
-      ["eval", "run", suite, "--cassette", "record", "--isolation", "inprocess", "--out", recorded],
+      [
+        "eval",
+        "run",
+        suite,
+        "--cassette",
+        "record",
+        "--live",
+        "--isolation",
+        "inprocess",
+        "--out",
+        recorded,
+      ],
       context,
       [
         createEvalCommand({
@@ -401,6 +434,8 @@ it("replays repaired judge verdicts under the original vote identity with all at
   expect(cassette.entries).toHaveLength(3);
   expect(JSON.stringify(cassette)).not.toContain("synthetic private reasoning");
   configured.mockRestore();
+  expect(secrets).toHaveBeenCalled();
+  secrets.mockClear();
   const replayed = join(root ?? "", "repaired-replay");
   expect(
     await main(["eval", "run", suite, "--out", replayed, "--fail-under", "1"], context, [
@@ -415,7 +450,7 @@ it("replays repaired judge verdicts under the original vote identity with all at
 });
 
 it.each(["off", "record", "replay"])(
-  "reports an unavailable %s judge gateway as a grade, not a suite rejection",
+  "requires opt-in for %s live judges and reports unavailable replay as a grade",
   async (mode) => {
     const { suite, context } = await setup([judge, { ...judge, rubricId: "second_rubric" }]);
     vi.spyOn(core, "createConfiguredModelPort").mockResolvedValue(undefined);
@@ -430,7 +465,11 @@ it.each(["off", "record", "replay"])(
           }),
         ],
       ),
-    ).toBe(ExitCode.ok);
+    ).toBe(mode === "replay" ? ExitCode.ok : ExitCode.failure);
+    expect(vi.mocked(core.createConfiguredModelPort).mock.calls.length > 0).toBe(mode === "replay");
+    if (mode !== "replay") {
+      return;
+    }
     const graders = (await report(output)).trials[0]?.graders.filter(
       ({ graderId }) => graderId === "llm_judge",
     );
