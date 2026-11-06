@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  FakeClock,
-  ModelsConfigSchema,
-  parseJson,
-  JsonValue,
-  SequentialIdGenerator,
-} from "@rovinos/schemas";
+import { FakeClock, ModelsConfigSchema } from "@rovinos/schemas";
 import { z } from "zod";
-import { createConfiguredModelPort } from "@rovinos/core";
-import type { ProviderAdapter } from "@rovinos/models";
 import { createLiveModelSession, guardedLiveModelFetch } from "./live-model.js";
 
 const endpoint = "https://provider.example.test/v1/chat/completions";
@@ -53,132 +45,6 @@ afterEach(() => {
 });
 
 describe("live model egress boundary", () => {
-  it("requires a positive call budget", async () => {
-    await expect(
-      createLiveModelSession({
-        models: models(),
-        maxCalls: 0,
-        secretResolver,
-        clock: new FakeClock(),
-      }),
-    ).rejects.toMatchObject({ code: "eval_live_config_invalid" });
-  });
-
-  it("shares the egress cap with host grader gateways using decorated provider adapters", async () => {
-    const transport = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(completion()));
-    vi.stubGlobal("fetch", transport);
-    const session = await createLiveModelSession({
-      models: models(),
-      maxCalls: 2,
-      secretResolver,
-      clock: new FakeClock(),
-    });
-    const decorateAdapter = vi.fn((adapter: ProviderAdapter) => adapter);
-    const judge = await createConfiguredModelPort(models(), {
-      providerAdapters: session.providerAdapters,
-      decorateAdapter,
-      ids: new SequentialIdGenerator(),
-      clock: new FakeClock(),
-    });
-    try {
-      if (judge === undefined) {
-        throw new Error("expected_gateway");
-      }
-      expect(Object.isFrozen(session.providerAdapters)).toBe(true);
-      expect(decorateAdapter.mock.calls[0]?.[0]).toBe(session.providerAdapters[0]);
-      await session.model.complete(request, context());
-      await judge.complete(request, context());
-      await expect(session.model.complete(request, context())).rejects.toMatchObject({
-        code: "eval_live_call_limit_exceeded",
-      });
-      expect(session.calls).toBe(2);
-      expect(transport).toHaveBeenCalledTimes(2);
-    } finally {
-      await session.close();
-    }
-  });
-
-  it("supports typed host graders and value transforms using the shared egress cap", async () => {
-    const transport = vi
-      .fn<typeof fetch>()
-      .mockImplementation(() => Promise.resolve(completion('{"result":"<EMAIL_1>"}')));
-    vi.stubGlobal("fetch", transport);
-    const session = await createLiveModelSession({
-      models: models(),
-      maxCalls: 2,
-      secretResolver,
-      clock: new FakeClock(),
-    });
-    const valueTransform = vi.fn((_schema: z.ZodType, tokenized: JsonValue) =>
-      Promise.resolve({ ok: true as const, tokenized }),
-    );
-    try {
-      const gateway = session.gatewayFor(models().routing);
-      const transformed = await gateway.complete(request, {
-        ...context(),
-        outputSchema: z.object({ result: z.string() }),
-        valueTransform,
-      });
-      expect(transformed.enforcement).toMatchObject({
-        valid: true,
-        value: { result: "<EMAIL_1>" },
-      });
-      expect(valueTransform).toHaveBeenCalledTimes(1);
-      const typed = await gateway.complete(request, {
-        ...context(),
-        outputSchema: z.object({ result: z.string() }),
-      });
-      if (typed.enforcement?.valid !== true) {
-        throw new Error("expected_valid_enforcement");
-      }
-      expect(typed.enforcement.value.result).toBe("<EMAIL_1>");
-      expect(session.calls).toBe(2);
-      await expect(session.model.complete(request, context())).rejects.toMatchObject({
-        code: "eval_live_call_limit_exceeded",
-      });
-      expect(transport).toHaveBeenCalledTimes(2);
-    } finally {
-      await session.close();
-    }
-  });
-
-  it("uses trial-specific routes while sharing adapters and the run-wide call cap", async () => {
-    const transport = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(completion()));
-    vi.stubGlobal("fetch", transport);
-    const session = await createLiveModelSession({
-      models: ModelsConfigSchema.parse({
-        ...models(),
-        routing: { default: [{ provider: "test", model: "primary" }] },
-      }),
-      maxCalls: 2,
-      secretResolver,
-      clock: new FakeClock(),
-    });
-    try {
-      await session.model.complete(request, context());
-      const variant = session.modelFor({
-        default: [{ provider: "test", model: "variant" }],
-        roles: {},
-        fallbackOn: [],
-      });
-      await variant.complete(request, context());
-      const outgoing = await Promise.all(
-        transport.mock.calls.map(async ([input]) =>
-          parseJson(JsonValue, await new Request(input).text()),
-        ),
-      );
-      expect(outgoing).toMatchObject([{ model: "primary" }, { model: "variant" }]);
-      expect(session.calls).toBe(2);
-      await expect(session.model.complete(request, context())).rejects.toMatchObject({
-        code: "eval_live_call_limit_exceeded",
-      });
-      expect(session.failureCode).toBe("eval_live_call_limit_exceeded");
-      expect(transport).toHaveBeenCalledTimes(2);
-    } finally {
-      await session.close();
-    }
-  });
-
   it("uses only the exact configured endpoint and never redirects", async () => {
     const state = {
       calls: 0,

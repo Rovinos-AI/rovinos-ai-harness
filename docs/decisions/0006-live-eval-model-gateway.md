@@ -32,6 +32,13 @@ omits provider definitions. The socket response carries normalized model output,
 not provider transport errors. Existing tokenization and policy enforcement remain
 in the trial runtime; the gateway does not authorize tools or change MCP egress.
 
+Structured-output validators that need the trial vault execute in the trial, not
+on the host. A bounded, newline-framed duplex socket exchange sends tokenized
+candidates to that validator and returns tokenized values or value-free issues.
+The host uses those results for its normal repair loop and shared request cap.
+Original validated JSON Schemas are preserved during provider lowering so the
+Zod roundtrip does not introduce unsupported schema constructs.
+
 `--isolation inprocess --cassette off --live` is the simpler local path. It uses
 the same bounded host model session directly, without a socket gateway or container.
 The CLI emits `eval_live_inprocess_not_isolated`; this mode is not a security

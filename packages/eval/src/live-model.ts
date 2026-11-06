@@ -355,6 +355,9 @@ export async function createLiveModelSession(
         ),
       ),
     );
+    if (controller.signal.aborted) {
+      throw new LiveModelError("eval_live_cancelled");
+    }
     const overrides = {
       providerAdapters: adapters,
       ids: new SequentialIdGenerator(),

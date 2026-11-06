@@ -2,9 +2,9 @@
 import { request as httpRequest } from "node:http";
 import { stat } from "node:fs/promises";
 import { dirname } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ModelCompletion, ModelPort } from "@rovinos/core";
-import { parseJson, JsonValue } from "@rovinos/schemas";
+import { Code, parseJson, JsonValue } from "@rovinos/schemas";
 import { z } from "zod";
 import { createLiveModelClient, startLiveModelGateway } from "./live-model-gateway.js";
 
@@ -39,10 +39,103 @@ function raw(socketPath: string, value: unknown, path = "/complete"): Promise<st
       },
     );
     call.once("error", reject);
-    call.end(JSON.stringify(value));
+    call.end(`${JSON.stringify(value)}${path === "/complete-tokenized" ? "\n" : ""}`);
   });
 }
 describe("live-model Unix socket RPC", () => {
+  it("validates candidates inside the trial and sends only tokenized values back for repairs", async () => {
+    const schema = z.object({ email: z.email() }).strict();
+    const transform = vi.fn((_schema: z.ZodType, candidate: JsonValue) =>
+      Promise.resolve({ ok: true as const, tokenized: candidate }),
+    );
+    const gateway = await startLiveModelGateway({
+      complete: async (_input, context) => {
+        expect(context.valueTransform).toBeTypeOf("function");
+        const result = await context.valueTransform?.(schema, { email: "<EMAIL_1>" });
+        expect(result).toEqual({ ok: true, tokenized: { email: "<EMAIL_1>" } });
+        return {
+          ...completion,
+          enforcement: { valid: true, value: { email: "<EMAIL_1>" }, rungUsed: "native" },
+        };
+      },
+    });
+    try {
+      const result = await createLiveModelClient(gateway.socketPath).complete(request, {
+        runId: id,
+        signal: new AbortController().signal,
+        outputSchema: schema,
+        valueTransform: transform,
+      });
+      expect(transform).toHaveBeenCalledWith(schema, { email: "<EMAIL_1>" });
+      expect(result.enforcement).toMatchObject({ valid: true, value: { email: "<EMAIL_1>" } });
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("returns safe validation issues to host repairs before accepting a later candidate", async () => {
+    const issues = [{ path: [], code: Code.parse("custom") }];
+    const transform = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, issues })
+      .mockResolvedValueOnce({ ok: true, tokenized: { result: "synthetic" } });
+    const gateway = await startLiveModelGateway({
+      complete: async (_input, context) => {
+        expect(await context.valueTransform?.(JsonValue, null)).toEqual({ ok: false, issues });
+        expect(await context.valueTransform?.(JsonValue, { result: "synthetic" })).toEqual({
+          ok: true,
+          tokenized: { result: "synthetic" },
+        });
+        return completion;
+      },
+    });
+    try {
+      await expect(
+        createLiveModelClient(gateway.socketPath).complete(request, {
+          runId: id,
+          signal: new AbortController().signal,
+          outputSchema: z.object({ result: z.string() }),
+          valueTransform: transform,
+        }),
+      ).resolves.toMatchObject({ schemaValid: true });
+      expect(transform).toHaveBeenCalledTimes(2);
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("sanitizes trial validator exceptions and rejects transforms without a schema", async () => {
+    const gateway = await startLiveModelGateway({
+      complete: async (_input, context) => {
+        expect(await context.valueTransform?.(JsonValue, null)).toEqual({
+          ok: false,
+          issues: [{ path: [], code: "custom" }],
+        });
+        return completion;
+      },
+    });
+    const valueTransform = () => Promise.reject(new Error("synthetic-vault-canary"));
+    try {
+      await expect(
+        createLiveModelClient(gateway.socketPath).complete(request, {
+          runId: id,
+          signal: new AbortController().signal,
+          outputSchema: z.object({ result: z.string() }),
+          valueTransform,
+        }),
+      ).resolves.toMatchObject({ schemaValid: true });
+      await expect(
+        createLiveModelClient(gateway.socketPath).complete(request, {
+          runId: id,
+          signal: new AbortController().signal,
+          valueTransform,
+        }),
+      ).rejects.toMatchObject({ code: "eval_live_request_invalid" });
+    } finally {
+      await gateway.close();
+    }
+  });
+
   it("serializes output schemas without functions and preserves host enforcement", async () => {
     let schemas = 0;
     const gateway = await startLiveModelGateway({
@@ -167,6 +260,7 @@ describe("live-model Unix socket RPC", () => {
         [{ request, runId: id }, "https://evil.example.test/complete"],
         [{ request, runId: id, huge: "x".repeat(1_048_576) }, "/complete"],
         [{ request, runId: "invalid" }, "/complete"],
+        [{ request, runId: id }, "/complete-tokenized"],
       ] as const) {
         const reply = await raw(gateway.socketPath, value, path);
         expect(parseJson(JsonValue, reply)).toEqual({
@@ -176,7 +270,7 @@ describe("live-model Unix socket RPC", () => {
         expect(reply).not.toContain("synthetic-credential-canary");
       }
       expect(calls).toBe(0);
-      expect(gateway.rejections).toBe(4);
+      expect(gateway.rejections).toBe(5);
     } finally {
       await gateway.close();
     }
