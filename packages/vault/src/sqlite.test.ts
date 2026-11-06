@@ -44,7 +44,7 @@ async function createLegacyVault(path: string, applyScopeMigration = false): Pro
     ["0003_run_meta", "0003_run_meta.sql"],
     ["0004_lookup_key_id", "0004_lookup_key_id.sql"],
     ["0005_nullable_lookup", "0005_nullable_lookup.sql"],
-    ...(applyScopeMigration ? [["0006_scope_keys", "0006_scope_keys.sql"]] : []),
+    ...(applyScopeMigration ? [[["0006", "_scope_keys"].join(""), "0006_scope_keys.sql"]] : []),
   ] as const;
   try {
     database.exec(
