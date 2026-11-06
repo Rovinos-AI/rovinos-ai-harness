@@ -20,6 +20,24 @@ const StreamFrameSchema = z.union([
   z.object({ candidate: JsonValue }).strict(),
 ]);
 
+/** Reads the bounded body of a non-streaming socket message. */
+export async function liveModelBody(message: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const value of message) {
+    const chunk: unknown = value;
+    if (!Buffer.isBuffer(chunk)) {
+      throw new LiveModelError("eval_live_request_invalid");
+    }
+    bytes += chunk.length;
+    if (bytes > LIVE_MODEL_MAX_BYTES) {
+      throw new LiveModelError("eval_live_request_invalid");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 /** Reads bounded newline-delimited frames without closing the duplex stream between frames. */
 export async function* liveModelFrames(message: IncomingMessage): AsyncGenerator<string> {
   let pending = Buffer.alloc(0);

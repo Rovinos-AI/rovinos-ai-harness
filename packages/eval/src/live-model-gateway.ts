@@ -16,6 +16,7 @@ import { schemaHash, toJsonSchema, type ValueTransform } from "@rovinos/models";
 import { z } from "zod";
 import {
   completeLiveModelStream,
+  liveModelBody as body,
   liveModelFrame,
   liveModelFrames,
   liveModelTransformReply,
@@ -29,23 +30,6 @@ import {
   LiveModelRequestSchema,
   liveModelFailure,
 } from "./live-model-contract.js";
-
-async function body(message: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const value of message) {
-    const chunk: unknown = value;
-    if (!Buffer.isBuffer(chunk)) {
-      throw new LiveModelError("eval_live_request_invalid");
-    }
-    bytes += chunk.length;
-    if (bytes > LIVE_MODEL_MAX_BYTES) {
-      throw new LiveModelError("eval_live_request_invalid");
-    }
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
 
 /** Private host gateway. Rejections are retained only as a bounded metadata count. */
 export interface LiveModelGateway {
@@ -102,9 +86,9 @@ function outputSchema(
   try {
     const json = z.union([z.boolean(), z.record(z.string(), JsonValue)]).parse(output.schema);
     const validate = compileJsonSchema(json);
-    // Preserve the wire schema: Zod roundtrips can add provider-unsupported allOf nodes.
+    // Validate with the compiled wire schema; reconstructing Zod checks can add unsupported allOf.
     return z
-      .fromJSONSchema(json)
+      .unknown()
       .superRefine((value, context) => {
         try {
           validate(value);
@@ -122,6 +106,8 @@ async function gatewayInput(
   request: IncomingMessage,
   frames: AsyncGenerator<string> | undefined,
 ): Promise<z.infer<typeof LiveModelRequestSchema>> {
+  const timeout = setTimeout(() => request.destroy(), 30_000);
+  timeout.unref();
   try {
     if (
       request.method !== "POST" ||
@@ -142,6 +128,8 @@ async function gatewayInput(
     return input;
   } catch {
     throw new LiveModelError("eval_live_request_invalid");
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -217,7 +205,8 @@ export async function startLiveModelGateway(
   const server = gatewayServer(sessionModel, lifetime.signal, () => {
     rejections = Math.min(Number.MAX_SAFE_INTEGER, rejections + 1);
   });
-  server.requestTimeout = 30_000;
+  // Duplex bodies stay open during inference; the initial envelope has its own bounded read.
+  server.requestTimeout = 0;
   server.headersTimeout = 10_000;
   server.on("connection", (socket) => {
     sockets.add(socket);

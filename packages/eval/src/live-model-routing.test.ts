@@ -64,42 +64,48 @@ describe("live model routing and host graders", () => {
     ).rejects.toMatchObject({ code: "eval_live_config_invalid" });
   });
 
-  it("uses trial validation for actual socket repairs within the shared provider request cap", async () => {
-    const transport = vi
-      .fn<typeof fetch>()
-      .mockImplementation(() => Promise.resolve(completion('{"email":"<EMAIL_1>"}')));
-    vi.stubGlobal("fetch", transport);
-    const session = await createLiveModelSession({
-      models: models(),
-      maxCalls: 2,
-      secretResolver,
-      clock: new FakeClock(),
-    });
-    const gateway = await startLiveModelGateway(session.model);
-    const valueTransform = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: false, issues: [{ path: [], code: "custom" }] })
-      .mockResolvedValueOnce({ ok: true, tokenized: { email: "<EMAIL_1>" } });
-    try {
-      const result = await createLiveModelClient(gateway.socketPath).complete(request, {
-        ...context(),
-        outputSchema: z.object({ email: z.email() }).strict(),
-        valueTransform,
+  it.each([
+    { schema: z.object({ email: z.email() }).strict(), candidate: { email: "<EMAIL_1>" } },
+    { schema: z.email(), candidate: "<EMAIL_1>" },
+  ])(
+    "uses trial validation for actual socket repairs with $candidate",
+    async ({ schema, candidate }) => {
+      const transport = vi
+        .fn<typeof fetch>()
+        .mockImplementation(() => Promise.resolve(completion(JSON.stringify(candidate))));
+      vi.stubGlobal("fetch", transport);
+      const session = await createLiveModelSession({
+        models: models(),
+        maxCalls: 2,
+        secretResolver,
+        clock: new FakeClock(),
       });
-      expect(result).toMatchObject({
-        schemaValid: true,
-        repairAttempts: 1,
-        enforcement: { valid: true, value: { email: "<EMAIL_1>" } },
-      });
-      expect(valueTransform).toHaveBeenCalledTimes(2);
-      expect(transport).toHaveBeenCalledTimes(2);
-      expect(session.calls).toBe(2);
-      expect(JSON.stringify(result)).not.toContain("synthetic-credential-canary");
-    } finally {
-      await gateway.close();
-      await session.close();
-    }
-  });
+      const gateway = await startLiveModelGateway(session.model);
+      const valueTransform = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, issues: [{ path: [], code: "custom" }] })
+        .mockResolvedValueOnce({ ok: true, tokenized: candidate });
+      try {
+        const result = await createLiveModelClient(gateway.socketPath).complete(request, {
+          ...context(),
+          outputSchema: schema,
+          valueTransform,
+        });
+        expect(result).toMatchObject({
+          schemaValid: true,
+          repairAttempts: 1,
+          enforcement: { valid: true, value: candidate },
+        });
+        expect(valueTransform).toHaveBeenCalledTimes(2);
+        expect(transport).toHaveBeenCalledTimes(2);
+        expect(session.calls).toBe(2);
+        expect(JSON.stringify(result)).not.toContain("synthetic-credential-canary");
+      } finally {
+        await gateway.close();
+        await session.close();
+      }
+    },
+  );
 
   it("does not return an active session when cancelled during credential resolution", async () => {
     const controller = new AbortController();

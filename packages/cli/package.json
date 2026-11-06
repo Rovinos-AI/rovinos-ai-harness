@@ -51,6 +51,7 @@
     "ajv-formats": "3.0.1",
     "better-sqlite3": "13.0.3",
     "commander": "15.0.0",
+    "fast-check": "4.10.2",
     "openai": "7.45.1",
     "parse5": "8.0.1",
     "pg": "8.23.1",
