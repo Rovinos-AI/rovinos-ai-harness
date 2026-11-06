@@ -44,9 +44,21 @@ function liveConfig() {
   });
 }
 
+function stubLiveDockerHost(): void {
+  vi.stubEnv("DOCKER_HOST", "unix:///synthetic/docker.sock");
+  vi.stubEnv("DOCKER_CONTEXT", "default");
+  vi.stubGlobal("process", {
+    ...process,
+    platform: "linux",
+    getuid: vi.fn(() => 1000),
+    getgid: vi.fn(() => 1000),
+  });
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -105,6 +117,7 @@ describe("CLI eval executor", () => {
   it.each(["docker", "inprocess"] as const)(
     "keeps live providers on the host and selects each trial route for %s",
     async (isolation) => {
+      stubLiveDockerHost();
       const config = liveConfig();
       const session = await evalApi.createLiveModelSession({ models: config.models, maxCalls: 2 });
       const modelFor = vi.spyOn(session, "modelFor").mockReturnValue(session.model);
@@ -171,6 +184,7 @@ describe("CLI eval executor", () => {
     ["DOCKER_HOST", "tcp://127.0.0.1:2375"],
     ["DOCKER_CONTEXT", "remote"],
   ])("rejects unsupported live Docker setting %s before starting a trial", async (name, value) => {
+    stubLiveDockerHost();
     const config = liveConfig();
     const session = await evalApi.createLiveModelSession({ models: config.models, maxCalls: 1 });
     vi.stubEnv(name, value);
