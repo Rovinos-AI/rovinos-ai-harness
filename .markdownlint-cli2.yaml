@@ -6,6 +6,9 @@ ignores:
 config:
   default: true
   MD013: false
+  # Changesets repeats "Minor Changes" and "Patch Changes" under each version heading.
+  MD024:
+    siblings_only: true
   MD033:
     allowed_elements:
       - "!--"

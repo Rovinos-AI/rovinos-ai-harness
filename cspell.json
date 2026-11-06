@@ -22,6 +22,7 @@
     "hashtextextended",
     "ILIKE",
     "labelledby",
+    "MSAL",
     "noopener",
     "noreferrer",
     "nodev",
@@ -49,5 +50,6 @@
       "addWords": true
     }
   ],
-  "dictionaries": ["project-words"]
+  "dictionaries": ["project-words"],
+  "ignoreRegExpList": ["GHSA(-[23456789cfghjmpqrvwx]{4}){3}"]
 }

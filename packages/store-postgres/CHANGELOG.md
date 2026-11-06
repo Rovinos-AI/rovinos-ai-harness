@@ -1,5 +1,41 @@
 # @rovinos/store-postgres
 
+## 0.2.0
+
+### Minor Changes
+
+- Release v0.2.0: SDK execution lifecycle with drain-then-suspend shutdown, live-model evals through a
+  host-side gateway, MCP result envelopes, and the other v0.2.0 milestone changes listed below.
+
+### Patch Changes
+
+- 38e0c4f: # Enforce concurrent run quotas when claiming jobs
+
+  Worker claims now defer matching jobs while their configured concurrent-run quota is full.
+- Updated dependencies [6b2ad35]
+- Updated dependencies [fa11fee]
+- Updated dependencies [f5dcaac]
+- Updated dependencies [8898749]
+- Updated dependencies [202681f]
+- Updated dependencies [7cec563]
+- Updated dependencies [ac1557e]
+- Updated dependencies [c82b800]
+- Updated dependencies [eac4076]
+- Updated dependencies [a823dce]
+- Updated dependencies [b02a17a]
+- Updated dependencies [998506a]
+- Updated dependencies [93a3179]
+- Updated dependencies [f6ac60b]
+- Updated dependencies [55f14d2]
+- Updated dependencies [463fbf9]
+- Updated dependencies [6be9a2e]
+- Updated dependencies
+- Updated dependencies [d60a8bb]
+- Updated dependencies [562de70]
+- Updated dependencies [dfb99d8]
+- Updated dependencies [a0b7365]
+  - @rovinos/sdk@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
