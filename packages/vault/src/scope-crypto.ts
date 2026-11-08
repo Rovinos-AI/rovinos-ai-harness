@@ -5,7 +5,7 @@ import type { Id, KeyProvider } from "@rovinos/schemas";
 import { VaultOperationError } from "./errors.js";
 import { loadMasterKey } from "./sqlite-crypto.js";
 
-const SCOPE_KEY_AAD_PREFIX = "harness/vault/scope/";
+export const SCOPE_AAD_PREFIX = "harness/vault/scope/";
 const SCOPE_WRAP_INFO = "harness/vault/scope-wrap/v1";
 
 /** A fresh data key and its master-key-wrapped representation. */
@@ -30,7 +30,7 @@ export async function wrapScopeKey(
     const encrypted = aesGcmEncrypt(
       wrappingKey,
       dataKey,
-      Buffer.from(`${SCOPE_KEY_AAD_PREFIX}${scopeId}`, "utf8"),
+      Buffer.from(`${SCOPE_AAD_PREFIX}${scopeId}`, "utf8"),
     );
     wrapped = encrypted;
     return Buffer.from(encrypted);
@@ -86,7 +86,7 @@ export async function unwrapScopeKey(
     const unwrapped = aesGcmDecrypt(
       wrappingKey,
       wrappedDek,
-      Buffer.from(`${SCOPE_KEY_AAD_PREFIX}${scopeId}`, "utf8"),
+      Buffer.from(`${SCOPE_AAD_PREFIX}${scopeId}`, "utf8"),
     );
     if (unwrapped.byteLength !== 32) {
       unwrapped.fill(0);
