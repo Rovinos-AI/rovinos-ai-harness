@@ -305,6 +305,12 @@ describe("GitHub workflows", () => {
         (step) => step.run?.includes("scripts/security/check-vulns.ts --scan") === true,
       ),
     ).toBe(true);
+    // check-vulns.ts imports the built schemas package; scanning before the build crashes.
+    const steps = job?.steps ?? [];
+    const build = steps.findIndex((step) => step.run === "yarn build:schemas");
+    const scan = steps.findIndex((step) => step.run?.includes("check-vulns.ts --scan") === true);
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(build).toBeLessThan(scan);
     expect(job?.steps.some((step) => step.name === "Upload dependency vulnerability report")).toBe(
       true,
     );
