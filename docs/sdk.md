@@ -50,6 +50,27 @@ content-reading operation. It returns only content fields from stored events and
 when PII tokenization is enabled; treat the returned tokenized values as sensitive. It never
 detokenizes values. Set `pii.enabled` to `true` (the default) when content access is needed.
 
+For incremental access, `streamRunContent` is a separate, tokenized-only API. Configure a trusted
+`contentAuthorizer` when creating the harness; it receives the validated principal and run id and
+must bind that principal to the embedding application's authenticated caller and run-level
+permissions. Streaming is denied when no authorizer is configured, and the decision is checked
+before opening the stream and before yielding each content item. Abort the supplied `signal` on
+cancellation or when permissions are revoked. A grant cannot recall values already yielded.
+
+The stream yields only content from committed event-log entries and labels each item
+`durability: "committed"`. Provider/model deltas that were not persisted are not exposed or replayed.
+`fromSeq` is an inclusive event sequence cursor; to resume after the last item received, use
+`lastItem.seq + 1`. Reconnecting from the same cursor can repeat an item. The SDK reads at most one
+stored event at a time and does not enqueue items ahead of the async iterator consumer, so a slow
+consumer applies backpressure while committed events remain in the configured store. Replay lasts
+only as long as the event log retains the run; there is no separate content-stream retention.
+
+The stream never reveals raw values. An embedder must use a separate explicitly authorized reveal
+operation if one is needed; no reveal option is accepted by the stream. Neither this API nor
+`getRunContent` changes the content-free contract of `watch`, safe events, MCP metadata
+notifications, or telemetry. See [ADR 0007](decisions/0007-authorized-content-streaming.md) for the
+threat model and limitations.
+
 ## Approvals and human input
 
 `resolveApproval` resolves a pending approval by id and decision. Its `principal` is required and
