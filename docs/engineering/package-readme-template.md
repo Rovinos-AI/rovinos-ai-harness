@@ -1,6 +1,6 @@
 <!-- package-readme: v1 -->
 
-# <Package name>
+# Package name
 
 ## Purpose
 

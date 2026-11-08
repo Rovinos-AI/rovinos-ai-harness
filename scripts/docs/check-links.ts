@@ -153,7 +153,7 @@ function collectHtmlLinks(text: string): MarkdownLink[] {
 function collectReferenceLinks(text: string): MarkdownLink[] {
   const links: MarkdownLink[] = [];
   for (const match of text.matchAll(referenceDefinitionPattern)) {
-    const destination = match[2].replaceAll(/^<|>$/gu, "");
+    const destination = (match[2] ?? "").replaceAll(/^<|>$/gu, "");
     if (destination.length > 0) {
       links.push({
         destination,
