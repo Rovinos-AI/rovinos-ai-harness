@@ -7,6 +7,7 @@ import {
   createWrappedScopeKey,
   decryptScopeValue,
   encryptScopeValue,
+  SCOPE_AAD_PREFIX,
   unwrapScopeKey,
 } from "./scope-crypto.js";
 
@@ -29,6 +30,10 @@ function provider(current = "key-a"): KeyProvider {
 }
 
 describe("scope key encryption", () => {
+  it("pins the scope-key associated-data prefix", () => {
+    expect(SCOPE_AAD_PREFIX).toBe("harness/vault/scope/");
+  });
+
   it("wraps random data keys to their scope and supports master-key rewrapping", async () => {
     const first = await createWrappedScopeKey(provider(), "key-a", scopeId, () =>
       new Uint8Array(32).fill(31),
@@ -84,7 +89,7 @@ describe("scope key encryption", () => {
         aesGcmDecrypt(
           valueKeys.encryption,
           wrapped.wrappedDek,
-          Buffer.from(`harness/vault/scope/${scopeId}`, "utf8"),
+          Buffer.from(`${SCOPE_AAD_PREFIX}${scopeId}`, "utf8"),
         ),
       ).toThrow();
       expect(await unwrapScopeKey(provider(), "key-a", scopeId, wrapped.wrappedDek)).toEqual(
