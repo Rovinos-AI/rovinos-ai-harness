@@ -3,7 +3,12 @@
 // cspell:ignore mhumxy mzxq mzxw ytboi aiusxzm
 import { describe, expect, it, vi } from "vitest";
 import type * as Crypto from "@rovinos/crypto";
-import { encodeBase32, pseudonymize, type PseudonymizeOptions } from "./pseudonym.js";
+import {
+  encodeBase32,
+  pseudonymize,
+  PSEUDONYM_HKDF_INFO,
+  type PseudonymizeOptions,
+} from "./pseudonym.js";
 
 const cryptoMocks = vi.hoisted(() => {
   const capture: {
@@ -75,6 +80,10 @@ describe("encodeBase32", () => {
 });
 
 describe("pseudonymize", () => {
+  it("pins the pseudonym HKDF domain-separation label", () => {
+    expect(PSEUDONYM_HKDF_INFO).toBe("harness/pseudonym");
+  });
+
   it("matches independent global and run-scoped HKDF/HMAC known-answer vectors", async () => {
     const provider = keyProvider();
 

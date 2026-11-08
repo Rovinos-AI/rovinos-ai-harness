@@ -78,7 +78,9 @@ interface MatchCounts {
   readonly falseNegative: number;
 }
 
-const corpusPath = fileURLToPath(new URL("../test/pii-corpus/corpus.jsonl", import.meta.url));
+const corpusPath = fileURLToPath(
+  new URL("../test/pii-corpus/__fixtures__/corpus.jsonl", import.meta.url),
+);
 const thresholdsPath = fileURLToPath(
   new URL("../test/pii-corpus/thresholds.json", import.meta.url),
 );

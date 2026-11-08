@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 const DEFAULT_SEED = 0x13_11_2026;
-const outputPath = fileURLToPath(new URL("../test/pii-corpus/corpus.jsonl", import.meta.url));
+const outputPath = fileURLToPath(
+  new URL("../test/pii-corpus/__fixtures__/corpus.jsonl", import.meta.url),
+);
 
 /** One synthetic span labeled with its entity type and UTF-16 offsets. */
 export const PiiCorpusSpanSchema = z
