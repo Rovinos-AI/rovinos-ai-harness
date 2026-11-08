@@ -65,7 +65,12 @@ describe("BudgetTracker", () => {
     expect(
       tracker.check(
         runState({
-          usage: { inputTokens: 0, outputTokens: 0, costMicros: 2, cost: { ...EMPTY_COST_TOTAL, knownMicros: 2, knownCount: 1 } },
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            costMicros: 2,
+            cost: { ...EMPTY_COST_TOTAL, knownMicros: 2, knownCount: 1 },
+          },
         }),
         100,
       ),
@@ -73,7 +78,12 @@ describe("BudgetTracker", () => {
     expect(
       tracker.check(
         runState({
-          usage: { inputTokens: 0, outputTokens: 0, costMicros: 3, cost: { ...EMPTY_COST_TOTAL, knownMicros: 3, knownCount: 1 } },
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            costMicros: 3,
+            cost: { ...EMPTY_COST_TOTAL, knownMicros: 3, knownCount: 1 },
+          },
         }),
         100,
       ),

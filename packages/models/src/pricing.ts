@@ -153,9 +153,10 @@ export function createPricingAccountant(
     }
     const cost = {
       version: 1 as const,
-      state: cacheReadMissing || cacheWriteMissing || usage.usageComplete === false
-        ? ("partial" as const)
-        : ("estimated" as const),
+      state:
+        cacheReadMissing || cacheWriteMissing || usage.usageComplete === false
+          ? ("partial" as const)
+          : ("estimated" as const),
       amountMicros: costMicros,
     };
     const key = `${model.provider}/${model.model}`;

@@ -136,9 +136,7 @@ export function addCostValue(total: CostTotal, value: CostValue): CostTotal {
           partialCount: checkedSum(total.partialCount, 1),
         }
       : {}),
-    ...(value.state === "unknown"
-      ? { unknownCount: checkedSum(total.unknownCount, 1) }
-      : {}),
+    ...(value.state === "unknown" ? { unknownCount: checkedSum(total.unknownCount, 1) } : {}),
   };
   return CostTotalSchema.parse({ ...next, state: totalState(next) });
 }

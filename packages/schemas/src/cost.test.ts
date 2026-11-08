@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import {
-  addCostValue,
-  combineCostTotals,
-  CostValueSchema,
-  EMPTY_COST_TOTAL,
-} from "./cost.js";
+import { addCostValue, combineCostTotals, CostValueSchema, EMPTY_COST_TOTAL } from "./cost.js";
 
 describe("versioned cost values and totals", () => {
   it("distinguishes known zero from unknown", () => {
@@ -31,7 +26,10 @@ describe("versioned cost values and totals", () => {
       { version: 1, state: "estimated", amountMicros: 3 },
       { version: 1, state: "partial", amountMicros: 5 },
       { version: 1, state: "unknown" },
-    ].reduce((current, value) => addCostValue(current, CostValueSchema.parse(value)), EMPTY_COST_TOTAL);
+    ].reduce(
+      (current, value) => addCostValue(current, CostValueSchema.parse(value)),
+      EMPTY_COST_TOTAL,
+    );
 
     expect(total).toEqual({
       version: 1,

@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
-import {
-  EMPTY_COST_TOTAL,
-  HarnessError,
-  type Event,
-  type RunStatus,
-} from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL, HarnessError, type Event, type RunStatus } from "@rovinos/schemas";
 import type { Plan } from "@rovinos/context";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
 import { planLastModelResponseRecovery } from "./run-state.js";

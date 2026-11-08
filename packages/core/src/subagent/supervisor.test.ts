@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { ensureTracingFallback } from "@rovinos/telemetry";
-import {
-  EMPTY_COST_TOTAL,
-  FakeClock,
-  Id,
-  JsonValue,
-  RunConfigSchema,
-} from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL, FakeClock, Id, JsonValue, RunConfigSchema } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";

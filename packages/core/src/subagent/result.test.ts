@@ -119,7 +119,12 @@ describe("finalizeChild", () => {
       childRunId,
       status: "completed",
       value: { text: "plain answer" },
-      usage: { inputTokens: 1, outputTokens: 2, steps: 1, cost: { ...EMPTY_COST_TOTAL, state: "unknown", unknownCount: 1 } },
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        steps: 1,
+        cost: { ...EMPTY_COST_TOTAL, state: "unknown", unknownCount: 1 },
+      },
     });
   });
 

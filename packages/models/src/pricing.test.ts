@@ -114,11 +114,14 @@ describe("model pricing", () => {
     );
 
     expect(
-      account({ provider: "sample", model: "model-a" }, {
-        inputTokens: 10_000,
-        outputTokens: 0,
-        usageComplete: false,
-      }),
+      account(
+        { provider: "sample", model: "model-a" },
+        {
+          inputTokens: 10_000,
+          outputTokens: 0,
+          usageComplete: false,
+        },
+      ),
     ).toMatchObject({
       costMicros: 1,
       cost: { version: 1, state: "partial", amountMicros: 1 },

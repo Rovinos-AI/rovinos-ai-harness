@@ -18,10 +18,7 @@ import type { Clock, RunRecorder } from "./recorder.js";
 import { withRunStartup } from "./run-startup.js";
 import { type ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
-import {
-  preflightModelBudget,
-  recordBudgetFailureAndCheckpoint,
-} from "./steps/model-preflight.js";
+import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { suspendedOutcome } from "./steps/suspended-outcome.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type {
@@ -313,7 +310,10 @@ async function finishModelStep(
   modelResult: ModelStepResult,
 ): Promise<Event | undefined> {
   const costBudget = execution.budgetTracker.checkWithOpenChildren(events, options.clock.now());
-  if (!costBudget.ok && (costBudget.code === "budget_cost_unknown" || modelResult.preparedCalls.length > 0)) {
+  if (
+    !costBudget.ok &&
+    (costBudget.code === "budget_cost_unknown" || modelResult.preparedCalls.length > 0)
+  ) {
     return recordBudgetFailureAndCheckpoint(
       options.recorder,
       events,

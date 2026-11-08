@@ -72,8 +72,7 @@ export function parseUsageLedgerDeltas(input: unknown): UsageLedgerDelta[] {
         period: delta.period,
         periodStart: delta.periodStart,
         costMicros: (previous?.costMicros ?? 0) + delta.costMicros,
-        unknownCostCount:
-          (previous?.unknownCostCount ?? 0) + (delta.unknownCostCount ?? 0),
+        unknownCostCount: (previous?.unknownCostCount ?? 0) + (delta.unknownCostCount ?? 0),
         runsStarted: (previous?.runsStarted ?? 0) + delta.runsStarted,
         ...(maxRunsStarted === undefined ? {} : { maxRunsStarted }),
       }),

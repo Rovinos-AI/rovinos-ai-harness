@@ -206,8 +206,7 @@ export class QuotaService {
     const start = periodStart(this.clock.now(), period);
     const [usage] = await this.store.readUsageLedger(quota.id, period, [start]);
     return (
-      (usage?.unknownCostCount ?? 0) > 0 ||
-      (usage?.costMicros ?? 0) >= costLimitMicros(amountUsd)
+      (usage?.unknownCostCount ?? 0) > 0 || (usage?.costMicros ?? 0) >= costLimitMicros(amountUsd)
     );
   }
 
