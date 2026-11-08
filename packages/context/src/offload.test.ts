@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
 import {
   Id,
   McpResultArtifactReferenceSchema,
@@ -6,8 +8,8 @@ import {
   SequentialIdGenerator,
   type Event,
   type JsonValue,
+  type KeyProvider,
 } from "@rovinos/schemas";
-import { describe, expect, it, vi } from "vitest";
 import {
   InMemoryWorkspace,
   NaiveStrategy,
@@ -33,6 +35,36 @@ const call = (toolId = "sample_tool", args: JsonValue = {}): OffloadToolCall => 
   toolId,
   args,
 });
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function keyProvider(
+  keys: ReadonlyMap<string, Uint8Array>,
+  currentKeyId: () => string = () => "test_key",
+): KeyProvider {
+  return {
+    currentKeyId,
+    getKey: (keyId) => {
+      const key = keys.get(keyId);
+      return key === undefined
+        ? Promise.reject(new Error("key_not_found"))
+        : Promise.resolve(key);
+    },
+  };
+}
+
+function firstArtifactReference(value: JsonValue): ReturnType<
+  typeof McpResultArtifactReferenceSchema.parse
+> {
+  const envelope = McpToolResultEnvelopeSchema.parse(value);
+  const part = envelope.parts[0];
+  if (part === undefined || part === null || typeof part !== "object" || Array.isArray(part)) {
+    throw new Error("Missing artifact part.");
+  }
+  return McpResultArtifactReferenceSchema.parse(part.artifact);
+}
 
 function fakePort(result: JsonValue): {
   readonly inner: OffloadToolPortLike;
@@ -116,6 +148,7 @@ describe("OffloadingToolPort", () => {
     const writeBatch = vi.spyOn(workspace, "writeBatch");
     const imageBytes = new Uint8Array([0, 255, 7]);
     const resourceBytes = new Uint8Array([1, 2]);
+    const keys = new Map([["test_key", new Uint8Array(32).fill(7)]]);
     const envelope: JsonValue = {
       format: "mcp-tool-result",
       version: 1,
@@ -144,19 +177,24 @@ describe("OffloadingToolPort", () => {
               target: "data",
               mimeType: "image/png",
               bytes: imageBytes,
-              sha256: "a".repeat(64),
+              sha256: sha256(imageBytes),
             },
             {
               partIndex: 2,
               target: "resource.blob",
               mimeType: "application/octet-stream",
               bytes: resourceBytes,
-              sha256: "b".repeat(64),
+              sha256: sha256(resourceBytes),
             },
           ],
         }),
     };
-    const port = new OffloadingToolPort(inner, workspace, {}, new SequentialIdGenerator());
+    const port = new OffloadingToolPort(
+      inner,
+      workspace,
+      {},
+      { ids: new SequentialIdGenerator(), artifactKeyProvider: keyProvider(keys) },
+    );
 
     const execution = await port.execute(call(), context);
     const result = McpToolResultEnvelopeSchema.parse(execution.result);
@@ -186,12 +224,14 @@ describe("OffloadingToolPort", () => {
     expect(result.parts[3]).toEqual({ type: "text", text: "after" });
     expect(resourcePart.resource.uri).toBe("file:///synthetic");
     expect(writeBatch).toHaveBeenCalledTimes(1);
-    expect(await workspace.read(`.harness/offload/${imageReference.handle}.bin`)).toEqual(
-      imageBytes,
-    );
-    expect(await workspace.read(`.harness/offload/${resourceReference.handle}.bin`)).toEqual(
-      resourceBytes,
-    );
+    const storedImage = await workspace.read(`.harness/offload/${imageReference.handle}.bin`);
+    const storedResource = await workspace.read(`.harness/offload/${resourceReference.handle}.bin`);
+    expect(storedImage).not.toEqual(imageBytes);
+    expect(storedResource).not.toEqual(resourceBytes);
+    expect(Buffer.from(storedImage).includes(Buffer.from(imageBytes))).toBe(false);
+    expect(Buffer.from(storedResource).includes(Buffer.from(resourceBytes))).toBe(false);
+    expect(imageReference.sha256).toBe(sha256(imageBytes));
+    expect(resourceReference.sha256).toBe(sha256(resourceBytes));
     expect(JSON.stringify(execution)).not.toContain(Buffer.from(imageBytes).toString("base64"));
     expect(JSON.stringify(execution)).not.toContain(Buffer.from(resourceBytes).toString("base64"));
 
@@ -202,6 +242,167 @@ describe("OffloadingToolPort", () => {
     const decoded = ReadOffloadedResultSchema.parse(page.result);
     expect(decoded.encoding).toBe("base64");
     expect([...Buffer.from(decoded.data, "base64")]).toEqual([...imageBytes]);
+  });
+
+  it("denies artifact reads from a different run", async () => {
+    const workspace = new InMemoryWorkspace();
+    const bytes = new Uint8Array([11, 22, 33]);
+    const keys = keyProvider(new Map([["test_key", new Uint8Array(32).fill(9)]]));
+    const inner: OffloadToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () =>
+        Promise.resolve({
+          outcome: "ok",
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: false,
+            parts: [{ type: "blob", mimeType: "application/octet-stream" }],
+          },
+          artifacts: [
+            {
+              partIndex: 0,
+              target: "data",
+              mimeType: "application/octet-stream",
+              bytes,
+              sha256: sha256(bytes),
+            },
+          ],
+        }),
+    };
+    const port = new OffloadingToolPort(inner, workspace, {}, {
+      ids: new SequentialIdGenerator(),
+      artifactKeyProvider: keys,
+    });
+    const result = await port.execute(call(), context);
+    const reference = firstArtifactReference(result.result);
+
+    await expect(
+      port.execute(
+        call("read_offloaded", { handle: reference.handle, encoding: "base64" }),
+        { ...context, runId: Id.parse("00000000000000000000000099") },
+      ),
+    ).resolves.toMatchObject({ outcome: "error", errorCode: "artifact_decrypt_failed" });
+  });
+
+  it("fails closed when the current encryption key is unavailable", async () => {
+    const workspace = new InMemoryWorkspace();
+    const writeBatch = vi.spyOn(workspace, "writeBatch");
+    const bytes = new Uint8Array([1, 2, 3]);
+    const inner: OffloadToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () =>
+        Promise.resolve({
+          outcome: "ok",
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: false,
+            parts: [{ type: "blob", mimeType: "application/octet-stream" }],
+          },
+          artifacts: [
+            {
+              partIndex: 0,
+              target: "data",
+              mimeType: "application/octet-stream",
+              bytes,
+              sha256: sha256(bytes),
+            },
+          ],
+        }),
+    };
+    const port = new OffloadingToolPort(
+      inner,
+      workspace,
+      {},
+      { ids: new SequentialIdGenerator(), artifactKeyProvider: keyProvider(new Map()) },
+    );
+
+    await expect(port.execute(call(), context)).resolves.toMatchObject({
+      outcome: "error",
+      errorCode: "artifact_encrypt_failed",
+    });
+    expect(writeBatch).not.toHaveBeenCalled();
+  });
+
+  it("reads artifacts encrypted with a prior key after rotation", async () => {
+    const workspace = new InMemoryWorkspace();
+    let activeKey = "old_key";
+    const keys = keyProvider(
+      new Map([
+        ["old_key", new Uint8Array(32).fill(1)],
+        ["new_key", new Uint8Array(32).fill(2)],
+      ]),
+      () => activeKey,
+    );
+    const bytes = new Uint8Array([31, 32, 33]);
+    const inner: OffloadToolPortLike = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () =>
+        Promise.resolve({
+          outcome: "ok",
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: false,
+            parts: [{ type: "blob", mimeType: "application/octet-stream" }],
+          },
+          artifacts: [
+            {
+              partIndex: 0,
+              target: "data",
+              mimeType: "application/octet-stream",
+              bytes,
+              sha256: sha256(bytes),
+            },
+          ],
+        }),
+    };
+    const port = new OffloadingToolPort(inner, workspace, {}, {
+      ids: new SequentialIdGenerator(),
+      artifactKeyProvider: keys,
+    });
+    const result = await port.execute(call(), context);
+    const reference = firstArtifactReference(result.result);
+    activeKey = "new_key";
+
+    const read = await port.execute(
+      call("read_offloaded", { handle: reference.handle, encoding: "base64" }),
+      context,
+    );
+    const page = ReadOffloadedResultSchema.parse(read.result);
+    expect([...Buffer.from(page.data, "base64")]).toEqual([...bytes]);
+    const unavailableReader = new OffloadingToolPort(
+      fakePort(null).inner,
+      workspace,
+      {},
+      {
+        ids: new SequentialIdGenerator(),
+        artifactKeyProvider: keyProvider(
+          new Map([["new_key", new Uint8Array(32).fill(2)]]),
+        ),
+      },
+    );
+    await expect(
+      unavailableReader.execute(
+        call("read_offloaded", { handle: reference.handle, encoding: "base64" }),
+        context,
+      ),
+    ).resolves.toMatchObject({ outcome: "error", errorCode: "artifact_decrypt_failed" });
+  });
+
+  it("returns a stable unsupported code when replay reads a legacy plaintext artifact", async () => {
+    const workspace = new InMemoryWorkspace();
+    const handle = "wf_00000000000000000000000000";
+    await workspace.write(`.harness/offload/${handle}.bin`, new Uint8Array([1, 2, 3]));
+    const port = new OffloadingToolPort(fakePort(null).inner, workspace);
+
+    await expect(
+      port.execute(call("read_offloaded", { handle, encoding: "base64" }), context),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      errorCode: "artifact_legacy_unsupported",
+    });
   });
 
   it("checks the substituted envelope limit before atomically writing artifacts", async () => {
@@ -226,12 +427,20 @@ describe("OffloadingToolPort", () => {
               target: "data",
               mimeType: "application/octet-stream",
               bytes,
-              sha256: "c".repeat(64),
+              sha256: sha256(bytes),
             },
           ],
         }),
     };
-    const port = new OffloadingToolPort(inner, workspace, {}, new SequentialIdGenerator());
+    const port = new OffloadingToolPort(
+      inner,
+      workspace,
+      {},
+      {
+        ids: new SequentialIdGenerator(),
+        artifactKeyProvider: keyProvider(new Map([["test_key", new Uint8Array(32).fill(7)]])),
+      },
+    );
 
     await expect(port.execute(call(), context)).resolves.toMatchObject({
       outcome: "error",
@@ -263,12 +472,20 @@ describe("OffloadingToolPort", () => {
               target: "data",
               mimeType: "image/png",
               bytes,
-              sha256: "d".repeat(64),
+              sha256: sha256(bytes),
             },
           ],
         }),
     };
-    const port = new OffloadingToolPort(inner, workspace, {}, new SequentialIdGenerator());
+    const port = new OffloadingToolPort(
+      inner,
+      workspace,
+      {},
+      {
+        ids: new SequentialIdGenerator(),
+        artifactKeyProvider: keyProvider(new Map([["test_key", new Uint8Array(32).fill(7)]])),
+      },
+    );
 
     const execution = await port.execute(call(), context);
     expect(execution).toEqual({
@@ -301,7 +518,7 @@ describe("OffloadingToolPort", () => {
       inner,
       workspace,
       { thresholdBytes: 1, previewChars: 7 },
-      ids,
+      { ids },
     );
     const execution = await port.execute(call(), context);
     const stub = OffloadedStub.parse(execution.result);
@@ -325,7 +542,7 @@ describe("OffloadingToolPort", () => {
       inner,
       new InMemoryWorkspace(),
       { thresholdBytes: 0, previewChars: 10 },
-      new SequentialIdGenerator(),
+      { ids: new SequentialIdGenerator() },
     );
     const stub = OffloadedStub.parse((await port.execute(call(), context)).result);
 
@@ -357,7 +574,7 @@ describe("OffloadingToolPort", () => {
       inner,
       workspace,
       { thresholdBytes: 0 },
-      new SequentialIdGenerator(),
+      { ids: new SequentialIdGenerator() },
     );
 
     const execution = await port.execute(call(), context);

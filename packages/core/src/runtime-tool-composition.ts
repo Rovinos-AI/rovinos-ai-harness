@@ -98,7 +98,10 @@ export function createRuntimeToolPort(options: RuntimeToolPortOptions): ToolPort
   const offloadingPort =
     options.overrides.workspace === undefined
       ? undefined
-      : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
+      : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, {
+          ids: options.ids,
+          artifactKeyProvider: options.keys,
+        });
   const composed = offloadingPort ?? piiTool;
   const spawnResumeStrategy = subagentTool.resumeStrategy?.bind(subagentTool);
   const innerResumeStrategy = toolWithBuiltins.resumeStrategy?.bind(toolWithBuiltins);
