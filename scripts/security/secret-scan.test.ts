@@ -10,7 +10,10 @@ const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const scanScript = join(root, "scripts/security/secret-scan.sh");
 const temporaryDirectories: string[] = [];
 
-function createRepository(filePath: string, key = ["AKIA", "QWERTY9876543210"].join("")): string {
+function createRepository(
+  filePath: string,
+  key = ["AK", "IA", "QWERTY9876543210"].join(""),
+): string {
   const directory = mkdtempSync(join(tmpdir(), "gitleaks-control-"));
   temporaryDirectories.push(directory);
   const git = (args: string[]) => {
@@ -49,7 +52,7 @@ describe("secret-scan.sh", () => {
     const result = spawnSync("bash", [scanScript, "--source", repository], {
       encoding: "utf8",
     });
-    const key = ["AKIA", "QWERTY9876543210"].join("");
+    const key = ["AK", "IA", "QWERTY9876543210"].join("");
 
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}${result.stderr}`).not.toContain(key);
@@ -65,11 +68,13 @@ describe("secret-scan.sh", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(`${result.stdout}${result.stderr}`).not.toContain(["AKIA", "QWERTY9876543210"].join(""));
+    expect(`${result.stdout}${result.stderr}`).not.toContain(
+      ["AK", "IA", "QWERTY9876543210"].join(""),
+    );
   });
 
   it("does not allow a fake marker embedded after a key-shaped value", () => {
-    const syntheticValue = ["AKIA", "QWERTY9876543210", "-test_", "marker9876543210"].join("");
+    const syntheticValue = ["AK", "IA", "QWERTY9876543210", "-test_", "marker9876543210"].join("");
     const repository = createRepository("secret.txt", syntheticValue);
     const result = spawnSync("bash", [scanScript, "--source", repository], {
       encoding: "utf8",
@@ -83,7 +88,7 @@ describe("secret-scan.sh", () => {
   });
 
   it("allows a synthetic value that starts with FAKE_", () => {
-    const syntheticValue = ["FAKE_", "AKIA", "QWERTY9876543210"].join("");
+    const syntheticValue = ["FAKE_", "AK", "IA", "QWERTY9876543210"].join("");
     const repository = createRepository("synthetic.txt", syntheticValue);
     const result = spawnSync("bash", [scanScript, "--source", repository], {
       encoding: "utf8",
