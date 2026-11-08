@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelPricingRate, ModelRef, ModelUsage } from "@rovinos/schemas";
+import type { CostValue, ModelPricingRate, ModelRef, ModelUsage } from "@rovinos/schemas";
 import { ModelUsageError } from "./errors.js";
 
 /** Prices keyed by the configured `provider/model` reference. */
@@ -58,6 +58,86 @@ function validateCacheUsageAndPricing(
   }
 }
 
+function costWithoutConfiguredPrice(usage: ModelUsage): CostValue {
+  const reportedCost =
+    usage.cost ??
+    (usage.costMicros === undefined
+      ? { version: 1 as const, state: "unknown" as const }
+      : { version: 1 as const, state: "known" as const, amountMicros: usage.costMicros });
+  if (usage.usageComplete !== false || reportedCost.state === "unknown") {
+    return reportedCost;
+  }
+  return {
+    version: 1,
+    state: "partial",
+    amountMicros: reportedCost.amountMicros,
+  };
+}
+
+function accountWithoutConfiguredPrice(
+  model: ModelRef,
+  usage: ModelUsage,
+  missingPriceModels: Set<string>,
+  onMissingPrice: (model: ModelRef) => void,
+): ModelUsage {
+  const key = `${model.provider}/${model.model}`;
+  if (!missingPriceModels.has(key)) {
+    missingPriceModels.add(key);
+    onMissingPrice(model);
+  }
+  const cost = costWithoutConfiguredPrice(usage);
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
+    ...(usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens }),
+    cost,
+    ...(cost.state === "unknown" ? {} : { costMicros: cost.amountMicros }),
+    ...(usage.usageComplete === undefined ? {} : { usageComplete: usage.usageComplete }),
+  };
+}
+
+function hasMissingCachePrice(usage: ModelUsage, rate: ModelPricingRate): boolean {
+  return (
+    ((usage.cacheReadTokens ?? 0) > 0 && rate.cacheReadMicrosPerMTok === undefined) ||
+    ((usage.cacheWriteTokens ?? 0) > 0 && rate.cacheWriteMicrosPerMTok === undefined)
+  );
+}
+
+function accountWithConfiguredPrice(options: {
+  readonly model: ModelRef;
+  readonly usage: ModelUsage;
+  readonly rate: ModelPricingRate;
+  readonly missingCachePriceModels: Set<string>;
+  readonly onMissingCachePrice: ((model: ModelRef) => void) | undefined;
+}): ModelUsage {
+  const { model, usage, rate, missingCachePriceModels, onMissingCachePrice } = options;
+  const costMicros = calculateCostMicros(usage, rate);
+  if (costMicros === undefined) {
+    throw new ModelUsageError();
+  }
+  const incompleteCachePricing = hasMissingCachePrice(usage, rate);
+  const cost: CostValue = {
+    version: 1,
+    state: incompleteCachePricing || usage.usageComplete === false ? "partial" : "estimated",
+    amountMicros: costMicros,
+  };
+  const key = `${model.provider}/${model.model}`;
+  if (incompleteCachePricing && !missingCachePriceModels.has(key)) {
+    missingCachePriceModels.add(key);
+    onMissingCachePrice?.(model);
+  }
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
+    ...(usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens }),
+    costMicros,
+    cost,
+    ...(usage.usageComplete === undefined ? {} : { usageComplete: usage.usageComplete }),
+  };
+}
+
 /**
  * Calculates the rounded integer-micro cost using exact integer arithmetic.
  *
@@ -108,70 +188,14 @@ export function createPricingAccountant(
   return (model, usage) => {
     const rate = resolveModelPricing(model.provider, model.model, pricing);
     if (rate === undefined) {
-      const key = `${model.provider}/${model.model}`;
-      if (!missingPriceModels.has(key)) {
-        missingPriceModels.add(key);
-        onMissingPrice(model);
-      }
-      const reportedCost =
-        usage.cost !== undefined
-          ? usage.cost
-          : usage.costMicros === undefined
-            ? { version: 1 as const, state: "unknown" as const }
-            : { version: 1 as const, state: "known" as const, amountMicros: usage.costMicros };
-      const cost =
-        usage.usageComplete === false && reportedCost.state !== "unknown"
-          ? {
-              version: 1 as const,
-              state: "partial" as const,
-              amountMicros: reportedCost.amountMicros,
-            }
-          : reportedCost;
-      return {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
-        ...(usage.cacheWriteTokens === undefined
-          ? {}
-          : { cacheWriteTokens: usage.cacheWriteTokens }),
-        cost,
-        ...(cost.state === "unknown" ? {} : { costMicros: cost.amountMicros }),
-        ...(usage.usageComplete === undefined ? {} : { usageComplete: usage.usageComplete }),
-      };
+      return accountWithoutConfiguredPrice(model, usage, missingPriceModels, onMissingPrice);
     }
-    const cacheReadMissing =
-      usage.cacheReadTokens !== undefined &&
-      usage.cacheReadTokens > 0 &&
-      rate.cacheReadMicrosPerMTok === undefined;
-    const cacheWriteMissing =
-      usage.cacheWriteTokens !== undefined &&
-      usage.cacheWriteTokens > 0 &&
-      rate.cacheWriteMicrosPerMTok === undefined;
-    const costMicros = calculateCostMicros(usage, rate);
-    if (costMicros === undefined) {
-      throw new ModelUsageError();
-    }
-    const cost = {
-      version: 1 as const,
-      state:
-        cacheReadMissing || cacheWriteMissing || usage.usageComplete === false
-          ? ("partial" as const)
-          : ("estimated" as const),
-      amountMicros: costMicros,
-    };
-    const key = `${model.provider}/${model.model}`;
-    if ((cacheReadMissing || cacheWriteMissing) && !missingCachePriceModels.has(key)) {
-      missingCachePriceModels.add(key);
-      onMissingCachePrice?.(model);
-    }
-    return {
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
-      ...(usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens }),
-      costMicros,
-      cost,
-      ...(usage.usageComplete === undefined ? {} : { usageComplete: usage.usageComplete }),
-    };
+    return accountWithConfiguredPrice({
+      model,
+      usage,
+      rate,
+      missingCachePriceModels,
+      onMissingCachePrice,
+    });
   };
 }

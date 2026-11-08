@@ -14,6 +14,26 @@ function aggregateOptionalTokens(
   return previous === undefined && next === undefined ? undefined : (previous ?? 0) + (next ?? 0);
 }
 
+function aggregateUsageCompleteness(
+  previous: ModelUsage | undefined,
+  next: ModelUsage,
+): ModelUsage["usageComplete"] {
+  if (previous?.usageComplete === false || next.usageComplete === false) {
+    return false;
+  }
+  if (previous?.usageComplete === true || next.usageComplete === true) {
+    return true;
+  }
+  return undefined;
+}
+
+function aggregateCost(previous: ModelUsage | undefined, next: ModelUsage) {
+  if (previous === undefined) {
+    return costValueFromUsage(next);
+  }
+  return combineCostValues(costValueFromUsage(previous), costValueFromUsage(next));
+}
+
 /**
  * Sums usage across attempts, keeping cache-token counts only when some attempt reported them.
  *
@@ -30,16 +50,8 @@ export function aggregateModelUsage(
     previous?.cacheWriteTokens,
     next.cacheWriteTokens,
   );
-  const usageComplete =
-    previous?.usageComplete === false || next.usageComplete === false
-      ? false
-      : previous?.usageComplete === true || next.usageComplete === true
-        ? true
-        : undefined;
-  const cost =
-    previous === undefined
-      ? costValueFromUsage(next)
-      : combineCostValues(costValueFromUsage(previous), costValueFromUsage(next));
+  const usageComplete = aggregateUsageCompleteness(previous, next);
+  const cost = aggregateCost(previous, next);
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,

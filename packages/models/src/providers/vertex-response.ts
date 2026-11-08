@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { GenerateContentResponse } from "@google/genai";
 import { Code, JsonValue, type Part } from "@rovinos/schemas";
-import type { z } from "zod";
+import { z } from "zod";
 import type { ProviderContext, ProviderResult } from "../types.js";
 import type { VertexFunctionCall } from "./vertex-request.js";
 
@@ -16,6 +16,13 @@ const FINISH_REASONS: Readonly<Record<string, string>> = {
   IMAGE_SAFETY: "provider_content_filtered",
   MALFORMED_FUNCTION_CALL: "tool_args_invalid",
 };
+
+const UsageMetadataSchema = z.looseObject({
+  promptTokenCount: z.number().int().nonnegative().optional(),
+  candidatesTokenCount: z.number().int().nonnegative().optional(),
+  thoughtsTokenCount: z.number().int().nonnegative().optional(),
+  cachedContentTokenCount: z.number().int().nonnegative().optional(),
+});
 
 function mapFinishReason(response: GenerateContentResponse): string {
   if (response.promptFeedback?.blockReason !== undefined) {
@@ -55,6 +62,54 @@ function mapParts(
   return { parts, functionCalls };
 }
 
+function addOpaquePart(
+  parts: Part[],
+  options: {
+    readonly response: GenerateContentResponse;
+    readonly provider: string;
+    readonly droppedSchemaKeywords: z.infer<typeof Code>[];
+    readonly functionCalls: Record<string, VertexFunctionCall>;
+  },
+): void {
+  const { response, provider, droppedSchemaKeywords, functionCalls } = options;
+  const content = response.candidates?.[0]?.content;
+  if (content === undefined) {
+    return;
+  }
+  parts.push({
+    type: "opaque",
+    provider,
+    blob: JsonValue.parse({ content, droppedSchemaKeywords, functionCalls }),
+  });
+}
+
+function normalizedFinishReason(parts: readonly Part[], response: GenerateContentResponse): string {
+  const reason = mapFinishReason(response);
+  const hasToolCall = parts.some((part) => part.type === "tool_call");
+  if (hasToolCall && reason !== "provider_content_filtered" && reason !== "tool_args_invalid") {
+    return "tool_calls";
+  }
+  return reason;
+}
+
+function mapUsage(response: GenerateContentResponse): ProviderResult["usage"] {
+  const parsed = UsageMetadataSchema.safeParse(response.usageMetadata);
+  if (!parsed.success) {
+    return { inputTokens: 0, outputTokens: 0, usageComplete: false };
+  }
+  const usage = parsed.data;
+  return {
+    inputTokens: usage.promptTokenCount ?? 0,
+    outputTokens: (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0),
+    ...(usage.promptTokenCount === undefined || usage.candidatesTokenCount === undefined
+      ? { usageComplete: false }
+      : {}),
+    ...(usage.cachedContentTokenCount === undefined
+      ? {}
+      : { cacheReadTokens: usage.cachedContentTokenCount }),
+  };
+}
+
 /** Converts a Vertex generation response into normalized parts and usage. */
 export function mapVertexResponse(options: {
   readonly response: GenerateContentResponse;
@@ -64,40 +119,17 @@ export function mapVertexResponse(options: {
   readonly droppedSchemaKeywords: z.infer<typeof Code>[];
 }): ProviderResult {
   const { response, context, provider, startedAt, droppedSchemaKeywords } = options;
-  const content = response.candidates?.[0]?.content;
   const mapped = mapParts(response, context);
-  if (content !== undefined) {
-    mapped.parts.push({
-      type: "opaque",
-      provider,
-      blob: JsonValue.parse({
-        content,
-        droppedSchemaKeywords,
-        functionCalls: mapped.functionCalls,
-      }),
-    });
-  }
-  const mappedReason = mapFinishReason(response);
-  const finishReason =
-    mapped.parts.some((part) => part.type === "tool_call") &&
-    mappedReason !== "provider_content_filtered" &&
-    mappedReason !== "tool_args_invalid"
-      ? "tool_calls"
-      : mappedReason;
-  const usage = response.usageMetadata;
+  addOpaquePart(mapped.parts, {
+    response,
+    provider,
+    droppedSchemaKeywords,
+    functionCalls: mapped.functionCalls,
+  });
   return {
     parts: mapped.parts,
-    usage: {
-      inputTokens: usage?.promptTokenCount ?? 0,
-      outputTokens: (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0),
-      ...(usage?.promptTokenCount === undefined || usage?.candidatesTokenCount === undefined
-        ? { usageComplete: false }
-        : {}),
-      ...(usage?.cachedContentTokenCount === undefined
-        ? {}
-        : { cacheReadTokens: usage.cachedContentTokenCount }),
-    },
-    finishReason: Code.parse(finishReason),
+    usage: mapUsage(response),
+    finishReason: Code.parse(normalizedFinishReason(mapped.parts, response)),
     latencyMs: Math.max(0, context.clock.now() - startedAt),
   };
 }

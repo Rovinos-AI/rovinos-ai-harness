@@ -35,13 +35,14 @@ import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import type { Tokenizer } from "@rovinos/pii";
 import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { HumanInputChannel } from "./human-input/channels.js";
-import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
+import type { CompactionRuntimeOptions } from "./steps/compaction-step.js";
 import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-output.js";
 import type { ValueTransform } from "@rovinos/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
 import { modelQuotaHooks } from "./model-quota-hooks.js";
 import { runToolCalls } from "./steps/tool-call-runner.js";
+import { prepareLoopIteration } from "./steps/loop-preparation.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
@@ -220,51 +221,16 @@ async function runLoopSteps(
   }
   const quotaHooks = modelQuotaHooks(options);
   for (;;) {
-    await drainSentinelTrips(options.recorder, events);
-    const aborted = await suspendIfShutdown(options, events, execution);
-    if (aborted !== undefined) {
-      return aborted;
-    }
-    const preflight = await preflightModelBudget({
-      budgetTracker: execution.budgetTracker,
-      checkpointer: execution.checkpointer,
+    const preparedIteration = await prepareLoopIteration({
+      options,
       events,
-      budgets: options.budgets,
-      now: options.clock.now(),
-      recorder: options.recorder,
-      ...quotaHooks,
+      execution,
+      quotaHooks,
+      drainSentinelTrips,
+      suspendIfShutdown,
     });
-    if (preflight.event !== undefined) {
-      return preflight.event;
-    }
-    await compactBeforeModelCall({
-      recorder: options.recorder,
-      events,
-      compaction: options.compaction,
-      model: options.model,
-      ids: options.ids,
-      runId: execution.runId,
-      signal: options.signal,
-      modelRef: {
-        provider: options.provider ?? "unknown",
-        model: options.modelName ?? "unknown",
-      },
-      goal: options.goal,
-      deadlineTs: preflight.deadlineTs,
-      unknownCostPolicy: options.budgets.unknownCostPolicy,
-      ...quotaHooks,
-    });
-    const compactionBudget = execution.budgetTracker.checkWithOpenChildren(
-      events,
-      options.clock.now(),
-    );
-    if (!compactionBudget.ok) {
-      return recordBudgetFailureAndCheckpoint(
-        options.recorder,
-        events,
-        compactionBudget,
-        execution.checkpointer,
-      );
+    if (preparedIteration.event !== undefined) {
+      return preparedIteration.event;
     }
     const prepared = await prepareModelStep(options, events, execution);
     if (prepared.event !== undefined) {

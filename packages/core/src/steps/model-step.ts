@@ -33,6 +33,7 @@ import {
   toolRunContext,
   type PreparedToolCall,
 } from "./prepare-tool.js";
+import { requestCompletion } from "./model-completion.js";
 
 class ModelStepEventMissingError extends HarnessError {
   readonly code = "model_step_event_missing";
@@ -157,30 +158,6 @@ function requestParts(
   };
 }
 
-function completeUnlessShutdown(
-  completion: Promise<ModelCompletion>,
-  signal: AbortSignal,
-): Promise<ModelCompletion | undefined> {
-  let onAbort: (() => void) | undefined;
-  const shutdown = new Promise<undefined>((resolve) => {
-    onAbort = (): void => {
-      if (signal.reason === "shutdown") {
-        resolve(undefined);
-      }
-    };
-    if (signal.aborted) {
-      onAbort();
-    } else {
-      signal.addEventListener("abort", onAbort, { once: true });
-    }
-  });
-  return Promise.race([completion, shutdown]).finally(() => {
-    if (onAbort !== undefined) {
-      signal.removeEventListener("abort", onAbort);
-    }
-  });
-}
-
 /**
  * Records a model request, performs the provider call, and records its outcome.
  *
@@ -205,37 +182,25 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       const requestEvent = await options.recorder.record(requestPartial);
       recorded.push(requestEvent);
 
-      const runContext = piiActionRunContext(modelRunContext(options), options.recorder, recorded);
-      let completion: ModelCompletion;
-      try {
-        const response = await completeUnlessShutdown(
-          options.model.complete(modelRequest, runContext),
-          options.signal,
-        );
-        if (response === undefined) {
-          result = { outcome: "aborted", events: recorded };
-          return requestEvent;
-        }
-        completion = response;
-      } catch (error) {
-        if (options.signal.aborted && options.signal.reason === "shutdown") {
-          result = { outcome: "aborted", events: recorded };
-          return requestEvent;
-        }
-        const failure = await recordModelFailure({
-          options,
-          requestId,
-          error,
-          span,
-          recorded,
-        });
-        result = failure.result;
-        return failure.event ?? requestEvent;
+      const completionOutcome = await requestCompletion({
+        completion: options.model.complete(
+          modelRequest,
+          piiActionRunContext(modelRunContext(options), options.recorder, recorded),
+        ),
+        signal: options.signal,
+        recorded,
+        requestEvent,
+        recordFailure: (error) => recordModelFailure({ options, requestId, error, span, recorded }),
+      });
+      if ("result" in completionOutcome) {
+        result = completionOutcome.result;
+        return completionOutcome.event;
       }
 
       if (requestEvent.type !== "model_request") {
         throw new ModelStepEventMissingError();
       }
+      let completion = completionOutcome.completion;
       const prepared = await prepareCompletion(
         completion,
         options.tool,
