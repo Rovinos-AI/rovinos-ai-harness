@@ -18,6 +18,11 @@ export {
 } from "./logger.js";
 export { POLICY_VERSION } from "./generated/policy-version.js";
 export {
+  assertSinkPolicies,
+  SinkPolicyError,
+  type AssertSinkPoliciesOptions,
+} from "./sinks/policy.js";
+export {
   SafeEvent,
   toSafeEvent,
   type SafeEvent as SafeEventType,

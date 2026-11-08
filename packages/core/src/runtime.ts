@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Id } from "@rovinos/schemas";
+import { HarnessError, TelemetryConfigSchema, type Id } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import {
   forceFlushTelemetry,
   initializeTelemetryMetrics,
+  assertSinkPolicies,
   sentinelTripQueue,
 } from "@rovinos/telemetry";
 import {
@@ -38,6 +39,7 @@ import {
 import { QuotaService } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
 import { assertRuntimeOverrideRequirements } from "./runtime-overrides.js";
+import { resolveCollectorConfigDir } from "./runtime-data-dir.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
@@ -387,6 +389,9 @@ export async function createRuntime(
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
   assertRuntimeOverrideRequirements(overrides);
+  await assertSinkPolicies(config.telemetry ?? TelemetryConfigSchema.parse({}), {
+    collectorConfigDir: resolveCollectorConfigDir(process.env),
+  });
   const metricsLifecycle =
     config.telemetry === undefined
       ? undefined
