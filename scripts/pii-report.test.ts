@@ -47,6 +47,33 @@ afterEach(() => {
 });
 
 describe("evaluatePiiReport", () => {
+  it("reports unchanged regex metrics from the committed corpus with its runtime JWT", () => {
+    const outputDirectory = temporaryDirectory();
+    expect(runPiiReport(["--out-dir", outputDirectory])).toBe(0);
+    const report = parseJson(
+      PiiReportSchema,
+      readFileSync(join(outputDirectory, "pii-report.json"), "utf8"),
+    );
+    expect(report.sampleCount).toBe(67);
+    expect(report.passed).toBe(true);
+    for (const [entityType, result] of Object.entries(report.entities)) {
+      if (entityType === "person_name" || entityType === "location") {
+        expect(result.exact.precision).toBeNull();
+        expect(result.exact.recall).toBe(0);
+      } else {
+        expect(result.exact).toMatchObject({
+          falsePositive: 0,
+          falseNegative: 0,
+          precision: 1,
+          recall: 1,
+          f1: 1,
+        });
+      }
+      expect(result.iou50).toEqual(result.exact);
+    }
+    expect(report.entities.api_key?.exact.truePositive).toBe(5);
+  });
+
   it("computes exact and IoU-0.5 precision, recall, and F1", () => {
     const report = evaluatePiiReport(
       [
