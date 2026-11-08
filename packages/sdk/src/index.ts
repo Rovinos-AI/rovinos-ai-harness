@@ -6,6 +6,49 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./harness.js";
+export {
+  ExtensionCapabilitySchema,
+  ExtensionCapabilityStatusSchema,
+  ExtensionDefinitionSchema,
+  ExtensionError,
+  ExtensionGrantSchema,
+  ExtensionGrantRevocationSchema,
+  ExtensionManifestSchema,
+  ExtensionRegistrationSchema,
+  ExtensionRegistrationStatusSchema,
+  SDK_VERSION,
+  defineTool,
+} from "./extensions.js";
+export type {
+  ExtensionCapability,
+  ExtensionCapabilityStatus,
+  ExtensionContributions,
+  ExtensionDefinition,
+  ExtensionGrant,
+  ExtensionGrantRevocation,
+  ExtensionManifest,
+  ExtensionRegistration,
+  ExtensionRegistrationStatus,
+  ExtensionToolDefinition,
+  ToolInvocationContext,
+} from "./extensions.js";
+export {
+  Code as CodeSchema,
+  Id as IdSchema,
+  JsonValue as JsonValueSchema,
+  ModelRefSchema,
+  ModelRequestSchema,
+  ModelUsageSchema,
+  PartSchema,
+} from "@rovinos/schemas";
+export type { Code, Id, JsonValue, ModelRequest, ModelUsage, Part } from "@rovinos/schemas";
+export { ProviderDeltaSchema, ProviderResultSchema } from "@rovinos/models";
+export type {
+  ProviderAdapter,
+  ProviderContext,
+  ProviderDelta,
+  ProviderResult,
+} from "@rovinos/models";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
 export {

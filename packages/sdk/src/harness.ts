@@ -16,6 +16,16 @@ import { answerPendingInput, resolvePendingApproval } from "./pending-requests.j
 import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
 import { runtimeOverridesFrom } from "./runtime-overrides.js";
 import {
+  ExtensionError,
+  ExtensionGrantRevocationSchema,
+  prepareExtensions,
+} from "./extensions.js";
+import type {
+  ExtensionGrantRevocation,
+  ExtensionRegistration,
+  ExtensionRegistrationStatus,
+} from "./extensions.js";
+import {
   CancelRunResultSchema,
   ContinueRunOptionsSchema,
   CreateHarnessOptionsSchema,
@@ -59,8 +69,30 @@ class HarnessClient implements Harness {
     private readonly piiEnabled: boolean,
     private readonly correlationEnabled: boolean,
     private readonly shutdownGraceMs: number,
+    private readonly readExtensionStatus: () => readonly ExtensionRegistrationStatus[],
+    private readonly revokeGrant: (request: ExtensionGrantRevocation) => boolean,
   ) {
     this.lifecycle = new LifecycleTracker(shutdownGraceMs);
+  }
+
+  getExtensionStatus(): readonly ExtensionRegistrationStatus[] {
+    return this.readExtensionStatus().map((status) => ({
+      ...status,
+      capabilities: status.capabilities.map((capability) => ({
+        ...capability,
+        requested: [...capability.requested],
+        enabled: [...capability.enabled],
+        unsupported: [...capability.unsupported],
+      })),
+    }));
+  }
+
+  revokeExtensionGrant(request: ExtensionGrantRevocation): boolean {
+    const parsedRequest = ExtensionGrantRevocationSchema.safeParse(request);
+    if (!parsedRequest.success) {
+      throw new ExtensionError("extension_grant_invalid");
+    }
+    return this.revokeGrant(parsedRequest.data);
   }
 
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
@@ -409,20 +441,59 @@ class HarnessClient implements Harness {
  * @param options - Validated config object or config path and optional runtime adapters.
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
-export async function createHarness(options: CreateHarnessOptions): Promise<Harness> {
-  const parsedOptions = CreateHarnessOptionsSchema.parse(options);
-  const runtimeOverrides = runtimeOverridesFrom(
-    HarnessOverridesSchema.parse(parsedOptions.overrides ?? {}),
-  );
+export async function createHarness<
+  const Registrations extends readonly ExtensionRegistration[] = readonly ExtensionRegistration[],
+>(options: CreateHarnessOptions<Registrations>): Promise<Harness> {
+  const parsedOptionsResult = CreateHarnessOptionsSchema.safeParse(options);
+  if (!parsedOptionsResult.success) {
+    const extensionIssue = parsedOptionsResult.error.issues.find(
+      (issue) => issue.path[0] === "extensions",
+    );
+    if (extensionIssue !== undefined) {
+      const code = extensionIssue.path.some(
+        (segment) => typeof segment === "string" && segment.startsWith("config"),
+      )
+        ? "extension_config_invalid"
+        : extensionIssue.path.includes("grants")
+          ? "extension_grant_invalid"
+          : extensionIssue.path.includes("manifest")
+            ? "extension_manifest_invalid"
+            : "extension_contribution_invalid";
+      throw new ExtensionError(code);
+    }
+    throw parsedOptionsResult.error;
+  }
+  const parsedOptions = parsedOptionsResult.data;
+  const baseOverrides = HarnessOverridesSchema.parse(parsedOptions.overrides ?? {});
   const config: HarnessConfig =
     "config" in parsedOptions
       ? parsedOptions.config
       : await loadConfig({ configPath: parsedOptions.configPath });
+  const preparedExtensions =
+    parsedOptions.extensions === undefined
+      ? undefined
+      : prepareExtensions(
+          parsedOptions.extensions,
+          baseOverrides.tool,
+          baseOverrides.providerAdapters ?? [],
+          config.run.budgets.maxWallClockMs,
+        );
+  const runtimeOverrides = runtimeOverridesFrom(
+    preparedExtensions === undefined
+      ? baseOverrides
+      : {
+          ...baseOverrides,
+          ...(preparedExtensions.tool === undefined ? {} : { tool: preparedExtensions.tool }),
+          providerAdapters: [...preparedExtensions.providers],
+        },
+  );
   const runtime = await createRuntime(config, runtimeOverrides);
   return new HarnessClient(
     runtime,
     config.pii.enabled,
     config.telemetry.correlation.enabled,
     config.run.shutdownGraceMs,
+    () => preparedExtensions?.getStatuses() ?? [],
+    (request) => preparedExtensions?.revokeGrant(request) ?? false,
   );
 }

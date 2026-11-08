@@ -13,6 +13,14 @@ import type { RuntimeOverrides } from "@rovinos/core";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
+import {
+  ExtensionRegistrationSchema,
+} from "./extensions.js";
+import type {
+  ExtensionGrantRevocation,
+  ExtensionRegistration,
+  ExtensionRegistrationStatus,
+} from "./extensions.js";
 
 function hasMethod(value: unknown, name: string): boolean {
   return (
@@ -128,18 +136,27 @@ export const CreateHarnessOptionsSchema = z.union([
     .object({
       config: HarnessConfigSchema,
       overrides: HarnessOverridesSchema.optional(),
+      extensions: z.array(ExtensionRegistrationSchema).max(32).optional(),
     })
     .strict(),
   z
     .object({
       configPath: z.string().min(1),
       overrides: HarnessOverridesSchema.optional(),
+      extensions: z.array(ExtensionRegistrationSchema).max(32).optional(),
     })
     .strict(),
 ]);
 
 /** Validated options accepted by {@link createHarness}. */
-export type CreateHarnessOptions = z.input<typeof CreateHarnessOptionsSchema>;
+type CreateHarnessOptionsInput = z.input<typeof CreateHarnessOptionsSchema>;
+type WithExtensionRegistrations<Options, Registrations extends readonly ExtensionRegistration[]> =
+  Options extends { readonly extensions?: unknown }
+    ? Omit<Options, "extensions"> & { readonly extensions?: Registrations }
+    : Options;
+export type CreateHarnessOptions<
+  Registrations extends readonly ExtensionRegistration[] = readonly ExtensionRegistration[],
+> = WithExtensionRegistrations<CreateHarnessOptionsInput, Registrations>;
 
 /** Branded ULID accepted by public run and approval operations. */
 export type RunId = z.infer<typeof Id>;
@@ -381,6 +398,10 @@ export type CancelRunResult = z.infer<typeof CancelRunResultSchema>;
 
 /** Public stable SDK operations. */
 export interface Harness {
+  /** Return non-sensitive capability status for registered extensions. */
+  getExtensionStatus(): readonly ExtensionRegistrationStatus[];
+  /** Revoke one tool or provider destination grant for future mediated operations. */
+  revokeExtensionGrant(request: ExtensionGrantRevocation): boolean;
   /**
    * Start a detached run and return after its initial events are durable.
    *
@@ -428,6 +449,7 @@ export interface Harness {
    */
   close(): Promise<void>;
 }
+
 
 /** Coded SDK failure that does not include untrusted input values. */
 export class SdkError extends HarnessError {
