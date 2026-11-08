@@ -10,7 +10,7 @@ const beginMarker = "<!-- BEGIN GENERATED: readme-deps (yarn gen:readmes) -->";
 const endMarker = "<!-- END GENERATED: readme-deps -->";
 const skippedDirectories = new Set([".git", ".yarn", ".tmp", "coverage", "dist", "node_modules"]);
 const layersSchema = z.record(z.string(), z.union([z.string(), z.array(z.string())]));
-const packageManifestSchema = z.object({ name: z.string().min(1) }).passthrough();
+const packageManifestSchema = z.looseObject({ name: z.string().min(1) });
 
 /** Dependency allowlist keyed by package directory name. */
 export type PackageLayers = z.infer<typeof layersSchema>;
@@ -60,7 +60,7 @@ function stringsFor(value: string | string[] | undefined): string[] {
 }
 
 function nodeName(value: string): string {
-  return value.replaceAll(/[^A-Za-z0-9_]/gu, "_");
+  return value.replaceAll(/\W/gu, "_");
 }
 
 function escapeLabel(value: string): string {
@@ -85,10 +85,7 @@ function collectMarkedReadmes(rootDirectory: string): { path: string; packageNam
     if (!existsSync(manifestPath) || !existsSync(readmePath)) {
       return;
     }
-    parseJson(
-      packageManifestSchema,
-      readFileSync(manifestPath, "utf8"),
-    );
+    parseJson(packageManifestSchema, readFileSync(manifestPath, "utf8"));
     if (readFileSync(readmePath, "utf8").includes(readmeMarker)) {
       marked.push({
         path: relative(rootDirectory, readmePath).split(sep).join("/"),

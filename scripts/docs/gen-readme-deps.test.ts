@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import {
-  generateReadmeDependencyBlock,
-  replaceReadmeDependencyBlock,
-} from "./gen-readme-deps.js";
+import { generateReadmeDependencyBlock, replaceReadmeDependencyBlock } from "./gen-readme-deps.js";
 
 describe("package README dependency generator", () => {
   it("renders allowed imports and packages that import the package", () => {

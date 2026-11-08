@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  collectMarkdownSources,
-  extractFencedBlocks,
-  type MarkdownSource,
-} from "./markdown.ts";
+import { collectHeadingIds } from "./markdown-anchors.ts";
+import { collectMarkdownSources, stripMarkdownCode, type MarkdownSource } from "./markdown.ts";
 
 /** One invalid link or heading reference in a Markdown document. */
 export interface LinkIssue {
@@ -15,17 +12,15 @@ export interface LinkIssue {
   readonly reason: string;
 }
 
-interface MarkdownLink {
+/** One link destination extracted from Markdown. */
+export interface MarkdownLink {
   readonly destination: string;
   readonly line: number;
 }
 
 const skippedDirectories = new Set([".git", ".yarn", ".tmp", "coverage", "dist", "node_modules"]);
-const inlineLinkPattern =
-  /!?\[[^\]]*(?:\[[^\]]*\][^\]]*)*\]\(\s*(?:<([^>\n]+)>|((?:\\.|[^\s)])+))(?:\s+["'][^)\n]*["'])?\s*\)/gu;
-const referenceDefinitionPattern = /^ {0,3}\[([^\]]+)\]:\s*(<[^>\n]+>|(?:\\.|[^\s]+))/gmu;
-const referenceUsePattern = /!?\[([^\]]+)\]\[([^\]]*)\]/gu;
-const htmlLinkPattern = /<(?:a|img)\b[^>]*?\b(?:href|src)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/giu;
+const referenceDefinitionPattern = /^ {0,3}\[([^\]\n]+)\]:\s*(<\S+>|\S+)/gmu;
+const htmlLinkPattern = /\b(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/giu;
 
 /**
  * Checks relative Markdown links and GitHub-style heading anchors.
@@ -41,118 +36,291 @@ export function checkLinks(
   const headingIds = new Map(
     sources.map((source) => [source.path, collectHeadingIds(source.contents)]),
   );
-  const issues: LinkIssue[] = [];
+  return sources.flatMap((source) => [
+    ...collectMarkdownLinks(source.contents).flatMap((link) => {
+      const issue = checkRelativeLink(source, link, existingPaths, headingIds);
+      return issue === undefined ? [] : [issue];
+    }),
+    ...collectMissingReferences(source.contents).map((reference) => ({
+      path: source.path,
+      line: reference.line,
+      reason: `unresolved Markdown reference: ${reference.label}`,
+    })),
+  ]);
+}
 
-  for (const source of sources) {
-    for (const link of collectLinks(source.contents)) {
-      const { destination, line } = link;
-      if (destination.startsWith("/") || destination.startsWith("//")) {
-        continue;
-      }
-      if (/^[A-Za-z][A-Za-z\d+.-]*:/u.test(destination)) {
-        continue;
-      }
-      const hashIndex = destination.indexOf("#");
-      const fragment = hashIndex < 0 ? "" : destination.slice(hashIndex + 1);
-      const rawPath = (hashIndex < 0 ? destination : destination.slice(0, hashIndex)).split("?")[0] ?? "";
-      let targetPath = source.path;
-      if (rawPath.length > 0) {
-        let decodedPath: string;
-        try {
-          decodedPath = decodeURIComponent(rawPath);
-        } catch {
-          issues.push({ path: source.path, line, reason: "invalid URL encoding in relative link" });
-          continue;
-        }
-        targetPath = posix
-          .normalize(posix.join(posix.dirname(source.path), decodedPath))
-          .replace(/\/$/u, "");
-      }
-      if (!existingPaths.has(targetPath)) {
-        issues.push({ path: source.path, line, reason: `unresolved relative link to ${targetPath}` });
-        continue;
-      }
-      if (fragment.length > 0 && targetPath.toLowerCase().endsWith(".md")) {
-        let decodedFragment: string;
-        try {
-          decodedFragment = decodeURIComponent(fragment);
-        } catch {
-          issues.push({ path: source.path, line, reason: "invalid URL encoding in anchor" });
-          continue;
-        }
-        if (!headingIds.get(targetPath)?.has(decodedFragment)) {
-          issues.push({ path: source.path, line, reason: `unresolved anchor in ${targetPath}` });
-        }
-      }
-    }
-
-    for (const reference of collectMissingReferences(source.contents)) {
-      issues.push({
-        path: source.path,
-        line: reference.line,
-        reason: `unresolved Markdown reference: ${reference.label}`,
-      });
-    }
+function checkRelativeLink(
+  source: MarkdownSource,
+  link: MarkdownLink,
+  existingPaths: ReadonlySet<string>,
+  headingIds: ReadonlyMap<string, Set<string>>,
+): LinkIssue | undefined {
+  const { destination, line } = link;
+  if (
+    destination.startsWith("/") ||
+    destination.startsWith("//") ||
+    /^[A-Za-z][A-Za-z\d+.-]*:/u.test(destination)
+  ) {
+    return undefined;
   }
-  return issues;
-}
-
-function stripFencedCode(markdown: string): string {
-  const characters = markdown.split("");
-  for (const block of extractFencedBlocks(markdown)) {
-    for (let index = block.start; index < block.end; index += 1) {
-      if (characters[index] !== "\n" && characters[index] !== "\r") {
-        characters[index] = " ";
-      }
+  const hashIndex = destination.indexOf("#");
+  const fragment = hashIndex < 0 ? "" : destination.slice(hashIndex + 1);
+  const rawPath =
+    (hashIndex < 0 ? destination : destination.slice(0, hashIndex)).split("?")[0] ?? "";
+  let targetPath = source.path;
+  if (rawPath.length > 0) {
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(rawPath);
+    } catch {
+      return { path: source.path, line, reason: "invalid URL encoding in relative link" };
     }
+    targetPath = posix
+      .normalize(posix.join(posix.dirname(source.path), decodedPath))
+      .replaceAll(/\/$/gu, "");
   }
-  return characters.join("");
+  if (!existingPaths.has(targetPath)) {
+    return { path: source.path, line, reason: `unresolved relative link to ${targetPath}` };
+  }
+  if (fragment.length === 0 || !targetPath.toLowerCase().endsWith(".md")) {
+    return undefined;
+  }
+  let decodedFragment: string;
+  try {
+    decodedFragment = decodeURIComponent(fragment);
+  } catch {
+    return { path: source.path, line, reason: "invalid URL encoding in anchor" };
+  }
+  return headingIds.get(targetPath)?.has(decodedFragment) === true
+    ? undefined
+    : { path: source.path, line, reason: `unresolved anchor in ${targetPath}` };
 }
 
-function stripCode(markdown: string): string {
-  return stripFencedCode(markdown)
-    .replace(/(`+)([^`\n]*?)\1/gu, (match) => " ".repeat(match.length));
+/**
+ * Extracts inline, reference, HTML, and autolink destinations from Markdown.
+ *
+ * @param markdown - Markdown source.
+ * @returns Link destinations and their source lines.
+ */
+export function collectMarkdownLinks(markdown: string): MarkdownLink[] {
+  const text = stripMarkdownCode(markdown);
+  return [
+    ...collectInlineLinks(text),
+    ...collectHtmlLinks(text),
+    ...collectReferenceLinks(text),
+    ...collectAutoLinks(text),
+  ];
 }
 
-function collectLinks(markdown: string): MarkdownLink[] {
-  const text = stripCode(markdown);
+function collectInlineLinks(text: string): MarkdownLink[] {
   const links: MarkdownLink[] = [];
-  for (const pattern of [inlineLinkPattern, htmlLinkPattern]) {
-    for (const match of text.matchAll(pattern)) {
-      const destination = (match[1] ?? match[2] ?? match[3] ?? "").replaceAll("\\", "");
-      if (destination.length > 0) {
-        links.push({
-          destination: destination.replaceAll(/^<|>$/gu, ""),
-          line: lineAt(text, match.index ?? 0),
-        });
-      }
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] !== "[") {
+      index += 1;
+      continue;
+    }
+    const labelEnd = findClosingBracket(text, index);
+    if (labelEnd === undefined || text[labelEnd + 1] !== "(") {
+      index += 1;
+      continue;
+    }
+    const destination = parseLinkDestination(text, labelEnd + 1);
+    if (destination !== undefined && destination.value.length > 0) {
+      links.push({ destination: destination.value, line: lineAt(text, index) });
+      index = destination.end + 1;
+    } else {
+      index += 1;
     }
   }
-  for (const match of text.matchAll(referenceDefinitionPattern)) {
-    const destination = (match[2] ?? "").replaceAll(/^<|>$/gu, "").replaceAll("\\", "");
-    if (destination.length > 0) {
+  return links;
+}
+
+function collectHtmlLinks(text: string): MarkdownLink[] {
+  const links: MarkdownLink[] = [];
+  for (const match of text.matchAll(htmlLinkPattern)) {
+    const destination = match[1] ?? match[2] ?? match[3];
+    if (destination !== undefined && destination.length > 0) {
       links.push({
-        destination,
-        line: lineAt(text, match.index ?? 0),
+        destination: destination.replaceAll(/[>"']$/gu, ""),
+        line: lineAt(text, match.index),
       });
     }
   }
   return links;
 }
 
+function collectReferenceLinks(text: string): MarkdownLink[] {
+  const links: MarkdownLink[] = [];
+  for (const match of text.matchAll(referenceDefinitionPattern)) {
+    const destination = match[2].replaceAll(/^<|>$/gu, "");
+    if (destination.length > 0) {
+      links.push({
+        destination,
+        line: lineAt(text, match.index),
+      });
+    }
+  }
+  return links;
+}
+
+function collectAutoLinks(text: string): MarkdownLink[] {
+  const links: MarkdownLink[] = [];
+  for (const match of text.matchAll(/https?:\/\/\S+/giu)) {
+    const destination = match[0].replaceAll(/[.,!?;:)>]+$/gu, "");
+    if (destination.length > 0) {
+      links.push({ destination, line: lineAt(text, match.index) });
+    }
+  }
+  return links;
+}
+
+function findClosingBracket(text: string, openingIndex: number): number | undefined {
+  let depth = 0;
+  for (let index = openingIndex; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "\\") {
+      index += 1;
+    } else if (character === "[") {
+      depth += 1;
+    } else if (character === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseLinkDestination(
+  text: string,
+  openingIndex: number,
+): { readonly value: string; readonly end: number } | undefined {
+  const end = findClosingParenthesis(text, openingIndex);
+  if (end === undefined) {
+    return undefined;
+  }
+  const start = skipWhitespace(text, openingIndex + 1, end);
+  const value =
+    text[start] === "<"
+      ? angleDestination(text, start, end)
+      : unquotedDestination(text, start, end);
+  return value === undefined ? undefined : { value, end };
+}
+
+function skipWhitespace(text: string, start: number, end: number): number {
+  let index = start;
+  while (index < end && /\s/u.test(text.charAt(index))) {
+    index += 1;
+  }
+  return index;
+}
+
+function angleDestination(text: string, start: number, end: number): string | undefined {
+  const angleEnd = text.indexOf(">", start + 1);
+  return angleEnd < 0 || angleEnd > end
+    ? undefined
+    : unescapeLinkDestination(text.slice(start + 1, angleEnd));
+}
+
+function unquotedDestination(text: string, start: number, end: number): string {
+  return unescapeLinkDestination(text.slice(start, unquotedDestinationEnd(text, start, end)));
+}
+
+function unquotedDestinationEnd(text: string, start: number, end: number): number {
+  let depth = 0;
+  let index = start;
+  while (index < end) {
+    const character = text.charAt(index);
+    if (character === "\\") {
+      index += 2;
+      continue;
+    }
+    if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      if (depth === 0) {
+        break;
+      }
+      depth -= 1;
+    } else if (/\s/u.test(character) && depth === 0) {
+      break;
+    }
+    index += 1;
+  }
+  return index;
+}
+
+function findClosingParenthesis(text: string, openingIndex: number): number | undefined {
+  let depth = 0;
+  let quote = "";
+  for (let index = openingIndex; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "\\") {
+      index += 1;
+    } else if (quote.length > 0) {
+      if (character === quote) {
+        quote = "";
+      }
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return undefined;
+}
+
+function unescapeLinkDestination(value: string): string {
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "\\" && index + 1 < value.length) {
+      index += 1;
+    }
+    result += value.charAt(index);
+  }
+  return result;
+}
+
 function collectMissingReferences(markdown: string): { label: string; line: number }[] {
-  const text = stripCode(markdown);
+  const text = stripMarkdownCode(markdown);
   const definitions = new Set(
     [...text.matchAll(referenceDefinitionPattern)].map((match) =>
       normalizeReference(match[1] ?? ""),
     ),
   );
-  return [...text.matchAll(referenceUsePattern)].flatMap((match) => {
-    const label = normalizeReference(match[2] || match[1] || "");
-    return definitions.has(label)
-      ? []
-      : [{ label, line: lineAt(text, match.index ?? 0) }];
-  });
+  const missing: { label: string; line: number }[] = [];
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] !== "[") {
+      index += 1;
+      continue;
+    }
+    const labelEnd = findClosingBracket(text, index);
+    if (labelEnd === undefined || text[labelEnd + 1] !== "[") {
+      index += 1;
+      continue;
+    }
+    const referenceEnd = findClosingBracket(text, labelEnd + 1);
+    if (referenceEnd === undefined) {
+      index += 1;
+      continue;
+    }
+    const reference = text.slice(labelEnd + 2, referenceEnd);
+    const labelText = reference.length > 0 ? reference : text.slice(index + 1, labelEnd);
+    const label = normalizeReference(labelText);
+    if (!definitions.has(label)) {
+      missing.push({ label, line: lineAt(text, index) });
+    }
+    index = referenceEnd + 1;
+  }
+  return missing;
 }
 
 function normalizeReference(value: string): string {
@@ -161,94 +329,6 @@ function normalizeReference(value: string): string {
 
 function lineAt(text: string, offset: number): number {
   return text.slice(0, offset).split("\n").length;
-}
-
-function collectHeadingIds(markdown: string): Set<string> {
-  const text = stripFencedCode(markdown);
-  const ids = new Set<string>();
-  const counts = new Map<string, number>();
-  for (const line of text.split(/\r?\n/u)) {
-    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/u.exec(line)?.[1];
-    if (heading !== undefined) {
-      const slug = slugify(heading);
-      const count = counts.get(slug) ?? 0;
-      ids.add(count === 0 ? slug : `${slug}-${String(count)}`);
-      counts.set(slug, count + 1);
-    }
-    for (const match of line.matchAll(/<(?:a|span)\b[^>]*\bid\s*=\s*["']([^"']+)["']/giu)) {
-      ids.add(match[1] ?? "");
-    }
-  }
-  return ids;
-}
-
-function slugify(heading: string): string {
-  const plain = heading
-    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/<[^>]*>/gu, "")
-    .replace(/[`*_~]/gu, "");
-  return plain
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, "")
-    .trim()
-    .replace(/\s+/gu, "-");
-}
-
-async function checkExternalLinks(sources: readonly MarkdownSource[]): Promise<LinkIssue[]> {
-  const unique = new Map<string, { path: string; line: number }>();
-  for (const source of sources) {
-    for (const { destination, line } of collectLinks(source.contents)) {
-      if (/^https?:\/\//iu.test(destination) && !unique.has(destination)) {
-        unique.set(destination, { path: source.path, line });
-      }
-    }
-    for (const match of stripCode(source.contents).matchAll(/https?:\/\/[^\s<>()]+/giu)) {
-      const destination = (match[0] ?? "").replace(/[.,!?;:]+$/u, "");
-      if (destination.length > 0 && !unique.has(destination)) {
-        unique.set(destination, {
-          path: source.path,
-          line: lineAt(source.contents, match.index ?? 0),
-        });
-      }
-    }
-  }
-  const issues: LinkIssue[] = [];
-  for (const [destination, location] of unique) {
-    let url: URL;
-    try {
-      url = new URL(destination);
-    } catch {
-      issues.push({ ...location, reason: "invalid external HTTP URL" });
-      continue;
-    }
-    if (
-      url.username.length > 0 ||
-      url.password.length > 0 ||
-      url.hostname === "localhost" ||
-      url.hostname.endsWith(".localhost") ||
-      url.hostname.endsWith(".local")
-    ) {
-      issues.push({ ...location, reason: "external URL host is not allowed" });
-      continue;
-    }
-    try {
-      const response = await fetch(url, {
-        method: "HEAD",
-        redirect: "manual",
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (response.status < 200 || response.status >= 400) {
-        issues.push({
-          ...location,
-          reason: `external HTTP link returned status ${String(response.status)}`,
-        });
-      }
-    } catch {
-      issues.push({ ...location, reason: "external HTTP link could not be reached" });
-    }
-  }
-  return issues;
 }
 
 function collectExistingPaths(rootDirectory: string): Set<string> {
@@ -274,10 +354,12 @@ function collectExistingPaths(rootDirectory: string): Set<string> {
 async function runCheck(): Promise<void> {
   const rootDirectory = fileURLToPath(new URL("../../", import.meta.url));
   const sources = collectMarkdownSources(rootDirectory);
-  const issues = [
-    ...checkLinks(sources, collectExistingPaths(rootDirectory)),
-    ...(process.argv.includes("--external") ? await checkExternalLinks(sources) : []),
-  ];
+  const externalIssues = process.argv.includes("--external")
+    ? await import("./check-external-links.ts").then(({ checkExternalLinks }) =>
+        checkExternalLinks(sources),
+      )
+    : [];
+  const issues = [...checkLinks(sources, collectExistingPaths(rootDirectory)), ...externalIssues];
   for (const issue of issues) {
     process.stderr.write(`Error: ${issue.reason} at ${issue.path}:${String(issue.line)}\n`);
   }

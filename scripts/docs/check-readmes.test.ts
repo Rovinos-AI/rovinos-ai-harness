@@ -46,11 +46,9 @@ describe("package README checker", () => {
 
   it("ignores unmarked READMEs until require-all is enabled", () => {
     expect(
-      checkReadmes(
-        [{ path: "packages/pkg/README.md", contents: "# Legacy README\n" }],
-        layers,
-        ["packages/pkg"],
-      ),
+      checkReadmes([{ path: "packages/pkg/README.md", contents: "# Legacy README\n" }], layers, [
+        "packages/pkg",
+      ]),
     ).toEqual([]);
   });
 

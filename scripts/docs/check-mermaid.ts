@@ -2,13 +2,10 @@
 import { JSDOM } from "jsdom";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  collectMarkdownSources,
-  extractFencedBlocks,
-  type MarkdownSource,
-} from "./markdown.ts";
+import type MermaidApi from "mermaid";
+import { collectMarkdownSources, extractFencedBlocks, type MarkdownSource } from "./markdown.ts";
 
-type Mermaid = typeof import("mermaid").default;
+type Mermaid = typeof MermaidApi;
 let mermaidPromise: Promise<Mermaid> | undefined;
 
 /** One invalid Mermaid diagram. */
@@ -23,9 +20,7 @@ export interface MermaidIssue {
  * @param sources - Markdown sources to inspect.
  * @returns Invalid diagrams in source order.
  */
-export async function checkMermaid(
-  sources: readonly MarkdownSource[],
-): Promise<MermaidIssue[]> {
+export async function checkMermaid(sources: readonly MarkdownSource[]): Promise<MermaidIssue[]> {
   const issues: MermaidIssue[] = [];
   for (const source of sources) {
     for (const block of extractFencedBlocks(source.contents)) {
@@ -76,9 +71,7 @@ async function runCheck(): Promise<void> {
   const rootDirectory = fileURLToPath(new URL("../../", import.meta.url));
   const issues = await checkMermaid(collectMarkdownSources(rootDirectory));
   for (const issue of issues) {
-    process.stderr.write(
-      `Error: invalid Mermaid diagram at ${issue.path}:${String(issue.line)}\n`,
-    );
+    process.stderr.write(`Error: invalid Mermaid diagram at ${issue.path}:${String(issue.line)}\n`);
   }
   if (issues.length > 0) {
     process.exitCode = 1;

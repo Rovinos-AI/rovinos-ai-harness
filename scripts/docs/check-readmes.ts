@@ -9,11 +9,7 @@ import {
   replaceReadmeDependencyBlock,
   type PackageLayers,
 } from "./gen-readme-deps.ts";
-import {
-  collectMarkdownSources,
-  extractFencedBlocks,
-  type MarkdownSource,
-} from "./markdown.ts";
+import { collectMarkdownSources, extractFencedBlocks, type MarkdownSource } from "./markdown.ts";
 
 const readmeMarker = "<!-- package-readme: v1 -->";
 const beginMarker = "<!-- BEGIN GENERATED: readme-deps (yarn gen:readmes) -->";
@@ -68,15 +64,16 @@ export function checkReadmes(
     const headings = source.contents
       .split(/\r?\n/u)
       .flatMap((line) => {
-        const match = /^##\s+(.+?)\s*#*\s*$/u.exec(line);
-        return match === null ? [] : [match[1] ?? ""];
+        const heading = headingTitle(line);
+        return heading === undefined ? [] : [heading];
       })
       .filter((heading) => requiredSections.some((required) => heading === required));
     if (headings.length !== requiredSections.length) {
       const missing = requiredSections.filter((required) => !headings.includes(required));
+      const missingSections = missing.length > 0 ? missing.join(", ") : "duplicate section";
       issues.push({
         path: source.path,
-        reason: `missing required sections: ${missing.join(", ") || "duplicate section"}`,
+        reason: `missing required sections: ${missingSections}`,
       });
     } else if (headings.some((heading, index) => heading !== requiredSections[index])) {
       issues.push({ path: source.path, reason: "required sections are out of order" });
@@ -87,13 +84,17 @@ export function checkReadmes(
     const diagrams = extractFencedBlocks(source.contents).filter(
       (block) =>
         block.language === "mermaid" &&
-        !(generatedStart >= 0 && generatedEnd > generatedStart &&
-          block.start > generatedStart && block.end <= generatedEnd),
+        !(
+          generatedStart >= 0 &&
+          generatedEnd > generatedStart &&
+          block.start > generatedStart &&
+          block.end <= generatedEnd
+        ),
     );
     if (diagrams.length < 2) {
       issues.push({
         path: source.path,
-        reason: `requires at least two hand-written Mermaid diagrams; found ${diagrams.length}`,
+        reason: `requires at least two hand-written Mermaid diagrams; found ${String(diagrams.length)}`,
       });
     }
 
@@ -144,6 +145,23 @@ function collectWorkspacePaths(rootDirectory: string): string[] {
     }
   }
   return paths.sort();
+}
+
+function headingTitle(line: string): string | undefined {
+  if (!line.startsWith("## ")) {
+    return undefined;
+  }
+  let title = line.slice(3).trim();
+  const suffixStart = title.lastIndexOf(" ");
+  const closingHashes = title.slice(suffixStart + 1);
+  let allClosingHashes = closingHashes.length > 0;
+  for (const character of closingHashes) {
+    allClosingHashes &&= character === "#";
+  }
+  if (suffixStart >= 0 && allClosingHashes) {
+    title = title.slice(0, suffixStart).trimEnd();
+  }
+  return title;
 }
 
 function runCheck(): void {

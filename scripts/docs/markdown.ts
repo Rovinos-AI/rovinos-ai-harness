@@ -58,13 +58,11 @@ export function extractFencedBlocks(markdown: string): FencedBlock[] {
   let offset = 0;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
-    const opening = /^ {0,3}(?<fence>`{3,}|~{3,})(?<info>.*?)(?:\r?\n)?$/u.exec(line);
-    if (opening?.groups === undefined) {
+    const opening = parseFenceOpening(line);
+    if (opening === undefined) {
       offset += line.length;
       continue;
     }
-    const fence = opening.groups.fence ?? "";
-    const language = (opening.groups.info ?? "").trim().split(/\s+/u, 1)[0]?.toLowerCase() ?? "";
     const start = offset;
     const startLine = index + 1;
     const contentLines: string[] = [];
@@ -73,9 +71,8 @@ export function extractFencedBlocks(markdown: string): FencedBlock[] {
     while (index + 1 < lines.length) {
       index += 1;
       const contentLine = lines[index] ?? "";
-      const closing = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*(?:\\r?\\n)?$`, "u");
       offset += contentLine.length;
-      if (closing.test(contentLine)) {
+      if (isClosingFence(contentLine, opening.character, opening.length)) {
         closed = true;
         break;
       }
@@ -83,7 +80,7 @@ export function extractFencedBlocks(markdown: string): FencedBlock[] {
     }
     if (closed) {
       blocks.push({
-        language,
+        language: opening.language,
         contents: contentLines.join("").replace(/\r?\n$/u, ""),
         start,
         end: offset,
@@ -92,4 +89,115 @@ export function extractFencedBlocks(markdown: string): FencedBlock[] {
     }
   }
   return blocks;
+}
+
+function parseFenceOpening(
+  line: string,
+): { readonly character: string; readonly length: number; readonly language: string } | undefined {
+  const contents = line.endsWith("\n") ? line.slice(0, -1) : line;
+  let indentation = 0;
+  while (contents[indentation] === " " && indentation <= 3) {
+    indentation += 1;
+  }
+  if (indentation > 3) {
+    return undefined;
+  }
+  const indented = contents.slice(indentation);
+  const character = indented[0] ?? "";
+  if (character !== "`" && character !== "~") {
+    return undefined;
+  }
+  let length = 0;
+  while (indented[length] === character) {
+    length += 1;
+  }
+  if (length < 3) {
+    return undefined;
+  }
+  const info = indented.slice(length).trim();
+  return {
+    character,
+    length,
+    language: (info.split(/\s+/u, 1)[0] ?? "").toLowerCase(),
+  };
+}
+
+function isClosingFence(line: string, character: string, minimumLength: number): boolean {
+  const withoutLineEnding = line.endsWith("\n") ? line.slice(0, -1) : line;
+  let indentation = 0;
+  while (withoutLineEnding[indentation] === " " && indentation <= 3) {
+    indentation += 1;
+  }
+  if (indentation > 3) {
+    return false;
+  }
+  const contents = withoutLineEnding.slice(indentation).trimEnd();
+  let length = 0;
+  while (contents[length] === character) {
+    length += 1;
+  }
+  return length >= minimumLength && contents.slice(length).trim().length === 0;
+}
+
+/** Replaces fenced code with spaces while preserving line positions and source offsets. */
+export function stripFencedMarkdown(markdown: string): string {
+  const characters = Array.from({ length: markdown.length }, (_, index) => markdown.charAt(index));
+  for (const block of extractFencedBlocks(markdown)) {
+    for (let index = block.start; index < block.end; index += 1) {
+      if (characters[index] !== "\n" && characters[index] !== "\r") {
+        characters[index] = " ";
+      }
+    }
+  }
+  return characters.join("");
+}
+
+/** Replaces fenced and inline code with spaces while preserving source positions. */
+export function stripMarkdownCode(markdown: string): string {
+  const text = stripFencedMarkdown(markdown);
+  const characters = Array.from({ length: text.length }, (_, index) => text.charAt(index));
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] !== "`") {
+      index += 1;
+      continue;
+    }
+    const openingLength = countTicks(text, index);
+    const closing = findClosingTicks(text, index + openingLength, openingLength);
+    if (closing === undefined) {
+      index += openingLength;
+      continue;
+    }
+    for (
+      let characterIndex = index;
+      characterIndex < closing + openingLength;
+      characterIndex += 1
+    ) {
+      if (characters[characterIndex] !== "\n" && characters[characterIndex] !== "\r") {
+        characters[characterIndex] = " ";
+      }
+    }
+    index = closing + openingLength;
+  }
+  return characters.join("");
+}
+
+function countTicks(text: string, start: number): number {
+  let length = 0;
+  while (text[start + length] === "`") {
+    length += 1;
+  }
+  return length;
+}
+
+function findClosingTicks(text: string, start: number, length: number): number | undefined {
+  for (let index = start; index < text.length; index += 1) {
+    if (text[index] === "\n" || text[index] === "\r") {
+      return undefined;
+    }
+    if (text[index] === "`" && countTicks(text, index) === length) {
+      return index;
+    }
+  }
+  return undefined;
 }

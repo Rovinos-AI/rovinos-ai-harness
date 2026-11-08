@@ -27,7 +27,8 @@ describe("Markdown link checker", () => {
     const sources: MarkdownSource[] = [
       {
         path: "README.md",
-        contents: "[first](docs/target.md#repeat-heading) [second](docs/target.md#repeat-heading-1)",
+        contents:
+          "[first](docs/target.md#repeat-heading) [second](docs/target.md#repeat-heading-1)",
       },
       {
         path: "docs/target.md",
@@ -35,8 +36,6 @@ describe("Markdown link checker", () => {
       },
     ];
 
-    expect(
-      checkLinks(sources, new Set(["README.md", "docs", "docs/target.md"])),
-    ).toEqual([]);
+    expect(checkLinks(sources, new Set(["README.md", "docs", "docs/target.md"]))).toEqual([]);
   });
 });
