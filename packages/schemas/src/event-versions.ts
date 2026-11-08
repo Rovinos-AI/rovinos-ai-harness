@@ -24,7 +24,7 @@ export const EVENT_SCHEMA_VERSIONS = {
   context_compacted: 2,
   pii_action: 1,
   budget_exceeded: 1,
-  subagent_spawned: 1,
+  subagent_spawned: 2,
   subagent_completed: 2,
 } satisfies Record<EventType, number>;
 
@@ -53,6 +53,9 @@ export const UPCASTERS: EventUpcasterMap = {
   },
   model_response: {
     1: costPayloadV1ToV2,
+  },
+  subagent_spawned: {
+    1: subagentSpawnedV1ToV2,
   },
   context_compacted: {
     1: costPayloadV1ToV2,
@@ -161,6 +164,20 @@ function subagentCompletedV1ToV2(payload: unknown): unknown {
           unknownCount: 1,
         };
   return { ...remaining, cost };
+}
+
+/** Adds the fail-closed unknown-cost policy to legacy child budget limits. */
+function subagentSpawnedV1ToV2(payload: unknown): unknown {
+  if (!isRecord(payload) || !isRecord(payload.budgetLimits)) {
+    return payload;
+  }
+  if (Object.hasOwn(payload.budgetLimits, "unknownCostPolicy")) {
+    return payload;
+  }
+  return {
+    ...payload,
+    budgetLimits: { ...payload.budgetLimits, unknownCostPolicy: "fail" },
+  };
 }
 
 /** Raw event envelope schema; payload keys are validated by the current strict schema after upcasting. */

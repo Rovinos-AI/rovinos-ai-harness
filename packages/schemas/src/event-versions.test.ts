@@ -228,6 +228,20 @@ describe("event schema upcasting", () => {
     });
   });
 
+  it("upcasts legacy child budget limits from the committed v1 fixture", async () => {
+    const source = await readFile(
+      new URL("../../../test/fixtures/legacy-logs/v1/subagent-spawned.json", import.meta.url),
+      "utf8",
+    );
+    const event = upcastEvent(parseJson(JsonValue, source));
+
+    expect(event).toMatchObject({
+      type: "subagent_spawned",
+      v: 2,
+      budgetLimits: { unknownCostPolicy: "fail" },
+    });
+  });
+
   it("preserves explicit v1 resolution decisions and rejects malformed or future envelopes", () => {
     const event = upcastEvent({
       ...envelope,
