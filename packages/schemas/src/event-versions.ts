@@ -11,7 +11,7 @@ export const EVENT_SCHEMA_VERSIONS = {
   run_input: 1,
   run_status_changed: 1,
   model_request: 3,
-  model_response: 1,
+  model_response: 2,
   tool_intent: 1,
   tool_execution_started: 1,
   tool_result: 2,
@@ -21,11 +21,11 @@ export const EVENT_SCHEMA_VERSIONS = {
   input_resolved: 1,
   app_content: 1,
   checkpoint_written: 1,
-  context_compacted: 1,
+  context_compacted: 2,
   pii_action: 1,
   budget_exceeded: 1,
   subagent_spawned: 1,
-  subagent_completed: 1,
+  subagent_completed: 2,
 } satisfies Record<EventType, number>;
 
 /** A pure transformation from one event payload version to the next. */
@@ -50,6 +50,15 @@ export const UPCASTERS: EventUpcasterMap = {
   },
   approval_resolved: {
     1: approvalResolvedV1ToV2,
+  },
+  model_response: {
+    1: costPayloadV1ToV2,
+  },
+  context_compacted: {
+    1: costPayloadV1ToV2,
+  },
+  subagent_completed: {
+    1: costPayloadV1ToV2,
   },
   tool_result: {
     1: toolResultV1ToV2,
@@ -94,6 +103,24 @@ function toolResultV1ToV2(payload: unknown): unknown {
   return {
     ...payload,
     result: { format: "legacy-json", version: 1, value: payload.result },
+  };
+}
+
+/** Recasts legacy integer costs as estimates and missing costs as explicitly unknown. */
+function costPayloadV1ToV2(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+  const { costMicros, ...remaining } = payload;
+  if (Object.hasOwn(payload, "cost")) {
+    return remaining;
+  }
+  return {
+    ...remaining,
+    cost:
+      typeof costMicros === "number" && Number.isSafeInteger(costMicros) && costMicros >= 0
+        ? { version: 1, state: "estimated", amountMicros: costMicros }
+        : { version: 1, state: "unknown" },
   };
 }
 

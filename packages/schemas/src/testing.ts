@@ -39,12 +39,13 @@ export const eventSamples = [
   {
     ...envelope,
     type: "model_response",
+    v: 2,
     requestId: id,
     provider: "test",
     model: "test",
     inputTokens: 1,
     outputTokens: 2,
-    costMicros: 3,
+    cost: { version: 1, state: "estimated", amountMicros: 3 },
     finishReason: "stop",
     latencyMs: 3,
     schemaValid: true,
@@ -134,6 +135,7 @@ export const eventSamples = [
   {
     ...envelope,
     type: "context_compacted",
+    v: 2,
     fromSeq: 0,
     toSeq: 1,
     strategy: "summary",
@@ -141,7 +143,7 @@ export const eventSamples = [
     summary: "compacted",
     inputTokens: 2,
     outputTokens: 1,
-    costMicros: 3,
+    cost: { version: 1, state: "estimated", amountMicros: 3 },
   },
   {
     ...envelope,
@@ -163,17 +165,23 @@ export const eventSamples = [
     type: "subagent_spawned",
     childRunId: id,
     role: "researcher",
-    budgetLimits: { maxSteps: 10, maxWallClockMs: 1000, countSuspendedTime: false },
+    budgetLimits: {
+      maxSteps: 10,
+      unknownCostPolicy: "fail",
+      maxWallClockMs: 1000,
+      countSuspendedTime: false,
+    },
     budgetDeadlineTs: 1000,
   },
   {
     ...envelope,
     type: "subagent_completed",
+    v: 2,
     childRunId: id,
     outcome: "completed",
     inputTokens: 3,
     outputTokens: 2,
-    costMicros: 1,
+    cost: { version: 1, state: "estimated", amountMicros: 1 },
   },
 ] satisfies Event[];
 

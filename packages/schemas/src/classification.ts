@@ -45,7 +45,7 @@ export const EVENT_FIELD_CLASS = {
     outputTokens: "meta",
     cacheReadTokens: "meta",
     cacheWriteTokens: "meta",
-    costMicros: "meta",
+    cost: "meta",
     finishReason: "meta",
     latencyMs: "meta",
     schemaValid: "meta",
@@ -136,7 +136,7 @@ export const EVENT_FIELD_CLASS = {
     summary: "content",
     inputTokens: "meta",
     outputTokens: "meta",
-    costMicros: "meta",
+    cost: "meta",
   },
   pii_action: { boundary: "meta", action: "meta", toolId: "meta", entities: "meta" },
   budget_exceeded: { budget: "meta", limit: "meta", observed: "meta" },
@@ -153,7 +153,7 @@ export const EVENT_FIELD_CLASS = {
     inputTokens: "meta",
     outputTokens: "meta",
     steps: "meta",
-    costMicros: "meta",
+    cost: "meta",
   },
 } satisfies { [T in EventType]: Record<PayloadKeys<T>, EventFieldClass> };
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
+import { CostValueSchema } from "./cost.js";
 import { JsonValue } from "./json.js";
 import { Code, Id, Sha256Hex } from "./primitives.js";
 
@@ -105,6 +106,7 @@ export const ModelUsageSchema = z
     cacheReadTokens: z.number().int().nonnegative().optional(),
     cacheWriteTokens: z.number().int().nonnegative().optional(),
     costMicros: z.number().int().nonnegative().optional(),
+    cost: CostValueSchema.optional(),
   })
   .strict();
 

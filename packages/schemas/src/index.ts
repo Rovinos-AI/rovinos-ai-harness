@@ -8,6 +8,15 @@ export {
   type ParseOptions,
   type SafeParseJsonResult,
 } from "./parse.js";
+export {
+  addCostValue,
+  combineCostTotals,
+  CostTotalSchema,
+  CostValueSchema,
+  EMPTY_COST_TOTAL,
+  type CostTotal,
+  type CostValue,
+} from "./cost.js";
 export { HarnessError } from "./errors.js";
 export {
   compileJsonSchema,

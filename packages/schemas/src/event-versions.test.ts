@@ -168,6 +168,39 @@ describe("event schema upcasting", () => {
     });
   });
 
+  it("upcasts legacy costs to estimates and missing costs to unknown", () => {
+    const raw = {
+      ...envelope,
+      type: "model_response",
+      requestId: "00000000000000000000000002",
+      provider: "synthetic",
+      model: "synthetic",
+      inputTokens: 0,
+      outputTokens: 0,
+      costMicros: 4,
+      finishReason: "stop",
+      latencyMs: 1,
+      schemaValid: true,
+      repairAttempts: 0,
+      content: [],
+      providerBlobs: null,
+    };
+
+    expect(upcastEvent(raw)).toMatchObject({
+      type: "model_response",
+      v: 2,
+      cost: { version: 1, state: "estimated", amountMicros: 4 },
+    });
+    expect(upcastEvent(raw)).not.toHaveProperty("costMicros");
+    const withoutCost = { ...raw };
+    Reflect.deleteProperty(withoutCost, "costMicros");
+    expect(upcastEvent(withoutCost)).toMatchObject({
+      type: "model_response",
+      v: 2,
+      cost: { version: 1, state: "unknown" },
+    });
+  });
+
   it("reads legacy tool results from the committed v1 log fixture", async () => {
     const source = await readFile(
       new URL("../../../test/fixtures/legacy-logs/v1/golden.jsonl", import.meta.url),
