@@ -155,7 +155,7 @@ describe("SDK extension registration", () => {
     expect(createContributions).not.toHaveBeenCalled();
   });
 
-  it("reports unsupported optional capabilities and disables ungranted contributions", () => {
+  it("reports unsupported optional capabilities and disables contributions that are not granted", () => {
     const createContributions = vi.fn(() => ({ tools: [] }));
     const prepared = prepareExtensions(
       [

@@ -619,7 +619,70 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
     }, z.core.$strict>>;
     extensions: z.ZodOptional<z.ZodArray<z.ZodObject<{
         namespace: z.ZodString;
-        definition: z.ZodCustom<import("./extensions.js").ExtensionDefinition<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>, import("./extensions.js").ExtensionDefinition<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>>;
+        definition: z.ZodObject<{
+            manifest: z.ZodObject<{
+                id: z.ZodString;
+                version: z.ZodString;
+                sdkRange: z.ZodString;
+                schemaVersion: z.ZodLiteral<1>;
+                capabilities: z.ZodObject<{
+                    required: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                    optional: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            configSchema: z.ZodCustom<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>, z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
+            createContributions: z.ZodCustom<(config: unknown) => import("./extensions.js").ExtensionContributions, (config: unknown) => import("./extensions.js").ExtensionContributions>;
+        }, z.core.$strict>;
         config: z.ZodOptional<z.ZodCustom<z.core.util.JSONType, z.core.util.JSONType>>;
         grants: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
             kind: z.ZodLiteral<"tools.contribute">;
@@ -647,6 +710,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             kind: z.ZodLiteral<"content.read">;
             bindings: z.ZodArray<z.ZodString>;
         }, z.core.$strict>], "kind">>;
+        toolTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>>;
 }, z.core.$strict>, z.ZodObject<{
     configPath: z.ZodString;
@@ -679,7 +744,70 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
     }, z.core.$strict>>;
     extensions: z.ZodOptional<z.ZodArray<z.ZodObject<{
         namespace: z.ZodString;
-        definition: z.ZodCustom<import("./extensions.js").ExtensionDefinition<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>, import("./extensions.js").ExtensionDefinition<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>>;
+        definition: z.ZodObject<{
+            manifest: z.ZodObject<{
+                id: z.ZodString;
+                version: z.ZodString;
+                sdkRange: z.ZodString;
+                schemaVersion: z.ZodLiteral<1>;
+                capabilities: z.ZodObject<{
+                    required: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                    optional: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            configSchema: z.ZodCustom<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>, z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
+            createContributions: z.ZodCustom<(config: unknown) => import("./extensions.js").ExtensionContributions, (config: unknown) => import("./extensions.js").ExtensionContributions>;
+        }, z.core.$strict>;
         config: z.ZodOptional<z.ZodCustom<z.core.util.JSONType, z.core.util.JSONType>>;
         grants: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
             kind: z.ZodLiteral<"tools.contribute">;
@@ -707,6 +835,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             kind: z.ZodLiteral<"content.read">;
             bindings: z.ZodArray<z.ZodString>;
         }, z.core.$strict>], "kind">>;
+        toolTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>>;
 }, z.core.$strict>]>;
 /** Validated options accepted by {@link createHarness}. */
