@@ -428,15 +428,17 @@ describe("McpConnection", () => {
     await peer.serverTransport.close();
   });
 
-  it("exposes negotiated protocol metadata and MCP Apps support", async () => {
+  it("exposes negotiated protocol metadata and advertised capabilities", async () => {
     const peer = await createMemoryPeer({ supportsApps: true });
     const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
 
     expect(connection.serverMetadata.protocolVersion).toBeUndefined();
     expect(connection.serverMetadata.supportsApps).toBe(false);
+    expect(connection.serverMetadata.supportsTools).toBe(false);
     await connection.connect();
     expect(connection.serverMetadata.protocolVersion).toBe("2025-11-25");
     expect(connection.serverMetadata.supportsApps).toBe(true);
+    expect(connection.serverMetadata.supportsTools).toBe(true);
     await connection.close();
     await peer.serverTransport.close();
   });
