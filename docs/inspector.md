@@ -14,6 +14,15 @@ MCP requests.
 To check the unauthenticated path, omit `--header` and retain `--stored-auth-only`. The endpoint
 rejects the request before MCP handling; the CLI reports `auth_required` and exits with status 3.
 
+The integration gate also invokes the synthetic `list_runs` tool over stdio and HTTP, rejects
+malformed arguments and an unknown tool, and checks that the MCP App visibility metadata matches
+the negotiated client capability. A second HTTP token has only `read` scope: its permitted
+`list_runs` call succeeds, while guessed App-only and `start_run` calls fail with
+`control_plane_scope_required`. The run list is compared before and after the denied mutation to
+confirm it did not create a run. Inspector exit statuses are interpreted by failure type; in
+particular, its documented status 3 is the unauthenticated path, status 5 is an MCP tool error, and
+protocol errors are asserted from their error envelope rather than treated as tool errors.
+
 For an endpoint that implements MCP OAuth, first authorize that server using the Inspector UI so its
 OAuth credentials are stored in the shared Inspector credential store. Then run the CLI with
 `--use-stored-auth --stored-auth-only` and the same `--server-url`; the CLI reuses the stored
@@ -23,3 +32,33 @@ control-plane's static bearer tokens.
 Avoid placing token values directly in command history or checked-in configuration. Configure
 `controlPlane.auth.tokens[].secret` with a `SecretRef` and expose its corresponding value only in the
 local environment used to launch the Inspector.
+
+## Advisory MCP conformance lanes
+
+The separate GitHub Actions `conformance-advisory` job runs the official
+`@modelcontextprotocol/conformance@0.2.0-alpha.12` runner against protocol `2026-07-28`. The pinned
+release is MIT-licensed and contains the frozen requirements inventory for that protocol revision.
+The role adapters exercise the harness `McpToolPort` client with `tools_call`, and the actual
+control-plane server with `server-stateless` and `tools-list`. The server adapter uses a loopback-only
+proxy to supply its synthetic admin bearer token; the conformance runner and archived reports do not
+receive that token.
+
+| Role | Implemented behavior in scope | Conformance scenarios measured |
+| --- | --- | --- |
+| Client | Tool discovery and calls through `McpToolPort`; stdio and HTTP transports are supported, while this lane exercises HTTP. | `tools_call` |
+| Server | Control-plane tools and resources over stdio and HTTP; Apps visibility is capability-negotiated, while this lane exercises HTTP. | `server-stateless`, `tools-list` |
+
+The report records the runner and protocol revisions, each measured scenario result, every required
+scenario left `not_measured`, and the runner's `not_scored` cases and reasons. The initial matrix
+does not claim prompts, resource templates, task extensions, OAuth-client scenarios, or other
+unmeasured capabilities as implemented. Static bearer-token expiry and in-process revocation are
+unsupported and explicitly marked not measured. Inspector interoperability results remain separate
+from the conformance report; neither constitutes universal MCP certification.
+
+This lane is advisory and does not feed the required `gates` job. Promote it to blocking only after
+the owner reviews the reported failures and coverage, approves the expanded capability matrix, and
+updates the pinned runner deliberately.
+
+Verification decision: GitHub Actions is the current CI; the integration tests map to its
+`integration` job, and the new role lanes use a separate non-required job. The retired Azure pipeline
+has no active stage to update.

@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ControlPlaneConfigSchema, Id, parseJson, type NewEvent } from "@rovinos/schemas";
-import { SqliteEventStore } from "@rovinos/store-sqlite";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import {
   INSPECTOR_HTTP_TOKEN,
-  minimalInspectorEnvironment,
-  startInspectorHttpServer,
-  type RunningInspectorServer,
+  INSPECTOR_READ_TOKEN,
+  startInspectorFixture,
 } from "./inspector-http.js";
 
 const root = resolvePath(import.meta.dirname, "../..");
@@ -22,7 +18,25 @@ const inspector = resolvePath(
 );
 const objectSchema = z.record(z.string(), z.unknown());
 const protocolVersions = { modern: "2026-07-28", legacy: "2025-11-25" } as const;
-const appTools = ["harness.approvals.resolve", "harness.approvals.reveal"] as const;
+const appOnlyTools = [
+  "approve",
+  "deny",
+  "answer_input",
+  "harness.approvals.get",
+  "harness.approvals.resolve",
+  "harness.approvals.reveal",
+  "harness.inputs.answer",
+  "harness.runs.list",
+  "harness.runs.get",
+] as const;
+const appMetadataTools = [
+  { name: "harness.approvals.get", resourceUri: "ui://harness/approval/v1" },
+  { name: "harness.approvals.resolve", resourceUri: "ui://harness/approval/v1" },
+  { name: "harness.approvals.reveal", resourceUri: "ui://harness/approval/v1" },
+  { name: "harness.inputs.answer", resourceUri: "ui://harness/input/v1" },
+  { name: "harness.runs.list", resourceUri: "ui://harness/runs/v1" },
+  { name: "harness.runs.get", resourceUri: "ui://harness/runs/v1" },
+] as const;
 
 interface ProcessResult {
   readonly status: number;
@@ -68,6 +82,13 @@ function inspectorError(result: ProcessResult, label: string): never {
       ? result.stderr.trim()
       : JSON.stringify({ error: { code: `inspector_exit_${String(result.status)}` } });
   throw new Error(`${label}: ${reasons[result.status] ?? "Inspector failed"}\n${detail}`);
+}
+
+function assertNoCredentialCanary(result: ProcessResult, label: string): void {
+  const output = `${result.stdout}${result.stderr}`;
+  if ([INSPECTOR_HTTP_TOKEN, INSPECTOR_READ_TOKEN].some((token) => output.includes(token))) {
+    failure(`${label} exposed an HTTP bearer-token canary.`);
+  }
 }
 
 function runProcess(args: readonly string[], env: NodeJS.ProcessEnv): Promise<ProcessResult> {
@@ -138,12 +159,7 @@ function argsForTransport(request: InspectorRequest): string[] {
 
 async function invoke(request: InspectorRequest): Promise<ProcessResult> {
   const result = await runProcess(argsForTransport(request), request.env);
-  if (
-    request.transport === "http" &&
-    `${result.stdout}${result.stderr}`.includes(INSPECTOR_HTTP_TOKEN)
-  ) {
-    failure("The Inspector exposed the HTTP bearer-token canary.");
-  }
+  assertNoCredentialCanary(result, "The Inspector");
   if (result.status !== 0) {
     inspectorError(
       result,
@@ -174,6 +190,98 @@ function toolRows(result: ProcessResult): Record<string, unknown>[] {
     .map((line) => jsonObject(line, "tools/list --app-info"));
 }
 
+function toolResponse(result: ProcessResult, label: string): Record<string, unknown> {
+  return record(jsonObject(result.stdout, label).result, `${label} result`);
+}
+
+function assertSuccessfulToolCall(result: ProcessResult, label: string): string[] {
+  const response = toolResponse(result, label);
+  if (response.isError === true) {
+    failure(`${label} returned an MCP tool error.`);
+  }
+  const structured = record(response.structuredContent, `${label} structured content`);
+  if (!Array.isArray(structured.runs)) {
+    failure(`${label} did not return the run list.`);
+  }
+  return structured.runs.map((run) => {
+    const row = record(run, `${label} run`);
+    if (typeof row.runId !== "string") {
+      return failure(`${label} returned a run without an identifier.`);
+    }
+    return row.runId;
+  });
+}
+
+function assertToolError(result: ProcessResult, label: string, code: string): void {
+  assertNoCredentialCanary(result, label);
+  if (result.status !== 5) {
+    failure(`${label} did not use Inspector exit status 5 for an MCP tool error.`);
+  }
+  const found = outputEnvelopes(result).some((envelope) => {
+    const error = objectSchema.safeParse(envelope.error);
+    if (error.success && error.data.code === code) {
+      return true;
+    }
+    const response = objectSchema.safeParse(envelope.result);
+    if (!response.success || response.data.isError !== true) {
+      return false;
+    }
+    const structured = objectSchema.safeParse(response.data.structuredContent);
+    if (structured.success && structured.data.code === code) {
+      return true;
+    }
+    return (
+      Array.isArray(response.data.content) &&
+      response.data.content.some((item) => {
+        const content = objectSchema.safeParse(item);
+        return (
+          content.success &&
+          content.data.type === "text" &&
+          typeof content.data.text === "string" &&
+          content.data.text.includes(code)
+        );
+      })
+    );
+  });
+  if (!found) {
+    failure(`${label} did not return the expected MCP tool-error code.`);
+  }
+}
+
+function outputEnvelopes(result: ProcessResult): Record<string, unknown>[] {
+  return [result.stdout, result.stderr]
+    .flatMap((text) => [text, ...text.split("\n").reverse()])
+    .flatMap((candidate) => {
+      try {
+        return [parseJson(objectSchema, candidate.trim())];
+      } catch {
+        return [];
+      }
+    });
+}
+
+function assertCallFailure(result: ProcessResult, label: string): void {
+  assertNoCredentialCanary(result, label);
+  if (result.status === 0) {
+    failure(`${label} unexpectedly exited successfully.`);
+  }
+  const hasErrorEnvelope = outputEnvelopes(result).some((envelope) => {
+    const toolResult = objectSchema.safeParse(envelope.result);
+    if (toolResult.success && toolResult.data.isError === true) {
+      return Array.isArray(toolResult.data.content);
+    }
+    const error = objectSchema.safeParse(envelope.error);
+    return (
+      error.success &&
+      (typeof error.data.code === "string" || typeof error.data.code === "number") &&
+      typeof error.data.message === "string"
+    );
+  });
+  if (!hasErrorEnvelope) {
+    failure(`${label} did not return a protocol or tool error response.`);
+  }
+}
+
 function appToolRow(
   rows: readonly Record<string, unknown>[],
   name: string,
@@ -195,25 +303,31 @@ function hasPermission(value: unknown): boolean {
 }
 
 function assertAppVisibility(rows: readonly Record<string, unknown>[], advertised: boolean): void {
-  for (const name of appTools) {
+  for (const name of appOnlyTools) {
     const row = appToolRow(rows, name);
-    if (!advertised) {
-      if (row?.hasApp === true) {
-        failure(`App-only tool ${name} was reported as visible without Apps support.`);
-      }
-      continue;
+    if (!advertised && row !== undefined) {
+      failure(`App-only tool ${name} was listed without Apps support.`);
     }
-    if (row?.hasApp !== true || row.resourceUri !== "ui://harness/approval/v1") {
+    if (advertised && row === undefined) {
+      failure(`App-only tool ${name} was not listed with Apps support.`);
+    }
+  }
+  if (!advertised) {
+    return;
+  }
+  for (const appTool of appMetadataTools) {
+    const row = appToolRow(rows, appTool.name);
+    if (row?.hasApp !== true || row.resourceUri !== appTool.resourceUri) {
       const observed =
         row === undefined
           ? rows.map((entry) => entry.toolName ?? entry.name)
           : { hasApp: row.hasApp, resourceUri: row.resourceUri };
       failure(
-        `App-only tool ${name} did not advertise the approval app: ${JSON.stringify(observed)}.`,
+        `App-only tool ${appTool.name} did not advertise its MCP App: ${JSON.stringify(observed)}.`,
       );
     }
     if (hasPermission(row.csp) || hasPermission(row.permissions)) {
-      failure(`Approval app ${name} declared CSP domains or extra permissions.`);
+      failure(`MCP App for ${appTool.name} declared CSP domains or extra permissions.`);
     }
   }
 }
@@ -246,6 +360,7 @@ async function checkTransport(
   // The Inspector rejects --strict with --app-info, so gate the full Apps-advertised list separately.
   await invokeWithFlags(["--strict", "--advertise-apps"]);
   assertAppVisibility(toolRows(await invokeWithFlags(["--app-info", "--advertise-apps"])), true);
+  await checkToolCalls(transport, endpoint, env, flags);
   const resource = jsonObject(
     (
       await invoke({
@@ -271,6 +386,41 @@ async function checkTransport(
   }
 }
 
+async function checkToolCalls(
+  transport: "stdio" | "http",
+  endpoint: string | undefined,
+  env: NodeJS.ProcessEnv,
+  flags: readonly string[],
+): Promise<void> {
+  const call = (toolName: string, toolArgs: string) =>
+    runProcess(
+      argsForTransport({
+        transport,
+        endpoint,
+        env,
+        protocolEra: "modern",
+        method: "tools/call",
+        flags: [...flags, "--tool-name", toolName, "--tool-args-json", toolArgs],
+      }),
+      env,
+    );
+  const success = await invoke({
+    transport,
+    endpoint,
+    env,
+    protocolEra: "modern",
+    method: "tools/call",
+    flags: [...flags, "--tool-name", "list_runs", "--tool-args-json", "{}"],
+  });
+  assertSuccessfulToolCall(success, `${transport} list_runs`);
+
+  const malformed = await call("list_runs", '{"limit":0}');
+  assertCallFailure(malformed, `${transport} malformed arguments`);
+
+  const unknown = await call("harness.unknown.synthetic", "{}");
+  assertToolError(unknown, `${transport} unknown tool`, "tool_not_found");
+}
+
 async function checkUnauthenticatedHttp(endpoint: string, env: NodeJS.ProcessEnv): Promise<void> {
   const result = await runProcess(
     argsForTransport({
@@ -284,11 +434,64 @@ async function checkUnauthenticatedHttp(endpoint: string, env: NodeJS.ProcessEnv
     env,
   );
   const output = `${result.stdout}${result.stderr}`;
-  if (output.includes(INSPECTOR_HTTP_TOKEN)) {
-    failure("The unauthenticated Inspector attempt exposed the HTTP bearer-token canary.");
-  }
+  assertNoCredentialCanary(result, "The unauthenticated Inspector attempt");
   if (result.status !== 3 || !output.includes("auth_required")) {
     failure("Unauthenticated Inspector initialization did not exit 3 with auth_required.");
+  }
+}
+
+async function checkRestrictedHttp(endpoint: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const flags = [
+    "--header",
+    ["Authorization:", ["Be", "arer ", INSPECTOR_READ_TOKEN].join("")].join(" "),
+    "--stored-auth-only",
+  ];
+  const call = (name: string, args: string) =>
+    runProcess(
+      argsForTransport({
+        transport: "http",
+        endpoint,
+        env,
+        protocolEra: "modern",
+        method: "tools/call",
+        flags: [...flags, "--tool-name", name, "--tool-args-json", args],
+      }),
+      env,
+    );
+
+  const before = await invoke({
+    transport: "http",
+    endpoint,
+    env,
+    protocolEra: "modern",
+    method: "tools/call",
+    flags: [...flags, "--tool-name", "list_runs", "--tool-args-json", "{}"],
+  });
+  const beforeRunIds = assertSuccessfulToolCall(before, "restricted list_runs");
+
+  const guessedAppTool = await call(
+    "harness.approvals.get",
+    '{"approvalId":"00000000000000000000000001"}',
+  );
+  assertToolError(
+    guessedAppTool,
+    "restricted guessed App tool",
+    "control_plane_scope_required",
+  );
+  const deniedMutation = await call("start_run", '{"goal":"synthetic denied run"}');
+  assertToolError(deniedMutation, "restricted start_run", "control_plane_scope_required");
+
+  const after = await invoke({
+    transport: "http",
+    endpoint,
+    env,
+    protocolEra: "modern",
+    method: "tools/call",
+    flags: [...flags, "--tool-name", "list_runs", "--tool-args-json", "{}"],
+  });
+  const afterRunIds = assertSuccessfulToolCall(after, "restricted list_runs after denial");
+  if (JSON.stringify(beforeRunIds) !== JSON.stringify(afterRunIds)) {
+    failure("A forbidden operation changed the restricted run list.");
   }
 }
 
@@ -330,59 +533,17 @@ async function checkStrictNegative(env: NodeJS.ProcessEnv): Promise<void> {
   }
 }
 
-async function seedSyntheticRun(dataDir: string): Promise<void> {
-  const store = new SqliteEventStore(join(dataDir, "harness.db"));
-  try {
-    const runId = Id.parse("00000000000000000000000001");
-    const event: NewEvent = {
-      runId,
-      ts: 1,
-      v: 1,
-      traceId: "a".repeat(32),
-      spanId: "b".repeat(16),
-      segmentId: runId,
-      type: "run_created",
-      configHash: "c".repeat(64),
-      policyVersion: "policy.v1",
-      depth: 0,
-    };
-    await store.append(runId, [event], 0);
-  } finally {
-    await store.close();
-  }
-}
-
 /** Runs the MCP Inspector conformance gate against both harness server transports. */
 export async function runInspectorConformance(): Promise<void> {
-  const workDir = await mkdtemp(join(tmpdir(), "harness-inspector-conformance-"));
-  const home = join(workDir, "home");
-  const dataDir = join(workDir, "data");
-  const configPath = join(workDir, "harness.config.json");
-  let httpServer: RunningInspectorServer | undefined;
+  const fixture = await startInspectorFixture({ root, harness });
   try {
-    await Promise.all([mkdir(home), mkdir(dataDir)]);
-    const controlPlane = ControlPlaneConfigSchema.parse({
-      auth: {
-        tokens: [
-          {
-            id: "token.inspector",
-            secret: "env:CONTROL_PLANE_INSPECTOR_TOKEN",
-            scopes: ["admin"],
-          },
-        ],
-      },
-    });
-    await writeFile(configPath, `${JSON.stringify({ controlPlane })}\n`, { mode: 0o600 });
-    await seedSyntheticRun(dataDir);
-    const env = minimalInspectorEnvironment(home, configPath, dataDir);
-    await checkTransport("stdio", undefined, env);
-    httpServer = await startInspectorHttpServer({ root, harness, env });
-    await checkUnauthenticatedHttp(httpServer.endpoint, env);
-    await checkTransport("http", httpServer.endpoint, env);
-    await checkStrictNegative(env);
+    await checkTransport("stdio", undefined, fixture.env);
+    await checkUnauthenticatedHttp(fixture.endpoint, fixture.env);
+    await checkTransport("http", fixture.endpoint, fixture.env);
+    await checkRestrictedHttp(fixture.endpoint, fixture.env);
+    await checkStrictNegative(fixture.env);
   } finally {
-    await httpServer?.close();
-    await rm(workDir, { recursive: true, force: true });
+    await fixture.close();
   }
 }
 

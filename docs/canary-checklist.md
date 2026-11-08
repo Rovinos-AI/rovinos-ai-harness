@@ -11,6 +11,10 @@ the new sink in the captured-output scan and add a negative control if protectio
 could be bypassed. Keep committed fixtures synthetic; cassette and `__fixtures__` files are
 scanned for canary-like patterns.
 
+The advisory MCP conformance gate scans its archived report tree for the synthetic bearer-token
+canaries; `scripts/ci/mcp-conformance-report-safety.canary.test.ts` is the negative control for
+that report sink.
+
 The hostile MCP App integration tests send run-seeded canaries through rejected telemetry fields
 and scan the host's exported spans, logs, metrics, diagnostics, and captured stdout.
 The canary pipeline exercises the sample MCP fixture's error-result shape with a run-seeded raw
