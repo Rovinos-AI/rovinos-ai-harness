@@ -80,9 +80,9 @@ describe("TelemetryConfigSchema", () => {
     expect(TelemetryConfigSchema.parse({ unsafe: {} }).unsafe).toEqual({
       allowContentSinks: false,
     });
-    expect(
-      TelemetryConfigSchema.safeParse({ unsafe: { allowContentSinks: "yes" } }).success,
-    ).toBe(false);
+    expect(TelemetryConfigSchema.safeParse({ unsafe: { allowContentSinks: "yes" } }).success).toBe(
+      false,
+    );
   });
 
   it("rejects non-positive, fractional, and unknown values", () => {

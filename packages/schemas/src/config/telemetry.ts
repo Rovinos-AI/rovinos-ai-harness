@@ -55,20 +55,23 @@ export const TelemetryConfigSchema = z
     sentinel: TelemetrySentinelConfigSchema,
     correlation: TelemetryCorrelationConfigSchema,
     metrics: TelemetryMetricsConfigSchema,
-    sinks: z.array(SinkPolicySchema).default([]).superRefine((sinks, context) => {
-      const seen = new Set<string>();
-      for (const [index, sink] of sinks.entries()) {
-        if (seen.has(sink.id)) {
-          context.addIssue({
-            code: "custom",
-            path: [index, "id"],
-            message: "Sink identifiers must be unique.",
-            params: { errorCode: "sink_id_duplicate" },
-          });
+    sinks: z
+      .array(SinkPolicySchema)
+      .default([])
+      .superRefine((sinks, context) => {
+        const seen = new Set<string>();
+        for (const [index, sink] of sinks.entries()) {
+          if (seen.has(sink.id)) {
+            context.addIssue({
+              code: "custom",
+              path: [index, "id"],
+              message: "Sink identifiers must be unique.",
+              params: { errorCode: "sink_id_duplicate" },
+            });
+          }
+          seen.add(sink.id);
         }
-        seen.add(sink.id);
-      }
-    }),
+      }),
     unsafe: TelemetryUnsafeConfigSchema,
   })
   .strict()

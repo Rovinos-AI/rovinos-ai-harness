@@ -93,13 +93,11 @@ const PROFILE_BY_KIND: Readonly<
 
 /** Stable, value-safe policy validation error. */
 export class SinkPolicyError extends HarnessError {
-  override readonly code: "sink_policy_violation" | "sink_policy_version_mismatch" | "content_sink_forbidden";
+  override readonly code:
+    "sink_policy_violation" | "sink_policy_version_mismatch" | "content_sink_forbidden";
   readonly sinkId: SinkPolicy["id"] | undefined;
 
-  constructor(
-    code: SinkPolicyError["code"],
-    sinkId?: SinkPolicy["id"],
-  ) {
+  constructor(code: SinkPolicyError["code"], sinkId?: SinkPolicy["id"]) {
     super(sinkId === undefined ? code : `${code}: ${sinkId}`);
     this.code = code;
     this.sinkId = sinkId;
@@ -257,11 +255,11 @@ export async function assertSinkPolicies(
   options: AssertSinkPoliciesOptions,
 ): Promise<void> {
   const telemetry =
-    "sinks" in config
-      ? config
-      : (config.telemetry ?? TelemetryConfigSchema.parse({}));
+    "sinks" in config ? config : (config.telemetry ?? TelemetryConfigSchema.parse({}));
   const sinks = telemetry.sinks.filter(({ enabled }) => enabled);
-  const unsafeSinks = sinks.filter(({ maxClassification }) => maxClassification === "content_tokenized");
+  const unsafeSinks = sinks.filter(
+    ({ maxClassification }) => maxClassification === "content_tokenized",
+  );
   const firstUnsafeSink = unsafeSinks.at(0);
   if (!telemetry.unsafe.allowContentSinks && firstUnsafeSink !== undefined) {
     throw new SinkPolicyError("content_sink_forbidden", firstUnsafeSink.id);

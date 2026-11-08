@@ -32,18 +32,18 @@ const metricProcessors = [
   "resource/policy_version",
   "batch",
 ];
-const processorNames = [
-  ...new Set([...traceProcessors, ...logProcessors, ...metricProcessors]),
-];
+const processorNames = [...new Set([...traceProcessors, ...logProcessors, ...metricProcessors])];
 
 let temporaryDirectory: string | undefined;
 
-async function createCollectorDirectory(options: {
-  readonly traceChain?: readonly string[];
-  readonly version?: string;
-  readonly profileFile?: string;
-  readonly profileContents?: string;
-} = {}): Promise<string> {
+async function createCollectorDirectory(
+  options: {
+    readonly traceChain?: readonly string[];
+    readonly version?: string;
+    readonly profileFile?: string;
+    readonly profileContents?: string;
+  } = {},
+): Promise<string> {
   temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-sink-policy-"));
   const directory = temporaryDirectory;
   await Promise.all([
@@ -82,13 +82,7 @@ async function createCollectorDirectory(options: {
     ),
     ...(options.profileFile === undefined
       ? []
-      : [
-          writeFile(
-            join(directory, options.profileFile),
-            options.profileContents ?? "",
-            "utf8",
-          ),
-        ]),
+      : [writeFile(join(directory, options.profileFile), options.profileContents ?? "", "utf8")]),
     ...(options.profileFile === undefined && options.profileContents === undefined
       ? [
           writeFile(
@@ -234,10 +228,10 @@ describe("assertSinkPolicies", () => {
     const logger = { info: vi.fn() };
 
     await expect(
-      assertSinkPolicies(
-        TelemetryConfigSchema.parse({ sinks: [unsafeSink] }),
-        { collectorConfigDir, logger },
-      ),
+      assertSinkPolicies(TelemetryConfigSchema.parse({ sinks: [unsafeSink] }), {
+        collectorConfigDir,
+        logger,
+      }),
     ).rejects.toMatchObject({
       code: "content_sink_forbidden",
       sinkId: "events",

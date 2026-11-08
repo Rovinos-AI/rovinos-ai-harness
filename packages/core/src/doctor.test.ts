@@ -223,9 +223,7 @@ describe("doctor registry", () => {
         }),
         [check],
       ),
-    ).resolves.toEqual([
-      { id: "sink_policies", status: "fail", code: "sink_policy_violation" },
-    ]);
+    ).resolves.toEqual([{ id: "sink_policies", status: "fail", code: "sink_policy_violation" }]);
   });
 
   it("warns that the built-in policy denies every tool when no policy file is configured", async () => {
