@@ -21,7 +21,10 @@ import {
   minimalInspectorEnvironment,
   startInspectorHttpServer,
 } from "../scripts/ci/inspector-http.js";
-import { startInspectorWebClient, type RunningInspectorWebClient } from "../scripts/ci/inspector-web.js";
+import {
+  startInspectorWebClient,
+  type RunningInspectorWebClient,
+} from "../scripts/ci/inspector-web.js";
 
 const root = resolve(import.meta.dirname, "..");
 const harness = resolve(root, "packages/cli/dist/bin.js");
@@ -36,18 +39,17 @@ const inspectorApiToken = "INSPECTOR_APPS_TEST_API_TOKEN_LONG_ENOUGH";
 const authorization = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${INSPECTOR_HTTP_TOKEN}`;
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
-const inspectorConnectRequestSchema = z
-  .looseObject({
-    config: z.looseObject({
-        type: z.enum(["streamable-http", "sse"]),
-        url: z.url(),
-      }),
-    settings: z
-      .looseObject({
-        headers: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
-      })
-      .optional(),
-  })
+const inspectorConnectRequestSchema = z.looseObject({
+  config: z.looseObject({
+    type: z.enum(["streamable-http", "sse"]),
+    url: z.url(),
+  }),
+  settings: z
+    .looseObject({
+      headers: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
+    })
+    .optional(),
+});
 
 interface ApprovalFixture {
   readonly runId: Id;
@@ -211,11 +213,7 @@ async function seedApprovals(dataDir: string): Promise<ApprovalFixture[]> {
   return fixtures;
 }
 
-function deepLink(
-  inspectorUrl: string,
-  serverUrl: string,
-  fixture: ApprovalFixture,
-): string {
+function deepLink(inspectorUrl: string, serverUrl: string, fixture: ApprovalFixture): string {
   const appArgs = ApprovalAppInputSchema.parse({
     approvalId: fixture.approvalId,
     payload: fixture.payload,
@@ -279,189 +277,185 @@ async function openApproval(
   ).toEqual([]);
 }
 
-it(
-  "renders approval apps in Inspector and records human decisions",
-  async () => {
-    const activeBrowser = browser;
-    if (activeBrowser === undefined) {
-      throw new Error("Playwright browser was not initialized.");
-    }
-    const workDir = await mkdtemp(join(tmpdir(), "harness-inspector-apps-"));
-    const home = join(workDir, "home");
-    const dataDir = join(workDir, "data");
-    const configPath = join(workDir, "harness.config.json");
-    let harnessServer: Awaited<ReturnType<typeof startInspectorHttpServer>> | undefined;
-    let inspectorServer: RunningInspectorWebClient | undefined;
-    const contexts: Awaited<ReturnType<Browser["newContext"]>>[] = [];
-    try {
-      await Promise.all([mkdir(home), mkdir(dataDir)]);
-      const controlPlane = ControlPlaneConfigSchema.parse({
-        auth: {
-          tokens: [
-            {
-              id: "token.inspector_apps",
-              secret: "env:CONTROL_PLANE_INSPECTOR_TOKEN",
-              scopes: ["approve"],
-            },
-          ],
-        },
-      });
-      await writeFile(configPath, `${JSON.stringify({ controlPlane })}\n`, { mode: 0o600 });
-      const fixtures = await seedApprovals(dataDir);
-      const harnessEnv = minimalInspectorEnvironment(home, configPath, dataDir);
-      harnessServer = await startInspectorHttpServer({ root, harness, env: harnessEnv });
-      const activeHarnessServer = harnessServer;
-      const inspectorEnv: NodeJS.ProcessEnv = {
-        ...harnessEnv,
-        HOST: "127.0.0.1",
-        CLIENT_PORT: "6274",
-        MCP_SANDBOX_PORT: "6275",
-        MCP_INSPECTOR_API_TOKEN: inspectorApiToken,
-        MCP_AUTO_OPEN_ENABLED: "false",
-        MCP_INSPECTOR_SECRET_STORE: "memory",
-        MCP_STORAGE_DIR: join(home, "storage"),
-        MCP_CATALOG_PATH: join(home, "catalog.json"),
-      };
-      inspectorServer = await startInspectorWebClient({
-        root,
-        launcher: inspector,
-        env: inspectorEnv,
-      });
-      const activeInspectorServer = inspectorServer;
-      const requestLog: CapturedRequest[] = [];
-      const responseLog: CapturedResponse[] = [];
-      const consoleLog: string[] = [];
-      const testApproval = async (fixture: ApprovalFixture, decision: "approve" | "deny") => {
-        const context = await activeBrowser.newContext();
-        contexts.push(context);
-        const page = await context.newPage();
-        await configureInspectorAuthorization(
-          page,
-          activeInspectorServer.url,
-          activeHarnessServer.endpoint,
-        );
-        page.on("request", (request) => {
-          requestLog.push({ url: request.url(), body: request.postData() ?? undefined });
-        });
-        page.on("response", (response) => {
-          responseLog.push({ url: response.url(), status: response.status() });
-        });
-        page.on("console", (message) => {
-          consoleLog.push(message.text());
-        });
-        await openApproval(
-          page,
-          activeInspectorServer.url,
-          activeHarnessServer.endpoint,
-          fixture,
-          requestLog,
-          responseLog,
-        );
-        const app = page.frameLocator('[data-testid="apps-form"] iframe');
-        const button = app.getByRole("button", {
-          name: decision === "approve" ? "Approve" : "Deny",
-          exact: true,
-        });
-        if (decision === "approve") {
-          await button.evaluate((element: HTMLButtonElement) => {
-            element.click();
-            element.click();
-          });
-        } else {
-          await button.click();
-        }
-        await app
-          .getByRole("status")
-          .filter({ hasText: decision === "approve" ? "Approval granted." : "Approval denied." })
-          .waitFor({ state: "visible" });
-        expect(await button.isDisabled()).toBe(true);
-        const store = new SqliteEventStore(join(dataDir, "harness.db"));
-        try {
-          const events: HarnessEvent[] = [];
-          for await (const event of store.read(fixture.runId)) {
-            events.push(event);
-          }
-          const decisions = events.filter((event) => event.type === "approval_resolved");
-          expect(decisions).toHaveLength(1);
-          expect(decisions[0]).toMatchObject({ decision, decidedBy: "human" });
-        } finally {
-          await store.close();
-        }
-        const panels = JSON.stringify({
-          app: await app.locator("body").innerText(),
-          inspector: await page.locator("body").innerText(),
-          messages: await page.getByTestId("apps-messages").allInnerTexts(),
-          logs: await page.getByTestId("apps-logs").allInnerTexts(),
-          consoleLog,
-          requests: requestLog,
-        });
-        expect(JSON.stringify(requestLog)).toContain("harness.approvals.resolve");
-        expectLoopbackRequests(requestLog);
-        for (const canary of rawCanaries) {
-          expect(panels).not.toContain(canary);
-        }
-      };
-      const approveFixture = fixtures[0];
-      const denyFixture = fixtures[1];
-      const resolvedFixture = fixtures[2];
-      if (
-        approveFixture === undefined ||
-        denyFixture === undefined ||
-        resolvedFixture === undefined
-      ) {
-        throw new Error("The approval fixtures were not created.");
-      }
-      await testApproval(approveFixture, "approve");
-      await testApproval(denyFixture, "deny");
-
-      const resolvedContext = await activeBrowser.newContext();
-      contexts.push(resolvedContext);
-      const resolvedPage = await resolvedContext.newPage();
-      const resolvedRequests: CapturedRequest[] = [];
-      const resolvedResponses: CapturedResponse[] = [];
+it("renders approval apps in Inspector and records human decisions", async () => {
+  const activeBrowser = browser;
+  if (activeBrowser === undefined) {
+    throw new Error("Playwright browser was not initialized.");
+  }
+  const workDir = await mkdtemp(join(tmpdir(), "harness-inspector-apps-"));
+  const home = join(workDir, "home");
+  const dataDir = join(workDir, "data");
+  const configPath = join(workDir, "harness.config.json");
+  let harnessServer: Awaited<ReturnType<typeof startInspectorHttpServer>> | undefined;
+  let inspectorServer: RunningInspectorWebClient | undefined;
+  const contexts: Awaited<ReturnType<Browser["newContext"]>>[] = [];
+  try {
+    await Promise.all([mkdir(home), mkdir(dataDir)]);
+    const controlPlane = ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.inspector_apps",
+            secret: "env:CONTROL_PLANE_INSPECTOR_TOKEN",
+            scopes: ["approve"],
+          },
+        ],
+      },
+    });
+    await writeFile(configPath, `${JSON.stringify({ controlPlane })}\n`, { mode: 0o600 });
+    const fixtures = await seedApprovals(dataDir);
+    const harnessEnv = minimalInspectorEnvironment(home, configPath, dataDir);
+    harnessServer = await startInspectorHttpServer({ root, harness, env: harnessEnv });
+    const activeHarnessServer = harnessServer;
+    const inspectorEnv: NodeJS.ProcessEnv = {
+      ...harnessEnv,
+      HOST: "127.0.0.1",
+      CLIENT_PORT: "6274",
+      MCP_SANDBOX_PORT: "6275",
+      MCP_INSPECTOR_API_TOKEN: inspectorApiToken,
+      MCP_AUTO_OPEN_ENABLED: "false",
+      MCP_INSPECTOR_SECRET_STORE: "memory",
+      MCP_STORAGE_DIR: join(home, "storage"),
+      MCP_CATALOG_PATH: join(home, "catalog.json"),
+    };
+    inspectorServer = await startInspectorWebClient({
+      root,
+      launcher: inspector,
+      env: inspectorEnv,
+    });
+    const activeInspectorServer = inspectorServer;
+    const requestLog: CapturedRequest[] = [];
+    const responseLog: CapturedResponse[] = [];
+    const consoleLog: string[] = [];
+    const testApproval = async (fixture: ApprovalFixture, decision: "approve" | "deny") => {
+      const context = await activeBrowser.newContext();
+      contexts.push(context);
+      const page = await context.newPage();
       await configureInspectorAuthorization(
-        resolvedPage,
+        page,
         activeInspectorServer.url,
         activeHarnessServer.endpoint,
       );
-      resolvedPage.on("request", (request) =>
-        resolvedRequests.push({ url: request.url(), body: request.postData() ?? undefined }),
-      );
-      resolvedPage.on("response", (response) =>
-        resolvedResponses.push({ url: response.url(), status: response.status() }),
-      );
-      await openApproval(
-        resolvedPage,
-        activeInspectorServer.url,
-        activeHarnessServer.endpoint,
-        resolvedFixture,
-        resolvedRequests,
-        resolvedResponses,
-      );
-      const resolvedApp = resolvedPage.frameLocator('[data-testid="apps-form"] iframe');
-      const approve = resolvedApp.getByRole("button", { name: "Approve", exact: true });
-      await approve.click();
-      await resolvedApp
-        .getByText("This approval has already been resolved.", { exact: true })
-        .waitFor({ state: "visible" });
-      expect(await approve.isDisabled()).toBe(true);
-      const resolvedPanels = JSON.stringify({
-        app: await resolvedApp.locator("body").innerText(),
-        inspector: await resolvedPage.locator("body").innerText(),
-        messages: await resolvedPage.getByTestId("apps-messages").allInnerTexts(),
-        logs: await resolvedPage.getByTestId("apps-logs").allInnerTexts(),
-        requests: resolvedRequests,
+      page.on("request", (request) => {
+        requestLog.push({ url: request.url(), body: request.postData() ?? undefined });
       });
-      expectLoopbackRequests(resolvedRequests);
-      for (const canary of rawCanaries) {
-        expect(resolvedPanels).not.toContain(canary);
+      page.on("response", (response) => {
+        responseLog.push({ url: response.url(), status: response.status() });
+      });
+      page.on("console", (message) => {
+        consoleLog.push(message.text());
+      });
+      await openApproval(
+        page,
+        activeInspectorServer.url,
+        activeHarnessServer.endpoint,
+        fixture,
+        requestLog,
+        responseLog,
+      );
+      const app = page.frameLocator('[data-testid="apps-form"] iframe');
+      const button = app.getByRole("button", {
+        name: decision === "approve" ? "Approve" : "Deny",
+        exact: true,
+      });
+      if (decision === "approve") {
+        await button.evaluate((element: HTMLButtonElement) => {
+          element.click();
+          element.click();
+        });
+      } else {
+        await button.click();
       }
-    } finally {
-      await Promise.all(contexts.map((context) => context.close()));
-      await inspectorServer?.close();
-      await harnessServer?.close();
-      await rm(workDir, { recursive: true, force: true });
+      await app
+        .getByRole("status")
+        .filter({ hasText: decision === "approve" ? "Approval granted." : "Approval denied." })
+        .waitFor({ state: "visible" });
+      expect(await button.isDisabled()).toBe(true);
+      const store = new SqliteEventStore(join(dataDir, "harness.db"));
+      try {
+        const events: HarnessEvent[] = [];
+        for await (const event of store.read(fixture.runId)) {
+          events.push(event);
+        }
+        const decisions = events.filter((event) => event.type === "approval_resolved");
+        expect(decisions).toHaveLength(1);
+        expect(decisions[0]).toMatchObject({ decision, decidedBy: "human" });
+      } finally {
+        await store.close();
+      }
+      const panels = JSON.stringify({
+        app: await app.locator("body").innerText(),
+        inspector: await page.locator("body").innerText(),
+        messages: await page.getByTestId("apps-messages").allInnerTexts(),
+        logs: await page.getByTestId("apps-logs").allInnerTexts(),
+        consoleLog,
+        requests: requestLog,
+      });
+      expect(JSON.stringify(requestLog)).toContain("harness.approvals.resolve");
+      expectLoopbackRequests(requestLog);
+      for (const canary of rawCanaries) {
+        expect(panels).not.toContain(canary);
+      }
+    };
+    const approveFixture = fixtures[0];
+    const denyFixture = fixtures[1];
+    const resolvedFixture = fixtures[2];
+    if (
+      approveFixture === undefined ||
+      denyFixture === undefined ||
+      resolvedFixture === undefined
+    ) {
+      throw new Error("The approval fixtures were not created.");
     }
-  },
-  240_000,
-);
+    await testApproval(approveFixture, "approve");
+    await testApproval(denyFixture, "deny");
+
+    const resolvedContext = await activeBrowser.newContext();
+    contexts.push(resolvedContext);
+    const resolvedPage = await resolvedContext.newPage();
+    const resolvedRequests: CapturedRequest[] = [];
+    const resolvedResponses: CapturedResponse[] = [];
+    await configureInspectorAuthorization(
+      resolvedPage,
+      activeInspectorServer.url,
+      activeHarnessServer.endpoint,
+    );
+    resolvedPage.on("request", (request) =>
+      resolvedRequests.push({ url: request.url(), body: request.postData() ?? undefined }),
+    );
+    resolvedPage.on("response", (response) =>
+      resolvedResponses.push({ url: response.url(), status: response.status() }),
+    );
+    await openApproval(
+      resolvedPage,
+      activeInspectorServer.url,
+      activeHarnessServer.endpoint,
+      resolvedFixture,
+      resolvedRequests,
+      resolvedResponses,
+    );
+    const resolvedApp = resolvedPage.frameLocator('[data-testid="apps-form"] iframe');
+    const approve = resolvedApp.getByRole("button", { name: "Approve", exact: true });
+    await approve.click();
+    await resolvedApp
+      .getByText("This approval has already been resolved.", { exact: true })
+      .waitFor({ state: "visible" });
+    expect(await approve.isDisabled()).toBe(true);
+    const resolvedPanels = JSON.stringify({
+      app: await resolvedApp.locator("body").innerText(),
+      inspector: await resolvedPage.locator("body").innerText(),
+      messages: await resolvedPage.getByTestId("apps-messages").allInnerTexts(),
+      logs: await resolvedPage.getByTestId("apps-logs").allInnerTexts(),
+      requests: resolvedRequests,
+    });
+    expectLoopbackRequests(resolvedRequests);
+    for (const canary of rawCanaries) {
+      expect(resolvedPanels).not.toContain(canary);
+    }
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+    await inspectorServer?.close();
+    await harnessServer?.close();
+    await rm(workDir, { recursive: true, force: true });
+  }
+}, 240_000);
