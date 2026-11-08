@@ -126,10 +126,7 @@ export class ModelGateway {
   private readonly sleep: Sleep;
   private readonly maxConcurrent: number;
   private readonly maxRepairs: number;
-  private readonly limiters = new Map<
-    Code,
-    ProviderRateLimiter
-  >();
+  private readonly limiters = new Map<Code, ProviderRateLimiter>();
   private readonly semaphores = new Map<Code, Semaphore>();
   private readonly accountUsage: (model: ModelRef, usage: ModelUsage) => ModelUsage;
 

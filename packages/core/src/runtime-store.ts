@@ -350,8 +350,7 @@ async function postgresConnectionString(
 
 class RateLimitConfigError extends HarnessError {
   override readonly code:
-    | "rate_limit_postgres_requires_postgres_store"
-    | "rate_limit_redis_backend_unavailable";
+    "rate_limit_postgres_requires_postgres_store" | "rate_limit_redis_backend_unavailable";
 
   constructor(code: RateLimitConfigError["code"]) {
     super(code);
@@ -381,12 +380,7 @@ export async function openConfiguredRateLimitStore(
   const shared = new PostgresRateLimitStore(
     await postgresConnectionString(storeConfig, options.secretResolver),
   );
-  return new UnavailableRateLimitStore(
-    shared,
-    "postgres",
-    rateLimits.onUnavailable,
-    options.clock,
-  );
+  return new UnavailableRateLimitStore(shared, "postgres", rateLimits.onUnavailable, options.clock);
 }
 
 /** Opens the configured event store shared by runtime and CLI maintenance commands. */

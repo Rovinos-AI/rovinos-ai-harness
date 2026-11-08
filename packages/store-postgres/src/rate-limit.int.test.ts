@@ -3,10 +3,7 @@ import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { Code } from "@rovinos/schemas";
 import { expect, it } from "vitest";
-import {
-  rateLimitStoreConformance,
-  type RateLimitStoreFactory,
-} from "@rovinos/store/testing";
+import { rateLimitStoreConformance, type RateLimitStoreFactory } from "@rovinos/store/testing";
 import { PostgresRateLimitStore } from "./rate-limit.js";
 
 const connectionString =

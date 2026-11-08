@@ -103,9 +103,7 @@ async function createRuntimeModel(
       ...(options.requestSanitizer === undefined
         ? {}
         : { requestSanitizer: options.requestSanitizer }),
-      ...(options.rateLimitStore === undefined
-        ? {}
-        : { rateLimitStore: options.rateLimitStore }),
+      ...(options.rateLimitStore === undefined ? {} : { rateLimitStore: options.rateLimitStore }),
     })) ?? missingModelPort
   );
 }

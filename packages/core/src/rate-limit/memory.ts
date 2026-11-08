@@ -34,12 +34,13 @@ export class InMemoryRateLimitStore implements RateLimitStore {
       throw new RateLimitStoreUnavailableError();
     }
     this.buckets.delete(checkedKey);
-    this.buckets.set(checkedKey, { tokens: remaining, updatedAt: Math.max(now, current.updatedAt) });
+    this.buckets.set(checkedKey, {
+      tokens: remaining,
+      updatedAt: Math.max(now, current.updatedAt),
+    });
     return {
       allowed,
-      retryAfterMs: allowed
-        ? 0
-        : Math.ceil(((cost - tokens) / limit.refillPerSecond) * 1_000),
+      retryAfterMs: allowed ? 0 : Math.ceil(((cost - tokens) / limit.refillPerSecond) * 1_000),
       remaining,
     };
   }

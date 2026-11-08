@@ -220,13 +220,10 @@ async function authenticateHttpRequest(
     rejectUnauthenticatedRequest(input, request, response);
     return undefined;
   }
-  const rateLimit = await input.rateLimitStore.take(
-    Code.parse(`cp.token.${principal.tokenId}`),
-    {
-      capacity: input.controlPlane.rateLimitPerMinute,
-      refillPerSecond: input.controlPlane.rateLimitPerMinute / 60,
-    },
-  );
+  const rateLimit = await input.rateLimitStore.take(Code.parse(`cp.token.${principal.tokenId}`), {
+    capacity: input.controlPlane.rateLimitPerMinute,
+    refillPerSecond: input.controlPlane.rateLimitPerMinute / 60,
+  });
   if (!rateLimit.allowed) {
     countRateLimitDenied("control_plane");
     rejectRateLimitedRequest(input.audit, principal.tokenId, response);
