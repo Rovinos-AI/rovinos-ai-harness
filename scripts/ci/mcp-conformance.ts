@@ -13,6 +13,16 @@ import { fileURLToPath } from "node:url";
 import { parseJson, parseYaml } from "@rovinos/schemas";
 import { z } from "zod";
 import {
+  conformanceReportSchema,
+  measuredScenarios,
+  protocolRevision,
+  requirementsSchema,
+  runnerRevision,
+  type scenarioReportSchema,
+  type ConformanceReport,
+  type ConformanceScenarioStatus,
+} from "./mcp-conformance-schema.js";
+import {
   INSPECTOR_HTTP_TOKEN,
   INSPECTOR_READ_TOKEN,
   startInspectorFixture,
@@ -22,68 +32,9 @@ import { assertNoCredentialCanaries } from "./mcp-conformance-report-safety.js";
 const root = resolvePath(import.meta.dirname, "../..");
 const harness = resolvePath(root, "packages/cli/dist/bin.js");
 const runner = resolvePath(root, "node_modules/@modelcontextprotocol/conformance/dist/index.js");
-const protocolRevision = "2026-07-28";
-const runnerRevision = "0.2.0-alpha.12";
-const measuredScenarios = {
-  client: ["tools_call"],
-  server: ["server-stateless", "tools-list"],
-} as const;
-const roles = z.enum(["client", "server"]);
-const requirementReason = z.enum(["extension", "added-after-release", "pending"]);
-const requirementsSchema = z
-  .object({
-    server: z.array(z.string().min(1)),
-    client: z.array(z.string().min(1)),
-    not_scored: z.array(
-      z
-        .object({
-          scenario: z.string().min(1),
-          leg: roles,
-          reason: requirementReason,
-          note: z.string().optional(),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
-const scenarioStatus = z.enum(["passed", "failed", "skipped", "not_measured"]);
-const scenarioReportSchema = z
-  .object({
-    scenario: z.string().min(1),
-    status: scenarioStatus,
-    reason: z.string().optional(),
-  })
-  .strict();
-const notScoredReportSchema = z
-  .object({
-    scenario: z.string().min(1),
-    role: roles,
-    status: z.literal("not_scored"),
-    reason: requirementReason,
-    note: z.string().optional(),
-  })
-  .strict();
-const notMeasuredCapabilitySchema = z
-  .object({
-    capability: z.string().min(1),
-    reason: z.string().min(1),
-  })
-  .strict();
-const conformanceReportSchema = z
-  .object({
-    runner: z.literal(`@modelcontextprotocol/conformance@${runnerRevision}`),
-    protocolRevision: z.literal(protocolRevision),
-    advisory: z.literal(true),
-    client: z.array(scenarioReportSchema),
-    server: z.array(scenarioReportSchema),
-    notScored: z.array(notScoredReportSchema),
-    notMeasuredCapabilities: z.array(notMeasuredCapabilitySchema),
-  })
-  .strict();
-const checksSchema = z.array(z.object({ status: z.string() }).passthrough());
+const checksSchema = z.array(z.object({ status: z.string() }).loose());
 
-export type ConformanceReport = z.infer<typeof conformanceReportSchema>;
-export type ConformanceScenarioStatus = z.infer<typeof scenarioStatus>;
+export type { ConformanceReport, ConformanceScenarioStatus } from "./mcp-conformance-schema.js";
 
 interface ProcessResult {
   readonly status: number;
@@ -98,7 +49,11 @@ function fail(code: string): never {
   throw new Error(code);
 }
 
-function runProcess(args: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Promise<ProcessResult> {
+function runProcess(
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       cwd,
@@ -181,15 +136,26 @@ async function startAuthProxy(endpoint: string): Promise<RunningProxy> {
   });
   const address = server.address();
   if (address === null || typeof address === "string") {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
     return fail("mcp_conformance_proxy_listen_failed");
   }
   const { port } = address;
   return {
     endpoint: `http://127.0.0.1:${String(port)}/mcp`,
-    close: () => new Promise<void>((resolve, reject) => {
-      server.close((error) => (error === undefined ? resolve() : reject(error)));
-    }),
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error === undefined) {
+            resolve();
+          } else {
+            reject(error);
+          }
+        });
+      }),
   };
 }
 
@@ -208,6 +174,7 @@ async function findChecks(directory: string): Promise<z.infer<typeof checksSchem
   return checks;
 }
 
+/** Runs a single official runner scenario and classifies its result conservatively. */
 export async function runConformanceScenario(input: {
   readonly role: "client" | "server";
   readonly scenario: string;
@@ -238,7 +205,10 @@ export async function runConformanceScenario(input: {
   ];
   const result = await runProcess(args, root, runnerEnvironment(input.home));
   const checks = await findChecks(outputDir);
-  if (result.status !== 0 || checks.some(({ status }) => status === "FAILURE" || status === "WARNING")) {
+  if (
+    result.status !== 0 ||
+    checks.some(({ status }) => status === "FAILURE" || status === "WARNING")
+  ) {
     return "failed";
   }
   if (checks.length === 0 || checks.some(({ status }) => status === "SKIPPED")) {
@@ -269,6 +239,60 @@ function scenarioRows(
   });
 }
 
+async function runScenarios(input: {
+  readonly role: "client" | "server";
+  readonly scenarios: readonly string[];
+  readonly outputDir: string;
+  readonly endpoint: string;
+  readonly home: string;
+}): Promise<Map<string, ConformanceScenarioStatus>> {
+  const results = new Map<string, ConformanceScenarioStatus>();
+  for (const scenario of input.scenarios) {
+    results.set(
+      scenario,
+      await runConformanceScenario({
+        role: input.role,
+        scenario,
+        outputDir: input.outputDir,
+        endpoint: input.endpoint,
+        home: input.home,
+      }),
+    );
+  }
+  return results;
+}
+
+function createReport(
+  requirements: z.infer<typeof requirementsSchema>,
+  clientResults: ReadonlyMap<string, ConformanceScenarioStatus>,
+  serverResults: ReadonlyMap<string, ConformanceScenarioStatus>,
+): ConformanceReport {
+  return conformanceReportSchema.parse({
+    runner: `@modelcontextprotocol/conformance@${runnerRevision}`,
+    protocolRevision,
+    advisory: true,
+    client: scenarioRows("client", requirements, measuredScenarios.client, clientResults),
+    server: scenarioRows("server", requirements, measuredScenarios.server, serverResults),
+    notScored: requirements.not_scored.map(({ scenario, leg, reason, note }) => ({
+      scenario,
+      role: leg,
+      status: "not_scored" as const,
+      reason,
+      ...(note === undefined ? {} : { note }),
+    })),
+    notMeasuredCapabilities: [
+      {
+        capability: "bearer-token-expiry",
+        reason: "Static control-plane bearer tokens have no expiration semantics.",
+      },
+      {
+        capability: "bearer-token-revocation",
+        reason: "Static control-plane bearer tokens cannot be revoked while the server is running.",
+      },
+    ],
+  });
+}
+
 /** Runs only the owner-approved 2026 protocol capabilities and records the full frozen inventory. */
 export async function runMcpConformanceLanes(outputDir: string): Promise<{
   readonly report: ConformanceReport;
@@ -289,66 +313,28 @@ export async function runMcpConformanceLanes(outputDir: string): Promise<{
     workDir = await mkdtemp(join(tmpdir(), "mcp-conformance-"));
     await writeFile(join(workDir, "requirements-2026-07-28.yaml"), requirementsText);
     proxy = await startAuthProxy(fixture.endpoint);
-    const clientResults = new Map<string, ConformanceScenarioStatus>();
-    const serverResults = new Map<string, ConformanceScenarioStatus>();
-    for (const scenario of measuredScenarios.client) {
-      clientResults.set(
-        scenario,
-        await runConformanceScenario({
-          role: "client",
-          scenario,
-          outputDir: workDir,
-          endpoint: fixture.endpoint,
-          home: fixture.home,
-        }),
-      );
-    }
-    for (const scenario of measuredScenarios.server) {
-      serverResults.set(
-        scenario,
-        await runConformanceScenario({
-          role: "server",
-          scenario,
-          outputDir: workDir,
-          endpoint: proxy.endpoint,
-          home: fixture.home,
-        }),
-      );
-    }
-    const report = conformanceReportSchema.parse({
-      runner: `@modelcontextprotocol/conformance@${runnerRevision}`,
-      protocolRevision,
-      advisory: true,
-      client: scenarioRows("client", requirements, measuredScenarios.client, clientResults),
-      server: scenarioRows("server", requirements, measuredScenarios.server, serverResults),
-      notScored: requirements.not_scored.map(({ scenario, leg, reason, note }) => ({
-        scenario,
-        role: leg,
-        status: "not_scored" as const,
-        reason,
-        ...(note === undefined ? {} : { note }),
-      })),
-      notMeasuredCapabilities: [
-        {
-          capability: "bearer-token-expiry",
-          reason: "Static control-plane bearer tokens have no expiration semantics.",
-        },
-        {
-          capability: "bearer-token-revocation",
-          reason: "Static control-plane bearer tokens cannot be revoked while the server is running.",
-        },
-      ],
+    const clientResults = await runScenarios({
+      role: "client",
+      scenarios: measuredScenarios.client,
+      outputDir: workDir,
+      endpoint: fixture.endpoint,
+      home: fixture.home,
     });
+    const serverResults = await runScenarios({
+      role: "server",
+      scenarios: measuredScenarios.server,
+      outputDir: workDir,
+      endpoint: proxy.endpoint,
+      home: fixture.home,
+    });
+    const report = createReport(requirements, clientResults, serverResults);
     await writeFile(join(workDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
     await assertNoCredentialCanaries(workDir, [INSPECTOR_HTTP_TOKEN, INSPECTOR_READ_TOKEN]);
     await mkdir(archiveDir, { recursive: true });
     await cp(workDir, archiveDir, { recursive: true });
     return {
       report,
-      exitCode: requiredConformanceExitCode([
-        ...clientResults.values(),
-        ...serverResults.values(),
-      ]),
+      exitCode: requiredConformanceExitCode([...clientResults.values(), ...serverResults.values()]),
     };
   } finally {
     await proxy?.close();
@@ -360,9 +346,7 @@ export async function runMcpConformanceLanes(outputDir: string): Promise<{
 }
 
 /** Returns nonzero unless every scenario selected for measurement passed. */
-export function requiredConformanceExitCode(
-  statuses: readonly ConformanceScenarioStatus[],
-): 0 | 1 {
+export function requiredConformanceExitCode(statuses: readonly ConformanceScenarioStatus[]): 0 | 1 {
   return statuses.every((status) => status === "passed") ? 0 : 1;
 }
 

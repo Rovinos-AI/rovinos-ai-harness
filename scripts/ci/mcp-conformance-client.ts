@@ -41,7 +41,7 @@ export async function runConformanceClient(
   protocolValue: unknown,
   serverUrlValue: unknown,
 ): Promise<void> {
-  const scenario = scenarioSchema.parse(scenarioValue);
+  scenarioSchema.parse(scenarioValue);
   const protocol = protocolSchema.parse(protocolValue);
   const serverUrl = loopbackUrlSchema.parse(serverUrlValue);
   const server = ServerConfigSchema.parse({
@@ -50,14 +50,11 @@ export async function runConformanceClient(
     transport: { kind: "http", url: serverUrl },
   });
   const port = await McpToolPort.create([server], {
-    resolveSecret: async () => {
+    resolveSecret: () => {
       throw new Error("unexpected_secret_resolution");
     },
   });
   try {
-    if (scenario !== "tools_call") {
-      failure("mcp_conformance_scenario_unsupported");
-    }
     const tool = port.getToolSpecs().find(({ toolId }) => toolId === "conformance.add_numbers");
     if (tool === undefined) {
       failure("mcp_conformance_tool_missing");
