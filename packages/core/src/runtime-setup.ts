@@ -10,13 +10,14 @@ import { PiiToolPort } from "@rovinos/pii";
 import type { McpToolPort } from "@rovinos/mcp";
 import type { LocalKeyProvider } from "@rovinos/vault";
 import type { EventStore } from "@rovinos/store";
+import type { RateLimitStore } from "@rovinos/schemas";
 import {
   createSandboxBackend,
   RemoteSandboxBackend,
   RunnerPool,
   type SandboxBackend,
 } from "@rovinos/sandbox";
-import { createRuntimeStore } from "./runtime-store.js";
+import { createRuntimeStore, openConfiguredRateLimitStore } from "./runtime-store.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
@@ -49,6 +50,7 @@ async function closeSetupResources(options: {
   readonly eventStore: EventStore | undefined;
   readonly vault: RuntimeVault | undefined;
   readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+  readonly rateLimitStore?: RateLimitStore | undefined;
   readonly disposeKeys: () => void;
 }): Promise<void> {
   try {
@@ -65,9 +67,13 @@ async function closeSetupResources(options: {
         await options.vault?.close();
       } finally {
         try {
-          await options.instanceHeartbeat?.close();
+          await options.rateLimitStore?.close?.();
         } finally {
-          options.disposeKeys();
+          try {
+            await options.instanceHeartbeat?.close();
+          } finally {
+            options.disposeKeys();
+          }
         }
       }
     }
@@ -81,11 +87,13 @@ function cleanupRuntimeSetupFailure(options: {
   readonly keys: RuntimeComposition["keys"];
   readonly overrides: RuntimeOverrides;
   readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+  readonly rateLimitStore?: RateLimitStore;
 }): Promise<void> {
   return closeSetupResources({
     mcpToolPort: options.tools?.mcpToolPort,
     sandboxBackend: options.tools?.sandboxBackend ?? options.overrides.sandboxBackend,
     eventStore: options.eventStore,
+    ...(options.rateLimitStore === undefined ? {} : { rateLimitStore: options.rateLimitStore }),
     vault: options.vault,
     instanceHeartbeat: options.instanceHeartbeat,
     disposeKeys: () => {
@@ -200,6 +208,7 @@ export type RuntimeSetup = RuntimeComposition & {
 interface RuntimeSetupResources {
   vault?: RuntimeVault;
   eventStore?: EventStore;
+  rateLimitStore?: RateLimitStore;
   tools?: RuntimeTools;
 }
 
@@ -335,21 +344,34 @@ async function composeRuntimeSetup(options: {
   const roles = await createRuntimeRoles(config, overrides, tool);
   const rawStore = await createRuntimeStore(config, overrides, clock);
   resources.eventStore = rawStore;
+  const rateLimitStore =
+    overrides.rateLimitStore ??
+    (await openConfiguredRateLimitStore(config, {
+      clock,
+      ...(overrides.secretResolver === undefined
+        ? {}
+        : { secretResolver: overrides.secretResolver }),
+    }));
+  if (overrides.rateLimitStore === undefined) {
+    resources.rateLimitStore = rateLimitStore;
+  }
+  const runtimeOverrides = { ...overrides, rateLimitStore };
   const { piiRuntime, model, store } = await createRuntimeModelAndStore({
     config,
     piiConfig,
-    overrides,
+    overrides: runtimeOverrides,
     ids,
     clock,
     vault: runtimeVault,
     scopes,
     store: rawStore,
     policyVersion: policy.version,
+    rateLimitStore,
   });
   const managedMcpToolPort = tools.mcpToolPort;
   return {
     config,
-    overrides,
+    overrides: runtimeOverrides,
     clock,
     ids,
     store,
@@ -361,6 +383,10 @@ async function composeRuntimeSetup(options: {
     vaultResolver: piiRuntime.resolver,
     pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
     model,
+    rateLimitStore,
+    ...(overrides.rateLimitStore === undefined
+      ? { closeRateLimitStore: () => rateLimitStore.close?.() ?? Promise.resolve() }
+      : {}),
     tool,
     ...(managedMcpToolPort === undefined
       ? {}
@@ -418,6 +444,9 @@ export async function setupRuntime(
     await cleanupRuntimeSetupFailure({
       tools: resources.tools,
       eventStore: resources.eventStore,
+      ...(resources.rateLimitStore === undefined
+        ? {}
+        : { rateLimitStore: resources.rateLimitStore }),
       vault: resources.vault,
       keys,
       overrides,

@@ -293,6 +293,9 @@ function composeRuntime(
         ...(options.closeToolPort === undefined ? {} : { closeToolPort: options.closeToolPort }),
         vault,
         keys,
+        ...(options.closeRateLimitStore === undefined
+          ? {}
+          : { closeRateLimitStore: options.closeRateLimitStore }),
         sandboxBackend: options.sandboxBackend,
         instanceHeartbeat: options.instanceHeartbeat,
         flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,

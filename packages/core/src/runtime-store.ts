@@ -28,10 +28,23 @@ import {
   type VaultTerminalRunsQuery,
   type VaultKeyRotation,
 } from "@rovinos/vault";
-import type { Id, KeysConfig, SecretRef, StoreConfig, VaultConfig } from "@rovinos/schemas";
+import {
+  RateLimitsConfigSchema,
+  HarnessError,
+  type Id,
+  type KeysConfig,
+  type RateLimitStore,
+  type RateLimitsConfig,
+  type SecretRef,
+  type StoreConfig,
+  type VaultConfig,
+} from "@rovinos/schemas";
+import { PostgresRateLimitStore } from "@rovinos/store-postgres";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
+import { InMemoryRateLimitStore } from "./rate-limit/memory.js";
+import { UnavailableRateLimitStore } from "./rate-limit/unavailable.js";
 
 /** Inputs shared by runtime and CLI configured-store operations. */
 export interface ConfiguredStoreOptions {
@@ -333,6 +346,47 @@ async function postgresConnectionString(
     throw new StoreUnavailableError();
   }
   return (await secretResolver.resolve(config.connectionString)).reveal();
+}
+
+class RateLimitConfigError extends HarnessError {
+  override readonly code:
+    | "rate_limit_postgres_requires_postgres_store"
+    | "rate_limit_redis_backend_unavailable";
+
+  constructor(code: RateLimitConfigError["code"]) {
+    super(code);
+    this.code = code;
+  }
+}
+
+/** Opens a rate-limit backend using the runtime's shared Postgres connection. */
+export async function openConfiguredRateLimitStore(
+  config: {
+    readonly rateLimits?: RateLimitsConfig;
+    readonly store?: StoreConfig;
+  },
+  options: Pick<ConfiguredStoreOptions, "clock" | "secretResolver"> = {},
+): Promise<RateLimitStore> {
+  const rateLimits = RateLimitsConfigSchema.parse(config.rateLimits);
+  if (rateLimits.backend === "memory") {
+    return new InMemoryRateLimitStore(options.clock);
+  }
+  if (rateLimits.backend === "redis") {
+    throw new RateLimitConfigError("rate_limit_redis_backend_unavailable");
+  }
+  const storeConfig = config.store;
+  if (storeConfig?.dialect !== "postgres") {
+    throw new RateLimitConfigError("rate_limit_postgres_requires_postgres_store");
+  }
+  const shared = new PostgresRateLimitStore(
+    await postgresConnectionString(storeConfig, options.secretResolver),
+  );
+  return new UnavailableRateLimitStore(
+    shared,
+    "postgres",
+    rateLimits.onUnavailable,
+    options.clock,
+  );
 }
 
 /** Opens the configured event store shared by runtime and CLI maintenance commands. */

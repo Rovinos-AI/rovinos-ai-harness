@@ -20,6 +20,7 @@ import { collectProviderStream } from "./streaming.js";
 import type { AdapterRegistry } from "./registry.js";
 import { readModelFailureMetadata } from "./errors.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
+import { StoreTokenBucketRateLimiter } from "./resilience/store-limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
 import { Semaphore } from "./resilience/semaphore.js";
 import {
@@ -38,6 +39,7 @@ import type {
   ModelGatewayContextBase,
   ModelGatewayDependencies,
   ModelGatewayOptions,
+  ProviderRateLimiter,
   ModelGatewayResponse,
   PreparedCompletionOptions,
   TokenizedModelGatewayContext,
@@ -124,7 +126,10 @@ export class ModelGateway {
   private readonly sleep: Sleep;
   private readonly maxConcurrent: number;
   private readonly maxRepairs: number;
-  private readonly limiters = new Map<Code, TokenBucketRateLimiter>();
+  private readonly limiters = new Map<
+    Code,
+    ProviderRateLimiter
+  >();
   private readonly semaphores = new Map<Code, Semaphore>();
   private readonly accountUsage: (model: ModelRef, usage: ModelUsage) => ModelUsage;
 
@@ -164,7 +169,15 @@ export class ModelGateway {
       }
       this.limiters.set(
         Code.parse(provider),
-        new TokenBucketRateLimiter(requestsPerMinute, dependencies.clock, this.sleep),
+        dependencies.rateLimitStore === undefined
+          ? new TokenBucketRateLimiter(requestsPerMinute, dependencies.clock, this.sleep)
+          : new StoreTokenBucketRateLimiter(
+              Code.parse(provider),
+              requestsPerMinute,
+              dependencies.rateLimitStore,
+              dependencies.clock,
+              this.sleep,
+            ),
       );
     }
   }
@@ -174,7 +187,7 @@ export class ModelGateway {
     options: {
       readonly request: ModelRequest;
       readonly context: ModelGatewayContext;
-      readonly limiter: TokenBucketRateLimiter | undefined;
+      readonly limiter: ProviderRateLimiter | undefined;
       readonly semaphore: Semaphore;
       readonly onAttempt: () => void;
       readonly onFailedAttempt: (error: unknown) => void;

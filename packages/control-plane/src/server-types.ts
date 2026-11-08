@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ControlPlaneConfig, Id, Principal, RunStatus, Code } from "@rovinos/schemas";
+import type {
+  ControlPlaneConfig,
+  Id,
+  Principal,
+  RunStatus,
+  Code,
+  RateLimitStore,
+} from "@rovinos/schemas";
 import type { RunQueue } from "@rovinos/store";
 import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { ServerContext } from "@modelcontextprotocol/server";
@@ -52,6 +59,8 @@ export interface ControlPlaneServerOptions {
   readonly secretResolver?: ControlPlaneSecretResolver;
   /** Clock used by the per-token HTTP request limiter. */
   readonly clock?: ControlPlaneClock;
+  /** Shared request-rate backend; defaults to a per-process token-bucket store. */
+  readonly rateLimitStore?: RateLimitStore;
   /** Metadata-only audit sink; defaults to the sanctioned telemetry logger. */
   readonly onAudit?: ControlPlaneAuditHandler;
   readonly operations?: ControlPlaneOperations;

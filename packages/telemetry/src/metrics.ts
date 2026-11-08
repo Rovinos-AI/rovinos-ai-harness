@@ -55,6 +55,10 @@ export const MCP_INPUT_REQUEST_OUTCOMES = [
 ] as const;
 /** Closed worker job outcomes used by the worker counter. */
 export const WORKER_JOB_OUTCOMES = ["completed", "suspended", "failed", "lease_lost"] as const;
+/** Rate-limit key classes emitted as bounded metric attributes. */
+export const RATE_LIMIT_KEY_KINDS = ["provider", "control_plane"] as const;
+/** Shared rate-limit backends emitted as bounded metric attributes. */
+export const RATE_LIMIT_BACKENDS = ["postgres", "redis"] as const;
 
 /** Bounded reasons for dropping or stripping telemetry data. */
 export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
@@ -66,6 +70,8 @@ export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
 export type McpInputRequestOutcome = (typeof MCP_INPUT_REQUEST_OUTCOMES)[number];
 /** Bounded worker job outcome. */
 export type WorkerJobOutcome = (typeof WORKER_JOB_OUTCOMES)[number];
+export type RateLimitKeyKind = (typeof RATE_LIMIT_KEY_KINDS)[number];
+export type RateLimitBackend = (typeof RATE_LIMIT_BACKENDS)[number];
 interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
   readonly "harness.telemetry.dropped.reason": TelemetryDropReason;
 }
@@ -89,6 +95,12 @@ interface McpInputRequestAttributes extends Readonly<Record<string, McpInputRequ
 interface WorkerJobAttributes extends Readonly<Record<string, WorkerJobOutcome>> {
   readonly "harness.worker.jobs.outcome": WorkerJobOutcome;
 }
+interface RateLimitDeniedAttributes extends Readonly<Record<string, RateLimitKeyKind>> {
+  readonly "harness.rate_limit.denied.key_kind": RateLimitKeyKind;
+}
+interface RateLimitDegradedAttributes extends Readonly<Record<string, RateLimitBackend>> {
+  readonly "harness.rate_limit.degraded.backend": RateLimitBackend;
+}
 
 /** String-valued metric attributes are explicitly closed enumerations. */
 export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
@@ -97,6 +109,8 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.policy.decision": POLICY_DECISIONS,
   "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
   "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
+  "harness.rate_limit.denied.key_kind": RATE_LIMIT_KEY_KINDS,
+  "harness.rate_limit.degraded.backend": RATE_LIMIT_BACKENDS,
 } as const;
 
 /** Collector allowlist of metric names and their allowed datapoint attribute keys. */
@@ -117,6 +131,8 @@ export const METRIC_ALLOWLIST = {
   "harness.mcp.discovery_failed": [],
   "harness.mcp.input_requests": ["harness.mcp.input_requests.outcome"],
   "harness.worker.jobs": ["harness.worker.jobs.outcome"],
+  "harness.rate_limit.denied": ["harness.rate_limit.denied.key_kind"],
+  "harness.rate_limit.degraded": ["harness.rate_limit.degraded.backend"],
   "harness.worker.queue_lag_ms": [],
 } as const satisfies Record<Code, readonly Code[]>;
 
@@ -136,6 +152,8 @@ let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
 let mcpInputRequestsCounter: Counter<McpInputRequestAttributes> | undefined;
 let workerJobsCounter: Counter<WorkerJobAttributes> | undefined;
+let rateLimitDeniedCounter: Counter<RateLimitDeniedAttributes> | undefined;
+let rateLimitDegradedCounter: Counter<RateLimitDegradedAttributes> | undefined;
 let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
 let telemetryMeterProvider: MeterProvider | undefined;
 
@@ -167,6 +185,8 @@ export function selectTelemetryMeterProvider(provider: MeterProvider | undefined
   quotaRejectionsCounter = undefined;
   mcpInputRequestsCounter = undefined;
   workerJobsCounter = undefined;
+  rateLimitDeniedCounter = undefined;
+  rateLimitDegradedCounter = undefined;
   workerQueueLagHistogram = undefined;
 }
 
@@ -314,6 +334,40 @@ function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {
     meter.createCounter<WorkerJobAttributes>(name),
   );
   return workerJobsCounter;
+}
+
+function getRateLimitDeniedCounter(): Counter<RateLimitDeniedAttributes> {
+  rateLimitDeniedCounter ??= createCounter<RateLimitDeniedAttributes>(
+    "harness.rate_limit.denied",
+    (meter, name) => meter.createCounter<RateLimitDeniedAttributes>(name),
+  );
+  return rateLimitDeniedCounter;
+}
+
+function getRateLimitDegradedCounter(): Counter<RateLimitDegradedAttributes> {
+  rateLimitDegradedCounter ??= createCounter<RateLimitDegradedAttributes>(
+    "harness.rate_limit.degraded",
+    (meter, name) => meter.createCounter<RateLimitDegradedAttributes>(name),
+  );
+  return rateLimitDegradedCounter;
+}
+
+/** Counts one denied rate-limit request without exporting its key. */
+export function countRateLimitDenied(keyKind: RateLimitKeyKind): void {
+  try {
+    getRateLimitDeniedCounter().add(1, { "harness.rate_limit.denied.key_kind": keyKind });
+  } catch {
+    return;
+  }
+}
+
+/** Counts use of an unavailable shared rate-limit backend. */
+export function countRateLimitDegraded(backend: RateLimitBackend): void {
+  try {
+    getRateLimitDegradedCounter().add(1, { "harness.rate_limit.degraded.backend": backend });
+  } catch {
+    return;
+  }
 }
 
 function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {

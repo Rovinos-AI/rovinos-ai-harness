@@ -25,6 +25,8 @@
     "build": "tsup"
   },
   "dependencies": {
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/store": "workspace:^",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "pg": "8.23.1",
@@ -40,8 +42,6 @@
     }
   },
   "devDependencies": {
-    "@rovinos/schemas": "workspace:^",
-    "@rovinos/store": "workspace:^",
     "@types/pg": "8.23.1",
     "tsup": "9.0.0",
     "typescript": "5.9.3",

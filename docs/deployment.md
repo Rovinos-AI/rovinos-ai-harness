@@ -37,6 +37,9 @@ the vault directory and otherwise defaults to `HARNESS_DATA_DIR`.
 
 ## Scaling
 
+For provider and control-plane request-rate backend choices and outage behavior, see
+[Request rate limits](./deployment/rate-limits.md).
+
 `deployment.mode` defaults to `single`. In this mode, SQLite remains supported and a per-file
 heartbeat sidecar rejects another live runtime sharing each configured SQLite file. The heartbeat is
 refreshed every 10 seconds; a row older than 30 seconds can be reclaimed after an unclean shutdown.

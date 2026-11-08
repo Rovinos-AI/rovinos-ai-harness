@@ -136,6 +136,16 @@ export {
 } from "./cli/inputs.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./config/keys.js";
+export {
+  RateLimitsConfigSchema,
+  type RateLimitsConfig,
+} from "./config/rate-limits.js";
+export {
+  RateLimitStoreUnavailableError,
+  type RateLimit,
+  type RateLimitResult,
+  type RateLimitStore,
+} from "./rate-limit.js";
 export { isSecretKeyName } from "./secret-key-name.js";
 export {
   DestinationSchema,
