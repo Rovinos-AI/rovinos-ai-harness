@@ -247,6 +247,7 @@ export {
   TelemetryConfigSchema,
   type SinkPolicy,
   type TelemetryConfig,
+  type TelemetryConfigInput,
 } from "./config/telemetry.js";
 export {
   ElicitationConfigSchema,

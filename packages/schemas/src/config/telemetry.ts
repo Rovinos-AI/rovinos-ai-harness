@@ -79,3 +79,6 @@ export const TelemetryConfigSchema = z
 
 /** Validated telemetry configuration. */
 export type TelemetryConfig = z.infer<typeof TelemetryConfigSchema>;
+
+/** Unparsed telemetry configuration with schema-defaulted properties optional. */
+export type TelemetryConfigInput = z.input<typeof TelemetryConfigSchema>;
