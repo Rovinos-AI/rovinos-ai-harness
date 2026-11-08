@@ -308,12 +308,10 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     context: OffloadRunContext,
   ): Promise<OffloadToolExecutionResult> {
     if (call.toolId === "read_offloaded") {
-      return readOffloaded(
-        this.workspace,
-        this.knownSizes,
-        call,
-        { runId: context.runId, keyProvider: this.artifactKeyProvider },
-      );
+      return readOffloaded(this.workspace, this.knownSizes, call, {
+        runId: context.runId,
+        keyProvider: this.artifactKeyProvider,
+      });
     }
 
     const execution = await this.inner.execute(call, context);
@@ -327,16 +325,12 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     execution: OffloadToolExecutionResult,
   ): Promise<OffloadToolExecutionResult> {
     if (execution.artifacts !== undefined && execution.artifacts.length > 0) {
-      return offloadArtifactResult(
-        execution,
-        this.workspace,
-        {
-          ids: this.ids,
-          knownSizes: this.knownSizes,
-          keyProvider: this.artifactKeyProvider,
-          runId: context.runId,
-        },
-      );
+      return offloadArtifactResult(execution, this.workspace, {
+        ids: this.ids,
+        knownSizes: this.knownSizes,
+        keyProvider: this.artifactKeyProvider,
+        runId: context.runId,
+      });
     }
     if (execution.binary === true && !ToolBinaryPayloadSchema.safeParse(execution.result).success) {
       return toolError("pii_input_invalid");

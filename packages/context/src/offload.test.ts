@@ -48,16 +48,14 @@ function keyProvider(
     currentKeyId,
     getKey: (keyId) => {
       const key = keys.get(keyId);
-      return key === undefined
-        ? Promise.reject(new Error("key_not_found"))
-        : Promise.resolve(key);
+      return key === undefined ? Promise.reject(new Error("key_not_found")) : Promise.resolve(key);
     },
   };
 }
 
-function firstArtifactReference(value: JsonValue): ReturnType<
-  typeof McpResultArtifactReferenceSchema.parse
-> {
+function firstArtifactReference(
+  value: JsonValue,
+): ReturnType<typeof McpResultArtifactReferenceSchema.parse> {
   const envelope = McpToolResultEnvelopeSchema.parse(value);
   const part = envelope.parts[0];
   if (part === undefined || part === null || typeof part !== "object" || Array.isArray(part)) {
@@ -270,18 +268,23 @@ describe("OffloadingToolPort", () => {
           ],
         }),
     };
-    const port = new OffloadingToolPort(inner, workspace, {}, {
-      ids: new SequentialIdGenerator(),
-      artifactKeyProvider: keys,
-    });
+    const port = new OffloadingToolPort(
+      inner,
+      workspace,
+      {},
+      {
+        ids: new SequentialIdGenerator(),
+        artifactKeyProvider: keys,
+      },
+    );
     const result = await port.execute(call(), context);
     const reference = firstArtifactReference(result.result);
 
     await expect(
-      port.execute(
-        call("read_offloaded", { handle: reference.handle, encoding: "base64" }),
-        { ...context, runId: Id.parse("00000000000000000000000099") },
-      ),
+      port.execute(call("read_offloaded", { handle: reference.handle, encoding: "base64" }), {
+        ...context,
+        runId: Id.parse("00000000000000000000000099"),
+      }),
     ).resolves.toMatchObject({ outcome: "error", errorCode: "artifact_decrypt_failed" });
   });
 
@@ -358,10 +361,15 @@ describe("OffloadingToolPort", () => {
           ],
         }),
     };
-    const port = new OffloadingToolPort(inner, workspace, {}, {
-      ids: new SequentialIdGenerator(),
-      artifactKeyProvider: keys,
-    });
+    const port = new OffloadingToolPort(
+      inner,
+      workspace,
+      {},
+      {
+        ids: new SequentialIdGenerator(),
+        artifactKeyProvider: keys,
+      },
+    );
     const result = await port.execute(call(), context);
     const reference = firstArtifactReference(result.result);
     activeKey = "new_key";
@@ -378,9 +386,7 @@ describe("OffloadingToolPort", () => {
       {},
       {
         ids: new SequentialIdGenerator(),
-        artifactKeyProvider: keyProvider(
-          new Map([["new_key", new Uint8Array(32).fill(2)]]),
-        ),
+        artifactKeyProvider: keyProvider(new Map([["new_key", new Uint8Array(32).fill(2)]])),
       },
     );
     await expect(

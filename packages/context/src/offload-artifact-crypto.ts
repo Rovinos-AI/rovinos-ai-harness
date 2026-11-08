@@ -10,9 +10,7 @@ const MAGIC = Buffer.from("HRA1", "ascii");
 export class OffloadArtifactCryptoError extends Error {
   constructor(
     readonly code:
-      | "artifact_encrypt_failed"
-      | "artifact_decrypt_failed"
-      | "artifact_legacy_unsupported",
+      "artifact_encrypt_failed" | "artifact_decrypt_failed" | "artifact_legacy_unsupported",
   ) {
     super(code);
   }
@@ -110,11 +108,7 @@ export async function decryptOffloadArtifact(
   let plaintext: Uint8Array | undefined;
   try {
     key = await loadKey(provider, keyId);
-    plaintext = aesGcmDecrypt(
-      key,
-      stored.subarray(encryptedOffset),
-      artifactAad(runId, handle),
-    );
+    plaintext = aesGcmDecrypt(key, stored.subarray(encryptedOffset), artifactAad(runId, handle));
     return plaintext;
   } catch (error) {
     plaintext?.fill(0);
