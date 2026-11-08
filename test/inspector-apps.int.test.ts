@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import {
-  ApprovalAppInputSchema,
+  ApprovalAppGetRequestSchema,
   ApprovalPayloadSchema,
   Code,
   ControlPlaneConfigSchema,
@@ -47,6 +47,20 @@ const inspectorConnectRequestSchema = z.looseObject({
   settings: z
     .looseObject({
       headers: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
+      metadata: z.looseObject({}).optional(),
+      protocolEra: z.enum(["legacy", "auto", "modern"]).optional(),
+      connectionTimeout: z.number().optional(),
+      requestTimeout: z.number().optional(),
+    })
+    .optional(),
+});
+const inspectorServerCreateRequestSchema = z.looseObject({
+  id: z.string(),
+  config: z.looseObject({ type: z.enum(["streamable-http", "sse"]), url: z.url() }),
+  settings: z
+    .looseObject({
+      headers: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
+      protocolEra: z.enum(["legacy", "auto", "modern"]).optional(),
     })
     .optional(),
 });
@@ -65,6 +79,62 @@ interface CapturedRequest {
 interface CapturedResponse {
   readonly url: string;
   readonly status: number;
+  readonly body?: string;
+}
+
+interface BrowserDiagnostics {
+  readonly console: string[];
+  readonly pageErrors: string[];
+  readonly networkFailures: string[];
+  readonly failedResponses: string[];
+}
+
+function redactDiagnostic(value: string): string {
+  return [emailCanary, textCanary, inspectorApiToken, INSPECTOR_HTTP_TOKEN, authorization].reduce(
+    (result, secret) => result.replaceAll(secret, "[redacted]"),
+    value,
+  );
+}
+
+function safeRequestUrl(value: string): string {
+  const url = new URL(value);
+  return `${url.origin}${url.pathname}`;
+}
+
+function captureBrowserDiagnostics(page: Page, diagnostics: BrowserDiagnostics): void {
+  page.on("console", (message) => {
+    diagnostics.console.push(redactDiagnostic(`${message.type()}: ${message.text()}`));
+  });
+  page.on("pageerror", (error) => {
+    diagnostics.pageErrors.push(redactDiagnostic(error.message));
+  });
+  page.on("requestfailed", (request) => {
+    diagnostics.networkFailures.push(
+      `${safeRequestUrl(request.url())}: ${redactDiagnostic(request.failure()?.errorText ?? "unknown failure")}`,
+    );
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      diagnostics.failedResponses.push(
+        `${safeRequestUrl(response.url())}: HTTP ${String(response.status())}`,
+      );
+    }
+  });
+}
+
+function captureInspectorResponses(page: Page, responses: CapturedResponse[]): void {
+  page.on("response", async (response) => {
+    const url = response.url();
+    const body =
+      new URL(url).pathname === "/api/mcp/send"
+        ? redactDiagnostic(await response.text().catch(() => "")).slice(0, 2_000)
+        : undefined;
+    responses.push({
+      url,
+      status: response.status(),
+      ...(body === undefined ? {} : { body }),
+    });
+  });
 }
 
 function expectLoopbackRequests(requests: readonly CapturedRequest[]): void {
@@ -79,6 +149,37 @@ async function configureInspectorAuthorization(
   serverUrl: string,
 ): Promise<void> {
   const inspectorOrigin = new URL(inspectorUrl).origin;
+  await page.route(
+    (url) => url.origin === inspectorOrigin && url.pathname === "/api/servers",
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      const body = route.request().postData();
+      if (body === null) {
+        throw new Error("Inspector server registration did not contain a body.");
+      }
+      const request = parseJson(inspectorServerCreateRequestSchema, body);
+      if (request.config.url !== serverUrl) {
+        await route.continue();
+        return;
+      }
+      await route.continue({
+        postData: JSON.stringify({
+          ...request,
+          settings: {
+            ...request.settings,
+            headers: request.settings?.headers ?? [],
+            metadata: request.settings?.metadata ?? {},
+            protocolEra: "modern",
+            connectionTimeout: request.settings?.connectionTimeout ?? 30_000,
+            requestTimeout: request.settings?.requestTimeout ?? 0,
+          },
+        }),
+      });
+    },
+  );
   await page.route(
     (url) => url.origin === inspectorOrigin && url.pathname === "/api/mcp/connect",
     async (route) => {
@@ -214,15 +315,12 @@ async function seedApprovals(dataDir: string): Promise<ApprovalFixture[]> {
 }
 
 function deepLink(inspectorUrl: string, serverUrl: string, fixture: ApprovalFixture): string {
-  const appArgs = ApprovalAppInputSchema.parse({
-    approvalId: fixture.approvalId,
-    payload: fixture.payload,
-  });
+  const appArgs = ApprovalAppGetRequestSchema.parse({ approvalId: fixture.approvalId });
   const query = new URLSearchParams({
     serverUrl,
     transport: "http",
     autoConnect: inspectorApiToken,
-    openApp: "harness.approvals.resolve",
+    openApp: "harness.approvals.get",
     appArgs: Buffer.from(JSON.stringify(appArgs)).toString("base64url"),
     autoOpen: inspectorApiToken,
   });
@@ -236,6 +334,7 @@ async function openApproval(
   fixture: ApprovalFixture,
   requestLog: CapturedRequest[],
   responseLog: CapturedResponse[],
+  diagnostics: BrowserDiagnostics,
 ): Promise<void> {
   await page.goto(deepLink(inspectorUrl, serverUrl, fixture), { waitUntil: "domcontentloaded" });
   const connected = page.locator('[data-testid="connection-status"][data-status="connected"]');
@@ -252,15 +351,68 @@ async function openApproval(
       `Inspector connection status: ${String(status)}; ${String(error)}; ${JSON.stringify(observed)}`,
     );
   }
-  await page
-    .locator('[data-testid="apps-form"][data-app-status="ready"]')
-    .waitFor({ state: "visible", timeout: 30_000 });
+  try {
+    await page
+      .locator('[data-testid="apps-form"][data-app-status="ready"]')
+      .waitFor({ state: "visible", timeout: 30_000 });
+  } catch {
+    const form = page.locator('[data-testid="apps-form"]');
+    const formCount = await form.count();
+    const body = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
+    const appsTab = page.getByText("Apps", { exact: true });
+    const appsTabCount = await appsTab.count();
+    if (appsTabCount === 1) {
+      await appsTab.click();
+    }
+    const appsPanel = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
+    throw new Error(
+      `Inspector Apps form did not become ready: ${JSON.stringify({
+        formCount,
+        appsTabCount,
+        appStatus: formCount === 0 ? null : await form.getAttribute("data-app-status"),
+        pageText: redactDiagnostic(body).slice(0, 2_000),
+        appsPanel: redactDiagnostic(appsPanel).slice(0, 2_000),
+        console: diagnostics.console,
+        pageErrors: diagnostics.pageErrors,
+        networkFailures: diagnostics.networkFailures,
+        failedResponses: diagnostics.failedResponses,
+        serverMessages: responseLog.filter((response) => response.body !== undefined),
+      })}`,
+    );
+  }
   expect(await page.getByTestId("apps-form").locator("iframe").count()).toBe(1);
   const app = page.frameLocator('[data-testid="apps-form"] iframe');
-  await app.getByRole("heading", { name: fixture.payload.summary }).waitFor({ state: "visible" });
-  await app.getByText(fixture.payload.ruleId, { exact: true }).waitFor({ state: "visible" });
-  await app.getByText("<EMAIL_1>", { exact: true }).waitFor({ state: "visible" });
-  await app.getByText("<SECRET_1>", { exact: true }).waitFor({ state: "visible" });
+  try {
+    await app.getByRole("heading", { name: fixture.payload.summary }).waitFor({ state: "visible" });
+    await app.getByText(fixture.payload.ruleId, { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("<EMAIL_1>", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("<SECRET_1>", { exact: true }).waitFor({ state: "visible" });
+  } catch {
+    const appText = await app
+      .locator("body")
+      .innerText()
+      .catch(() => "");
+    const appMessages = await page.getByTestId("apps-messages").allInnerTexts();
+    const appLogs = await page.getByTestId("apps-logs").allInnerTexts();
+    throw new Error(
+      `Inspector app content did not render: ${JSON.stringify({
+        appText: redactDiagnostic(appText).slice(0, 2_000),
+        appMessages: redactDiagnostic(appMessages.join("\n")).slice(0, 2_000),
+        appLogs: redactDiagnostic(appLogs.join("\n")).slice(0, 2_000),
+        frameUrls: page.frames().map((frame) => safeRequestUrl(frame.url())),
+        console: diagnostics.console,
+        pageErrors: diagnostics.pageErrors,
+        networkFailures: diagnostics.networkFailures,
+        failedResponses: diagnostics.failedResponses,
+      })}`,
+    );
+  }
   const inspectorText = await page.locator("body").innerText();
   const appText = await app.locator("body").innerText();
   const messages = await page.getByTestId("apps-messages").allInnerTexts();
@@ -326,11 +478,17 @@ it("renders approval apps in Inspector and records human decisions", async () =>
     const activeInspectorServer = inspectorServer;
     const requestLog: CapturedRequest[] = [];
     const responseLog: CapturedResponse[] = [];
-    const consoleLog: string[] = [];
     const testApproval = async (fixture: ApprovalFixture, decision: "approve" | "deny") => {
       const context = await activeBrowser.newContext();
       contexts.push(context);
       const page = await context.newPage();
+      const diagnostics: BrowserDiagnostics = {
+        console: [],
+        pageErrors: [],
+        networkFailures: [],
+        failedResponses: [],
+      };
+      captureBrowserDiagnostics(page, diagnostics);
       await configureInspectorAuthorization(
         page,
         activeInspectorServer.url,
@@ -339,12 +497,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       page.on("request", (request) => {
         requestLog.push({ url: request.url(), body: request.postData() ?? undefined });
       });
-      page.on("response", (response) => {
-        responseLog.push({ url: response.url(), status: response.status() });
-      });
-      page.on("console", (message) => {
-        consoleLog.push(message.text());
-      });
+      captureInspectorResponses(page, responseLog);
       await openApproval(
         page,
         activeInspectorServer.url,
@@ -352,6 +505,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         fixture,
         requestLog,
         responseLog,
+        diagnostics,
       );
       const app = page.frameLocator('[data-testid="apps-form"] iframe');
       const button = app.getByRole("button", {
@@ -388,7 +542,10 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         inspector: await page.locator("body").innerText(),
         messages: await page.getByTestId("apps-messages").allInnerTexts(),
         logs: await page.getByTestId("apps-logs").allInnerTexts(),
-        consoleLog,
+        console: diagnostics.console,
+        pageErrors: diagnostics.pageErrors,
+        networkFailures: diagnostics.networkFailures,
+        failedResponses: diagnostics.failedResponses,
         requests: requestLog,
       });
       expect(JSON.stringify(requestLog)).toContain("harness.approvals.resolve");
@@ -415,6 +572,13 @@ it("renders approval apps in Inspector and records human decisions", async () =>
     const resolvedPage = await resolvedContext.newPage();
     const resolvedRequests: CapturedRequest[] = [];
     const resolvedResponses: CapturedResponse[] = [];
+    const resolvedDiagnostics: BrowserDiagnostics = {
+      console: [],
+      pageErrors: [],
+      networkFailures: [],
+      failedResponses: [],
+    };
+    captureBrowserDiagnostics(resolvedPage, resolvedDiagnostics);
     await configureInspectorAuthorization(
       resolvedPage,
       activeInspectorServer.url,
@@ -423,9 +587,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
     resolvedPage.on("request", (request) =>
       resolvedRequests.push({ url: request.url(), body: request.postData() ?? undefined }),
     );
-    resolvedPage.on("response", (response) =>
-      resolvedResponses.push({ url: response.url(), status: response.status() }),
-    );
+    captureInspectorResponses(resolvedPage, resolvedResponses);
     await openApproval(
       resolvedPage,
       activeInspectorServer.url,
@@ -433,6 +595,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       resolvedFixture,
       resolvedRequests,
       resolvedResponses,
+      resolvedDiagnostics,
     );
     const resolvedApp = resolvedPage.frameLocator('[data-testid="apps-form"] iframe');
     const approve = resolvedApp.getByRole("button", { name: "Approve", exact: true });
