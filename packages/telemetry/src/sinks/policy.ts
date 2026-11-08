@@ -18,7 +18,7 @@ const CollectorPipelineSchema = z
     exporters: z.array(z.string()).optional(),
     processors: z.array(z.string()).optional(),
   })
-  .passthrough();
+  .loose();
 
 const CollectorConfigSchema = z
   .object({
@@ -28,10 +28,10 @@ const CollectorConfigSchema = z
       .object({
         pipelines: z.record(z.string(), CollectorPipelineSchema).optional(),
       })
-      .passthrough()
+      .loose()
       .optional(),
   })
-  .passthrough();
+  .loose();
 
 const PolicyVersionConfigSchema = z
   .object({
@@ -46,13 +46,13 @@ const PolicyVersionConfigSchema = z
                 value: Code,
                 action: z.string(),
               })
-              .passthrough(),
+              .loose(),
           ),
         })
-        .passthrough(),
+        .loose(),
     ),
   })
-  .passthrough();
+  .loose();
 
 const PROCESSORS_BY_PIPELINE: Readonly<Record<string, readonly string[]>> = {
   traces: [
@@ -143,8 +143,7 @@ function hasExpectedProcessors(
   const expected = PROCESSORS_BY_PIPELINE[pipelineName];
   return (
     expected !== undefined &&
-    actual !== undefined &&
-    actual.length === expected.length &&
+    actual?.length === expected.length &&
     actual.every((processor, index) => processor === expected[index] && definitions.has(processor))
   );
 }
@@ -157,6 +156,92 @@ function matchesExporter(exporters: readonly string[], expected: string): boolea
 
 function reportUnsafeSink(sink: SinkPolicy, logger: Pick<Logger, "info">): void {
   logger.info(Code.parse("telemetry_content_sink_enabled"), { sink_id: sink.id });
+}
+
+interface CollectorPolicy {
+  readonly processorDefinitions: ReadonlySet<string>;
+  readonly pipelines: Record<string, z.infer<typeof CollectorPipelineSchema>> | undefined;
+}
+
+async function loadCollectorPolicy(directory: string): Promise<CollectorPolicy> {
+  const [base, allowlist, versionConfig] = await Promise.all([
+    readCollectorConfig(directory, "base.yaml", CollectorConfigSchema),
+    readCollectorConfig(directory, "allowlist.generated.yaml", CollectorConfigSchema),
+    readCollectorConfig(directory, "policy-version.generated.yaml", PolicyVersionConfigSchema),
+  ]);
+  const versionAttributes = versionConfig.processors["resource/policy_version"]?.attributes;
+  if (
+    versionAttributes?.some(
+      ({ key, value, action }) =>
+        key === "harness.policy.version" && value === POLICY_VERSION && action === "upsert",
+    ) !== true
+  ) {
+    throw new SinkPolicyError("sink_policy_version_mismatch");
+  }
+  return {
+    processorDefinitions: new Set([
+      ...Object.keys(base.processors ?? {}),
+      ...Object.keys(allowlist.processors ?? {}),
+      ...Object.keys(versionConfig.processors),
+    ]),
+    pipelines: allowlist.service?.pipelines,
+  };
+}
+
+function assertProfilePipelines(
+  sink: SinkPolicy,
+  profile: (typeof PROFILE_BY_KIND)[SinkPolicy["kind"]],
+  collectorProfile: z.infer<typeof CollectorConfigSchema>,
+  collectorPolicy: CollectorPolicy,
+): void {
+  const exporters = collectorProfile.exporters;
+  const pipelines = collectorProfile.service?.pipelines;
+  if (
+    !isRecord(exporters) ||
+    !Object.keys(exporters).some((exporter) => matchesExporter([exporter], profile.exporter)) ||
+    pipelines === undefined
+  ) {
+    throw new SinkPolicyError("sink_policy_violation", sink.id);
+  }
+
+  const matchingPipelines = Object.entries(pipelines).filter(([, pipeline]) =>
+    matchesExporter(pipeline.exporters ?? [], profile.exporter),
+  );
+  if (matchingPipelines.length === 0) {
+    throw new SinkPolicyError("sink_policy_violation", sink.id);
+  }
+  for (const [pipelineName, pipeline] of matchingPipelines) {
+    if (
+      !hasExpectedProcessors(
+        pipelineName,
+        collectorPolicy.pipelines?.[pipelineName]?.processors,
+        collectorPolicy.processorDefinitions,
+      ) ||
+      (pipeline.processors !== undefined &&
+        !hasExpectedProcessors(
+          pipelineName,
+          pipeline.processors,
+          collectorPolicy.processorDefinitions,
+        ))
+    ) {
+      throw new SinkPolicyError("sink_policy_violation", sink.id);
+    }
+  }
+}
+
+async function assertSinkProfile(
+  sink: SinkPolicy,
+  directory: string,
+  collectorPolicy: CollectorPolicy,
+): Promise<void> {
+  const profile = PROFILE_BY_KIND[sink.kind];
+  const collectorProfile = await readCollectorConfig(
+    directory,
+    profile.file,
+    CollectorConfigSchema,
+    sink.id,
+  );
+  assertProfilePipelines(sink, profile, collectorProfile, collectorPolicy);
 }
 
 /**
@@ -176,96 +261,20 @@ export async function assertSinkPolicies(
       ? config
       : (config.telemetry ?? TelemetryConfigSchema.parse({}));
   const sinks = telemetry.sinks.filter(({ enabled }) => enabled);
-  for (const sink of sinks) {
-    if (
-      sink.maxClassification === "content_tokenized" &&
-      telemetry.unsafe.allowContentSinks !== true
-    ) {
-      throw new SinkPolicyError("content_sink_forbidden", sink.id);
-    }
+  const unsafeSinks = sinks.filter(({ maxClassification }) => maxClassification === "content_tokenized");
+  const firstUnsafeSink = unsafeSinks.at(0);
+  if (!telemetry.unsafe.allowContentSinks && firstUnsafeSink !== undefined) {
+    throw new SinkPolicyError("content_sink_forbidden", firstUnsafeSink.id);
   }
   if (sinks.length === 0) {
     return;
   }
 
-  const [base, allowlist, versionConfig] = await Promise.all([
-    readCollectorConfig(options.collectorConfigDir, "base.yaml", CollectorConfigSchema),
-    readCollectorConfig(
-      options.collectorConfigDir,
-      "allowlist.generated.yaml",
-      CollectorConfigSchema,
-    ),
-    readCollectorConfig(
-      options.collectorConfigDir,
-      "policy-version.generated.yaml",
-      PolicyVersionConfigSchema,
-    ),
-  ]);
-  const versionAttributes = versionConfig.processors["resource/policy_version"]?.attributes;
-  if (
-    versionAttributes?.some(
-      ({ key, value, action }) =>
-        key === "harness.policy.version" && value === POLICY_VERSION && action === "upsert",
-    ) !== true
-  ) {
-    throw new SinkPolicyError("sink_policy_version_mismatch");
-  }
-
-  const baseProcessors = Object.keys(base.processors ?? {});
-  const allowlistProcessors = Object.keys(allowlist.processors ?? {});
-  const versionProcessors = Object.keys(versionConfig.processors);
-  const processorDefinitions = new Set([
-    ...baseProcessors,
-    ...allowlistProcessors,
-    ...versionProcessors,
-  ]);
-  const allowlistPipelines = allowlist.service?.pipelines;
+  const collectorPolicy = await loadCollectorPolicy(options.collectorConfigDir);
   const logger = options.logger ?? createLogger();
 
   for (const sink of sinks) {
-    const profile = PROFILE_BY_KIND[sink.kind];
-    if (profile === undefined) {
-      throw new SinkPolicyError("sink_policy_violation", sink.id);
-    }
-    const collectorProfile = await readCollectorConfig(
-      options.collectorConfigDir,
-      profile.file,
-      CollectorConfigSchema,
-      sink.id,
-    );
-    const exporters = collectorProfile.exporters;
-    const pipelines = collectorProfile.service?.pipelines;
-    if (
-      !isRecord(exporters) ||
-      !Object.keys(exporters).some((exporter) =>
-        matchesExporter([exporter], profile.exporter),
-      ) ||
-      pipelines === undefined
-    ) {
-      throw new SinkPolicyError("sink_policy_violation", sink.id);
-    }
-
-    const matchingPipelines = Object.entries(pipelines).filter(([, pipeline]) =>
-      matchesExporter(pipeline.exporters ?? [], profile.exporter),
-    );
-    if (matchingPipelines.length === 0) {
-      throw new SinkPolicyError("sink_policy_violation", sink.id);
-    }
-    for (const [pipelineName, pipeline] of matchingPipelines) {
-      const generatedPipeline = allowlistPipelines?.[pipelineName];
-      if (
-        generatedPipeline === undefined ||
-        !hasExpectedProcessors(
-          pipelineName,
-          generatedPipeline.processors,
-          processorDefinitions,
-        ) ||
-        (pipeline.processors !== undefined &&
-          !hasExpectedProcessors(pipelineName, pipeline.processors, processorDefinitions))
-      ) {
-        throw new SinkPolicyError("sink_policy_violation", sink.id);
-      }
-    }
+    await assertSinkProfile(sink, options.collectorConfigDir, collectorPolicy);
     if (sink.maxClassification === "content_tokenized") {
       reportUnsafeSink(sink, logger);
     }
