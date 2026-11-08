@@ -56,19 +56,23 @@ describe("evaluatePiiReport", () => {
     );
     expect(report.sampleCount).toBe(67);
     expect(report.passed).toBe(true);
-    for (const [entityType, result] of Object.entries(report.entities)) {
-      if (entityType === "person_name" || entityType === "location") {
-        expect(result.exact.precision).toBeNull();
-        expect(result.exact.recall).toBe(0);
-      } else {
-        expect(result.exact).toMatchObject({
-          falsePositive: 0,
-          falseNegative: 0,
-          precision: 1,
-          recall: 1,
-          f1: 1,
-        });
-      }
+    const regexOnlyExcluded = new Set(["person_name", "location"]);
+    for (const entityType of regexOnlyExcluded) {
+      expect(report.entities[entityType]?.exact.precision).toBeNull();
+      expect(report.entities[entityType]?.exact.recall).toBe(0);
+    }
+    for (const [, result] of Object.entries(report.entities).filter(
+      ([entityType]) => !regexOnlyExcluded.has(entityType),
+    )) {
+      expect(result.exact).toMatchObject({
+        falsePositive: 0,
+        falseNegative: 0,
+        precision: 1,
+        recall: 1,
+        f1: 1,
+      });
+    }
+    for (const result of Object.values(report.entities)) {
       expect(result.iou50).toEqual(result.exact);
     }
     expect(report.entities.api_key?.exact.truePositive).toBe(5);
