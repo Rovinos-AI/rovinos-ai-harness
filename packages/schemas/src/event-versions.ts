@@ -58,7 +58,7 @@ export const UPCASTERS: EventUpcasterMap = {
     1: costPayloadV1ToV2,
   },
   subagent_completed: {
-    1: costPayloadV1ToV2,
+    1: subagentCompletedV1ToV2,
   },
   tool_result: {
     1: toolResultV1ToV2,
@@ -117,11 +117,50 @@ function costPayloadV1ToV2(payload: unknown): unknown {
   }
   return {
     ...remaining,
-    cost:
-      typeof costMicros === "number" && Number.isSafeInteger(costMicros) && costMicros >= 0
-        ? { version: 1, state: "estimated", amountMicros: costMicros }
-        : { version: 1, state: "unknown" },
+    cost: legacyCostValue(costMicros),
   };
+}
+
+function legacyCostValue(costMicros: unknown): unknown {
+  return typeof costMicros === "number" && Number.isSafeInteger(costMicros) && costMicros >= 0
+    ? { version: 1, state: "estimated", amountMicros: costMicros }
+    : { version: 1, state: "unknown" };
+}
+
+/** Recasts a legacy child total into the complete run-total representation. */
+function subagentCompletedV1ToV2(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+  const { costMicros, ...remaining } = payload;
+  if (Object.hasOwn(payload, "cost")) {
+    return remaining;
+  }
+  const cost =
+    typeof costMicros === "number" && Number.isSafeInteger(costMicros) && costMicros >= 0
+      ? {
+          version: 1,
+          state: "estimated",
+          knownMicros: 0,
+          estimatedMicros: costMicros,
+          partialMicros: 0,
+          knownCount: 0,
+          estimatedCount: 1,
+          partialCount: 0,
+          unknownCount: 0,
+        }
+      : {
+          version: 1,
+          state: "unknown",
+          knownMicros: 0,
+          estimatedMicros: 0,
+          partialMicros: 0,
+          knownCount: 0,
+          estimatedCount: 0,
+          partialCount: 0,
+          unknownCount: 1,
+        };
+  return { ...remaining, cost };
 }
 
 /** Raw event envelope schema; payload keys are validated by the current strict schema after upcasting. */

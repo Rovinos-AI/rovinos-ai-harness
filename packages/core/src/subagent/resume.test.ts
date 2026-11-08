@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EventSchema, Id, RunConfigSchema, type Event } from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL, EventSchema, Id, RunConfigSchema, type Event } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelToolCall, ToolPort } from "../ports.js";
@@ -298,7 +298,7 @@ describe("recoverSubagentSpawn", () => {
         childRunId,
         status: "completed",
         value: { text: "resumed" },
-        usage: { inputTokens: 2, outputTokens: 3 },
+        usage: { inputTokens: 2, outputTokens: 3, cost: EMPTY_COST_TOTAL },
       };
     });
 
@@ -354,7 +354,7 @@ describe("recoverSubagentSpawn", () => {
         childRunId,
         status: "completed",
         value: { text: "recovered" },
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       };
     });
 
@@ -374,7 +374,7 @@ describe("recoverSubagentSpawn", () => {
       Promise.resolve({
         childRunId,
         status: "suspended",
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       });
 
     await expect(

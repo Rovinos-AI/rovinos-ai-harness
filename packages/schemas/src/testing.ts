@@ -181,7 +181,17 @@ export const eventSamples = [
     outcome: "completed",
     inputTokens: 3,
     outputTokens: 2,
-    cost: { version: 1, state: "estimated", amountMicros: 1 },
+    cost: {
+      version: 1,
+      state: "estimated",
+      knownMicros: 0,
+      estimatedMicros: 1,
+      partialMicros: 0,
+      knownCount: 0,
+      estimatedCount: 1,
+      partialCount: 0,
+      unknownCount: 0,
+    },
   },
 ] satisfies Event[];
 

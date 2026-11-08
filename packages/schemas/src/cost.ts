@@ -32,6 +32,23 @@ export const CostValueSchema = z.discriminatedUnion("state", [
 /** Inferred versioned cost value. */
 export type CostValue = z.infer<typeof CostValueSchema>;
 
+/** Resolves normalized usage to an explicit cost, treating omitted amounts as unknown. */
+export function costValueFromUsage(usage: {
+  readonly cost?: CostValue | undefined;
+  readonly costMicros?: number | undefined;
+  readonly usageComplete?: boolean | undefined;
+}): CostValue {
+  const cost =
+    usage.cost ??
+    (usage.costMicros === undefined
+      ? { version: 1 as const, state: "unknown" as const }
+      : { version: 1 as const, state: "known" as const, amountMicros: usage.costMicros });
+  if (usage.usageComplete !== false || cost.state === "unknown" || cost.state === "partial") {
+    return cost;
+  }
+  return { version: 1, state: "partial", amountMicros: cost.amountMicros };
+}
+
 const costTotalFields = {
   version: z.literal(1),
   state: z.enum(["known", "estimated", "partial", "unknown"]),
@@ -139,4 +156,26 @@ export function combineCostTotals(left: CostTotal, right: CostTotal): CostTotal 
     unknownCount: checkedSum(left.unknownCount, right.unknownCount),
   };
   return CostTotalSchema.parse({ ...total, state: totalState(total) });
+}
+
+/** Combines costs from retries or fallbacks without treating missing amounts as zero. */
+export function combineCostValues(left: CostValue, right: CostValue): CostValue {
+  const total = combineCostTotals(
+    addCostValue(EMPTY_COST_TOTAL, left),
+    addCostValue(EMPTY_COST_TOTAL, right),
+  );
+  if (total.state === "unknown") {
+    return { version: 1, state: "unknown" };
+  }
+  const amountMicros = checkedSum(
+    checkedSum(total.knownMicros, total.estimatedMicros),
+    total.partialMicros,
+  );
+  if (total.state === "partial") {
+    return { version: 1, state: "partial", amountMicros };
+  }
+  if (total.state === "estimated") {
+    return { version: 1, state: "estimated", amountMicros };
+  }
+  return { version: 1, state: "known", amountMicros };
 }

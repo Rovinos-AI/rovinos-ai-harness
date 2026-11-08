@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelRef, ModelUsage } from "@rovinos/schemas";
+import {
+  combineCostValues,
+  costValueFromUsage,
+  type ModelRef,
+  type ModelUsage,
+} from "@rovinos/schemas";
 import { countModelUsage, setActiveSpanAttribute } from "@rovinos/telemetry";
 
 function aggregateOptionalTokens(
@@ -25,11 +30,24 @@ export function aggregateModelUsage(
     previous?.cacheWriteTokens,
     next.cacheWriteTokens,
   );
+  const usageComplete =
+    previous?.usageComplete === false || next.usageComplete === false
+      ? false
+      : previous?.usageComplete === true || next.usageComplete === true
+        ? true
+        : undefined;
+  const cost =
+    previous === undefined
+      ? costValueFromUsage(next)
+      : combineCostValues(costValueFromUsage(previous), costValueFromUsage(next));
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
     ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
     ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+    ...(usageComplete === undefined ? {} : { usageComplete }),
+    ...(cost.state === "unknown" ? {} : { costMicros: cost.amountMicros }),
+    cost,
   };
 }
 

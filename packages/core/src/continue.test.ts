@@ -558,7 +558,7 @@ describe("inherited continuation budgets", () => {
         model: "test",
         inputTokens: 2,
         outputTokens: 3,
-        costMicros: 300,
+        cost: { version: 1, state: "estimated", amountMicros: 300 },
         finishReason: "stop",
         latencyMs: 1,
         schemaValid: true,

@@ -232,17 +232,17 @@ describe("production subagent runtime", () => {
           inputTokens,
           outputTokens,
           steps,
-          costMicros,
+          cost,
         }) => {
           await parentRecorder.record({
             type: "subagent_completed",
-            v: 1,
+            v: 2,
             childRunId,
             outcome,
             inputTokens,
             outputTokens,
             ...(steps === undefined ? {} : { steps }),
-            ...(costMicros === undefined ? {} : { costMicros }),
+            cost,
           });
         },
       };

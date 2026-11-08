@@ -90,6 +90,9 @@ export function mapVertexResponse(options: {
     usage: {
       inputTokens: usage?.promptTokenCount ?? 0,
       outputTokens: (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0),
+      ...(usage?.promptTokenCount === undefined || usage?.candidatesTokenCount === undefined
+        ? { usageComplete: false }
+        : {}),
       ...(usage?.cachedContentTokenCount === undefined
         ? {}
         : { cacheReadTokens: usage.cachedContentTokenCount }),

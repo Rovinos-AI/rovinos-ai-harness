@@ -19,6 +19,7 @@ describe("readPostgresUsageLedger", () => {
       readonly period: UsageLedgerPeriod;
       readonly period_start: string;
       readonly cost_micros: string;
+      readonly unknown_cost_count: string;
       readonly runs_started: string;
     }[] = [
       {
@@ -26,6 +27,7 @@ describe("readPostgresUsageLedger", () => {
         period: "hour",
         period_start: "3",
         cost_micros: "17",
+        unknown_cost_count: "0",
         runs_started: "2",
       },
     ];
@@ -39,7 +41,9 @@ describe("readPostgresUsageLedger", () => {
         period,
         periodStarts: [3],
       }),
-    ).resolves.toEqual([{ quotaId, period, periodStart: 3, costMicros: 17, runsStarted: 2 }]);
+    ).resolves.toEqual([
+      { quotaId, period, periodStart: 3, costMicros: 17, unknownCostCount: 0, runsStarted: 2 },
+    ]);
     expect(ensureInitialized).toHaveBeenCalledOnce();
     expect(query).toHaveBeenCalledWith(quotaId, period, [3]);
   });
@@ -78,7 +82,14 @@ describe("readPostgresUsageLedger", () => {
 describe("queryPostgresUsageLedger", () => {
   it("selects the quota's rows for the requested period starts", async () => {
     const rows = [
-      { quota_id: "analysts", period, period_start: "3", cost_micros: "17", runs_started: "2" },
+      {
+        quota_id: "analysts",
+        period,
+        period_start: "3",
+        cost_micros: "17",
+        unknown_cost_count: "0",
+        runs_started: "2",
+      },
     ];
     const query = vi.fn((_text: string, _values: readonly unknown[]) => Promise.resolve({ rows }));
 

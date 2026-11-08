@@ -113,6 +113,20 @@ export function createPricingAccountant(
         missingPriceModels.add(key);
         onMissingPrice(model);
       }
+      const reportedCost =
+        usage.cost !== undefined
+          ? usage.cost
+          : usage.costMicros === undefined
+            ? { version: 1 as const, state: "unknown" as const }
+            : { version: 1 as const, state: "known" as const, amountMicros: usage.costMicros };
+      const cost =
+        usage.usageComplete === false && reportedCost.state !== "unknown"
+          ? {
+              version: 1 as const,
+              state: "partial" as const,
+              amountMicros: reportedCost.amountMicros,
+            }
+          : reportedCost;
       return {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
@@ -120,6 +134,9 @@ export function createPricingAccountant(
         ...(usage.cacheWriteTokens === undefined
           ? {}
           : { cacheWriteTokens: usage.cacheWriteTokens }),
+        cost,
+        ...(cost.state === "unknown" ? {} : { costMicros: cost.amountMicros }),
+        ...(usage.usageComplete === undefined ? {} : { usageComplete: usage.usageComplete }),
       };
     }
     const cacheReadMissing =
@@ -131,6 +148,16 @@ export function createPricingAccountant(
       usage.cacheWriteTokens > 0 &&
       rate.cacheWriteMicrosPerMTok === undefined;
     const costMicros = calculateCostMicros(usage, rate);
+    if (costMicros === undefined) {
+      throw new ModelUsageError();
+    }
+    const cost = {
+      version: 1 as const,
+      state: cacheReadMissing || cacheWriteMissing || usage.usageComplete === false
+        ? ("partial" as const)
+        : ("estimated" as const),
+      amountMicros: costMicros,
+    };
     const key = `${model.provider}/${model.model}`;
     if ((cacheReadMissing || cacheWriteMissing) && !missingCachePriceModels.has(key)) {
       missingCachePriceModels.add(key);
@@ -142,6 +169,8 @@ export function createPricingAccountant(
       ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
       ...(usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens }),
       costMicros,
+      cost,
+      ...(usage.usageComplete === undefined ? {} : { usageComplete: usage.usageComplete }),
     };
   };
 }

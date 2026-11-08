@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Principal, type QuotaConfig } from "@rovinos/schemas";
+import {
+  HarnessError,
+  type Code,
+  type CostValue,
+  type Principal,
+  type QuotaConfig,
+} from "@rovinos/schemas";
 import { type EventStore, type UsageLedgerDelta, type UsageLedgerPeriod } from "@rovinos/store";
 import { countQuotaRejection } from "@rovinos/telemetry";
 import type { Clock } from "./recorder.js";
@@ -104,12 +110,11 @@ export class QuotaService {
   }
 
   /** Return cost increments to commit atomically with a model_response event. */
-  usageUpdatesForCost(identity: QuotaIdentity, costMicros: number | undefined): UsageLedgerDelta[] {
-    if (costMicros === undefined || costMicros === 0) {
+  usageUpdatesForCost(identity: QuotaIdentity, cost: CostValue): UsageLedgerDelta[] {
+    const costMicros = cost.state === "unknown" ? 0 : cost.amountMicros;
+    const unknownCostCount = cost.state === "unknown" || cost.state === "partial" ? 1 : 0;
+    if (costMicros === 0 && unknownCostCount === 0) {
       return [];
-    }
-    if (!Number.isSafeInteger(costMicros) || costMicros < 0) {
-      throw new RangeError("Model cost must be a nonnegative safe integer.");
     }
     const now = this.clock.now();
     const updates: UsageLedgerDelta[] = [];
@@ -120,6 +125,7 @@ export class QuotaService {
           period: "day",
           periodStart: periodStart(now, "day"),
           costMicros,
+          unknownCostCount,
           runsStarted: 0,
         });
       }
@@ -129,6 +135,7 @@ export class QuotaService {
           period: "month",
           periodStart: periodStart(now, "month"),
           costMicros,
+          unknownCostCount,
           runsStarted: 0,
         });
       }
@@ -150,6 +157,16 @@ export class QuotaService {
         const windowStart = periodStart(this.clock.now(), period);
         const [usage] = await this.store.readUsageLedger(quota.id, period, [windowStart]);
         const observed = usage?.costMicros ?? 0;
+        if ((usage?.unknownCostCount ?? 0) > 0) {
+          this.recordRejection(quota.id);
+          return {
+            ok: false,
+            budget: "quota",
+            limit,
+            observed,
+            code: "quota_cost_unknown",
+          };
+        }
         if (observed >= limit) {
           this.recordRejection(quota.id);
           return { ok: false, budget: "quota", limit, observed };
@@ -188,7 +205,10 @@ export class QuotaService {
     }
     const start = periodStart(this.clock.now(), period);
     const [usage] = await this.store.readUsageLedger(quota.id, period, [start]);
-    return (usage?.costMicros ?? 0) >= costLimitMicros(amountUsd);
+    return (
+      (usage?.unknownCostCount ?? 0) > 0 ||
+      (usage?.costMicros ?? 0) >= costLimitMicros(amountUsd)
+    );
   }
 
   private reject(quotaId: Code): never {

@@ -376,7 +376,7 @@ function projectSubagentCompleted(
     outcome: event.outcome,
     inputTokens: event.inputTokens,
     outputTokens: event.outputTokens,
-    ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
+    costState: event.cost.state,
   });
 }
 

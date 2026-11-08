@@ -107,6 +107,7 @@ export const ModelUsageSchema = z
     cacheWriteTokens: z.number().int().nonnegative().optional(),
     costMicros: z.number().int().nonnegative().optional(),
     cost: CostValueSchema.optional(),
+    usageComplete: z.boolean().optional(),
   })
   .strict();
 

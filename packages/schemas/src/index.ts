@@ -10,9 +10,11 @@ export {
 } from "./parse.js";
 export {
   addCostValue,
+  combineCostValues,
   combineCostTotals,
   CostTotalSchema,
   CostValueSchema,
+  costValueFromUsage,
   EMPTY_COST_TOTAL,
   type CostTotal,
   type CostValue,

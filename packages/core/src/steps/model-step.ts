@@ -2,14 +2,17 @@
 import {
   APP_TELEMETRY_TOOL_NAME,
   Code,
+  costValueFromUsage,
   HarnessError,
   JsonValue as JsonValueSchema,
   ModelRequestSchema,
   ModelUsageSchema,
   type Event,
+  type CostValue,
   type Id,
   type Message,
   type ModelRequest,
+  type RunConfig,
   type ToolSpec,
 } from "@rovinos/schemas";
 import {
@@ -60,7 +63,8 @@ export interface ModelStepOptions {
   /** Omits a run-failure status event when a model request is nested in a tool. */
   readonly failureMode?: "tool";
   readonly valueTransform?: ValueTransform;
-  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
+  readonly usageUpdatesForCost?: (cost: CostValue) => readonly UsageLedgerDelta[];
+  readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
   readonly includeTools?: boolean;
   readonly contextMetadata: {
     readonly strategyId: Code;
@@ -240,9 +244,18 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       );
       completion = prepared.completion;
       const structuredValue = tokenizedStructuredValue(completion);
+      const cost = costValueFromUsage(completion.usage);
       const response = await options.recorder.record(
-        responsePayload(requestId, completion, structuredValue),
-        options.usageUpdatesForCost?.(completion.usage.costMicros),
+        responsePayload(
+          requestId,
+          completion,
+          structuredValue,
+          options.unknownCostPolicy === "allow" &&
+            (cost.state === "unknown" || cost.state === "partial")
+            ? "budget_cost_unknown_allowed"
+            : undefined,
+        ),
+        options.usageUpdatesForCost?.(cost),
       );
       recorded.push(response);
       result = {
@@ -281,13 +294,13 @@ async function recordModelFailure({
       const response = await options.recorder.record(
         {
           type: "model_response",
-          v: 1,
+          v: 2,
           requestId,
           provider: options.provider ?? "unknown",
           model: options.modelName ?? "unknown",
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
-          ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+          cost: costValueFromUsage(usage),
           finishReason: "invalid_output",
           latencyMs: readFailureCount(error, "latencyMs"),
           schemaValid: false,
@@ -296,7 +309,7 @@ async function recordModelFailure({
           content: [],
           providerBlobs: null,
         },
-        options.usageUpdatesForCost?.(usage.costMicros),
+        options.usageUpdatesForCost?.(costValueFromUsage(usage)),
       );
       recorded.push(response);
     }
@@ -327,10 +340,11 @@ function responsePayload(
   requestId: Id,
   completion: ModelCompletion,
   structuredValue: ModelCompletion["providerBlobs"] | undefined,
+  costWarningCode: Code | undefined,
 ): EventPartial {
   return {
     type: "model_response",
-    v: 1,
+    v: 2,
     requestId,
     provider: completion.provider,
     model: completion.model,
@@ -342,9 +356,8 @@ function responsePayload(
     ...(completion.usage.cacheWriteTokens === undefined
       ? {}
       : { cacheWriteTokens: completion.usage.cacheWriteTokens }),
-    ...(completion.usage.costMicros === undefined
-      ? {}
-      : { costMicros: completion.usage.costMicros }),
+    cost: costValueFromUsage(completion.usage),
+    ...(costWarningCode === undefined ? {} : { costWarningCode }),
     finishReason: completion.finishReason,
     latencyMs: completion.latencyMs,
     schemaValid: completion.schemaValid,

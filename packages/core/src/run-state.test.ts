@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
-import { HarnessError, type Event, type RunStatus } from "@rovinos/schemas";
+import {
+  EMPTY_COST_TOTAL,
+  HarnessError,
+  type Event,
+  type RunStatus,
+} from "@rovinos/schemas";
 import type { Plan } from "@rovinos/context";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
 import { planLastModelResponseRecovery } from "./run-state.js";
@@ -126,6 +131,7 @@ function modelResponse(
   return {
     ...envelope(seq, ts, currentSegmentId),
     type: "model_response",
+    v: 2,
     requestId: id,
     provider: "test",
     model: "test",
@@ -138,7 +144,10 @@ function modelResponse(
     fallbackDepth: 0,
     content: [],
     providerBlobs: [],
-    ...(costMicros === undefined ? {} : { costMicros }),
+    cost:
+      costMicros === undefined
+        ? { version: 1, state: "unknown" }
+        : { version: 1, state: "estimated", amountMicros: costMicros },
   };
 }
 
@@ -440,7 +449,7 @@ describe("foldRunState", () => {
     expect(state.approvalRequests.size).toBe(1);
     expect(state.resolvedApprovals.size).toBe(1);
     expect(state.steps).toBe(1);
-    expect(state.usage).toEqual({ inputTokens: 3, outputTokens: 5, costMicros: 0 });
+    expect(state.usage).toMatchObject({ inputTokens: 3, outputTokens: 5, costMicros: 0 });
     expect(state.lastCheckpoint).toEqual({ checkpointId: id, atSeq: 3 });
     expect(state.segmentId).toBe(id);
     expect(state.lastTs).toBe(5);
@@ -456,12 +465,25 @@ describe("foldRunState", () => {
     ) => ({
       ...envelope(seq),
       type: "subagent_completed" as const,
+      v: 2,
       childRunId: otherRunId,
       outcome: "completed" as const,
       inputTokens,
       outputTokens,
       steps,
-      ...(costMicros === undefined ? {} : { costMicros }),
+      cost:
+        costMicros === undefined
+          ? {
+              ...EMPTY_COST_TOTAL,
+              state: "unknown" as const,
+              unknownCount: 1,
+            }
+          : {
+              ...EMPTY_COST_TOTAL,
+              state: "estimated" as const,
+              estimatedMicros: costMicros,
+              estimatedCount: 1,
+            },
     });
     const state = foldRunState([
       runCreated(0),
@@ -470,7 +492,7 @@ describe("foldRunState", () => {
       completed(3, 7, 8, 3),
     ]);
 
-    expect(state.usage).toEqual({ inputTokens: 13, outputTokens: 17, costMicros: 7 });
+    expect(state.usage).toMatchObject({ inputTokens: 13, outputTokens: 17, costMicros: 7 });
     expect(state.steps).toBe(6);
   });
 
@@ -482,6 +504,7 @@ describe("foldRunState", () => {
       {
         ...envelope(3, 115),
         type: "context_compacted",
+        v: 2,
         fromSeq: 1,
         toSeq: 2,
         strategy: "summarizing",
@@ -489,14 +512,14 @@ describe("foldRunState", () => {
         summary: "summary",
         inputTokens: 7,
         outputTokens: 2,
-        costMicros: 9,
+        cost: { version: 1, state: "estimated", amountMicros: 9 },
       },
       statusChanged(4, "running", "suspended", "shutdown", 120),
       statusChanged(5, "suspended", "running", "resume", 320, resumedSegmentId),
       modelResponse(6, undefined, 330, resumedSegmentId),
     ]);
 
-    expect(state.usage).toEqual({ inputTokens: 13, outputTokens: 12, costMicros: 13 });
+    expect(state.usage).toMatchObject({ inputTokens: 13, outputTokens: 12, costMicros: 13 });
     expect(state.steps).toBe(2);
     expect(state.startedAt).toBe(100);
     expect(state.suspendedTimeMs).toBe(200);

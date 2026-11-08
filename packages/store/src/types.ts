@@ -16,6 +16,7 @@ export const UsageLedgerDeltaSchema = z
     period: UsageLedgerPeriodSchema,
     periodStart: z.number().int().nonnegative(),
     costMicros: z.number().int().nonnegative(),
+    unknownCostCount: z.number().int().nonnegative().optional(),
     runsStarted: z.number().int().nonnegative(),
     maxRunsStarted: z.number().int().positive().optional(),
   })
@@ -31,6 +32,7 @@ export const UsageLedgerRowSchema = z
     period: UsageLedgerPeriodSchema,
     periodStart: z.number().int().nonnegative(),
     costMicros: z.number().int().nonnegative(),
+    unknownCostCount: z.number().int().nonnegative().default(0),
     runsStarted: z.number().int().nonnegative(),
   })
   .strict();
@@ -70,6 +72,8 @@ export function parseUsageLedgerDeltas(input: unknown): UsageLedgerDelta[] {
         period: delta.period,
         periodStart: delta.periodStart,
         costMicros: (previous?.costMicros ?? 0) + delta.costMicros,
+        unknownCostCount:
+          (previous?.unknownCostCount ?? 0) + (delta.unknownCostCount ?? 0),
         runsStarted: (previous?.runsStarted ?? 0) + delta.runsStarted,
         ...(maxRunsStarted === undefined ? {} : { maxRunsStarted }),
       }),

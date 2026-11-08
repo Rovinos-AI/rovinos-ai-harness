@@ -35,7 +35,7 @@ function modelResponse(runId: Id, costMicros: number): NewEvent {
   return {
     runId,
     ts: 2,
-    v: 1,
+    v: 2,
     traceId: "a".repeat(32),
     spanId: "b".repeat(16),
     segmentId: runId,
@@ -45,7 +45,7 @@ function modelResponse(runId: Id, costMicros: number): NewEvent {
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
-    costMicros,
+    cost: { version: 1, state: "known", amountMicros: costMicros },
     finishReason: "stop",
     latencyMs: 1,
     schemaValid: true,
@@ -128,7 +128,14 @@ it("commits usage with model responses and enforces hourly starts under concurre
       ],
     });
     await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
-      { quotaId: "daily", period: "day", periodStart: 0, costMicros: 700, runsStarted: 0 },
+      {
+        quotaId: "daily",
+        period: "day",
+        periodStart: 0,
+        costMicros: 700,
+        unknownCostCount: 0,
+        runsStarted: 0,
+      },
     ]);
 
     const runIds = Array.from({ length: 10 }, (_, index) =>
@@ -158,7 +165,14 @@ it("commits usage with model responses and enforces hourly starts under concurre
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
     expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
     await expect(store.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
-      { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
+      {
+        quotaId: "hourly",
+        period: "hour",
+        periodStart: 3_600_000,
+        costMicros: 0,
+        unknownCostCount: 0,
+        runsStarted: 5,
+      },
     ]);
     const rejectedRunIds = results.flatMap((result, index) =>
       result.status === "rejected" ? [runIds[index]] : [],

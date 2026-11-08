@@ -89,6 +89,42 @@ describe("model pricing", () => {
     expect(calculateCostMicros({ inputTokens: 100, outputTokens: 50 }, undefined)).toBeUndefined();
   });
 
+  it("reports missing prices as unknown and zero-token priced usage as estimated zero", () => {
+    const model = { provider: "sample", model: "model-a" };
+    const missingPrice = createPricingAccountant(undefined, vi.fn())(model, {
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    const zeroUsage = createPricingAccountant(
+      { "sample/model-a": { inputMicrosPerMTok: 100, outputMicrosPerMTok: 200 } },
+      vi.fn(),
+    )(model, { inputTokens: 0, outputTokens: 0 });
+
+    expect(missingPrice.cost).toEqual({ version: 1, state: "unknown" });
+    expect(zeroUsage).toMatchObject({
+      costMicros: 0,
+      cost: { version: 1, state: "estimated", amountMicros: 0 },
+    });
+  });
+
+  it("marks incomplete usage as partial while preserving its known subtotal", () => {
+    const account = createPricingAccountant(
+      { "sample/model-a": { inputMicrosPerMTok: 100, outputMicrosPerMTok: 200 } },
+      vi.fn(),
+    );
+
+    expect(
+      account({ provider: "sample", model: "model-a" }, {
+        inputTokens: 10_000,
+        outputTokens: 0,
+        usageComplete: false,
+      }),
+    ).toMatchObject({
+      costMicros: 1,
+      cost: { version: 1, state: "partial", amountMicros: 1 },
+    });
+  });
+
   it("prices cached reads and writes independently from uncached input", () => {
     expect(
       calculateCostMicros(
@@ -122,6 +158,7 @@ describe("model pricing", () => {
     expect(account({ provider: "sample", model: "model-a" }, usage)).toEqual({
       ...usage,
       costMicros: 1,
+      cost: { version: 1, state: "partial", amountMicros: 1 },
     });
     account({ provider: "sample", model: "model-a" }, usage);
 

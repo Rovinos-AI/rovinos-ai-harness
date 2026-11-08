@@ -18,7 +18,10 @@ import type { Clock, RunRecorder } from "./recorder.js";
 import { withRunStartup } from "./run-startup.js";
 import { type ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
-import { preflightModelBudget } from "./steps/model-preflight.js";
+import {
+  preflightModelBudget,
+  recordBudgetFailureAndCheckpoint,
+} from "./steps/model-preflight.js";
 import { suspendedOutcome } from "./steps/suspended-outcome.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type {
@@ -251,8 +254,21 @@ async function runLoopSteps(
       },
       goal: options.goal,
       deadlineTs: preflight.deadlineTs,
+      unknownCostPolicy: options.budgets.unknownCostPolicy,
       ...quotaHooks,
     });
+    const compactionBudget = execution.budgetTracker.checkWithOpenChildren(
+      events,
+      options.clock.now(),
+    );
+    if (!compactionBudget.ok) {
+      return recordBudgetFailureAndCheckpoint(
+        options.recorder,
+        events,
+        compactionBudget,
+        execution.checkpointer,
+      );
+    }
     const prepared = await prepareModelStep(options, events, execution);
     if (prepared.event !== undefined) {
       return prepared.event;
@@ -271,6 +287,7 @@ async function runLoopSteps(
         ...(options.role === undefined ? {} : { role: options.role }),
         ...(options.provider === undefined ? {} : { provider: options.provider }),
         ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+        unknownCostPolicy: options.budgets.unknownCostPolicy,
         ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
         ...quotaHooks,
       },
@@ -295,6 +312,15 @@ async function finishModelStep(
   execution: RunLoopExecution,
   modelResult: ModelStepResult,
 ): Promise<Event | undefined> {
+  const costBudget = execution.budgetTracker.checkWithOpenChildren(events, options.clock.now());
+  if (!costBudget.ok && (costBudget.code === "budget_cost_unknown" || modelResult.preparedCalls.length > 0)) {
+    return recordBudgetFailureAndCheckpoint(
+      options.recorder,
+      events,
+      costBudget,
+      execution.checkpointer,
+    );
+  }
   const stepState = await checkpointAfterStep(execution.checkpointer, events);
   if (stepState.status === "suspended" || modelResult.outcome === "aborted") {
     return suspendedOutcome(events);

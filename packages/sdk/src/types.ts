@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
+  CostTotalSchema,
   HarnessError,
   Id,
   InputResponseSchema,
@@ -226,7 +227,7 @@ export const RunViewSchema = RunSummarySchema.extend({
     .object({
       inputTokens: z.number().int().nonnegative(),
       outputTokens: z.number().int().nonnegative(),
-      costMicros: z.number().int().nonnegative(),
+      cost: CostTotalSchema,
     })
     .strict(),
   pendingApprovals: z.array(Id),

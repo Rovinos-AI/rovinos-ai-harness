@@ -23,12 +23,13 @@ beforeAll(() => {
 function modelResponse(): EventPartial {
   return {
     type: "model_response",
-    v: 1,
+    v: 2,
     requestId: "22222222222222222222222222",
     provider: "test",
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" },
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: true,
