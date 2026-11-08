@@ -4,12 +4,12 @@ import { Code, FakeClock } from "@rovinos/schemas";
 import { rateLimitStoreConformance } from "@rovinos/store/testing";
 import { InMemoryRateLimitStore } from "./memory.js";
 
-rateLimitStoreConformance("InMemoryRateLimitStore conformance", async () => {
+rateLimitStoreConformance("InMemoryRateLimitStore conformance", () => {
   const store = new InMemoryRateLimitStore();
-  return {
+  return Promise.resolve({
     open: () => store,
     cleanup: () => Promise.resolve(),
-  };
+  });
 });
 
 describe("InMemoryRateLimitStore", () => {

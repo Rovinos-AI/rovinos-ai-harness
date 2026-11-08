@@ -9,36 +9,42 @@ it("cancels a denied shared wait without consuming the next caller's token", asy
   let attempts = 0;
   const keys: string[] = [];
   const store: RateLimitStore = {
-    async take(key, limit) {
+    take(key, limit) {
       keys.push(key);
       attempts += 1;
       if (tokenAvailable) {
         tokenAvailable = false;
-        return { allowed: true, retryAfterMs: 0, remaining: limit.capacity - 1 };
+        return Promise.resolve({ allowed: true, retryAfterMs: 0, remaining: limit.capacity - 1 });
       }
-      return { allowed: false, retryAfterMs: 10, remaining: 0 };
+      return Promise.resolve({ allowed: false, retryAfterMs: 10, remaining: 0 });
     },
   };
-  const limiter = new StoreTokenBucketRateLimiter(
-    Code.parse("anthropic"),
-    60,
+  const limiter = new StoreTokenBucketRateLimiter({
+    provider: Code.parse("anthropic"),
+    requestsPerMinute: 60,
     store,
-    { now: () => 0 },
-    (_delay, signal) =>
-      new Promise<void>((_, reject) => {
+    clock: { now: () => 0 },
+    sleep: (_delay, signal) =>
+      new Promise<void>((_resolve, reject) => {
         if (signal.aborted) {
-          reject(signal.reason);
+          reject(new Error("aborted"));
           return;
         }
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        signal.addEventListener(
+          "abort",
+          () => {
+            reject(new Error("aborted"));
+          },
+          { once: true },
+        );
       }),
-  );
+  });
   const controller = new AbortController();
   const waiting = limiter.acquire(controller.signal);
   await new Promise((resolve) => setImmediate(resolve));
   controller.abort(new Error("cancelled"));
 
-  await expect(waiting).rejects.toThrow("cancelled");
+  await expect(waiting).rejects.toThrow("aborted");
   tokenAvailable = true;
   await expect(limiter.acquire(new AbortController().signal)).resolves.toBeUndefined();
   expect(attempts).toBe(2);
@@ -46,15 +52,15 @@ it("cancels a denied shared wait without consuming the next caller's token", asy
 });
 
 it("maps strict shared-store outages to the provider rate-limit error", async () => {
-  const limiter = new StoreTokenBucketRateLimiter(
-    Code.parse("anthropic"),
-    60,
-    {
+  const limiter = new StoreTokenBucketRateLimiter({
+    provider: Code.parse("anthropic"),
+    requestsPerMinute: 60,
+    store: {
       take: () => Promise.reject(new RateLimitStoreUnavailableError()),
     },
-    { now: () => 0 },
-    () => Promise.resolve(),
-  );
+    clock: { now: () => 0 },
+    sleep: () => Promise.resolve(),
+  });
 
   await expect(limiter.acquire(new AbortController().signal)).rejects.toMatchObject({
     code: "provider_rate_limited",

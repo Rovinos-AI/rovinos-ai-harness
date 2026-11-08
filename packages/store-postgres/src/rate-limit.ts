@@ -6,20 +6,17 @@ import { Pool, type QueryResultRow } from "pg";
 import { z } from "zod";
 import { postgresMigrationDirectory } from "./migration-directory.js";
 
-const connectionStringSchema = z
-  .string()
-  .url()
-  .refine((value) => {
-    const protocol = new URL(value).protocol;
-    return protocol === "postgres:" || protocol === "postgresql:";
-  });
+const connectionStringSchema = z.url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === "postgres:" || protocol === "postgresql:";
+});
 
 const optionsSchema = z
   .object({
     poolSize: z.number().int().positive().max(100).default(10),
     schema: z
       .string()
-      .regex(/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/)
+      .regex(/^[a-z_]\w{0,62}$/i)
       .default("public"),
   })
   .strict();

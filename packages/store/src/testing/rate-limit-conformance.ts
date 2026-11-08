@@ -33,8 +33,8 @@ export function rateLimitStoreConformance(
 ): void {
   describe(name, () => {
     it("grants bursts, charges cost, and reports the time to refill", async () => {
-      await withStore(createFactory, async ({ open }) => {
-        const store = open();
+      await withStore(createFactory, async (factory) => {
+        const store = factory.open();
         const key = Code.parse("provider.anthropic");
         const limit = { capacity: 3, refillPerSecond: 10 };
         await expect(store.take(key, limit, 2)).resolves.toMatchObject({
@@ -42,10 +42,11 @@ export function rateLimitStoreConformance(
           remaining: 1,
         });
         const denied = await store.take(key, limit, 2);
-        expect(denied).toMatchObject({ allowed: false, remaining: expect.any(Number) });
+        expect(denied.allowed).toBe(false);
+        expect(Number.isFinite(denied.remaining)).toBe(true);
         expect(denied.retryAfterMs).toBeGreaterThan(0);
         expect(denied.retryAfterMs).toBeLessThanOrEqual(100);
-        await new Promise((resolve) => setTimeout(resolve, 125));
+        await new Promise<void>((resolve) => setTimeout(resolve, 125));
         const granted = await store.take(key, limit, 2);
         expect(granted.allowed).toBe(true);
         expect(granted.remaining).toBeGreaterThanOrEqual(0);
@@ -54,20 +55,20 @@ export function rateLimitStoreConformance(
     });
 
     it("refills a depleted bucket over time", async () => {
-      await withStore(createFactory, async ({ open }) => {
-        const store = open();
+      await withStore(createFactory, async (factory) => {
+        const store = factory.open();
         const key = Code.parse("cp.token.alpha");
         const limit = { capacity: 1, refillPerSecond: 20 };
         await expect(store.take(key, limit)).resolves.toMatchObject({ allowed: true });
         await expect(store.take(key, limit)).resolves.toMatchObject({ allowed: false });
-        await new Promise((resolve) => setTimeout(resolve, 75));
+        await new Promise<void>((resolve) => setTimeout(resolve, 75));
         await expect(store.take(key, limit)).resolves.toMatchObject({ allowed: true });
       });
     });
 
     it("keeps independent keys in independent buckets", async () => {
-      await withStore(createFactory, async ({ open }) => {
-        const store = open();
+      await withStore(createFactory, async (factory) => {
+        const store = factory.open();
         const limit = { capacity: 1, refillPerSecond: 0.000001 };
         await expect(store.take(Code.parse("provider.anthropic"), limit)).resolves.toMatchObject({
           allowed: true,
@@ -82,9 +83,9 @@ export function rateLimitStoreConformance(
     });
 
     it("enforces aggregate capacity across two concurrent clients", async () => {
-      await withStore(createFactory, async ({ open }) => {
-        const first = open();
-        const second = open();
+      await withStore(createFactory, async (factory) => {
+        const first = factory.open();
+        const second = factory.open();
         const limit = { capacity: 100, refillPerSecond: 0.000001 };
         const results = await Promise.all(
           Array.from({ length: 200 }, (_, index) =>

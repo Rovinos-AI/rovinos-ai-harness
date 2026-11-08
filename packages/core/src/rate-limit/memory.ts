@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, RateLimitStoreUnavailableError } from "@rovinos/schemas";
-import type { RateLimit, RateLimitResult, RateLimitStore } from "./types.js";
-import type { RateLimitClock } from "./types.js";
+import type { RateLimit, RateLimitClock, RateLimitResult, RateLimitStore } from "./types.js";
 
 const MAX_BUCKETS = 100_000;
 
@@ -18,7 +17,19 @@ export class InMemoryRateLimitStore implements RateLimitStore {
   constructor(private readonly clock: RateLimitClock = { now: () => Date.now() }) {}
 
   /** @inheritdoc */
-  async take(key: Code, limit: RateLimit, cost = 1): Promise<RateLimitResult> {
+  take(key: Code, limit: RateLimit, cost = 1): Promise<RateLimitResult> {
+    try {
+      return Promise.resolve(this.takeNow(key, limit, cost));
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error
+          ? error
+          : new Error("Rate-limit operation failed.", { cause: error }),
+      );
+    }
+  }
+
+  private takeNow(key: Code, limit: RateLimit, cost: number): RateLimitResult {
     const checkedKey = Code.parse(key);
     validateTake(limit, cost);
     const now = validateTime(this.clock.now());

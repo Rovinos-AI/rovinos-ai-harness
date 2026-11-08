@@ -10,7 +10,6 @@ import {
   type EventStore,
   type RunQueue,
   type RunQueueIdGenerator,
-  type StoreKeyRotation,
   SystemRunQueueIdGenerator,
 } from "@rovinos/store";
 import {
@@ -24,38 +23,27 @@ import {
   PostgresVault,
   SqliteVault,
   VaultOperationError,
-  type VaultAdmin,
   type VaultTerminalRunsQuery,
-  type VaultKeyRotation,
 } from "@rovinos/vault";
-import {
-  RateLimitsConfigSchema,
-  HarnessError,
-  type Id,
-  type KeysConfig,
-  type RateLimitStore,
-  type RateLimitsConfig,
-  type SecretRef,
-  type StoreConfig,
-  type VaultConfig,
-} from "@rovinos/schemas";
-import { PostgresRateLimitStore } from "@rovinos/store-postgres";
+import { type Id, type KeysConfig, type StoreConfig, type VaultConfig } from "@rovinos/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
-import { InMemoryRateLimitStore } from "./rate-limit/memory.js";
-import { UnavailableRateLimitStore } from "./rate-limit/unavailable.js";
-
-/** Inputs shared by runtime and CLI configured-store operations. */
-export interface ConfiguredStoreOptions {
-  readonly dataDir?: string;
-  readonly readOnly?: boolean;
-  readonly appliedAt?: number;
-  readonly clock?: Clock;
-  readonly secretResolver?: {
-    resolve(ref: SecretRef): Promise<{ reveal(): string }>;
-  };
-}
+import type {
+  ConfiguredKeyRotation,
+  ConfiguredKeyRotationOptions,
+  ConfiguredStoreOptions,
+  ConfiguredVaultAdmin,
+  ConfiguredVaultOptions,
+} from "./runtime-store-types.js";
+export { openConfiguredRateLimitStore } from "./runtime-rate-limit-store.js";
+export type {
+  ConfiguredKeyRotation,
+  ConfiguredKeyRotationOptions,
+  ConfiguredStoreOptions,
+  ConfiguredVaultAdmin,
+  ConfiguredVaultOptions,
+} from "./runtime-store-types.js";
 
 async function openConfiguredRotationStore(
   config: { readonly store?: StoreConfig },
@@ -96,39 +84,6 @@ async function openConfiguredRotationStore(
     countRowsByKey: () => Promise.resolve([]),
     close: () => Promise.resolve(),
   };
-}
-
-/** Options for opening the configured vault for maintenance. */
-export interface ConfiguredVaultOptions {
-  readonly dataDir?: string;
-  readonly clock?: Clock;
-  readonly secretResolver?: {
-    resolve(ref: SecretRef): Promise<{ reveal(): string }>;
-  };
-}
-
-/** Vault administration handle with ownership of its SQLite and key resources. */
-export interface ConfiguredVaultAdmin extends VaultAdmin {
-  /** Close the vault database and dispose its cached keys. */
-  close(): void | Promise<void>;
-}
-
-/** Opened rotation adapters and the key provider they share. */
-export interface ConfiguredKeyRotation {
-  /** The configured current key id used for new writes. */
-  readonly currentKeyId: string;
-  /** Selected dedicated vault adapter, when requested. */
-  readonly vault?: VaultKeyRotation & { close(): void | Promise<void> };
-  /** Selected event-store adapter, when requested. */
-  readonly store?: StoreKeyRotation & { close(): Promise<void> };
-  /** Close opened databases and zero cached key material. */
-  close(): Promise<void>;
-}
-
-/** Selects which configured stores to open for key rotation maintenance. */
-export interface ConfiguredKeyRotationOptions extends ConfiguredStoreOptions {
-  readonly vault: boolean;
-  readonly store: boolean;
 }
 
 /**
@@ -346,41 +301,6 @@ async function postgresConnectionString(
     throw new StoreUnavailableError();
   }
   return (await secretResolver.resolve(config.connectionString)).reveal();
-}
-
-class RateLimitConfigError extends HarnessError {
-  override readonly code:
-    "rate_limit_postgres_requires_postgres_store" | "rate_limit_redis_backend_unavailable";
-
-  constructor(code: RateLimitConfigError["code"]) {
-    super(code);
-    this.code = code;
-  }
-}
-
-/** Opens a rate-limit backend using the runtime's shared Postgres connection. */
-export async function openConfiguredRateLimitStore(
-  config: {
-    readonly rateLimits?: RateLimitsConfig;
-    readonly store?: StoreConfig;
-  },
-  options: Pick<ConfiguredStoreOptions, "clock" | "secretResolver"> = {},
-): Promise<RateLimitStore> {
-  const rateLimits = RateLimitsConfigSchema.parse(config.rateLimits);
-  if (rateLimits.backend === "memory") {
-    return new InMemoryRateLimitStore(options.clock);
-  }
-  if (rateLimits.backend === "redis") {
-    throw new RateLimitConfigError("rate_limit_redis_backend_unavailable");
-  }
-  const storeConfig = config.store;
-  if (storeConfig?.dialect !== "postgres") {
-    throw new RateLimitConfigError("rate_limit_postgres_requires_postgres_store");
-  }
-  const shared = new PostgresRateLimitStore(
-    await postgresConnectionString(storeConfig, options.secretResolver),
-  );
-  return new UnavailableRateLimitStore(shared, "postgres", rateLimits.onUnavailable, options.clock);
 }
 
 /** Opens the configured event store shared by runtime and CLI maintenance commands. */

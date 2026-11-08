@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { chmod, mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@rovinos/schemas";
-import type { PiiConfig } from "@rovinos/schemas";
-import { openSqliteInstanceHeartbeat } from "@rovinos/store-sqlite";
-import type { SqliteInstanceHeartbeat } from "@rovinos/store-sqlite";
+import type { PiiConfig, RateLimitStore } from "@rovinos/schemas";
 import { PiiToolPort } from "@rovinos/pii";
 import type { McpToolPort } from "@rovinos/mcp";
 import type { LocalKeyProvider } from "@rovinos/vault";
 import type { EventStore } from "@rovinos/store";
-import type { RateLimitStore } from "@rovinos/schemas";
 import {
   createSandboxBackend,
   RemoteSandboxBackend,
@@ -21,7 +18,7 @@ import { createRuntimeStore, openConfiguredRateLimitStore } from "./runtime-stor
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
-import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
+import { resolveDataDir } from "./runtime-data-dir.js";
 import { createRuntimeVault } from "./runtime-vault.js";
 import { createConfiguredMcpToolPort } from "./runtime-mcp.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
@@ -40,46 +37,12 @@ import type {
   RuntimeOverrides,
   RuntimeVault,
 } from "./runtime-config.js";
-import { DeploymentStartupError, validateDeploymentTopology } from "./runtime-deployment.js";
+import { validateDeploymentTopology } from "./runtime-deployment.js";
+import { openRuntimeInstanceHeartbeat } from "./runtime-instance-heartbeat.js";
+import { closeSetupResources } from "./runtime-setup-cleanup.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
-async function closeSetupResources(options: {
-  readonly mcpToolPort?: McpToolPort | undefined;
-  readonly sandboxBackend?: SandboxBackend | undefined;
-  readonly eventStore: EventStore | undefined;
-  readonly vault: RuntimeVault | undefined;
-  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
-  readonly rateLimitStore?: RateLimitStore | undefined;
-  readonly disposeKeys: () => void;
-}): Promise<void> {
-  try {
-    try {
-      await options.mcpToolPort?.close();
-    } finally {
-      await options.sandboxBackend?.close?.();
-    }
-  } finally {
-    try {
-      await options.eventStore?.close();
-    } finally {
-      try {
-        await options.vault?.close();
-      } finally {
-        try {
-          await options.rateLimitStore?.close?.();
-        } finally {
-          try {
-            await options.instanceHeartbeat?.close();
-          } finally {
-            options.disposeKeys();
-          }
-        }
-      }
-    }
-  }
-}
-
 function cleanupRuntimeSetupFailure(options: {
   readonly tools: RuntimeTools | undefined;
   readonly eventStore: EventStore | undefined;
@@ -264,49 +227,29 @@ function validatePiiConfig(config: RuntimeConfig, overrides: RuntimeOverrides): 
   return pii;
 }
 
-async function openRuntimeInstanceHeartbeat(options: {
-  readonly config: RuntimeConfig;
-  readonly overrides: RuntimeOverrides;
-  readonly dataDir: string;
-  readonly clock: RuntimeComposition["clock"];
-}): Promise<RuntimeComposition["instanceHeartbeat"]> {
-  if (options.config.deployment?.mode === "multi" || options.overrides.readOnlyStore === true) {
-    return undefined;
-  }
-  const sqlitePaths = new Set<string>();
-  if (options.config.store?.dialect !== "postgres" && options.overrides.store === undefined) {
-    sqlitePaths.add(resolve(join(options.dataDir, "harness.db")));
-  }
-  if (options.config.vault?.backend !== "postgres" && options.overrides.transientVault !== true) {
-    sqlitePaths.add(resolve(join(resolveVaultDataDir(process.env, options.dataDir), "vault.db")));
-  }
-  if (sqlitePaths.size === 0) {
-    return undefined;
-  }
-  const heartbeats: SqliteInstanceHeartbeat[] = [];
-  const instanceIds = new SystemIdGenerator(options.clock);
-  try {
-    for (const databasePath of sqlitePaths) {
-      const heartbeat = await openSqliteInstanceHeartbeat({
-        databasePath,
-        instanceId: instanceIds.next(),
-        now: () => options.clock.now(),
-      });
-      if (heartbeat === undefined) {
-        throw new DeploymentStartupError("deployment_single_instance_violation");
-      }
-      heartbeats.push(heartbeat);
-    }
-  } catch (error) {
-    await Promise.all(heartbeats.map((heartbeat) => heartbeat.close().catch(() => undefined)));
-    throw error;
-  }
+async function createRuntimeRateLimitStore(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides,
+  clock: RuntimeComposition["clock"],
+): Promise<{ readonly store: RateLimitStore; readonly ownedStore?: RateLimitStore }> {
+  const rateLimitStore =
+    overrides.rateLimitStore ??
+    (await openConfiguredRateLimitStore(config, {
+      clock,
+      ...(overrides.secretResolver === undefined
+        ? {}
+        : { secretResolver: overrides.secretResolver }),
+    }));
   return {
-    signal: AbortSignal.any(heartbeats.map(({ signal }) => signal)),
-    close: async () => {
-      await Promise.all(heartbeats.map((heartbeat) => heartbeat.close()));
-    },
+    store: rateLimitStore,
+    ...(overrides.rateLimitStore === undefined ? { ownedStore: rateLimitStore } : {}),
   };
+}
+
+function getOwnedRateLimitResource(
+  rateLimit: Awaited<ReturnType<typeof createRuntimeRateLimitStore>>,
+): Partial<RuntimeSetupResources> {
+  return rateLimit.ownedStore === undefined ? {} : { rateLimitStore: rateLimit.ownedStore };
 }
 
 async function composeRuntimeSetup(options: {
@@ -344,34 +287,24 @@ async function composeRuntimeSetup(options: {
   const roles = await createRuntimeRoles(config, overrides, tool);
   const rawStore = await createRuntimeStore(config, overrides, clock);
   resources.eventStore = rawStore;
-  const rateLimitStore =
-    overrides.rateLimitStore ??
-    (await openConfiguredRateLimitStore(config, {
-      clock,
-      ...(overrides.secretResolver === undefined
-        ? {}
-        : { secretResolver: overrides.secretResolver }),
-    }));
-  if (overrides.rateLimitStore === undefined) {
-    resources.rateLimitStore = rateLimitStore;
-  }
-  const runtimeOverrides = { ...overrides, rateLimitStore };
+  const rateLimit = await createRuntimeRateLimitStore(config, overrides, clock);
+  Object.assign(resources, getOwnedRateLimitResource(rateLimit));
   const { piiRuntime, model, store } = await createRuntimeModelAndStore({
     config,
     piiConfig,
-    overrides: runtimeOverrides,
+    overrides: { ...overrides, rateLimitStore: rateLimit.store },
     ids,
     clock,
     vault: runtimeVault,
     scopes,
     store: rawStore,
     policyVersion: policy.version,
-    rateLimitStore,
+    rateLimitStore: rateLimit.store,
   });
   const managedMcpToolPort = tools.mcpToolPort;
   return {
     config,
-    overrides: runtimeOverrides,
+    overrides: { ...overrides, rateLimitStore: rateLimit.store },
     clock,
     ids,
     store,
@@ -383,9 +316,9 @@ async function composeRuntimeSetup(options: {
     vaultResolver: piiRuntime.resolver,
     pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
     model,
-    rateLimitStore,
+    rateLimitStore: rateLimit.store,
     ...(overrides.rateLimitStore === undefined
-      ? { closeRateLimitStore: () => rateLimitStore.close?.() ?? Promise.resolve() }
+      ? { closeRateLimitStore: () => rateLimit.store.close?.() ?? Promise.resolve() }
       : {}),
     tool,
     ...(managedMcpToolPort === undefined

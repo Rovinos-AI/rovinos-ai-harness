@@ -168,13 +168,13 @@ export class ModelGateway {
         Code.parse(provider),
         dependencies.rateLimitStore === undefined
           ? new TokenBucketRateLimiter(requestsPerMinute, dependencies.clock, this.sleep)
-          : new StoreTokenBucketRateLimiter(
-              Code.parse(provider),
+          : new StoreTokenBucketRateLimiter({
+              provider: Code.parse(provider),
               requestsPerMinute,
-              dependencies.rateLimitStore,
-              dependencies.clock,
-              this.sleep,
-            ),
+              store: dependencies.rateLimitStore,
+              clock: dependencies.clock,
+              sleep: this.sleep,
+            }),
       );
     }
   }
