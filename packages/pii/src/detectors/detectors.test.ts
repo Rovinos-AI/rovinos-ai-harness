@@ -14,6 +14,8 @@ import {
 
 // Synthetic identifier fixtures only; keys are assembled rather than usable credentials.
 const jwt = `${"eyJ" + "a".repeat(5)}.${"eyJ" + "b".repeat(5)}.${"c".repeat(8)}`;
+const rsaPrivateKeyHeader = ["-----BEGIN", " RSA PRIVATE", " KEY-----"].join("");
+const privateKeyHeader = ["-----BEGIN", " PRIVATE", " KEY-----"].join("");
 
 const cases = [
   {
@@ -90,8 +92,8 @@ const cases = [
       "AKIA" + "A".repeat(16),
       "ghp_" + "a".repeat(36),
       jwt,
-      "-----BEGIN RSA PRIVATE KEY-----",
-      "-----BEGIN PRIVATE KEY-----",
+      rsaPrivateKeyHeader,
+      privateKeyHeader,
     ],
     negative: [
       "AKIA" + "A".repeat(15),
