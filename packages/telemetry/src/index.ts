@@ -21,6 +21,7 @@ export {
   assertSinkPolicies,
   SinkPolicyError,
   type AssertSinkPoliciesOptions,
+  type SinkPolicyConfig,
 } from "./sinks/policy.js";
 export {
   SafeEvent,

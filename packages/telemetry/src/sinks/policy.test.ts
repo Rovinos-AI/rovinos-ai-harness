@@ -126,7 +126,7 @@ describe("assertSinkPolicies", () => {
     });
 
     await expect(
-      assertSinkPolicies(config, { collectorConfigDir, logger: { info: vi.fn() } }),
+      assertSinkPolicies({ telemetry: config }, { collectorConfigDir, logger: { info: vi.fn() } }),
     ).resolves.toBeUndefined();
   });
 
@@ -135,7 +135,7 @@ describe("assertSinkPolicies", () => {
     ["datadog", "profile-datadog.yaml", "datadog", ["traces", "logs", "metrics"]],
     ["stdout", "profile-debug.yaml", "debug", ["traces", "logs", "metrics"]],
     ["file", "profile-test.yaml", "file/traces", ["traces"]],
-  ] as const)("validates the %s local sink profile", async (kind, file, exporter, pipelines) => {
+  ] as const)("validates the %s collector profile", async (kind, file, exporter, pipelines) => {
     const collectorConfigDir = await createCollectorDirectory({
       profileFile: file,
       profileContents: [
@@ -151,6 +151,29 @@ describe("assertSinkPolicies", () => {
     await expect(
       assertSinkPolicies(config, { collectorConfigDir, logger: { info: vi.fn() } }),
     ).resolves.toBeUndefined();
+  });
+
+  it("rejects a profile pipeline that overrides the allowlist order", async () => {
+    const collectorConfigDir = await createCollectorDirectory({
+      profileFile: "profile-datadog.yaml",
+      profileContents: [
+        "exporters:",
+        "  datadog: {}",
+        "service:",
+        "  pipelines:",
+        `    traces: { exporters: [datadog], processors: [${[...traceProcessors].reverse().join(", ")}] }`,
+        "    logs: { exporters: [datadog] }",
+        "    metrics: { exporters: [datadog] }",
+        "",
+      ].join("\n"),
+    });
+    const config = TelemetryConfigSchema.parse({
+      sinks: [{ id: "events", kind: "datadog" }],
+    });
+
+    await expect(
+      assertSinkPolicies(config, { collectorConfigDir, logger: { info: vi.fn() } }),
+    ).rejects.toMatchObject({ code: "sink_policy_violation", sinkId: "events" });
   });
 
   it("rejects a missing allowlist processor and identifies its sink", async () => {

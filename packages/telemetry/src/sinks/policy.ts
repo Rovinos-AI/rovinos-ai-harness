@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Code, HarnessError, parseYaml, type SinkPolicy, type TelemetryConfig } from "@rovinos/schemas";
+import {
+  Code,
+  HarnessError,
+  parseYaml,
+  TelemetryConfigSchema,
+  type SinkPolicy,
+  type TelemetryConfig,
+} from "@rovinos/schemas";
 import { z } from "zod";
 import { createLogger, type Logger } from "../logger.js";
 import { POLICY_VERSION } from "../generated/policy-version.js";
@@ -107,6 +114,9 @@ export interface AssertSinkPoliciesOptions {
   readonly logger?: Pick<Logger, "info">;
 }
 
+/** Validated full harness configuration or its telemetry section. */
+export type SinkPolicyConfig = TelemetryConfig | { readonly telemetry?: TelemetryConfig };
+
 async function readCollectorConfig<Schema extends z.ZodType>(
   directory: string,
   file: string,
@@ -153,19 +163,23 @@ function reportUnsafeSink(sink: SinkPolicy, logger: Pick<Logger, "info">): void 
  * Verifies enabled sink policies against the collector's exporter profiles and generated
  * allowlist. Content-capable sinks additionally require the explicit unsafe opt-in.
  *
- * @param config - Validated telemetry configuration.
+ * @param config - Validated harness configuration or telemetry configuration.
  * @param options - Collector config location and optional structured logger.
  * @throws SinkPolicyError when a sink is unsafe or its collector pipeline is not compliant.
  */
 export async function assertSinkPolicies(
-  config: TelemetryConfig,
+  config: SinkPolicyConfig,
   options: AssertSinkPoliciesOptions,
 ): Promise<void> {
-  const sinks = config.sinks.filter(({ enabled }) => enabled);
+  const telemetry =
+    "sinks" in config
+      ? config
+      : (config.telemetry ?? TelemetryConfigSchema.parse({}));
+  const sinks = telemetry.sinks.filter(({ enabled }) => enabled);
   for (const sink of sinks) {
     if (
       sink.maxClassification === "content_tokenized" &&
-      config.unsafe.allowContentSinks !== true
+      telemetry.unsafe.allowContentSinks !== true
     ) {
       throw new SinkPolicyError("content_sink_forbidden", sink.id);
     }
@@ -237,7 +251,7 @@ export async function assertSinkPolicies(
     if (matchingPipelines.length === 0) {
       throw new SinkPolicyError("sink_policy_violation", sink.id);
     }
-    for (const [pipelineName] of matchingPipelines) {
+    for (const [pipelineName, pipeline] of matchingPipelines) {
       const generatedPipeline = allowlistPipelines?.[pipelineName];
       if (
         generatedPipeline === undefined ||
@@ -245,7 +259,9 @@ export async function assertSinkPolicies(
           pipelineName,
           generatedPipeline.processors,
           processorDefinitions,
-        )
+        ) ||
+        (pipeline.processors !== undefined &&
+          !hasExpectedProcessors(pipelineName, pipeline.processors, processorDefinitions))
       ) {
         throw new SinkPolicyError("sink_policy_violation", sink.id);
       }
