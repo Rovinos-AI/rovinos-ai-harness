@@ -312,7 +312,8 @@ async function finishModelStep(
   const costBudget = execution.budgetTracker.checkWithOpenChildren(events, options.clock.now());
   if (
     !costBudget.ok &&
-    (costBudget.code === "budget_cost_unknown" || modelResult.preparedCalls.length > 0)
+    (costBudget.code === "budget_cost_unknown" ||
+      (modelResult.outcome === "response" && modelResult.preparedCalls.length > 0))
   ) {
     return recordBudgetFailureAndCheckpoint(
       options.recorder,

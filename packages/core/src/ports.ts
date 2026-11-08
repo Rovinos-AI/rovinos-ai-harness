@@ -37,6 +37,8 @@ export type ModelRequest = SharedModelRequest;
 export interface RunContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** Policy for model-call costs that cannot be fully calculated. */
+  readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
   /** Count-only output progress emitted by the active model request. */
   readonly onProgress?: (progress: ModelProgress) => void;
   /** Durable MRTR handler installed by the core tool step. */

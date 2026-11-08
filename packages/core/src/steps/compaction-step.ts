@@ -306,7 +306,9 @@ export async function compactBeforeModelCall(options: {
     new ModelPortSummarizer(options.model, options.ids, options.modelRef, {
       runId: options.runId,
       signal: options.signal,
-      unknownCostPolicy: options.unknownCostPolicy,
+      ...(options.unknownCostPolicy === undefined
+        ? {}
+        : { unknownCostPolicy: options.unknownCostPolicy }),
       ...(options.deadlineTs === undefined ? {} : { deadlineTs: options.deadlineTs }),
     });
   const event = await compactionStep({

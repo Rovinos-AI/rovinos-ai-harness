@@ -133,7 +133,7 @@ describe("compactionStep", () => {
       summary: "summary <EMAIL_1>",
       inputTokens: 8,
       outputTokens: 2,
-      costMicros: 13,
+      cost: { version: 1, state: "known", amountMicros: 13 },
     });
     expect(summarized).toHaveLength(1);
     expect(summarized[0]?.goal).toBe("goal");
