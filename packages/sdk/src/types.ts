@@ -122,13 +122,13 @@ export const HarnessOverridesSchema = z
 /** Dependencies used when embedding or testing the harness. */
 export type HarnessOverrides = z.infer<typeof HarnessOverridesSchema>;
 
-/** Claimed principal and run requested for content access; the embedder verifies the identity. */
+/** Claimed principal and run requested for content access; the host application verifies identity. */
 export const ContentAccessRequestSchema = z.object({ principal: Principal, runId: Id }).strict();
 
 /** Inferred authorization input for tokenized content access. */
 export type ContentAccessRequest = z.infer<typeof ContentAccessRequestSchema>;
 
-/** Trusted embedder policy that binds an authenticated caller to tokenized run-content access. */
+/** Trusted host application policy binding an authenticated caller to tokenized run-content access. */
 export type ContentAuthorizer = (request: ContentAccessRequest) => boolean | Promise<boolean>;
 
 const contentAuthorizerSchema = z.custom<ContentAuthorizer>((value) => typeof value === "function");
@@ -466,7 +466,7 @@ export interface Harness {
    * Stream separately authorized, tokenized content from committed events only.
    *
    * `fromSeq` is inclusive and may be reused after reconnecting; persist the last yielded
-   * `seq` and resume at `seq + 1`. The embedder's authorizer is checked before subscription and
+   * `seq` and resume at `seq + 1`. The configured authorizer is checked before subscription and
    * before each content item. Abort `signal` on cancellation or immediate permission revocation.
    * Values already yielded cannot be recalled.
    */

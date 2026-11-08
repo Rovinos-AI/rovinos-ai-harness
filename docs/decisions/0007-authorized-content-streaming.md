@@ -18,13 +18,13 @@ without that binding is not proof of identity. An authorized client may retain a
 delivered; the harness cannot revoke knowledge or copies held by that client.
 
 The design protects against accidental use of the tokenized content stream by a caller that lacks
-the configured authorization decision. It does not protect against a compromised embedder, a
+the configured authorization decision. It does not protect against a compromised host application, a
 misconfigured authorizer, a client authorized for the wrong run, or a store/vault operator with
 access to their configured data and keys.
 
 ## Decision
 
-Add `Harness.streamRunContent` as a separate public API. The embedder supplies a trusted
+Add `Harness.streamRunContent` as a separate public API. The host application supplies a trusted
 `contentAuthorizer` at harness creation. It receives a validated principal and run id, must return
 an explicit allow decision, and is called before opening the stream and before every yielded
 content item. Missing, throwing, or rejecting authorizers fail closed. The authorizer is the
@@ -59,5 +59,5 @@ logs for the synthetic canary set.
 The stream does not promise replay of provider deltas that were never committed. A slow consumer
 does not cause a stream-side queue to grow, but the event store's configured retention, capacity,
 and availability still determine how long a reconnect cursor remains usable. Permission changes
-that occur while the iterator is idle take effect immediately only when the embedder aborts the
+that occur while the iterator is idle take effect immediately only when the host application aborts the
 signal; otherwise they are observed before the next content item.

@@ -848,6 +848,61 @@ describe("@rovinos/sdk", () => {
     ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
   });
 
+  it("fails closed when the content authorizer rejects", async () => {
+    const { harness } = await createTestHarness({
+      contentAuthorizer: () => {
+        throw new Error("synthetic authorization failure");
+      },
+    });
+    const started = await harness.startRun({ goal: "Synthetic content" });
+    await waitForRun(harness, started.runId, "completed");
+
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.reader"),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
+  });
+
+  it("stops streams cancelled before and during authorization", async () => {
+    const cancelledDuringAuthorization = new AbortController();
+    let abortDuringAuthorization = false;
+    const authorizer = vi.fn(() => {
+      if (abortDuringAuthorization) {
+        cancelledDuringAuthorization.abort();
+      }
+      return true;
+    });
+    const { harness } = await createTestHarness({ contentAuthorizer: authorizer });
+    const started = await harness.startRun({ goal: "Synthetic content" });
+    await waitForRun(harness, started.runId, "completed");
+
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort();
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.reader"),
+          signal: alreadyAborted.signal,
+        }),
+      ),
+    ).resolves.toEqual([]);
+    expect(authorizer).not.toHaveBeenCalled();
+
+    abortDuringAuthorization = true;
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.reader"),
+          signal: cancelledDuringAuthorization.signal,
+        }),
+      ),
+    ).resolves.toEqual([]);
+    expect(authorizer).toHaveBeenCalledOnce();
+  });
+
   it("streams committed content with independent readers, bounded slow-consumer delivery, and replay", async () => {
     const { harness } = await createTestHarness({
       contentAuthorizer: ({ principal }) => principal === "cli.reader",

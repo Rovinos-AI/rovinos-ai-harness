@@ -65,7 +65,7 @@ stored event at a time and does not enqueue items ahead of the async iterator co
 consumer applies backpressure while committed events remain in the configured store. Replay lasts
 only as long as the event log retains the run; there is no separate content-stream retention.
 
-The stream never reveals raw values. An embedder must use a separate explicitly authorized reveal
+The stream never reveals raw values. The embedding application must use a separate explicitly authorized reveal
 operation if one is needed; no reveal option is accepted by the stream. Neither this API nor
 `getRunContent` changes the content-free contract of `watch`, safe events, MCP metadata
 notifications, or telemetry. See [ADR 0007](decisions/0007-authorized-content-streaming.md) for the
