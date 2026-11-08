@@ -23,3 +23,15 @@ control-plane's static bearer tokens.
 Avoid placing token values directly in command history or checked-in configuration. Configure
 `controlPlane.auth.tokens[].secret` with a `SecretRef` and expose its corresponding value only in the
 local environment used to launch the Inspector.
+
+## Browser Apps verification
+
+The integration test `test/inspector-apps.int.test.ts` runs the pinned Inspector 2.13.0 web client
+against the harness over loopback HTTP using the 2026-07-28 protocol era and an approve-scoped
+synthetic token. It covers rendered approval details, app-bridge approve/deny calls, an already
+resolved approval, repeated interaction, and canary/network checks. Run it with
+`yarn test:integration test/inspector-apps.int.test.ts`; CI executes it in the `integration` job with
+Chromium. Inspector credentials use the memory secret store and an isolated home directory.
+
+This is browser-host coverage of the harness control-plane, not an upstream protocol conformance
+claim or a test of model-selected outbound MCP calls.
