@@ -11,7 +11,7 @@ import {
 import { z } from "zod";
 import { normalize } from "./normalize.js";
 
-const PSEUDONYM_KEY_INFO = "harness/pseudonym";
+export const PSEUDONYM_HKDF_INFO = "harness/pseudonym";
 const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
 function isKeyProvider(value: unknown): value is KeyProvider {
@@ -130,7 +130,7 @@ export async function pseudonymize(options: PseudonymizeOptions): Promise<Pseudo
     throw new PseudonymError("pseudonym_key_invalid");
   }
 
-  const derivedKey = hkdfSha256(masterKey, PSEUDONYM_KEY_INFO);
+  const derivedKey = hkdfSha256(masterKey, PSEUDONYM_HKDF_INFO);
   let data: Buffer | undefined;
   let mac: Uint8Array | undefined;
   try {
