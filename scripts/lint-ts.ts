@@ -22,16 +22,7 @@ const sharedArguments = [
   "--no-error-on-unmatched-pattern",
 ];
 
-const lintableExtensions = new Set([
-  ".js",
-  ".mjs",
-  ".ts",
-  ".tsx",
-  ".mts",
-  ".cts",
-  ".yaml",
-  ".yml",
-]);
+const lintableExtensions = new Set([".js", ".mjs", ".ts", ".tsx", ".mts", ".cts", ".yaml", ".yml"]);
 
 function lintableFiles(root: string, directory: string): string[] {
   const files: string[] = [];
