@@ -31,7 +31,7 @@ function wrap(tool: WebFetchTool) {
     pii,
     workspace,
     { thresholdBytes: 0 },
-    new SequentialIdGenerator(),
+    { ids: new SequentialIdGenerator() },
   );
   return { port, workspace };
 }

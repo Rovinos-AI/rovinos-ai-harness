@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 const DEFAULT_SEED = 0x13_11_2026;
-const outputPath = fileURLToPath(
-  new URL("../test/pii-corpus/__fixtures__/corpus.jsonl", import.meta.url),
-);
+const outputPath = fileURLToPath(new URL("../test/pii-corpus/corpus.jsonl", import.meta.url));
+const jwtFragments = ["eyJ" + "hbGciOiJub25lIn0", "eyJzdWIiOiJ0ZXN0In0", "signatureplaceholder123"];
+// Keep the committed sample non-JWT-shaped without changing its labeled offsets.
+const jwtPlaceholder = jwtFragments.join("|");
 
 /** One synthetic span labeled with its entity type and UTF-16 offsets. */
 export const PiiCorpusSpanSchema = z
@@ -40,6 +41,17 @@ export const PiiCorpusSampleSchema = z
 
 /** A validated corpus sample. */
 export type PiiCorpusSample = z.infer<typeof PiiCorpusSampleSchema>;
+
+/** Restores the synthetic JWT only in memory before detector evaluation. */
+export function materializePiiCorpusSample(sample: PiiCorpusSample): PiiCorpusSample {
+  if (sample.id !== "pii-key-5") {
+    return sample;
+  }
+  return PiiCorpusSampleSchema.parse({
+    ...sample,
+    text: sample.text.replace(jwtPlaceholder, jwtFragments.join(".")),
+  });
+}
 
 function mulberry32(seed: number): () => number {
   let state = seed >>> 0;
@@ -167,17 +179,12 @@ function ipSamples(): PiiCorpusSample[] {
 
 function keySamples(): PiiCorpusSample[] {
   const placeholderKey = `ghp_${"0".repeat(36)}`;
-  const placeholderJwt = [
-    "eyJ" + "hbGciOiJub25lIn0",
-    "eyJzdWIiOiJ0ZXN0In0",
-    "signatureplaceholder123",
-  ].join(".");
   return [
     createSample("pii-key-1", "The fake service key is ", "AKIA0000000000000000", "api_key"),
     createSample("pii-key-2", "The placeholder token is ", placeholderKey, "api_key"),
     createSample("pii-key-3", "The demo access key is ", `AKIA${"1".repeat(16)}`, "api_key"),
     createSample("pii-key-4", "The fake GitHub token is ", `ghp_${"A".repeat(36)}`, "api_key"),
-    createSample("pii-key-5", "The synthetic JWT is ", placeholderJwt, "api_key"),
+    createSample("pii-key-5", "The synthetic JWT is ", jwtPlaceholder, "api_key"),
   ];
 }
 

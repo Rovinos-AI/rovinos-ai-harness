@@ -70,6 +70,13 @@ function readNightlyVulnerabilityWorkflow(): z.infer<typeof workflowSchema> {
   );
 }
 
+function readNightlyDocsLinksWorkflow(): z.infer<typeof workflowSchema> {
+  return parseYaml(
+    workflowSchema,
+    readFileSync(resolve(root, ".github/workflows/docs-links-nightly.yml"), "utf8"),
+  );
+}
+
 function readSetupAction(): z.infer<typeof actionSchema> {
   return parseYaml(
     actionSchema,
@@ -325,6 +332,25 @@ describe("GitHub workflows", () => {
     );
     expect(
       job?.steps.some(
+        (step) =>
+          step.uses?.startsWith("actions/checkout@") === true &&
+          step.with?.["persist-credentials"] === false,
+      ),
+    ).toBe(true);
+  });
+
+  it("checks external documentation links nightly on main", () => {
+    const workflow = readNightlyDocsLinksWorkflow();
+    const job = workflow.jobs["external-links"];
+    const steps = job?.steps ?? [];
+
+    expect(workflow.on.schedule).toEqual([{ cron: "43 4 * * *" }]);
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(job?.if).toBe("github.ref == 'refs/heads/main'");
+    expect(steps.some((step) => step.uses === "./.github/actions/node-setup")).toBe(true);
+    expect(steps.some((step) => step.run === "yarn check:links --external")).toBe(true);
+    expect(
+      steps.some(
         (step) =>
           step.uses?.startsWith("actions/checkout@") === true &&
           step.with?.["persist-credentials"] === false,

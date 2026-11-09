@@ -67,7 +67,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `vault` | `schemas`, `telemetry`, `crypto` |
 | `pii` | `schemas`, `telemetry`, `vault` |
 | `models` | `schemas`, `telemetry` |
-| `context` | `schemas`, `telemetry` |
+| `context` | `schemas`, `telemetry`, `crypto` |
 | `policy` | `schemas`, `telemetry` |
 | `mcp` | `schemas`, `telemetry`, `crypto` |
 | `sandbox` | `schemas`, `telemetry`, `crypto`, `context` |

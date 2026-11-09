@@ -17,7 +17,7 @@ function fixture(result: JsonValue) {
     },
     workspace,
     { thresholdBytes: 10000000 },
-    new SequentialIdGenerator(),
+    { ids: new SequentialIdGenerator() },
   );
   return { port, workspace, write };
 }
