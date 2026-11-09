@@ -9,116 +9,46 @@ import {
 } from "@opentelemetry/api";
 import { Code, type Code as CodeType, type ModelUsage } from "@rovinos/schemas";
 import { isValidModelUsage } from "./metric-validation.js";
+import type {
+  HostAppRejectedAttributes,
+  HostAppRejectedReason,
+  METRIC_ALLOWLIST,
+  McpInputRequestAttributes,
+  McpInputRequestOutcome,
+  ModelUsageAttributes,
+  PolicyDecision,
+  PolicyDecisionAttributes,
+  QuotaRejectionAttributes,
+  RateLimitBackend,
+  RateLimitKeyKind,
+  TelemetryDropAttributes,
+  TelemetryDropReason,
+  WorkerJobAttributes,
+  WorkerJobOutcome,
+} from "./metric-attributes.js";
+import { safelyRecordMetric } from "./metric-safety.js";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
-
-/** Closed reason values used by the dropped-telemetry metric. */
-export const TELEMETRY_DROP_REASONS = [
-  "unregistered_span",
-  "unregistered_log_record",
-  "unregistered_attr",
-  "invalid_attr",
-  "correlation_disabled",
-  "event_stripped",
-  "leak_sentinel",
-  "processor_error",
-  "trip_queue_overflow",
-  "trip_append_failed",
-  "trip_flush_failed",
-  "trip_discarded",
-] as const;
-
-/** Closed rejection reasons used by the host app-call counter. */
-export const HOST_APP_REJECTED_REASONS = [
-  "schema",
-  "size",
-  "rate",
-  "unknown_app",
-  "unknown_tool",
-  "unknown_span",
-  "session_cap",
-  "request_disabled",
-  "request_invalid",
-  "request_unavailable",
-  "user_denied",
-] as const;
-
-/** Policy outcomes used by the decision counter. */
-export const POLICY_DECISIONS = ["allow", "ask", "deny"] as const;
-/** Bounded outcomes for MCP human-input requests. */
-export const MCP_INPUT_REQUEST_OUTCOMES = [
-  "asked",
-  "declined_sensitive",
-  "rejected",
-  "rounds_exceeded",
-  "rate_limited",
-] as const;
-/** Closed worker job outcomes used by the worker counter. */
-export const WORKER_JOB_OUTCOMES = ["completed", "suspended", "failed", "lease_lost"] as const;
-
-/** Bounded reasons for dropping or stripping telemetry data. */
-export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
-/** Bounded reasons counted when an app call is rejected by the host. */
-export type HostAppRejectedReason = (typeof HOST_APP_REJECTED_REASONS)[number];
-/** Bounded policy decision outcome. */
-export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
-/** Bounded outcomes counted for an MCP human-input request. */
-export type McpInputRequestOutcome = (typeof MCP_INPUT_REQUEST_OUTCOMES)[number];
-/** Bounded worker job outcome. */
-export type WorkerJobOutcome = (typeof WORKER_JOB_OUTCOMES)[number];
-interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
-  readonly "harness.telemetry.dropped.reason": TelemetryDropReason;
-}
-interface HostAppRejectedAttributes extends Readonly<Record<string, HostAppRejectedReason>> {
-  readonly "harness.host.app_rejected.reason": HostAppRejectedReason;
-}
-interface PolicyDecisionAttributes extends Readonly<Record<string, PolicyDecision>> {
-  readonly "harness.policy.decision": PolicyDecision;
-}
-interface ModelUsageAttributes extends Readonly<Record<string, CodeType>> {
-  readonly "harness.model.provider": CodeType;
-  readonly "harness.model.name": CodeType;
-}
-interface QuotaRejectionAttributes extends Readonly<Record<string, CodeType>> {
-  readonly "harness.quota.id": CodeType;
-}
-interface McpInputRequestAttributes extends Readonly<Record<string, McpInputRequestOutcome>> {
-  readonly "harness.mcp.input_requests.outcome": McpInputRequestOutcome;
-}
-
-interface WorkerJobAttributes extends Readonly<Record<string, WorkerJobOutcome>> {
-  readonly "harness.worker.jobs.outcome": WorkerJobOutcome;
-}
-
-/** String-valued metric attributes are explicitly closed enumerations. */
-export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
-  "harness.telemetry.dropped.reason": TELEMETRY_DROP_REASONS,
-  "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
-  "harness.policy.decision": POLICY_DECISIONS,
-  "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
-  "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
-} as const;
-
-/** Collector allowlist of metric names and their allowed datapoint attribute keys. */
-export const METRIC_ALLOWLIST = {
-  "harness.host.app_rejected": ["harness.host.app_rejected.reason"],
-  "harness.host.app_spans_accepted": [],
-  "harness.model.cache_read_tokens": ["harness.model.provider", "harness.model.name"],
-  "harness.model.cache_write_tokens": ["harness.model.provider", "harness.model.name"],
-  "harness.model.tokens": ["harness.model.provider", "harness.model.name"],
-  "harness.model.cost_micros": ["harness.model.provider", "harness.model.name"],
-  "harness.policy.decisions": ["harness.policy.decision"],
-  "harness.quota.rejections": ["harness.quota.id"],
-  "harness.pii.blob_hit": [],
-  "harness.pii.detector_degraded": [],
-  "harness.sentinel.scope_reduced": [],
-  "harness.sentinel.short_values_skipped": [],
-  "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
-  "harness.mcp.discovery_failed": [],
-  "harness.mcp.input_requests": ["harness.mcp.input_requests.outcome"],
-  "harness.worker.jobs": ["harness.worker.jobs.outcome"],
-  "harness.worker.queue_lag_ms": [],
-} as const satisfies Record<Code, readonly Code[]>;
+export {
+  HOST_APP_REJECTED_REASONS,
+  METRIC_ALLOWLIST,
+  MCP_INPUT_REQUEST_OUTCOMES,
+  POLICY_DECISIONS,
+  RATE_LIMIT_BACKENDS,
+  RATE_LIMIT_KEY_KINDS,
+  TELEMETRY_DROP_REASONS,
+  TELEMETRY_METRIC_STRING_ATTRIBUTES,
+  WORKER_JOB_OUTCOMES,
+} from "./metric-attributes.js";
+export type {
+  HostAppRejectedReason,
+  McpInputRequestOutcome,
+  PolicyDecision,
+  RateLimitBackend,
+  RateLimitKeyKind,
+  TelemetryDropReason,
+  WorkerJobOutcome,
+} from "./metric-attributes.js";
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
 let hostAppRejectedCounter: Counter<HostAppRejectedAttributes> | undefined;
@@ -136,6 +66,8 @@ let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
 let mcpInputRequestsCounter: Counter<McpInputRequestAttributes> | undefined;
 let workerJobsCounter: Counter<WorkerJobAttributes> | undefined;
+let rateLimitDeniedCounter: Counter<QuotaRejectionAttributes> | undefined;
+let rateLimitDegradedCounter: Counter<QuotaRejectionAttributes> | undefined;
 let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
 let telemetryMeterProvider: MeterProvider | undefined;
 
@@ -167,6 +99,8 @@ export function selectTelemetryMeterProvider(provider: MeterProvider | undefined
   quotaRejectionsCounter = undefined;
   mcpInputRequestsCounter = undefined;
   workerJobsCounter = undefined;
+  rateLimitDeniedCounter = undefined;
+  rateLimitDegradedCounter = undefined;
   workerQueueLagHistogram = undefined;
 }
 
@@ -302,11 +236,9 @@ function getMcpInputRequestsCounter(): Counter<McpInputRequestAttributes> {
 
 /** Counts one quota rejection using the configured quota's bounded code. */
 export function countQuotaRejection(quotaId: CodeType): void {
-  try {
+  safelyRecordMetric(() => {
     getQuotaRejectionsCounter().add(1, { "harness.quota.id": Code.parse(quotaId) });
-  } catch {
-    return;
-  }
+  });
 }
 
 function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {
@@ -316,6 +248,36 @@ function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {
   return workerJobsCounter;
 }
 
+function getRateLimitDeniedCounter(): Counter<QuotaRejectionAttributes> {
+  rateLimitDeniedCounter ??= createCounter<QuotaRejectionAttributes>(
+    "harness.rate_limit.denied",
+    (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
+  );
+  return rateLimitDeniedCounter;
+}
+
+function getRateLimitDegradedCounter(): Counter<QuotaRejectionAttributes> {
+  rateLimitDegradedCounter ??= createCounter<QuotaRejectionAttributes>(
+    "harness.rate_limit.degraded",
+    (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
+  );
+  return rateLimitDegradedCounter;
+}
+
+/** Counts one denied rate-limit request without exporting its key. */
+export function countRateLimitDenied(keyKind: RateLimitKeyKind): void {
+  safelyRecordMetric(() => {
+    getRateLimitDeniedCounter().add(1, { "harness.rate_limit.denied.key_kind": keyKind });
+  });
+}
+
+/** Counts use of an unavailable shared rate-limit backend. */
+export function countRateLimitDegraded(backend: RateLimitBackend): void {
+  safelyRecordMetric(() => {
+    getRateLimitDegradedCounter().add(1, { "harness.rate_limit.degraded.backend": backend });
+  });
+}
+
 function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
   workerQueueLagHistogram ??= createMetricHistogram("harness.worker.queue_lag_ms");
   return workerQueueLagHistogram;
@@ -323,47 +285,37 @@ function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
 
 /** Counts a telemetry drop using its bounded reason code. */
 export function countDroppedTelemetry(reason: TelemetryDropReason): void {
-  try {
+  safelyRecordMetric(() => {
     getDroppedCounter().add(1, { "harness.telemetry.dropped.reason": reason });
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts an app tool rejection with its bounded host reason code. */
 export function countHostAppRejected(reason: HostAppRejectedReason): void {
-  try {
+  safelyRecordMetric(() => {
     getHostAppRejectedCounter().add(1, { "harness.host.app_rejected.reason": reason });
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts one policy decision using its bounded outcome. */
 export function countPolicyDecision(decision: PolicyDecision): void {
-  try {
+  safelyRecordMetric(() => {
     getPolicyDecisionsCounter().add(1, { "harness.policy.decision": decision });
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts one opaque provider blob that contains detected sensitive content. */
 export function countPiiBlobHit(): void {
-  try {
+  safelyRecordMetric(() => {
     getPiiBlobHitCounter().add(1);
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts one PII detection run that continued without its configured async detector. */
 export function countPiiDetectorDegraded(): void {
-  try {
+  safelyRecordMetric(() => {
     getPiiDetectorDegradedCounter().add(1);
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts accepted app spans without high-cardinality attributes. */
@@ -371,29 +323,23 @@ export function countHostAppSpansAccepted(count: number): void {
   if (!Number.isSafeInteger(count) || count <= 0) {
     return;
   }
-  try {
+  safelyRecordMetric(() => {
     getHostAppSpansAcceptedCounter().add(count);
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts values excluded from a run's sentinel set without metric attributes. */
 export function countSkippedShortValues(count: number): void {
-  try {
+  safelyRecordMetric(() => {
     getSkippedShortValuesCounter().add(count);
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts when a global scan uses per-run matchers instead of a combined matcher. */
 export function countSentinelScopeReduced(): void {
-  try {
+  safelyRecordMetric(() => {
     getScopeReducedCounter().add(1);
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts total input and output tokens and optional cost for one provider/model. */
@@ -408,7 +354,7 @@ export function countModelUsage(
   if (!isValidModelUsage(usage)) {
     return;
   }
-  try {
+  safelyRecordMetric(() => {
     const attributes: ModelUsageAttributes = {
       "harness.model.provider": Code.parse(provider),
       "harness.model.name": Code.parse(model),
@@ -423,36 +369,28 @@ export function countModelUsage(
     if (usage.costMicros !== undefined) {
       getModelCostCounter().add(usage.costMicros, attributes);
     }
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts an MCP tool-discovery failure without server identifiers. */
 export function countMcpDiscoveryFailed(): void {
-  try {
+  safelyRecordMetric(() => {
     getMcpDiscoveryFailedCounter().add(1);
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts an MCP input-request outcome without server identifiers or request content. */
 export function countMcpInputRequest(outcome: McpInputRequestOutcome): void {
-  try {
+  safelyRecordMetric(() => {
     getMcpInputRequestsCounter().add(1, { "harness.mcp.input_requests.outcome": outcome });
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Counts a worker job using a bounded outcome and no identifiers. */
 export function countWorkerJob(outcome: WorkerJobOutcome): void {
-  try {
+  safelyRecordMetric(() => {
     getWorkerJobsCounter().add(1, { "harness.worker.jobs.outcome": outcome });
-  } catch {
-    return;
-  }
+  });
 }
 
 /** Records queue delay without identifiers or other attributes. */
@@ -460,9 +398,7 @@ export function recordWorkerQueueLag(lagMs: number): void {
   if (!Number.isFinite(lagMs) || lagMs < 0) {
     return;
   }
-  try {
+  safelyRecordMetric(() => {
     getWorkerQueueLagHistogram().record(lagMs);
-  } catch {
-    return;
-  }
+  });
 }

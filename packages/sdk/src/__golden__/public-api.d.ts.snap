@@ -517,6 +517,23 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 }>>;
                 maxSeries: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
+            sinks: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    datadog: "datadog";
+                    file: "file";
+                    kusto: "kusto";
+                    stdout: "stdout";
+                }>;
+                maxClassification: z.ZodDefault<z.ZodEnum<{
+                    content_tokenized: "content_tokenized";
+                    metadata: "metadata";
+                }>>;
+                enabled: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>>;
+            unsafe: z.ZodPrefault<z.ZodObject<{
+                allowContentSinks: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         sandbox: z.ZodPrefault<z.ZodObject<{
             allowUnsafeInProcess: z.ZodOptional<z.ZodBoolean>;

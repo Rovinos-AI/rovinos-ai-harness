@@ -558,6 +558,8 @@ store: {}`,
         sentinel: { minValueLength: 6 },
         correlation: { enabled: false },
         metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+        sinks: [],
+        unsafe: { allowContentSinks: false },
       },
       sandbox: {},
       elicitation: {

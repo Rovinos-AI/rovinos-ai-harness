@@ -147,6 +147,13 @@ export {
 } from "./cli/inputs.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./config/keys.js";
+export { RateLimitsConfigSchema, type RateLimitsConfig } from "./config/rate-limits.js";
+export {
+  RateLimitStoreUnavailableError,
+  type RateLimit,
+  type RateLimitResult,
+  type RateLimitStore,
+} from "./rate-limit.js";
 export { isSecretKeyName } from "./secret-key-name.js";
 export {
   DestinationSchema,
@@ -253,7 +260,13 @@ export {
   type CustomDetector,
   type Detection,
 } from "./pii-detection.js";
-export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
+export {
+  SinkPolicySchema,
+  TelemetryConfigSchema,
+  type SinkPolicy,
+  type TelemetryConfig,
+  type TelemetryConfigInput,
+} from "./config/telemetry.js";
 export {
   ElicitationConfigSchema,
   ServerElicitationConfigSchema,
