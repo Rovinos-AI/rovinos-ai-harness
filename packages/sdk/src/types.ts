@@ -447,7 +447,8 @@ export interface Harness {
 
 /** Coded SDK failure that does not include untrusted input values. */
 export class SdkError extends HarnessError {
-  readonly code: SdkMcpConnectionErrorCode
+  readonly code:
+    | SdkMcpConnectionErrorCode
     | "sdk_mcp_catalog_invalid"
     | "sdk_mcp_config_invalid"
     | "sdk_mcp_inspection_failed"

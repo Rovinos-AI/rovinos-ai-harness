@@ -15,7 +15,10 @@ const server = new McpServer(
 );
 server.registerTool(
   "echo",
-  { description: "Return the supplied synthetic value.", inputSchema: z.object({ value: z.string() }) },
+  {
+    description: "Return the supplied synthetic value.",
+    inputSchema: z.object({ value: z.string() }),
+  },
   async ({ value }) => {
     await appendFile(counterPath, "echo\n", "utf8");
     return { content: [{ type: "text", text: value }] };

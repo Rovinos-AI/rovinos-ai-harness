@@ -61,9 +61,9 @@ const abortSignalSchema = z.custom<AbortSignal>(
     typeof value.removeEventListener === "function",
 );
 
-const secretResolverSchema = z.custom<
-  (ref: SecretRef, signal?: AbortSignal) => Promise<string>
->((value) => typeof value === "function");
+const secretResolverSchema = z.custom<(ref: SecretRef, signal?: AbortSignal) => Promise<string>>(
+  (value) => typeof value === "function",
+);
 
 /** Dependencies needed to resolve references during a read-only server inspection. */
 export const InspectMcpServerOptionsSchema = z

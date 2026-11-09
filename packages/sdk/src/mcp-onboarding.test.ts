@@ -2,11 +2,7 @@
 import { HarnessConfigSchema } from "@rovinos/config";
 import { parseYaml } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
-import {
-  McpCatalogInspectionSchema,
-  registerMcpServer,
-  selectMcpTools,
-} from "./mcp-onboarding.js";
+import { McpCatalogInspectionSchema, registerMcpServer, selectMcpTools } from "./mcp-onboarding.js";
 import { SdkError } from "./types.js";
 
 const server = {
