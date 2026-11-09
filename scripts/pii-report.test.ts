@@ -47,6 +47,37 @@ afterEach(() => {
 });
 
 describe("evaluatePiiReport", () => {
+  it("reports unchanged regex metrics from the committed corpus with its runtime JWT", () => {
+    const outputDirectory = temporaryDirectory();
+    expect(runPiiReport(["--out-dir", outputDirectory])).toBe(0);
+    const report = parseJson(
+      PiiReportSchema,
+      readFileSync(join(outputDirectory, "pii-report.json"), "utf8"),
+    );
+    expect(report.sampleCount).toBe(67);
+    expect(report.passed).toBe(true);
+    const regexOnlyExcluded = new Set(["person_name", "location"]);
+    for (const entityType of regexOnlyExcluded) {
+      expect(report.entities[entityType]?.exact.precision).toBeNull();
+      expect(report.entities[entityType]?.exact.recall).toBe(0);
+    }
+    for (const [, result] of Object.entries(report.entities).filter(
+      ([entityType]) => !regexOnlyExcluded.has(entityType),
+    )) {
+      expect(result.exact).toMatchObject({
+        falsePositive: 0,
+        falseNegative: 0,
+        precision: 1,
+        recall: 1,
+        f1: 1,
+      });
+    }
+    for (const result of Object.values(report.entities)) {
+      expect(result.iou50).toEqual(result.exact);
+    }
+    expect(report.entities.api_key?.exact.truePositive).toBe(5);
+  });
+
   it("computes exact and IoU-0.5 precision, recall, and F1", () => {
     const report = evaluatePiiReport(
       [

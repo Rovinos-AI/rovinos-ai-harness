@@ -249,7 +249,13 @@ export {
   type CustomDetector,
   type Detection,
 } from "./pii-detection.js";
-export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
+export {
+  SinkPolicySchema,
+  TelemetryConfigSchema,
+  type SinkPolicy,
+  type TelemetryConfig,
+  type TelemetryConfigInput,
+} from "./config/telemetry.js";
 export {
   ElicitationConfigSchema,
   ServerElicitationConfigSchema,
@@ -343,7 +349,12 @@ export {
 } from "./cli/pii.js";
 export {
   ServersCheckResultSchema,
+  ServersCheckPhaseSchema,
+  ServersCheckPhaseStatusSchema,
+  ServersCheckPhasesSchema,
   ServersCheckServerResultSchema,
+  type ServersCheckPhase,
+  type ServersCheckPhases,
   type ServersCheckResult,
   type ServersCheckServerResult,
 } from "./cli/servers.js";

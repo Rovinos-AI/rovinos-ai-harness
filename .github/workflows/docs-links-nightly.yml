@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Nightly external documentation link check
+
+on:
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-links-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  external-links:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Check external documentation links
+        run: yarn check:links --external
