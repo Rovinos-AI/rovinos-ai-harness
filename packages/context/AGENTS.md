@@ -10,7 +10,7 @@ Context strategies (naive, sliding window, summarizing), token counting, offload
 
 ## Allowed internal imports
 
-- `@rovinos/schemas`, `@rovinos/telemetry`. Nothing else from `@rovinos/*`.
+- `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->
@@ -20,7 +20,7 @@ Context strategies (naive, sliding window, summarizing), token counting, offload
 - `ContextStrategy.build` is pure over the event log. Side effects (summarizing, writing files) happen in explicit run-loop steps that record events.
 - Tool calls and their results are one atomic group; never split them.
 - Any change in a strategy's output for the same input requires a new `version` Code (golden/version guard test).
-- Offloaded files and previews contain tokenized content only.
+- Offloaded text files and previews contain tokenized content; binary MCP artifacts are encrypted at rest but not tokenized.
 
 ## Testing
 
