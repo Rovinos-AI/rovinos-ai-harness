@@ -48,7 +48,9 @@ multi-artifact write and authorization contract is not yet defined.
    before persistence. Binary parts are blocked by default with `mcp_binary_result_blocked`.
    Operators may set `binaryResults: allow` per server. Allowed binary artifacts are stored
    without tokenization in the run workspace as an explicit exception to the files-carry-tokens rule.
-   Vault-key encryption is a follow-up; this decision does not add it.
+   Artifacts are AES-GCM encrypted with the current vault key and bound to the run and handle.
+   Plaintext byte counts and SHA-256 digests remain in references. Raw artifacts written before
+   encryption are unsupported and reads return `artifact_legacy_unsupported`.
 
 ## Offload and failure semantics
 
@@ -99,5 +101,5 @@ legacy results must both be passed intact to the next model step.
 
 ## Follow-up
 
-Encrypt allowed binary artifacts with the run's vault key while retaining run-scoped reference
-authorization and integrity verification.
+**Completed by task 6.20:** Encrypt allowed binary artifacts with vault keys while retaining
+run-scoped reference authorization and plaintext digest metadata.

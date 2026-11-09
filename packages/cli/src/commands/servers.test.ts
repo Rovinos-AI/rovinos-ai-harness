@@ -494,6 +494,9 @@ describe("harness servers check", () => {
 
     expect(exitCode).toBe(ExitCode.ok);
     expect(documents).toHaveLength(1);
+    expect(result.reportVersion).toBe(1);
+    expect(result.catalogFingerprintStatus).toBe("complete");
+    expect(result.catalogFingerprint).toMatch(/^[a-f0-9]{64}$/u);
     expect(result.servers).toEqual([
       expect.objectContaining({
         id: "primary",
@@ -501,11 +504,25 @@ describe("harness servers check", () => {
         protocolEra: "legacy",
         protocolVersion: "2025-11-25",
         supportsApps: true,
+        capabilities: { apps: "yes", tools: "yes" },
         trust: "internal",
         reachable: true,
         toolCount: 2,
+        acceptedToolCount: 1,
+        excludedToolCount: 1,
         registeredToolIds: ["primary.available"],
         rejectedTools: [{ reason: "tool_not_allowlisted" }],
+        phases: {
+          connection: { status: "success" },
+          authentication: { status: "not_applicable" },
+          negotiation: { status: "success" },
+          discovery: { status: "success" },
+          schemaValidation: { status: "partial" },
+          exposure: { status: "partial" },
+          policyConfiguration: { status: "not_tested", allowlistConfigured: true },
+        },
+        aliasMappingAvailable: false,
+        nextAction: "review_tool_allowlist",
         tracePropagation: "no",
         tracePropagationReason: "disabled",
         warnings: ["trace_propagation_disabled"],
@@ -542,8 +559,21 @@ describe("harness servers check", () => {
         id: "offline",
         reachable: false,
         errorCode: "mcp_connect_failed",
+        phases: {
+          connection: { status: "failed", errorCode: "mcp_connect_failed" },
+          authentication: { status: "not_applicable" },
+          negotiation: { status: "not_tested" },
+          discovery: { status: "not_tested" },
+          schemaValidation: { status: "not_tested" },
+          exposure: { status: "not_tested" },
+          policyConfiguration: { status: "not_tested", allowlistConfigured: false },
+        },
+        capabilities: { apps: "unknown", tools: "unknown" },
+        nextAction: "check_transport_configuration",
       }),
     );
+    expect(result.catalogFingerprintStatus).toBe("not_tested");
+    expect(result.catalogFingerprint).toBeUndefined();
     expect(stderr).toEqual(["servers_check_failed\n"]);
     expect(stdout.join("") + stderr.join("")).not.toContain(errorCanary);
   });
@@ -574,6 +604,17 @@ describe("harness servers check", () => {
         reachable: false,
         supportsApps: false,
         errorCode: "mcp_apps_unsupported",
+        phases: {
+          connection: { status: "not_tested" },
+          authentication: { status: "not_applicable" },
+          negotiation: { status: "not_tested" },
+          discovery: { status: "not_tested" },
+          schemaValidation: { status: "not_tested" },
+          exposure: { status: "not_tested" },
+          policyConfiguration: { status: "not_tested", allowlistConfigured: false },
+        },
+        capabilities: { apps: "unknown", tools: "unknown" },
+        nextAction: "review_server_configuration",
       }),
     );
     expect(createTransport).not.toHaveBeenCalled();
@@ -661,8 +702,20 @@ describe("harness servers check", () => {
     expect(result.servers).toEqual([
       expect.objectContaining({
         toolCount: 1,
+        acceptedToolCount: 0,
+        excludedToolCount: 1,
         registeredToolIds: [],
         rejectedTools: [{ reason: "tool_header_invalid" }],
+        phases: {
+          connection: { status: "success" },
+          authentication: { status: "not_applicable" },
+          negotiation: { status: "success" },
+          discovery: { status: "success" },
+          schemaValidation: { status: "not_tested" },
+          exposure: { status: "partial" },
+          policyConfiguration: { status: "not_tested", allowlistConfigured: false },
+        },
+        nextAction: "review_tool_configuration",
       }),
     ]);
     expect(stdout.join("")).not.toContain("native-secret-tool");
@@ -710,6 +763,16 @@ describe("harness servers check", () => {
         connectLatencyMs: 10,
         reachable: false,
         errorCode: "mcp_list_tools_failed",
+        phases: {
+          connection: { status: "success" },
+          authentication: { status: "not_applicable" },
+          negotiation: { status: "success" },
+          discovery: { status: "failed", errorCode: "mcp_list_tools_failed" },
+          schemaValidation: { status: "not_tested" },
+          exposure: { status: "not_tested" },
+          policyConfiguration: { status: "not_tested", allowlistConfigured: false },
+        },
+        nextAction: "retry_discovery",
       }),
     ]);
   });
@@ -740,6 +803,16 @@ describe("harness servers check", () => {
         id: "second",
         tracePropagation: "no",
         tracePropagationReason: "external",
+        phases: {
+          connection: { status: "success" },
+          authentication: { status: "not_applicable" },
+          negotiation: { status: "success" },
+          discovery: { status: "success" },
+          schemaValidation: { status: "success" },
+          exposure: { status: "success" },
+          policyConfiguration: { status: "not_tested", allowlistConfigured: false },
+        },
+        capabilities: { apps: "yes", tools: "yes" },
       }),
     ]);
   });
@@ -770,7 +843,12 @@ describe("harness servers check", () => {
     const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
 
     expect(exitCode).toBe(ExitCode.failure);
-    expect(result).toEqual({ servers: [], errorCode: "mcp_server_not_found" });
+    expect(result).toEqual({
+      reportVersion: 1,
+      catalogFingerprintStatus: "not_tested",
+      servers: [],
+      errorCode: "mcp_server_not_found",
+    });
     expect(stderr).toEqual(["servers_check_failed\n"]);
   });
 
@@ -942,7 +1020,21 @@ describe("harness servers check", () => {
       const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
 
       expect(exitCode).toBe(ExitCode.ok);
-      expect(result.servers).toEqual([expect.objectContaining({ id: "machine", reachable: true })]);
+      expect(result.servers).toEqual([
+        expect.objectContaining({
+          id: "machine",
+          reachable: true,
+          phases: {
+            connection: { status: "success" },
+            authentication: { status: "success" },
+            negotiation: { status: "success" },
+            discovery: { status: "success" },
+            schemaValidation: { status: "success" },
+            exposure: { status: "success" },
+            policyConfiguration: { status: "not_tested", allowlistConfigured: false },
+          },
+        }),
+      ]);
       expect(oauthServer.resourceProbeCount()).toBe(1);
       expect(oauthServer.fallbackProbeCount()).toBeGreaterThanOrEqual(1);
       expect(closeStore).toHaveBeenCalledOnce();
@@ -1322,6 +1414,16 @@ describe("harness servers check", () => {
         id: "remote",
         reachable: false,
         errorCode: "mcp_auth_required",
+        phases: {
+          connection: { status: "failed", errorCode: "mcp_auth_required" },
+          authentication: { status: "failed", errorCode: "mcp_auth_required" },
+          negotiation: { status: "not_tested" },
+          discovery: { status: "not_tested" },
+          schemaValidation: { status: "not_tested" },
+          exposure: { status: "not_tested" },
+          policyConfiguration: { status: "not_tested", allowlistConfigured: false },
+        },
+        nextAction: "configure_authentication",
       }),
     ]);
   });
