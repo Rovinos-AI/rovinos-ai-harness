@@ -130,20 +130,18 @@ export class LifecycleTracker {
   }
 }
 
-/** Streams safe events for a run and tracks the watcher until iteration ends. */
-export async function* watchRunEvents({
+/** Streams stored events for a run and tracks the watcher until iteration ends. */
+export async function* watchRunStoredEvents({
   runtime,
   tracker,
   runId,
   options,
-  projectSafeEvents,
 }: {
   readonly runtime: Runtime;
   readonly tracker: LifecycleTracker;
   readonly runId: Id;
   readonly options: ReturnType<typeof WatchOptionsSchema.parse>;
-  readonly projectSafeEvents: (events: readonly Event[]) => Promise<readonly SafeEvent[]>;
-}): AsyncGenerator<SafeEvent> {
+}): AsyncGenerator<Event> {
   const controller = new AbortController();
   const watcher = tracker.addWatcher(controller);
   const onAbort = (): void => {
@@ -171,10 +169,29 @@ export async function* watchRunEvents({
       signal: controller.signal,
       ...(options.maxBuffered === undefined ? {} : { maxBuffered: options.maxBuffered }),
     })) {
-      yield* await projectSafeEvents([event]);
+      yield event;
     }
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
     tracker.finishWatcher(watcher);
+  }
+}
+
+/** Streams safe events for a run and tracks the watcher until iteration ends. */
+export async function* watchRunEvents({
+  runtime,
+  tracker,
+  runId,
+  options,
+  projectSafeEvents,
+}: {
+  readonly runtime: Runtime;
+  readonly tracker: LifecycleTracker;
+  readonly runId: Id;
+  readonly options: ReturnType<typeof WatchOptionsSchema.parse>;
+  readonly projectSafeEvents: (events: readonly Event[]) => Promise<readonly SafeEvent[]>;
+}): AsyncGenerator<SafeEvent> {
+  for await (const event of watchRunStoredEvents({ runtime, tracker, runId, options })) {
+    yield* await projectSafeEvents([event]);
   }
 }
