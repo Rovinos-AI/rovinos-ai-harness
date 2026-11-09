@@ -1004,7 +1004,20 @@ export declare const RunViewSchema: z.ZodObject<{
         }>;
         inputTokens: z.ZodNumber;
         outputTokens: z.ZodNumber;
-        costMicros: z.ZodOptional<z.ZodNumber>;
+        costVersion: z.ZodNumber;
+        costState: z.ZodEnum<{
+            estimated: "estimated";
+            known: "known";
+            partial: "partial";
+            unknown: "unknown";
+        }>;
+        costKnownMicros: z.ZodNumber;
+        costEstimatedMicros: z.ZodNumber;
+        costPartialMicros: z.ZodNumber;
+        costKnownCount: z.ZodNumber;
+        costEstimatedCount: z.ZodNumber;
+        costPartialCount: z.ZodNumber;
+        costUnknownCount: z.ZodNumber;
         runId: z.ZodString;
         seq: z.ZodNumber;
         ts: z.ZodNumber;

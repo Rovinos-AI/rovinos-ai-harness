@@ -287,7 +287,7 @@ it("records and replays voted judges with configured pricing and stops schedulin
       knownMicros: 6_000_004,
       estimatedMicros: 0,
       partialMicros: 0,
-      knownCount: 1,
+      knownCount: 2,
       estimatedCount: 0,
       partialCount: 0,
       unknownCount: 0,

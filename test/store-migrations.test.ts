@@ -257,7 +257,8 @@ describe("SQLite schema migrations", () => {
     expect(await readdir(postgresMigrations)).toContain("0006_run_queue.sql");
     expect(await readdir(postgresMigrations)).toContain("0007_usage_ledger.sql");
     expect(await readdir(postgresMigrations)).toContain("0008_run_queue_wakeups.sql");
-    expect(await readdir(postgresMigrations)).toContain("0012_unknown_cost_ledger.sql");
+    expect(await readdir(postgresMigrations)).toContain("0012_rate_limit_buckets.sql");
+    expect(await readdir(postgresMigrations)).toContain("0013_unknown_cost_ledger.sql");
     expect(await readFile(new URL("0001_init.sql", directory), "utf8")).toContain(
       "CREATE TABLE IF NOT EXISTS events",
     );
