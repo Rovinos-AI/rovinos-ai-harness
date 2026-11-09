@@ -21,20 +21,20 @@ import {
   type scenarioReportSchema,
   type ConformanceReport,
   type ConformanceScenarioStatus,
-} from "./mcp-conformance-schema.js";
+} from "./mcp-conformance-schema.ts";
 import {
   INSPECTOR_HTTP_TOKEN,
   INSPECTOR_READ_TOKEN,
   startInspectorFixture,
-} from "./inspector-http.js";
-import { assertNoCredentialCanaries } from "./mcp-conformance-report-safety.js";
+} from "./inspector-http.ts";
+import { assertNoCredentialCanaries } from "./mcp-conformance-report-safety.ts";
 
 const root = resolvePath(import.meta.dirname, "../..");
 const harness = resolvePath(root, "packages/cli/dist/bin.js");
 const runner = resolvePath(root, "node_modules/@modelcontextprotocol/conformance/dist/index.js");
 const checksSchema = z.array(z.object({ status: z.string() }).loose());
 
-export type { ConformanceReport, ConformanceScenarioStatus } from "./mcp-conformance-schema.js";
+export type { ConformanceReport, ConformanceScenarioStatus } from "./mcp-conformance-schema.ts";
 
 interface ProcessResult {
   readonly status: number;

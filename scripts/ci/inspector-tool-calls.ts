@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
-import { INSPECTOR_HTTP_TOKEN, INSPECTOR_READ_TOKEN } from "./inspector-http.js";
+import { INSPECTOR_HTTP_TOKEN, INSPECTOR_READ_TOKEN } from "./inspector-http.ts";
 
 /** Result of one MCP Inspector CLI invocation. */
 export interface ProcessResult {

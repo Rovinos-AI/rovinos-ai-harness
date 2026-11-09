@@ -10,12 +10,12 @@ import {
   checkToolCalls,
   type InspectorRequest,
   type ProcessResult,
-} from "./inspector-tool-calls.js";
+} from "./inspector-tool-calls.ts";
 import {
   INSPECTOR_HTTP_TOKEN,
   INSPECTOR_READ_TOKEN,
   startInspectorFixture,
-} from "./inspector-http.js";
+} from "./inspector-http.ts";
 
 const root = resolvePath(import.meta.dirname, "../..");
 const harness = resolvePath(root, "packages/cli/dist/bin.js");
