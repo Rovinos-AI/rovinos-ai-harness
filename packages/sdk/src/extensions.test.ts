@@ -18,6 +18,7 @@ import type {
   ExtensionDefinition,
   ExtensionGrant,
   ExtensionRegistration,
+  ToolInvocationContext,
   ProviderAdapter,
 } from "./index.js";
 import { prepareExtensions } from "./extensions.js";
@@ -270,18 +271,21 @@ describe("SDK extension registration", () => {
       [],
     );
     const tool = prepared.tool;
-    expect(tool?.getToolSpecs?.()).toHaveLength(1);
-    expect(tool?.describe?.(Code.parse("knowledge.search"))).toMatchObject({
+    if (tool === undefined) {
+      throw new Error("The granted extension tool should be registered.");
+    }
+    expect(tool.getToolSpecs?.()).toHaveLength(1);
+    expect(tool.describe(Code.parse("knowledge.search"))).toMatchObject({
       idempotent: false,
       timeoutMs: 30_000,
     });
-    await expect(tool?.execute(toolCall, toolContext)).resolves.toMatchObject({
+    await expect(tool.execute(toolCall, toolContext)).resolves.toMatchObject({
       outcome: "ok",
       result: { answer: "refund" },
     });
-    expect(tool?.catalogFingerprints?.()).toHaveProperty("knowledge.search");
+    expect(tool.catalogFingerprints?.()).toHaveProperty("knowledge.search");
     await expect(
-      tool?.execute({ ...toolCall, args: { query: "" } }, toolContext),
+      tool.execute({ ...toolCall, args: { query: "" } }, toolContext),
     ).resolves.toMatchObject({ outcome: "error", errorCode: "extension_input_invalid" });
 
     expect(
@@ -291,14 +295,14 @@ describe("SDK extension registration", () => {
         target: "search",
       }),
     ).toBe(true);
-    expect(tool?.getToolSpecs?.()).toEqual([]);
-    expect(tool?.catalogFingerprints?.()).toEqual({});
+    expect(tool.getToolSpecs?.()).toEqual([]);
+    expect(tool.catalogFingerprints?.()).toEqual({});
     expect(prepared.getStatuses()[0]?.capabilities[0]).toMatchObject({
       enabled: [],
       unsupported: ["search"],
       reason: "not_granted",
     });
-    await expect(tool?.execute(toolCall, toolContext)).resolves.toMatchObject({
+    await expect(tool.execute(toolCall, toolContext)).resolves.toMatchObject({
       outcome: "error",
       errorCode: "extension_grant_missing",
     });
@@ -318,7 +322,7 @@ describe("SDK extension registration", () => {
       [],
       5_000,
     );
-    expect(prepared.tool?.describe?.(Code.parse("knowledge.search"))?.timeoutMs).toBe(5_000);
+    expect(prepared.tool?.describe(Code.parse("knowledge.search"))?.timeoutMs).toBe(5_000);
   });
 
   it("stops a cancelled invocation and rejects invalid output without forwarding it", async () => {
@@ -498,9 +502,7 @@ describe("SDK extension registration", () => {
           clock: new FakeClock(1),
           ids: new SequentialIdGenerator(),
           model: {
-            complete: async () => {
-              throw new Error("not used");
-            },
+            complete: () => Promise.reject(new Error("not used")),
           },
         },
         extensions: [
@@ -523,9 +525,7 @@ describe("SDK extension registration", () => {
         clock: new FakeClock(1),
         ids: new SequentialIdGenerator(),
         model: {
-          complete: async () => {
-            throw new Error("not used");
-          },
+          complete: () => Promise.reject(new Error("not used")),
         },
       },
       extensions: [
@@ -563,14 +563,21 @@ describe("SDK extension registration", () => {
 
   it("routes an extension tool through the ordinary core model and policy path", async () => {
     const store = new InMemoryEventStore();
-    const execute = vi.fn(async ({ query }: { readonly query: string }) => ({ answer: query }));
+    let invocationSignal: AbortSignal | undefined;
+    const execute = vi.fn(
+      ({ query }: { readonly query: string }, context: ToolInvocationContext) => {
+        invocationSignal = context.signal;
+        return Promise.resolve({ answer: query });
+      },
+    );
     let responseIndex = 0;
+    let offeredToolIds: readonly string[] = [];
     const model: ModelPort = {
-      complete: async (request) => {
+      complete: (request) => {
         responseIndex += 1;
         if (responseIndex === 1) {
-          expect(request.tools?.map(({ toolId }) => toolId)).toContain("knowledge.search");
-          return {
+          offeredToolIds = request.tools?.map(({ toolId }) => toolId) ?? [];
+          return Promise.resolve({
             parts: [
               {
                 type: "tool_call",
@@ -588,9 +595,9 @@ describe("SDK extension registration", () => {
             repairAttempts: 0,
             fallbackDepth: 0,
             providerBlobs: null,
-          };
+          });
         }
-        return {
+        return Promise.resolve({
           parts: [{ type: "text", text: "Synthetic answer." }],
           usage: { inputTokens: 1, outputTokens: 1 },
           finishReason: Code.parse("stop"),
@@ -601,7 +608,7 @@ describe("SDK extension registration", () => {
           repairAttempts: 0,
           fallbackDepth: 0,
           providerBlobs: null,
-        } satisfies ModelCompletion;
+        } satisfies ModelCompletion);
       },
     };
     const harness = await createHarness({
@@ -650,10 +657,9 @@ describe("SDK extension registration", () => {
       }
 
       expect(responseIndex).toBe(2);
-      expect(execute).toHaveBeenCalledWith(
-        { query: "synthetic" },
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      );
+      expect(offeredToolIds).toContain("knowledge.search");
+      expect(execute).toHaveBeenCalledWith({ query: "synthetic" }, expect.anything());
+      expect(invocationSignal).toBeInstanceOf(AbortSignal);
       expect(observedKinds).toContain("tool_call");
       expect(events.map(({ type }) => type)).toContain("tool_intent");
       expect(events.map(({ type }) => type)).toContain("tool_result");

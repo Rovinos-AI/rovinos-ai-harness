@@ -154,6 +154,7 @@ type WithExtensionRegistrations<Options, Registrations extends readonly Extensio
   Options extends { readonly extensions?: unknown }
     ? Omit<Options, "extensions"> & { readonly extensions?: Registrations }
     : Options;
+/** Options passed to {@link createHarness}, with optional literal registrations preserved. */
 export type CreateHarnessOptions<
   Registrations extends readonly ExtensionRegistration[] = readonly ExtensionRegistration[],
 > = WithExtensionRegistrations<CreateHarnessOptionsInput, Registrations>;
