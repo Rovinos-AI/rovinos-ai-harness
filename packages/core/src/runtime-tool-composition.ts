@@ -114,7 +114,10 @@ export function createRuntimeToolPort(options: RuntimeToolPortOptions): ToolPort
   const getCatalogVersion = options.tool.catalogVersion?.bind(options.tool);
   const getCatalogFingerprints = options.tool.catalogFingerprints?.bind(options.tool);
   const pinForRun = createPinForRun(options, pinToolForRun);
+  const profileSupport: Pick<ToolPort, "supportsToolProfiles"> =
+    options.tool.supportsToolProfiles === true ? { supportsToolProfiles: true } : {};
   return Object.assign(composed, {
+    ...profileSupport,
     ...(pinForRun === undefined ? {} : { pinForRun }),
     ...(getCatalogVersion === undefined ? {} : { catalogVersion: getCatalogVersion }),
     ...(getCatalogFingerprints === undefined

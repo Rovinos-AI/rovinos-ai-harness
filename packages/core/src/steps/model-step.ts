@@ -177,6 +177,19 @@ function completeUnlessShutdown(
   });
 }
 
+function toolDefinitionDiagnostics(tools: readonly ToolSpec[] | undefined): {
+  readonly count: number;
+  readonly bytes: number;
+} {
+  if (tools === undefined || tools.length === 0) {
+    return { count: 0, bytes: 0 };
+  }
+  return {
+    count: tools.length,
+    bytes: Buffer.byteLength(JSON.stringify(tools), "utf8"),
+  };
+}
+
 /**
  * Records a model request, performs the provider call, and records its outcome.
  *
@@ -186,6 +199,7 @@ function completeUnlessShutdown(
 export async function modelStep(options: ModelStepOptions): Promise<ModelStepResult> {
   const requestId = options.ids.next();
   const { modelRequest, requestPartial } = requestParts(options, requestId);
+  const toolDiagnostics = toolDefinitionDiagnostics(modelRequest.tools);
   const recorded: Event[] = [];
   let result: ModelStepResult | undefined;
 
@@ -196,6 +210,8 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       "harness.context.strategy_version": options.contextMetadata.strategyVersion,
       "harness.context.estimated_tokens": options.contextMetadata.estimatedTokens,
       "harness.context.message_count": options.contextMetadata.messageCount,
+      "harness.tool.definition_count": toolDiagnostics.count,
+      "harness.tool.definition_bytes": toolDiagnostics.bytes,
     },
     async (span) => {
       const requestEvent = await options.recorder.record(requestPartial);

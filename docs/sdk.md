@@ -28,6 +28,23 @@ durable SQLite and Postgres stores can also be selected through configuration.
 An optional `role` is passed to model routing. `requestedBy` records the run's requesting principal
 in `run_created` metadata; it is not an authorization mechanism.
 
+## MCP tool profiles
+
+Configure named MCP tool subsets with `toolProfiles`, then select one for a new run:
+
+```ts
+const { runId } = await harness.startRun({
+  goal: "Summarize the synthetic issue.",
+  toolProfile: "inspect",
+});
+```
+
+The profile is validated against the server catalog after server allowlists are applied. Profiles
+only narrow which MCP definitions are sent to the model; tool calls still pass through policy and
+approval. `continueRun` accepts the same option. Profiles apply to new runs only; active runs and
+resumed runs keep the MCP tool fingerprints recorded at creation. See
+[configuration](configuration.md#mcp-tool-profiles) for limits and examples.
+
 ## Metadata and events
 
 `getRun` and `listRuns` return run status, usage totals, approval identifiers, pagination metadata,

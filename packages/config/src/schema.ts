@@ -16,6 +16,7 @@ import {
   ServersConfigSchema,
   StoreConfigSchema,
   TelemetryConfigSchema,
+  ToolProfilesConfigSchema,
   VaultConfigSchema,
 } from "@rovinos/schemas";
 
@@ -23,6 +24,7 @@ import {
 export const HarnessConfigSchema = z
   .object({
     run: RunConfigSchema,
+    toolProfiles: ToolProfilesConfigSchema.default({}),
     roles: RolesConfigSchema,
     quotas: QuotasConfigSchema,
     store: StoreConfigSchema,

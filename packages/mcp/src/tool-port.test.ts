@@ -13,10 +13,12 @@ import type { SpanContext } from "@opentelemetry/api";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import {
   HarnessError,
+  Code,
   JsonValue,
   ServerConfigSchema,
   type JsonValue as JsonValueType,
   type ServerConfig,
+  type ToolProfilesConfig,
 } from "@rovinos/schemas";
 import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { lookupSpanDefinition } from "@rovinos/telemetry";
@@ -64,6 +66,8 @@ async function fixture(
     readonly binaryResults?: "block" | "allow";
     readonly offloadBinaryResults?: boolean;
     readonly authRequiredMethod?: "tools/list" | "tools/call";
+    readonly tools?: Tool[];
+    readonly toolProfiles?: ToolProfilesConfig;
     readonly elicitation?: ServerConfig["elicitation"];
     readonly urlOptions?: {
       readonly requireHttps?: boolean;
@@ -75,7 +79,7 @@ async function fixture(
   const server = new McpServer({ name: "tool-port-test", version: "1.0.0" });
   const calls: CallToolRequest["params"][] = [];
   const receivedMeta: (Record<string, unknown> | undefined)[] = [];
-  let tools: Tool[] = [{ name: "echo", inputSchema }];
+  let tools: Tool[] = options.tools ?? [{ name: "echo", inputSchema }];
   let failToolsList = false;
   server.server.registerCapabilities({ tools: { listChanged: true } });
   server.server.setRequestHandler("tools/list", () => {
@@ -142,6 +146,7 @@ async function fixture(
         ...(options.offloadBinaryResults === undefined
           ? {}
           : { offloadBinaryResults: options.offloadBinaryResults }),
+        ...(options.toolProfiles === undefined ? {} : { toolProfiles: options.toolProfiles }),
         ...(options.urlOptions === undefined ? {} : { urlOptions: options.urlOptions }),
       },
     );
@@ -244,6 +249,82 @@ afterAll(() => {
 });
 
 describe("McpToolPort", () => {
+  it("exposes only the selected authorized profile and rejects hidden dispatch", async () => {
+    const current = await fixture({
+      tools: [
+        { name: "echo", inputSchema },
+        { name: "hidden", inputSchema },
+      ],
+      toolProfiles: {
+        focused: ["mcp_test.echo"],
+        empty: [],
+      },
+    });
+    try {
+      const focused = await current.port.pinForRun({ toolProfile: Code.parse("focused") });
+      expect(focused.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.echo"]);
+      expect(focused.catalogFingerprints()).toHaveProperty("mcp_test.echo");
+      expect(focused.catalogFingerprints()).not.toHaveProperty("mcp_test.hidden");
+      await expect(
+        focused.execute({ ...call, toolId: "mcp_test.hidden" }, context()),
+      ).resolves.toMatchObject({ outcome: "error", errorCode: "mcp_tool_not_found" });
+      expect(current.calls).toHaveLength(0);
+
+      const empty = await current.port.pinForRun({ toolProfile: Code.parse("empty") });
+      expect(empty.getToolSpecs()).toEqual([]);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("fails closed for unknown profiles and profile names outside the authorized catalog", async () => {
+    const current = await fixture({
+      tools: [{ name: "echo", inputSchema }],
+      toolProfiles: { focused: ["mcp_test.echo", "mcp_test.guessed"] },
+    });
+    try {
+      await expect(
+        current.port.pinForRun({ toolProfile: Code.parse("missing") }),
+      ).rejects.toMatchObject({ code: "mcp_tool_profile_unknown" });
+      await expect(
+        current.port.pinForRun({ toolProfile: Code.parse("focused") }),
+      ).rejects.toMatchObject({ code: "mcp_tool_profile_tool_missing" });
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("keeps a pinned profile subset stable across catalog additions and binds resume fingerprints", async () => {
+    const current = await fixture({
+      tools: [
+        { name: "echo", inputSchema },
+        { name: "hidden", inputSchema },
+      ],
+      toolProfiles: { focused: ["mcp_test.echo"] },
+    });
+    try {
+      const activeRun = await current.port.pinForRun({ toolProfile: Code.parse("focused") });
+      current.setTools([
+        { name: "echo", inputSchema },
+        { name: "hidden", inputSchema },
+        { name: "new_tool", inputSchema },
+      ]);
+      await current.port.refreshCatalog();
+
+      expect(activeRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.echo"]);
+      await expect(activeRun.execute(call, context())).resolves.toMatchObject({ outcome: "ok" });
+      expect(current.calls.map(({ name }) => name)).toEqual(["echo"]);
+
+      const resumedRun = await current.port.pinForRun({
+        resumed: true,
+        expectedToolFingerprints: activeRun.catalogFingerprints(),
+      });
+      expect(resumedRun.getToolSpecs().map(({ toolId }) => toolId)).toEqual(["mcp_test.echo"]);
+    } finally {
+      await current.close();
+    }
+  });
+
   it("pins a run and rejects a removed tool while routing new runs through refreshed tools", async () => {
     const current = await fixture();
     const activeRun = await current.port.pinForRun();

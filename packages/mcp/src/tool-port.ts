@@ -2,7 +2,12 @@
 // Each run keeps its discovered registry; refreshes never widen a pinned view.
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { Code, compileJsonSchema, HarnessError, JsonValue } from "@rovinos/schemas";
-import type { JsonValue as JsonValueType, ServerConfig, Sha256Hex } from "@rovinos/schemas";
+import type {
+  JsonValue as JsonValueType,
+  ServerConfig,
+  Sha256Hex,
+  ToolProfilesConfig,
+} from "@rovinos/schemas";
 import * as telemetry from "@rovinos/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
@@ -69,6 +74,8 @@ export type McpToolPortDependencies = McpConnectionDependencies;
 export interface McpToolPortOptions {
   /** Set only when an outer OffloadingToolPort consumes binary payloads. */
   readonly offloadBinaryResults?: boolean;
+  /** Operator-defined MCP tool subsets; each profile is checked against the authorized catalog. */
+  readonly toolProfiles?: ToolProfilesConfig;
   /** Global URL safety policy for MCP elicitation. */
   readonly urlOptions?: ElicitationUrlOptions;
 }
@@ -78,6 +85,7 @@ export interface McpCatalogPinOptions {
   readonly expectedVersion?: Sha256Hex;
   readonly expectedToolFingerprints?: Readonly<Record<string, Sha256Hex>>;
   readonly resumed?: boolean;
+  readonly toolProfile?: Code;
 }
 
 /** Failure raised when a run cannot safely use the catalog it was created with. */
@@ -86,6 +94,16 @@ export class McpCatalogChangedError extends HarnessError {
 
   constructor() {
     super("The MCP tool catalog no longer matches this run.");
+  }
+}
+
+/** Failure raised when a requested profile is not a subset of the configured catalog. */
+export class McpToolProfileError extends HarnessError {
+  readonly code: "mcp_tool_profile_unknown" | "mcp_tool_profile_tool_missing";
+
+  constructor(code: McpToolProfileError["code"]) {
+    super(code);
+    this.code = code;
   }
 }
 
@@ -202,6 +220,8 @@ async function executeRegisteredTool(options: {
  * limited to stable codes and never copies server text into telemetry.
  */
 export class McpToolPort {
+  readonly supportsToolProfiles: true = true;
+
   private constructor(
     private readonly catalog: CatalogState,
     private readonly options: McpToolPortOptions,
@@ -304,15 +324,35 @@ export class McpToolPort {
     ) {
       throw new McpCatalogChangedError();
     }
+    const profileRegistry =
+      options.toolProfile === undefined
+        ? refreshedRegistry
+        : this.#registryForProfile(refreshedRegistry, options.toolProfile);
     const registry =
       expectedToolFingerprints === undefined
-        ? refreshedRegistry
-        : refreshedRegistry.retainMatchingFingerprints(expectedToolFingerprints);
+        ? profileRegistry
+        : profileRegistry.retainMatchingFingerprints(expectedToolFingerprints);
     return new McpToolPort(this.catalog, this.options, this.oauthTokenStore, {
       pinnedRegistry: registry,
-      pinnedFingerprints: expectedToolFingerprints ?? refreshedRegistry.catalogFingerprints(),
+      pinnedFingerprints: expectedToolFingerprints ?? registry.catalogFingerprints(),
       ownsResources: false,
     });
+  }
+
+  #registryForProfile(registry: ToolRegistry, profileName: Code): ToolRegistry {
+    const profiles = this.options.toolProfiles;
+    if (profiles === undefined || !Object.hasOwn(profiles, profileName)) {
+      throw new McpToolProfileError("mcp_tool_profile_unknown");
+    }
+    const toolIds = profiles[profileName];
+    if (toolIds === undefined) {
+      throw new McpToolProfileError("mcp_tool_profile_unknown");
+    }
+    const available = new Set(registry.getToolSpecs().map(({ toolId }) => toolId));
+    if (toolIds.some((toolId) => !available.has(toolId))) {
+      throw new McpToolProfileError("mcp_tool_profile_tool_missing");
+    }
+    return registry.retainToolIds(new Set(toolIds));
   }
 
   /** Returns the retry metadata and input schema for a registered tool. */

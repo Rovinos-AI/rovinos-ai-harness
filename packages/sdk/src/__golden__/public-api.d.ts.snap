@@ -86,6 +86,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 }>, z.ZodTransform<boolean, "false" | "true">>]>>;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
+        toolProfiles: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>;
         roles: z.ZodDefault<z.ZodArray<z.ZodObject<{
             id: z.ZodString;
             route: z.ZodOptional<z.ZodString>;
@@ -665,6 +666,7 @@ export declare const StartRunOptionsSchema: z.ZodObject<{
     goal: z.ZodString;
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
     role: z.ZodOptional<z.ZodString>;
+    toolProfile: z.ZodOptional<z.ZodString>;
     idempotencyKey: z.ZodOptional<z.ZodString>;
     requestedBy: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
@@ -674,6 +676,7 @@ export type StartRunOptions = z.infer<typeof StartRunOptionsSchema>;
 export declare const ContinueRunOptionsSchema: z.ZodObject<{
     goal: z.ZodString;
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
+    toolProfile: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 /** Inferred input for {@link Harness.continueRun}. */
 export type ContinueRunOptions = z.infer<typeof ContinueRunOptionsSchema>;

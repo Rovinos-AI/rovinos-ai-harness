@@ -71,10 +71,15 @@ class HarnessClient implements Harness {
       const keyHash =
         input.idempotencyKey === undefined
           ? undefined
-          : createHash("sha256")
-              .update("harness/sdk/idempotency/v1\0")
-              .update(input.idempotencyKey)
-              .digest("hex");
+          : (() => {
+              const hash = createHash("sha256")
+                .update("harness/sdk/idempotency/v1\0")
+                .update(input.idempotencyKey);
+              if (input.toolProfile !== undefined) {
+                hash.update("\0tool-profile\0").update(input.toolProfile);
+              }
+              return hash.digest("hex");
+            })();
       const existingStart = keyHash === undefined ? undefined : this.idempotencyKeys.get(keyHash);
       if (existingStart !== undefined) {
         return await this.existingRunResult(await existingStart);
@@ -132,6 +137,7 @@ class HarnessClient implements Harness {
     const { input, runInput, keyHash, candidateRunId, managed } = options;
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
+      ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
       ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
       signal: managed.controller.signal,
@@ -175,6 +181,7 @@ class HarnessClient implements Harness {
     try {
       const execution = this.runtime.continueRun(parsedRunId, runInput, {
         signal: managed.controller.signal,
+        ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
       });
       this.trackExecution(managed, execution.runId, execution.completion);
       const result = await execution.completion;

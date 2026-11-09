@@ -89,6 +89,11 @@ export function composeToolPorts(
   const catalogFingerprints = ports.some((port) => port.catalogFingerprints !== undefined)
     ? () => collectCatalogFingerprints(toolIds, portFor)
     : undefined;
+  const profileSupport: Pick<ToolPort, "supportsToolProfiles"> = ports.some(
+    (port) => port.supportsToolProfiles === true,
+  )
+    ? { supportsToolProfiles: true }
+    : {};
   const validateInputSchema = ports.some((port) => port.validateInputSchema !== undefined)
     ? (
         toolId: Code,
@@ -100,6 +105,7 @@ export function composeToolPorts(
         Promise.resolve(true)
     : undefined;
   return {
+    ...profileSupport,
     ...(prepare === undefined ? {} : { prepare }),
     ...(pinForRun === undefined ? {} : { pinForRun }),
     ...(catalogVersion === undefined ? {} : { catalogVersion }),
