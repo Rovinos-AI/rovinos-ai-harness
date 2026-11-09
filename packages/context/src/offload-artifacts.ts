@@ -4,11 +4,25 @@ import {
   McpResultArtifactReferenceSchema,
   McpToolResultEnvelopeSchema,
   type Code,
+  type Id,
   type JsonValue as JsonValueType,
+  type KeyProvider,
 } from "@rovinos/schemas";
 import { OffloadedHandleSchema } from "./offload-schemas.js";
 import type { OffloadedHandle } from "./offload-schemas.js";
 import type { OffloadIdGenerator, OffloadToolExecutionResult, WorkspacePort } from "./offload.js";
+import {
+  encryptOffloadArtifact,
+  OffloadArtifactCryptoError,
+  offloadArtifactSha256,
+} from "./offload-artifact-crypto.js";
+
+interface OffloadArtifactOptions {
+  readonly ids: OffloadIdGenerator;
+  readonly knownSizes: Map<OffloadedHandle, number>;
+  readonly keyProvider: KeyProvider | undefined;
+  readonly runId: Id;
+}
 
 interface PreparedArtifactBatch {
   readonly handles: readonly OffloadedHandle[];
@@ -51,10 +65,12 @@ function replacedPart(
   };
 }
 
-function prepareArtifactBatch(
+async function prepareArtifactBatch(
   execution: OffloadToolExecutionResult,
   ids: OffloadIdGenerator,
-): Preparation {
+  keyProvider: KeyProvider | undefined,
+  runId: Id,
+): Promise<Preparation> {
   const envelope = McpToolResultEnvelopeSchema.safeParse(execution.result);
   if (!envelope.success || execution.artifacts === undefined) {
     return { errorCode: "mcp_result_invalid" };
@@ -75,16 +91,31 @@ function prepareArtifactBatch(
     if (!handle.success || !reference.success || part === undefined) {
       return { errorCode: "mcp_result_invalid" };
     }
+    if (offloadArtifactSha256(artifact.bytes) !== artifact.sha256) {
+      return { errorCode: "mcp_result_invalid" };
+    }
     const nextPart = replacedPart(part, artifact.target, JsonValue.parse(reference.data));
     if (nextPart === undefined) {
       return { errorCode: "mcp_result_invalid" };
+    }
+    if (keyProvider === undefined) {
+      return { errorCode: "artifact_encrypt_failed" };
+    }
+    let encrypted: Uint8Array;
+    try {
+      encrypted = await encryptOffloadArtifact(keyProvider, runId, handle.data, artifact.bytes);
+    } catch (error) {
+      return {
+        errorCode:
+          error instanceof OffloadArtifactCryptoError ? error.code : "artifact_encrypt_failed",
+      };
     }
     parts[artifact.partIndex] = nextPart;
     handles.push(handle.data);
     sizes.push(artifact.bytes.byteLength);
     writes.push({
       path: `.harness/offload/${handle.data}.bin`,
-      data: artifact.bytes,
+      data: encrypted,
     });
   }
 
@@ -103,10 +134,14 @@ function prepareArtifactBatch(
 export async function offloadArtifactResult(
   execution: OffloadToolExecutionResult,
   workspace: WorkspacePort,
-  ids: OffloadIdGenerator,
-  knownSizes: Map<OffloadedHandle, number>,
+  options: OffloadArtifactOptions,
 ): Promise<OffloadToolExecutionResult> {
-  const prepared = prepareArtifactBatch(execution, ids);
+  const prepared = await prepareArtifactBatch(
+    execution,
+    options.ids,
+    options.keyProvider,
+    options.runId,
+  );
   if ("errorCode" in prepared) {
     return toolError(prepared.errorCode);
   }
@@ -118,7 +153,7 @@ export async function offloadArtifactResult(
   for (const [index, handle] of prepared.handles.entries()) {
     const size = prepared.sizes[index];
     if (size !== undefined) {
-      knownSizes.set(handle, size);
+      options.knownSizes.set(handle, size);
     }
   }
   return {

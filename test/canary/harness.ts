@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { loadConfig } from "@rovinos/config";
-import { InMemoryWorkspace, OffloadingToolPort, type WorkspacePort } from "@rovinos/context";
+import { OffloadingToolPort, type WorkspacePort } from "@rovinos/context";
 import { createRuntime } from "@rovinos/core";
 import type { Runtime, ToolPort } from "@rovinos/core";
 import { FileCassetteStore } from "@rovinos/models";
@@ -16,6 +16,7 @@ import { captureCliOutput } from "./cli-output.js";
 import { readDatabaseSinks } from "./scanning.js";
 import {
   ASK_TOOL,
+  BINARY_TOOL,
   createCanaryModel,
   createCanarySecretResolver,
   createCanaryToolPort,
@@ -32,6 +33,7 @@ import {
   emitCanaryUnsafeSpan,
   type CanaryTelemetry,
 } from "./telemetry.js";
+import { createCapturedWorkspace } from "./workspace.js";
 
 interface CapturedSinks {
   readonly spans: CanaryTelemetry["spans"];
@@ -48,6 +50,7 @@ interface CapturedSinks {
   readonly toolBoundary: string[];
   readonly toolErrors: string[];
   readonly toolOutputs: string[];
+  readonly events: string[];
   readonly unprotectedExporter: string[];
 }
 
@@ -61,7 +64,7 @@ async function loadCanaryConfig(
     "rules:",
     "  - id: canary_tool_allow",
     "    match:",
-    `      tools: [${ECHO_TOOL}, ${FAIL_TOOL}, sample_mcp.fail]`,
+    `      tools: [${ECHO_TOOL}, ${FAIL_TOOL}, ${BINARY_TOOL}, sample_mcp.fail]`,
     "    decision: allow",
     "    reason: canary_allowed",
     "  - id: canary_tool_ask",
@@ -115,7 +118,6 @@ export class CanaryHarness {
   private readonly reader: RuntimeVaultReader;
   private readonly ids: SequentialIdGenerator;
   private readonly clock: { now(): number };
-  private readonly memoryWorkspace = new InMemoryWorkspace();
   runId: Id | undefined;
 
   private constructor(input: {
@@ -131,6 +133,8 @@ export class CanaryHarness {
     readonly toolBoundary: string[];
     readonly toolErrors: string[];
     readonly toolOutputs: string[];
+    readonly workspace: WorkspacePort;
+    readonly workspaceFiles: Map<string, Uint8Array>;
   }) {
     this.canaries = input.canaries;
     this.directory = input.directory;
@@ -153,26 +157,15 @@ export class CanaryHarness {
       context: [],
       approvals: [],
       snapshot: [],
-      workspace: new Map(),
       cassette: [],
       toolBoundary: input.toolBoundary,
       toolErrors: input.toolErrors,
       toolOutputs: input.toolOutputs,
+      events: [],
       unprotectedExporter: [],
+      workspace: input.workspaceFiles,
     };
-    this.workspace = {
-      write: async (path, data) => {
-        await this.memoryWorkspace.write(path, data);
-        this.captured.workspace.set(path, data.slice());
-      },
-      writeBatch: async (entries) => {
-        await this.memoryWorkspace.writeBatch(entries);
-        for (const { path, data } of entries) {
-          this.captured.workspace.set(path, data.slice());
-        }
-      },
-      read: (path, range) => this.memoryWorkspace.read(path, range),
-    };
+    this.workspace = input.workspace;
   }
 
   /** Create a unique data directory and compose the configured runtime with fake ports. */
@@ -185,6 +178,7 @@ export class CanaryHarness {
     const clock = { now: () => 100 };
     const ids = new SequentialIdGenerator();
     const resolver = createCanarySecretResolver();
+    const { workspace, files: workspaceFiles } = createCapturedWorkspace();
     const toolBoundary: string[] = [];
     const toolErrors: string[] = [];
     const toolOutputs: string[] = [];
@@ -202,6 +196,7 @@ export class CanaryHarness {
           executedTools,
         ),
         secretResolver: resolver,
+        workspace,
       });
       reader.attach(runtime);
       return new CanaryHarness({
@@ -216,6 +211,8 @@ export class CanaryHarness {
         toolBoundary,
         toolErrors,
         toolOutputs,
+        workspace,
+        workspaceFiles,
         executedTools,
       });
     } catch (error) {
@@ -241,6 +238,7 @@ export class CanaryHarness {
     for await (const event of this.runtime.store.read(runId)) {
       events.push(event);
     }
+    this.captured.events.push(JSON.stringify(events));
     const snapshot = await this.runtime.store.latestSnapshot(runId);
     this.captured.snapshot.push(JSON.stringify(snapshot ?? null));
 
@@ -326,6 +324,7 @@ export class CanaryHarness {
       ["cli.context", this.captured.context.join("\n")],
       ["cli.approvals", this.captured.approvals.join("\n")],
       ["snapshot", this.captured.snapshot.join("\n")],
+      ["events", this.captured.events.join("\n")],
       ["cassette", this.captured.cassette.join("\n")],
       ["unprotected-exporter", this.captured.unprotectedExporter.join("\n")],
       ...[...this.captured.workspace].map(([path, data]): [string, string] => [
@@ -407,7 +406,7 @@ export class CanaryHarness {
         thresholdBytes: 1,
         previewChars: 0,
       },
-      this.ids,
+      { ids: this.ids, artifactKeyProvider: this.runtime.keys },
     );
     const call = {
       callId: Id.parse(this.ids.next()),
