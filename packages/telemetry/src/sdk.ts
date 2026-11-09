@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { logs } from "@opentelemetry/api";
-import { TelemetryConfigSchema, type TelemetryConfig } from "@rovinos/schemas";
+import { TelemetryConfigSchema, type TelemetryConfigInput } from "@rovinos/schemas";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { PushMetricExporter } from "@opentelemetry/sdk-metrics";
 import {
@@ -30,7 +30,7 @@ export interface TelemetrySdkOptions {
   readonly logExporter: LogRecordExporter;
   readonly metricExporter?: PushMetricExporter;
   readonly gate?: SentinelGate;
-  readonly telemetry?: TelemetryConfig;
+  readonly telemetry?: TelemetryConfigInput;
 }
 
 /** Providers created with allowlist processors and a required fail-closed sentinel. */
@@ -58,12 +58,14 @@ export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
     throw new TelemetrySdkError();
   }
 
-  assertSentinelGate(options.gate, options.telemetry);
+  const telemetry =
+    options.telemetry === undefined ? undefined : TelemetryConfigSchema.parse(options.telemetry);
+  assertSentinelGate(options.gate, telemetry);
   // Default to stable HTTP conventions without overriding an operator's setting.
   env.OTEL_SEMCONV_STABILITY_OPT_IN ??= SEMCONV_STABILITY_OPT_IN;
   const processorOptions = {
     ...(options.gate === undefined ? {} : { gate: options.gate }),
-    ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
+    ...(telemetry === undefined ? {} : { telemetry }),
   };
   const resource = resourceFromAttributes({ "harness.policy.version": POLICY_VERSION });
   const tracerProvider = new TracerProvider({
@@ -85,7 +87,7 @@ export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
     ],
   });
   const metricsLifecycle: TelemetryMetricsLifecycle = initializeTelemetryMetrics(
-    (options.telemetry ?? TelemetryConfigSchema.parse({})).metrics,
+    (telemetry ?? TelemetryConfigSchema.parse({})).metrics,
     options.metricExporter,
   );
   const forceFlush = async (): Promise<void> => {

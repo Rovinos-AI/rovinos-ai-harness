@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { resolve } from "node:path";
 
 /**
  * Resolves the data directory used for harness runtime state.
@@ -12,6 +13,18 @@ export function resolveDataDir(
   override?: string,
 ): string {
   return override ?? env.HARNESS_DATA_DIR ?? process.cwd();
+}
+
+/**
+ * Resolves the collector configuration directory used for sink-policy validation.
+ *
+ * @param env - Environment source.
+ * @returns Explicit collector directory or the repository-relative default.
+ */
+export function resolveCollectorConfigDir(
+  env: Readonly<Record<string, string | undefined>>,
+): string {
+  return resolve(env.HARNESS_COLLECTOR_CONFIG_DIR ?? "infra/collector");
 }
 
 /**
