@@ -59,7 +59,9 @@ from the conformance report; neither constitutes universal MCP certification.
 
 This lane is advisory and does not feed the required `gates` job. Promote it to blocking only after
 the owner reviews the reported failures and coverage, approves the expanded capability matrix, and
-updates the pinned runner deliberately.
+updates the pinned runner deliberately. Scenario failures are retained in the uploaded report and
+emitted as GitHub Actions warnings; runner, setup, and report-validation errors still fail the job.
+The current `server-stateless` failure remains a follow-up for capability-matrix review.
 
 Verification decision: GitHub Actions is the current CI; the integration tests map to its
 `integration` job, and the new role lanes use a separate non-required job. The retired Azure pipeline

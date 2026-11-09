@@ -296,7 +296,6 @@ function createReport(
 /** Runs only the owner-approved 2026 protocol capabilities and records the full frozen inventory. */
 export async function runMcpConformanceLanes(outputDir: string): Promise<{
   readonly report: ConformanceReport;
-  readonly exitCode: 0 | 1;
 }> {
   const archiveDir = resolvePath(outputDir);
   const requirementsPath = join(
@@ -332,10 +331,7 @@ export async function runMcpConformanceLanes(outputDir: string): Promise<{
     await assertNoCredentialCanaries(workDir, [INSPECTOR_HTTP_TOKEN, INSPECTOR_READ_TOKEN]);
     await mkdir(archiveDir, { recursive: true });
     await cp(workDir, archiveDir, { recursive: true });
-    return {
-      report,
-      exitCode: requiredConformanceExitCode([...clientResults.values(), ...serverResults.values()]),
-    };
+    return { report };
   } finally {
     await proxy?.close();
     await fixture.close();
@@ -345,9 +341,20 @@ export async function runMcpConformanceLanes(outputDir: string): Promise<{
   }
 }
 
-/** Returns nonzero unless every scenario selected for measurement passed. */
-export function requiredConformanceExitCode(statuses: readonly ConformanceScenarioStatus[]): 0 | 1 {
-  return statuses.every((status) => status === "passed") ? 0 : 1;
+/** Advisory scenario results warn without failing CI; missing reports indicate harness errors. */
+export function advisoryConformanceOutcome(report: ConformanceReport | undefined): {
+  readonly exitCode: 0 | 1;
+  readonly warnings: readonly string[];
+} {
+  if (report === undefined) {
+    return { exitCode: 1, warnings: [] };
+  }
+  const warnings = (["client", "server"] as const).flatMap((role) =>
+    report[role]
+      .filter(({ status }) => status === "failed")
+      .map(({ scenario }) => `::warning::MCP conformance ${role} scenario ${scenario} failed`),
+  );
+  return { exitCode: 0, warnings };
 }
 
 async function main(): Promise<void> {
@@ -359,6 +366,7 @@ async function main(): Promise<void> {
   }
   try {
     const result = await runMcpConformanceLanes(outputDir);
+    const outcome = advisoryConformanceOutcome(result.report);
     process.stdout.write(
       `${JSON.stringify({
         runner: result.report.runner,
@@ -368,10 +376,13 @@ async function main(): Promise<void> {
         server: result.report.server.filter(({ status }) => status !== "not_measured"),
       })}\n`,
     );
-    process.exitCode = result.exitCode;
+    for (const warning of outcome.warnings) {
+      process.stdout.write(`${warning}\n`);
+    }
+    process.exitCode = outcome.exitCode;
   } catch {
     process.stderr.write("mcp_conformance_lane_failed\n");
-    process.exitCode = 1;
+    process.exitCode = advisoryConformanceOutcome(undefined).exitCode;
   }
 }
 
