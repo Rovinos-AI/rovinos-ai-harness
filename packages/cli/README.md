@@ -127,7 +127,7 @@ sequenceDiagram
   CLI->>Core: runtime.close()
 ```
 
-The command list and detailed behavior are in [`docs/cli.md`](../../docs/cli.md). Command registration lives under [`src/commands/`](./src/commands/); runtime composition starts in [`src/command.ts`](./src/command.ts).
+The command list and detailed behavior are in [`docs/cli.md`](../../docs/cli.md). Command registration lives in `src/commands/`; runtime composition starts in [`src/command.ts`](./src/command.ts).
 
 ## Public API
 
@@ -188,5 +188,5 @@ The package also has server and store integration tests (`*.int.test.ts`), a ser
 - [Secrets](../../docs/secrets.md)
 - [Security guidance](../../docs/security/secrets.md)
 - [Telemetry guarantees](../../docs/telemetry/guarantees.md)
-- [CLI package source](./src/)
+- [CLI entry point](./src/main.ts)
 - [Programmatic API export](./src/programmatic.ts)
