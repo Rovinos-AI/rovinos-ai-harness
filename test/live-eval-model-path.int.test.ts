@@ -23,31 +23,73 @@ import {
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { createServer } from "node:http";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 const toolDescription = "Read the synthetic model-path fixture";
 const fixtureValue = "synthetic-fixture-read-complete";
 const WireRequestSchema = z.looseObject({
-  messages: z.array(
-    z.looseObject({
-      role: z.string(),
-      content: JsonValue.optional(),
-      tool_call_id: z.string().optional(),
-      tool_calls: z.array(z.looseObject({ id: z.string() })).optional(),
-    }),
-  ),
-  tools: z.array(
-    z.looseObject({
-      name: z.string().optional(),
-      description: z.string().optional(),
-      function: z.looseObject({ name: z.string(), description: z.string().optional() }).optional(),
-    }),
-  ),
+  messages: z
+    .array(
+      z.looseObject({
+        role: z.string(),
+        content: JsonValue.optional(),
+        tool_call_id: z.string().optional(),
+        tool_calls: z.array(z.looseObject({ id: z.string() })).optional(),
+      }),
+    )
+    .optional(),
+  tools: z
+    .array(
+      z.looseObject({
+        name: z.string().optional(),
+        description: z.string().optional(),
+        input_schema: JsonValue.optional(),
+        function: z
+          .looseObject({ name: z.string(), description: z.string().optional() })
+          .optional(),
+      }),
+    )
+    .optional(),
 });
+const ModelPathReportSchema = z
+  .object({
+    providerAcceptance: z.enum(["accepted", "not_reached"]),
+    toolExecution: z.enum(["invoked", "not_invoked"]),
+    modelTurn: z.enum(["completed", "failed", "suspended"]),
+  })
+  .strict();
 type Decision = "allow" | "deny" | "ask";
+type ProviderProfile = "openai" | "anthropic" | "openai_compatible";
+type ToolSelection = "authorized" | "hidden" | "malformed";
 
-function providerResponse(alias: string, first: boolean) {
+function providerResponse(
+  profile: ProviderProfile,
+  alias: string,
+  first: boolean,
+  selection: ToolSelection,
+) {
+  if (profile === "anthropic") {
+    return {
+      id: "msg_model_path_fixture",
+      type: "message",
+      role: "assistant",
+      model: "fixture-model",
+      content: first
+        ? [
+            {
+              type: "tool_use",
+              id: "toolu_fixture",
+              name: selection === "hidden" ? "fixture_hidden" : alias,
+              input: selection === "malformed" ? { key: 42 } : { key: "fixture" },
+            },
+          ]
+        : [{ type: "text", text: "Synthetic fixture complete." }],
+      stop_reason: first ? "tool_use" : "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 4, output_tokens: 2 },
+    };
+  }
   return {
     id: "chatcmpl_model_path_fixture",
     object: "chat.completion",
@@ -64,7 +106,10 @@ function providerResponse(alias: string, first: boolean) {
                 {
                   id: "call_fixture",
                   type: "function",
-                  function: { name: alias, arguments: '{"key":"fixture"}' },
+                  function: {
+                    name: selection === "hidden" ? "fixture_hidden" : alias,
+                    arguments: selection === "malformed" ? '{"key":42}' : '{"key":"fixture"}',
+                  },
                 },
               ],
             }
@@ -76,47 +121,47 @@ function providerResponse(alias: string, first: boolean) {
   };
 }
 
-async function mockProvider() {
+async function mockProvider(profile: ProviderProfile, selection: ToolSelection) {
   const requests: z.infer<typeof WireRequestSchema>[] = [];
   const credentials: (string | undefined)[] = [];
   const failures: unknown[] = [];
-  const server = createServer((request, response) => {
-    void (async () => {
-      let body = "";
-      for await (const chunk of request) {
-        body += String(chunk);
-      }
-      const parsed = parseJson(WireRequestSchema, body);
-      requests.push(parsed);
-      credentials.push(request.headers.authorization);
-      const tool = parsed.tools.find(
-        (candidate) =>
-          candidate.description === toolDescription ||
-          candidate.function?.description === toolDescription,
-      );
-      const alias = tool?.name ?? tool?.function?.name;
-      if (alias === undefined) {
-        throw new Error("The runtime did not expose the discovered MCP fixture.");
-      }
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify(providerResponse(alias, requests.length === 1)));
-    })().catch((error: unknown) => {
-      failures.push(error);
-      response.writeHead(500);
-      response.end();
+  const respond = (parsed: z.infer<typeof WireRequestSchema>, credential: string | undefined) => {
+    requests.push(parsed);
+    credentials.push(credential);
+    const tool = parsed.tools?.find(
+      (candidate) =>
+        candidate.description === toolDescription ||
+        candidate.function?.description === toolDescription,
+    );
+    const alias = tool?.name ?? tool?.function?.name ?? "fixture_read";
+    return Response.json(providerResponse(profile, alias, requests.length === 1, selection));
+  };
+  let baseUrl: string;
+  let close: () => Promise<void>;
+  if (profile === "openai_compatible") {
+    const server = createServer((request, response) => {
+      void (async () => {
+        let body = "";
+        for await (const chunk of request) {
+          body += String(chunk);
+        }
+        const parsed = parseJson(WireRequestSchema, body);
+        const reply = respond(parsed, request.headers.authorization);
+        response.writeHead(reply.status, Object.fromEntries(reply.headers));
+        response.end(await reply.text());
+      })().catch((error: unknown) => {
+        failures.push(error);
+        response.writeHead(500);
+        response.end();
+      });
     });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("The loopback provider did not bind a TCP port.");
-  }
-  return {
-    baseUrl: `http://127.0.0.1:${String(address.port)}`,
-    requests,
-    credentials,
-    failures,
-    close: () =>
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("The loopback provider did not bind a TCP port.");
+    }
+    baseUrl = `http://127.0.0.1:${String(address.port)}`;
+    close = () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error === undefined) {
@@ -126,30 +171,77 @@ async function mockProvider() {
           }
         });
         server.closeAllConnections();
-      }),
+      });
+  } else {
+    const endpoint =
+      profile === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1";
+    baseUrl = endpoint;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      try {
+        const request = new Request(input, init);
+        const parsed = parseJson(WireRequestSchema, await request.text());
+        return respond(
+          parsed,
+          request.headers.get("authorization") ?? request.headers.get("x-api-key") ?? undefined,
+        );
+      } catch (error) {
+        failures.push(error);
+        throw error;
+      }
+    });
+    close = () => {
+      vi.unstubAllGlobals();
+      return Promise.resolve();
+    };
+  }
+  return {
+    baseUrl,
+    requests,
+    credentials,
+    failures,
+    close,
   };
 }
 
-async function runScenario(decision: Decision) {
-  const canary = createCanaries(`live-model-path.${decision}`).apiKey;
+async function runScenario(
+  decision: Decision,
+  profile: ProviderProfile = "openai_compatible",
+  selection: ToolSelection = "authorized",
+  targetConfigured = true,
+) {
+  const canary = createCanaries(`live-model-path.${decision}.${profile}.${selection}`).apiKey;
   const credentialCanary = canary.value;
   const credentialForms = [canary.value, ...canary.variants];
   const cleanup: (() => Promise<void>)[] = [];
-  const provider = await mockProvider();
+  const provider = await mockProvider(profile, selection);
   cleanup.push(provider.close);
   try {
     const clock = new FakeClock(1_000);
     const session = await createLiveModelSession({
       models: ModelsConfigSchema.parse({
         providers: [
-          {
-            id: "fixture",
-            kind: "openai_compatible",
-            baseUrl: provider.baseUrl,
-            apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
-            trust: "local",
-            streaming: false,
-          },
+          profile === "anthropic"
+            ? {
+                id: "fixture",
+                kind: "anthropic",
+                apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
+                streaming: false,
+              }
+            : profile === "openai"
+              ? {
+                  id: "fixture",
+                  kind: "openai",
+                  apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
+                  streaming: false,
+                }
+              : {
+                  id: "fixture",
+                  kind: "openai_compatible",
+                  baseUrl: provider.baseUrl,
+                  apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
+                  trust: "local",
+                  streaming: false,
+                },
         ],
         retry: { maxAttempts: 1 },
         routing: { default: [{ provider: "fixture", model: "fixture-model" }] },
@@ -176,7 +268,7 @@ async function runScenario(decision: Decision) {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const mcp = new McpServer({ name: "model-path-fixture", version: "1.0.0" });
     cleanup.push(() => mcp.close());
-    const calls: unknown[] = [];
+    const calls: JsonValue[] = [];
     let discoveries = 0;
     const inputSchema = {
       type: "object",
@@ -200,13 +292,15 @@ async function runScenario(decision: Decision) {
         models: ModelsConfigSchema.parse({
           routing: { default: [{ provider: "fixture", model: "fixture-model" }] },
         }),
-        servers: [
-          ServerConfigSchema.parse({
-            id: "fixture",
-            toolPrefix: "fixture",
-            transport: { kind: "stdio", command: "not-spawned-by-test" },
-          }),
-        ],
+        servers: targetConfigured
+          ? [
+              ServerConfigSchema.parse({
+                id: "fixture",
+                toolPrefix: "fixture",
+                transport: { kind: "stdio", command: "not-spawned-by-test" },
+              }),
+            ]
+          : [],
       },
       {
         model,
@@ -234,6 +328,7 @@ async function runScenario(decision: Decision) {
     cleanup.push(() => runtime.close());
     const handle = runtime.start("Read the synthetic fixture using its MCP tool.");
     const first = await handle.completion;
+    let finalStatus = first.status;
     if (decision === "ask") {
       expect(first.status).toBe("suspended");
       expect(calls).toEqual([]);
@@ -246,33 +341,47 @@ async function runScenario(decision: Decision) {
         metadata: { decidedBy: "human", approverId: "cli.synthetic_fixture" },
       });
       expect(calls).toEqual([]);
-      expect((await runtime.resume(handle.runId)).status).toBe("completed");
-    } else {
+      finalStatus = (await runtime.resume(handle.runId)).status;
+      expect(finalStatus).toBe("completed");
+    } else if (selection === "authorized" && targetConfigured) {
       expect(first.status).toBe("completed");
+    } else if (selection === "malformed") {
+      expect(first.status).toBe("completed");
+    } else {
+      expect(first.status).toBe("failed");
     }
     const events: Event[] = [];
     for await (const event of runtime.store.read(handle.runId)) {
       events.push(event);
     }
-    expect(discoveries).toBeGreaterThan(0);
+    if (targetConfigured) {
+      expect(discoveries).toBeGreaterThan(0);
+    } else {
+      expect(discoveries).toBe(0);
+    }
     expect(provider.failures).toEqual([]);
     expect(session.failureCode).toBeUndefined();
-    expect(session.calls).toBe(2);
+    expect(session.calls).toBe(provider.requests.length);
     expect(gateway.rejections).toBe(0);
-    expect(provider.requests).toHaveLength(2);
+    const expectedRequests = selection === "hidden" || !targetConfigured ? 1 : 2;
+    expect(provider.requests).toHaveLength(expectedRequests);
+    const credential =
+      profile === "anthropic" ? credentialCanary : ["Bearer", credentialCanary].join(" ");
     expect(provider.credentials).toEqual(
-      Array.from({ length: 2 }, () => ["Bearer", credentialCanary].join(" ")),
+      Array.from({ length: expectedRequests }, () => credential),
     );
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: "tool_intent",
-        toolId: "fixture.read",
-        policyDecision: decision,
-      }),
-    );
-    expect(events).toContainEqual(
-      expect.objectContaining({ type: "tool_result", toolId: "fixture.read" }),
-    );
+    if (selection !== "hidden" && targetConfigured) {
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool_intent",
+          toolId: "fixture.read",
+          policyDecision: decision,
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: "tool_result", toolId: "fixture.read" }),
+      );
+    }
     expect(
       scanForCanaries(credentialForms, [
         { name: "gateway.client_payloads", content: JSON.stringify(socketPayloads) },
@@ -283,19 +392,34 @@ async function runScenario(decision: Decision) {
         { name: "host.provider_auth", content: JSON.stringify(provider.credentials) },
       ]),
     ).toEqual(["host.provider_auth"]);
-    const continuation = provider.requests[1];
-    const toolMessage = continuation?.messages.find(({ role }) => role === "tool");
-    const assistant = continuation?.messages.find(({ role }) => role === "assistant");
-    expect(toolMessage?.tool_call_id).toBeDefined();
-    expect(toolMessage?.tool_call_id).toBe(assistant?.tool_calls?.[0]?.id);
-    if (decision === "deny") {
+    if (selection === "authorized" && targetConfigured && provider.requests[1] !== undefined) {
+      const continuation = provider.requests[1];
+      expect(continuation.tools).toHaveLength(1);
+      if (profile === "anthropic") {
+        expect(JSON.stringify(continuation)).toContain(fixtureValue);
+        expect(JSON.stringify(continuation)).toContain("toolu_fixture");
+      } else {
+        const toolMessage = continuation.messages?.find(({ role }) => role === "tool");
+        const assistant = continuation.messages?.find(({ role }) => role === "assistant");
+        expect(toolMessage?.tool_call_id).toBeDefined();
+        expect(toolMessage?.tool_call_id).toBe(assistant?.tool_calls?.[0]?.id);
+        if (decision !== "deny") {
+          expect(JSON.stringify(continuation)).toContain(fixtureValue);
+        }
+      }
+    }
+    if (selection === "hidden" || !targetConfigured) {
       expect(calls).toEqual([]);
-      expect(events).toContainEqual(
-        expect.objectContaining({ type: "tool_result", outcome: "denied" }),
-      );
+      expect(events).not.toContainEqual(expect.objectContaining({ type: "tool_intent" }));
+    } else if (selection === "malformed" || decision === "deny") {
+      expect(calls).toEqual([]);
+      if (decision === "deny") {
+        expect(events).toContainEqual(
+          expect.objectContaining({ type: "tool_result", outcome: "denied" }),
+        );
+      }
     } else {
       expect(calls).toEqual([{ key: "fixture" }]);
-      expect(JSON.stringify(provider.requests[1])).toContain(fixtureValue);
     }
     if (decision === "ask") {
       expect(events).toContainEqual(expect.objectContaining({ type: "approval_requested" }));
@@ -303,7 +427,19 @@ async function runScenario(decision: Decision) {
         expect.objectContaining({ type: "approval_resolved", decidedBy: "human" }),
       );
     }
-    return events;
+    return {
+      report: ModelPathReportSchema.parse({
+        providerAcceptance:
+          provider.requests.length === 0
+            ? "not_reached"
+            : events.some(({ type }) => type === "model_response")
+              ? "accepted"
+              : "rejected",
+        toolExecution: calls.length > 0 ? "invoked" : "not_invoked",
+        modelTurn: finalStatus,
+      }),
+      events,
+    };
   } finally {
     for (const close of cleanup.reverse()) {
       await close();
@@ -324,18 +460,63 @@ describe("live eval ordinary MCP model path without paid calls", () => {
     }
   });
 
-  it("discovers and executes an allowed MCP tool through a local OpenAI-compatible host gateway", async () => {
-    expect(await runScenario("allow")).toContainEqual(
-      expect.objectContaining({ type: "model_response", finishReason: "stop" }),
+  it.each(["openai", "anthropic", "openai_compatible"] as const)(
+    "discovers, executes, and round-trips the result through the %s model profile",
+    async (profile) => {
+      const { report, events } = await runScenario("allow", profile);
+      expect(report).toEqual({
+        providerAcceptance: "accepted",
+        toolExecution: "invoked",
+        modelTurn: "completed",
+      });
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: "model_response", finishReason: "stop" }),
+      );
+    },
+  );
+
+  it.each([
+    { name: "a guessed hidden tool name", selection: "hidden" as const, targetConfigured: true },
+    { name: "an unconfigured target", selection: "authorized" as const, targetConfigured: false },
+  ])("rejects $name without invoking an MCP tool", async ({ selection, targetConfigured }) => {
+    const { report, events } = await runScenario(
+      "allow",
+      "openai_compatible",
+      selection,
+      targetConfigured,
+    );
+    expect(report).toEqual({
+      providerAcceptance: "rejected",
+      toolExecution: "not_invoked",
+      modelTurn: "failed",
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "tool_intent" }));
+  });
+
+  it("validates malformed model arguments before invoking the MCP tool", async () => {
+    const { report, events } = await runScenario("allow", "openai_compatible", "malformed");
+    expect(report).toEqual({
+      providerAcceptance: "accepted",
+      toolExecution: "not_invoked",
+      modelTurn: "completed",
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "tool_result", errorCode: "args_invalid" }),
     );
   });
 
   it.each(["deny", "ask"] as const)(
     "keeps %s enforcement in the ordinary runtime instead of the model gateway",
     async (decision) => {
-      expect(await runScenario(decision)).toContainEqual(
+      const { report, events } = await runScenario(decision);
+      expect(report).toMatchObject({
+        providerAcceptance: "accepted",
+        modelTurn: "completed",
+      });
+      expect(events).toContainEqual(
         expect.objectContaining({ type: "tool_intent", policyDecision: decision }),
       );
+      expect(report.toolExecution).toBe(decision === "ask" ? "invoked" : "not_invoked");
     },
   );
 });
