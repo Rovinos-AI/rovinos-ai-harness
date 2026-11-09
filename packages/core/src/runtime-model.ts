@@ -3,6 +3,7 @@ import {
   HarnessError,
   type Capabilities,
   type ModelsConfig,
+  type RateLimitStore,
   type SecretRef,
 } from "@rovinos/schemas";
 import {
@@ -46,6 +47,7 @@ export interface RuntimeModelOverrides {
   /** Internal adapter decoration, used for eval cassette recording. */
   readonly decorateAdapter?: (adapter: ProviderAdapter) => ProviderAdapter;
   readonly requestSanitizer?: RequestSanitizer;
+  readonly rateLimitStore?: RateLimitStore;
   readonly secretResolver?: {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
   };

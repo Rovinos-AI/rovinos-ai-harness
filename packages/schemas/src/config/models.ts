@@ -156,7 +156,7 @@ function validateAzureOpenAIProvider(
 
 export const ModelProviderConfigSchema = z
   .object({
-    id: Code,
+    id: Code.max(55),
     kind: z.enum(["anthropic", "azure_openai", "bedrock", "openai", "openai_compatible"]),
     apiKey: SecretRefSchema.optional(),
     baseUrl: z.url().optional(),

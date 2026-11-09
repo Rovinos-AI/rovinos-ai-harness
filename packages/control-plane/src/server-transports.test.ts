@@ -363,6 +363,7 @@ describe("control-plane transports", () => {
     mocks.dispatch(request("/mcp"), authenticated);
     const throttledToken = response();
     mocks.dispatch(request("/mcp"), throttledToken);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(throttledToken.statusCode).toBe(429);
     expect(audits).toEqual([
       {
@@ -559,6 +560,7 @@ describe("control-plane transports", () => {
 
     mocks.dispatch(request("/mcp"), first);
     mocks.dispatch(request("/mcp"), limited);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(first.statusCode).toBe(200);
     expect(limited.statusCode).toBe(429);
