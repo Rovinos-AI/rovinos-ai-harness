@@ -336,7 +336,12 @@ export {
 } from "./cli/pii.js";
 export {
   ServersCheckResultSchema,
+  ServersCheckPhaseSchema,
+  ServersCheckPhaseStatusSchema,
+  ServersCheckPhasesSchema,
   ServersCheckServerResultSchema,
+  type ServersCheckPhase,
+  type ServersCheckPhases,
   type ServersCheckResult,
   type ServersCheckServerResult,
 } from "./cli/servers.js";

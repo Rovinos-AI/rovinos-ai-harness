@@ -5,13 +5,15 @@ import type { Client } from "@modelcontextprotocol/client";
 export interface McpServerMetadata {
   readonly protocolVersion: string | undefined;
   readonly supportsApps: boolean;
+  readonly supportsTools: boolean;
 }
 
-/** Returns only the negotiated protocol version and MCP Apps extension presence. */
+/** Returns the negotiated protocol version and advertised tools and MCP Apps capabilities. */
 export function getServerMetadata(client: Client | undefined): McpServerMetadata {
+  const capabilities = client?.getServerCapabilities();
   return {
     protocolVersion: client?.getNegotiatedProtocolVersion(),
-    supportsApps:
-      client?.getServerCapabilities()?.extensions?.["io.modelcontextprotocol/ui"] !== undefined,
+    supportsApps: capabilities?.extensions?.["io.modelcontextprotocol/ui"] !== undefined,
+    supportsTools: capabilities?.tools !== undefined,
   };
 }

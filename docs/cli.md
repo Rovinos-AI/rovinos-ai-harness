@@ -69,11 +69,72 @@ table of check IDs, statuses, and codes. `--json` returns a schema-validated arr
 
 `harness servers check [--server <id>] [--json]` connects to the configured MCP servers, lists their
 tools, and reports registered tool IDs, rejected-tool reason codes, negotiated protocol metadata,
-MCP Apps support, connection latency, and trace-propagation behavior. `--server` limits the check to
-one configured server. It never invokes tools or prints tool descriptions or server-provided text.
+advertised tools and MCP Apps capabilities, connection latency, and trace-propagation behavior.
+`--server` limits the check to one configured server. It never invokes tools or prints tool
+descriptions or server-provided text.
 Trusted servers with trace propagation disabled are marked with a warning. Unreachable servers or
-registry collisions return code `1`; `--json` emits one validated `ServersCheckResultSchema`
-document.
+registry collisions return code `1`; `--json` emits one validated, versioned
+`ServersCheckResultSchema` document. A check can launch the configured stdio process or contact a
+remote service even though it never invokes a tool.
+
+Report version `1` distinguishes connection, authentication, negotiation, discovery, schema
+validation, exposure, and policy-configuration phases. Each phase reports success, partial, failed,
+not tested, or not applicable as appropriate. Policy authorization is always `not_tested`: it depends
+on tool arguments, which this command never supplies. Registered tool IDs are the IDs exposed for
+possible use; they do not mean a call has been authorized. Reports include accepted and excluded
+counts, alias-mapping availability, and a catalog fingerprint only when discovery completed. A
+partial or untested catalog has a status but no fingerprint. Failures include a safe `nextAction` code.
+Default output contains metadata only; it does not include schemas, descriptions, protocol captures,
+credentials, or service URLs. Use the existing [MCP Inspector guide](inspector.md) for a separate
+interactive diagnosis workflow.
+
+Example `--json` report:
+
+```json
+{
+  "reportVersion": 1,
+  "catalogFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "catalogFingerprintStatus": "complete",
+  "servers": [
+    {
+      "id": "primary",
+      "transportKind": "stdio",
+      "protocolEra": "legacy",
+      "protocolVersion": "2025-11-25",
+      "supportsApps": true,
+      "capabilities": {
+        "apps": "yes",
+        "tools": "yes"
+      },
+      "trust": "internal",
+      "connectLatencyMs": 3,
+      "reachable": true,
+      "toolCount": 2,
+      "acceptedToolCount": 1,
+      "excludedToolCount": 1,
+      "registeredToolIds": ["primary.available"],
+      "rejectedTools": [{ "reason": "tool_not_allowlisted" }],
+      "phases": {
+        "connection": { "status": "success" },
+        "authentication": { "status": "not_applicable" },
+        "negotiation": { "status": "success" },
+        "discovery": { "status": "success" },
+        "schemaValidation": { "status": "partial" },
+        "exposure": { "status": "partial" },
+        "policyConfiguration": {
+          "status": "not_tested",
+          "allowlistConfigured": true
+        }
+      },
+      "aliasMappingAvailable": false,
+      "nextAction": "review_tool_allowlist",
+      "tracePropagation": "no",
+      "tracePropagationReason": "disabled",
+      "warnings": ["trace_propagation_disabled"]
+    }
+  ]
+}
+```
 
 ## `harness store migrate`
 

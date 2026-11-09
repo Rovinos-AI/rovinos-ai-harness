@@ -33,12 +33,12 @@ RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store
        done \
     && cp -a packages/cli/dist /out/
 
-FROM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime-os-audit
+FROM node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS runtime-os-audit
 
-# Debian DSA-6607-1 (CVE-2026-109518): the pinned node:26-slim digest still ships apt 3.0.3.
-# Remove this upgrade once the upstream base image includes apt 3.0.4 or later.
+# CVE-2026-76844 and CVE-2026-85091: the pinned node:26-slim digest still ships zlib1g 1.3.1-1+b1.
+# Remove this upgrade once the upstream base image includes zlib1g 1.3.1-1+deb13u1 or later.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade apt=3.0.4 libapt-pkg7.0=3.0.4 \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
