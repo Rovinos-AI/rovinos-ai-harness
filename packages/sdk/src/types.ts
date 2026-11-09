@@ -14,7 +14,8 @@ import { HarnessConfigSchema } from "@rovinos/config";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 
-type SdkMcpConnectionErrorCode =
+/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
+export type SdkMcpConnectionErrorCode =
   | "mcp_connect_failed"
   | "mcp_connect_timeout"
   | "mcp_auth_required"

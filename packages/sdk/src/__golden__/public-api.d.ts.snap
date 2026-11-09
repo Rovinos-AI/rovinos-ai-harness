@@ -6,11 +6,11 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./harness.js";
-export { inspectMcpServer, registerMcpServer, selectMcpTools, McpCatalogInspectionSchema, type InspectMcpServerOptions, type McpCatalogInspection, type McpServerConfig, type McpToolSelection, type McpToolSelectionResult, } from "./mcp-onboarding.js";
-export type { HarnessConfig } from "@rovinos/config";
+export { inspectMcpServer, registerMcpServer, selectMcpTools, McpCatalogInspectionSchema, InspectMcpServerOptionsSchema, McpToolSelectionSchema, type InspectMcpServerOptions, type McpCatalogInspection, type McpServerConfig, type McpToolSelection, type McpToolSelectionResult, } from "./mcp-onboarding.js";
+export { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
-export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, type WatchOptions, } from "./types.js";
+export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, type WatchOptions, } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
 
 import { type Harness, type CreateHarnessOptions } from "./types.js";
@@ -116,7 +116,8 @@ export declare function selectMcpTools(config: z.input<typeof HarnessConfigSchem
 import { HarnessError, Id } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
-type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_tools_failed" | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
+/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
+export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_tools_failed" | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
 export declare const HarnessOverridesSchema: z.ZodObject<{
     store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
@@ -1261,4 +1262,3 @@ export declare class SdkError extends HarnessError {
     /** Creates a stable SDK error with a closed code. */
     constructor(code: SdkError["code"]);
 }
-export {};
