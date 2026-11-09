@@ -5,39 +5,22 @@ import {
   McpConnection,
   McpConnectionError,
   OAuthTokenStore,
-  ToolRegistry,
-  ToolRegistryError,
   type McpConnectionDependencies,
-  type McpTool,
 } from "@rovinos/mcp";
 import { Code, HarnessError, ServersCheckResultSchema, type ServerConfig } from "@rovinos/schemas";
 import type { LocalKeyProvider } from "@rovinos/vault";
 import { join } from "node:path";
-import { z } from "zod";
 import type { CommandModule } from "../command.js";
 import { createLoginKeys, registerServersAuthCommands } from "./servers-auth.js";
-import type { Output } from "../output.js";
+import {
+  createServersCheckResult,
+  printServersCheckResult,
+  type ServerDiscoveryResult,
+} from "./servers-check-report.js";
 
-const MCP_PROTOCOL_VERSION_SCHEMA = z.iso.date();
-const APPS_EXTENSION_WARNING = Code.parse("annotations_require_internal");
-const TRACE_DISABLED_WARNING = Code.parse("trace_propagation_disabled");
-const TOOL_HEADER_INVALID = Code.parse("tool_header_invalid");
 type ServersCommandOverrides = Pick<McpConnectionDependencies, "createTransport" | "now"> & {
   readonly openBrowser?: (url: string) => Promise<void>;
 };
-
-interface DiscoveryResult {
-  readonly config: ServerConfig;
-  readonly protocolEra: "legacy" | "modern" | "unknown";
-  readonly protocolVersion: string | undefined;
-  readonly supportsApps: boolean;
-  readonly tools: readonly McpTool[];
-  readonly excludedToolCount: number;
-  readonly toolCount: number;
-  readonly connectLatencyMs: number;
-  readonly reachable: boolean;
-  readonly errorCode?: string;
-}
 
 class ServersCheckFailedError extends HarnessError {
   override readonly code = "servers_check_failed";
@@ -47,48 +30,93 @@ class ServersCheckFailedError extends HarnessError {
   }
 }
 
-function protocolVersionOf(version: string | undefined): string {
-  return version !== undefined && MCP_PROTOCOL_VERSION_SCHEMA.safeParse(version).success
-    ? version
-    : "unknown";
-}
-
-function unsupportedAppsDiscovery(config: ServerConfig): DiscoveryResult {
+function unsupportedAppsDiscovery(config: ServerConfig): ServerDiscoveryResult {
   return {
     config,
     protocolEra: "unknown",
     protocolVersion: undefined,
     supportsApps: false,
+    supportsTools: false,
     tools: [],
     excludedToolCount: 0,
     toolCount: 0,
     connectLatencyMs: 0,
+    connectionAttempted: false,
+    connected: false,
+    discoverySucceeded: false,
     reachable: false,
     errorCode: "mcp_apps_unsupported",
   };
 }
 
-function propagationFor(server: ServerConfig): {
-  readonly tracePropagation: "yes" | "no";
-  readonly tracePropagationReason: "external" | "disabled" | "enabled";
-} {
-  if (server.trust === "external") {
-    return { tracePropagation: "no", tracePropagationReason: "external" };
+async function discoverServer(
+  config: ServerConfig,
+  context: Parameters<CommandModule["register"]>[1],
+  dependencies: McpConnectionDependencies,
+): Promise<ServerDiscoveryResult> {
+  let excludedToolCount = 0;
+  const connection = new McpConnection(config, {
+    ...dependencies,
+    logger: {
+      log(event) {
+        if (event.code === "mcp_tools_excluded") {
+          excludedToolCount += event.count;
+        }
+      },
+    },
+  });
+  const startedAt = context.clock.now();
+  let connectLatencyMs = 0;
+  let protocolEra: ServerDiscoveryResult["protocolEra"] = "unknown";
+  let protocolVersion: string | undefined;
+  let supportsApps = false;
+  let supportsTools = false;
+  let tools: ServerDiscoveryResult["tools"] = [];
+  let connected = false;
+  let discoverySucceeded = false;
+  let reachable = false;
+  let errorCode: string | undefined;
+  try {
+    try {
+      await connection.connect();
+    } finally {
+      connectLatencyMs = Math.max(0, Math.round(context.clock.now() - startedAt));
+    }
+    connected = true;
+    protocolEra = connection.protocolEra ?? "unknown";
+    const metadata = connection.serverMetadata;
+    protocolVersion = metadata.protocolVersion;
+    supportsApps = metadata.supportsApps;
+    supportsTools = metadata.supportsTools;
+    tools = await connection.listTools();
+    discoverySucceeded = true;
+    reachable = true;
+  } catch (error) {
+    protocolEra = connection.protocolEra ?? protocolEra;
+    const metadata = connection.serverMetadata;
+    protocolVersion = metadata.protocolVersion ?? protocolVersion;
+    supportsApps = metadata.supportsApps || supportsApps;
+    errorCode = error instanceof McpConnectionError ? error.code : "mcp_connect_failed";
+  } finally {
+    await connection.close();
   }
-  return server.propagateTrace
-    ? { tracePropagation: "yes", tracePropagationReason: "enabled" }
-    : { tracePropagation: "no", tracePropagationReason: "disabled" };
-}
-
-function warningsFor(server: ServerConfig): Code[] {
-  const warnings: Code[] = [];
-  if (server.trust === "internal" && !server.propagateTrace) {
-    warnings.push(TRACE_DISABLED_WARNING);
-  }
-  if (server.trust === "external" && server.useAnnotations) {
-    warnings.push(APPS_EXTENSION_WARNING);
-  }
-  return warnings;
+  const toolCount = tools.length + excludedToolCount;
+  return {
+    config,
+    protocolEra,
+    protocolVersion,
+    supportsApps,
+    supportsTools,
+    tools,
+    excludedToolCount,
+    toolCount,
+    connectLatencyMs,
+    connectionAttempted: true,
+    connected,
+    discoverySucceeded,
+    reachable,
+    ...(errorCode === undefined ? {} : { errorCode }),
+  };
 }
 
 async function discoverServers(
@@ -96,13 +124,13 @@ async function discoverServers(
   context: Parameters<CommandModule["register"]>[1],
   overrides: ServersCommandOverrides | undefined,
   oauthTokenStore?: OAuthTokenStore,
-): Promise<DiscoveryResult[]> {
+): Promise<ServerDiscoveryResult[]> {
   const defaultResolver = new CompositeSecretResolver({ akv: new AkvSecretResolver() });
   const dependencies: McpConnectionDependencies = {
-    resolveSecret: async (ref, signal) =>
-      context.secretResolver === undefined
-        ? (await defaultResolver.resolve(ref, signal)).reveal()
-        : (await context.secretResolver.resolve(ref, signal)).reveal(),
+    resolveSecret: async (ref, signal) => {
+      const resolver = context.secretResolver ?? defaultResolver;
+      return (await resolver.resolve(ref, signal)).reveal();
+    },
     env: process.env,
     ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
     ...(overrides?.createTransport === undefined
@@ -111,185 +139,15 @@ async function discoverServers(
     ...(overrides?.now === undefined ? {} : { now: overrides.now }),
   };
 
-  const discovered = servers.filter((server) => server.apps).map(unsupportedAppsDiscovery);
-  for (const config of servers.filter((server) => !server.apps)) {
-    let excludedToolCount = 0;
-    const connection = new McpConnection(config, {
-      ...dependencies,
-      logger: {
-        log(event) {
-          if (event.code === "mcp_tools_excluded") {
-            excludedToolCount += event.count;
-          }
-        },
-      },
-    });
-    const startedAt = context.clock.now();
-    let connectLatencyMs = 0;
-    let protocolEra: DiscoveryResult["protocolEra"] = "unknown";
-    let protocolVersion: string | undefined;
-    let supportsApps = false;
-    let tools: McpTool[] = [];
-    let toolCount = 0;
-    let reachable = false;
-    let errorCode: string | undefined;
-    try {
-      try {
-        await connection.connect();
-      } finally {
-        connectLatencyMs = Math.max(0, Math.round(context.clock.now() - startedAt));
-      }
-      protocolEra = connection.protocolEra ?? "unknown";
-      const metadata = connection.serverMetadata;
-      protocolVersion = metadata.protocolVersion;
-      supportsApps = metadata.supportsApps;
-      tools = await connection.listTools();
-      toolCount = tools.length + excludedToolCount;
-      reachable = true;
-    } catch (error) {
-      toolCount = tools.length + excludedToolCount;
-      protocolEra = connection.protocolEra ?? protocolEra;
-      const metadata = connection.serverMetadata;
-      protocolVersion = metadata.protocolVersion ?? protocolVersion;
-      supportsApps = metadata.supportsApps || supportsApps;
-      errorCode = error instanceof McpConnectionError ? error.code : "mcp_connect_failed";
-    } finally {
-      await connection.close();
-    }
-    discovered.push({
-      config,
-      protocolEra,
-      protocolVersion,
-      supportsApps,
-      tools,
-      excludedToolCount,
-      toolCount,
-      connectLatencyMs,
-      reachable,
-      ...(errorCode === undefined ? {} : { errorCode }),
-    });
-  }
-  return discovered;
-}
-
-function createResult(discovered: readonly DiscoveryResult[]) {
-  const toolIdsByServer = new Map<Code, Code[]>();
-  const rejectedByServer = new Map<Code, { reason: Code }[]>();
-  let registryError: Code | undefined;
-  const registryInputs = discovered
-    .filter(({ reachable }) => reachable)
-    .map(({ config, tools }) => ({
-      config,
-      tools,
-    }));
-
-  try {
-    const registry = new ToolRegistry(registryInputs);
-    for (const spec of registry.getToolSpecs()) {
-      const route = registry.resolve(spec.toolId);
-      if (route !== undefined) {
-        const toolIds = toolIdsByServer.get(route.server.id) ?? [];
-        toolIds.push(spec.toolId);
-        toolIdsByServer.set(route.server.id, toolIds);
-      }
-    }
-    for (const rejected of registry.rejected()) {
-      const rejectedTools = rejectedByServer.get(rejected.serverId) ?? [];
-      rejectedTools.push({ reason: rejected.reason });
-      rejectedByServer.set(rejected.serverId, rejectedTools);
-    }
-  } catch (error) {
-    registryError = Code.parse(
-      error instanceof ToolRegistryError ? error.code : "mcp_registry_failed",
+  const discovered: ServerDiscoveryResult[] = [];
+  for (const server of servers) {
+    discovered.push(
+      server.apps
+        ? unsupportedAppsDiscovery(server)
+        : await discoverServer(server, context, dependencies),
     );
   }
-
-  const servers = discovered.map(
-    ({
-      config,
-      protocolEra,
-      protocolVersion,
-      supportsApps,
-      excludedToolCount,
-      toolCount,
-      connectLatencyMs,
-      reachable,
-      errorCode,
-    }) => ({
-      id: config.id,
-      transportKind: config.transport.kind,
-      protocolEra,
-      protocolVersion: protocolVersionOf(protocolVersion),
-      supportsApps,
-      trust: config.trust,
-      connectLatencyMs,
-      reachable,
-      toolCount,
-      registeredToolIds: toolIdsByServer.get(config.id) ?? [],
-      rejectedTools: [
-        ...(rejectedByServer.get(config.id) ?? []),
-        ...Array.from({ length: excludedToolCount }, () => ({ reason: TOOL_HEADER_INVALID })),
-      ],
-      ...propagationFor(config),
-      warnings: warningsFor(config),
-      ...(errorCode === undefined ? {} : { errorCode: Code.parse(errorCode) }),
-    }),
-  );
-
-  const result = {
-    servers,
-    ...(registryError === undefined ? {} : { errorCode: registryError }),
-  };
-  return ServersCheckResultSchema.parse(result);
-}
-
-function printHumanResult(
-  output: Output,
-  result: ReturnType<typeof ServersCheckResultSchema.parse>,
-): void {
-  const rows: (string | number | boolean)[][] = [
-    [
-      "id",
-      "transport",
-      "protocolEra",
-      "protocolVersion",
-      "apps",
-      "trust",
-      "connectMs",
-      "reachable",
-      "toolCount",
-      "registeredToolIds",
-      "rejectedTools",
-      "tracePropagation",
-      "traceReason",
-      "errorCode",
-    ],
-  ];
-  for (const server of result.servers) {
-    rows.push([
-      server.id,
-      server.transportKind,
-      server.protocolEra,
-      server.protocolVersion,
-      server.supportsApps,
-      server.trust,
-      server.connectLatencyMs,
-      server.reachable,
-      server.toolCount,
-      server.registeredToolIds.join(","),
-      server.rejectedTools.map(({ reason }) => reason).join(","),
-      server.tracePropagation,
-      server.tracePropagationReason,
-      server.errorCode ?? "",
-    ]);
-    for (const warning of server.warnings) {
-      rows.push(["warning", server.id, warning]);
-    }
-  }
-  if (result.errorCode !== undefined) {
-    rows.push(["warning", result.errorCode]);
-  }
-  output.table(rows);
+  return discovered;
 }
 
 /** Creates the `harness servers check` command. */
@@ -325,7 +183,7 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
               );
             }
             const discovered = await discoverServers(selected, context, overrides, store);
-            const result = createResult(discovered);
+            const result = createServersCheckResult(discovered, missingServer);
             const completed = {
               ...result,
               ...(missingServer ? { errorCode: Code.parse("mcp_server_not_found") } : {}),
@@ -333,7 +191,7 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
             if (program.optsWithGlobals().json === true) {
               context.out.json(ServersCheckResultSchema, completed);
             } else {
-              printHumanResult(context.out, completed);
+              printServersCheckResult(context.out, completed);
             }
             if (
               completed.errorCode !== undefined ||
