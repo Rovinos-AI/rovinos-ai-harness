@@ -61,6 +61,7 @@ async function createRuntimeModel(
     readonly ids: RuntimeComposition["ids"];
     readonly clock: Clock;
     readonly requestSanitizer?: RequestSanitizer;
+    readonly rateLimitStore?: RuntimeOverrides["rateLimitStore"];
   },
 ): Promise<RuntimeComposition["model"]> {
   const injectedModel = overrides.model;
@@ -102,6 +103,7 @@ async function createRuntimeModel(
       ...(options.requestSanitizer === undefined
         ? {}
         : { requestSanitizer: options.requestSanitizer }),
+      ...(options.rateLimitStore === undefined ? {} : { rateLimitStore: options.rateLimitStore }),
     })) ?? missingModelPort
   );
 }
@@ -117,6 +119,7 @@ export async function createRuntimeModelAndStore(options: {
   readonly scopes: RunScopeRegistry;
   readonly store: EventStore;
   readonly policyVersion: Code;
+  readonly rateLimitStore?: RuntimeOverrides["rateLimitStore"];
 }): Promise<{
   readonly piiRuntime: ReturnType<typeof createRuntimePii>;
   readonly model: RuntimeComposition["model"];
@@ -144,6 +147,7 @@ export async function createRuntimeModelAndStore(options: {
     ids: options.ids,
     clock: options.clock,
     ...(requestSanitizer === undefined ? {} : { requestSanitizer }),
+    ...(options.rateLimitStore === undefined ? {} : { rateLimitStore: options.rateLimitStore }),
   });
   return {
     piiRuntime,
