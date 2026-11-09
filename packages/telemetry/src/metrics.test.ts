@@ -9,6 +9,8 @@ import {
   POLICY_DECISIONS,
   MCP_INPUT_REQUEST_OUTCOMES,
   WORKER_JOB_OUTCOMES,
+  RATE_LIMIT_BACKENDS,
+  RATE_LIMIT_KEY_KINDS,
   METRIC_ALLOWLIST,
   countHostAppRejected,
   countHostAppSpansAccepted,
@@ -21,6 +23,8 @@ import {
   countQuotaRejection,
   countDroppedTelemetry,
   countWorkerJob,
+  countRateLimitDenied,
+  countRateLimitDegraded,
   recordWorkerQueueLag,
   countSentinelScopeReduced,
   countSkippedShortValues,
@@ -72,6 +76,37 @@ describe("countDroppedTelemetry", () => {
     vi.clearAllMocks();
     add.mockImplementation(() => undefined);
     record.mockImplementation(() => undefined);
+  });
+
+  describe("rate-limit metrics", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      add.mockImplementation(() => undefined);
+    });
+
+    it("uses only bounded key-kind and backend attributes", () => {
+      for (const keyKind of RATE_LIMIT_KEY_KINDS) {
+        countRateLimitDenied(keyKind);
+      }
+      for (const backend of RATE_LIMIT_BACKENDS) {
+        countRateLimitDegraded(backend);
+      }
+
+      expect(createCounter).toHaveBeenCalledWith("harness.rate_limit.denied");
+      expect(createCounter).toHaveBeenCalledWith("harness.rate_limit.degraded");
+      expect(add.mock.calls).toEqual([
+        [1, { "harness.rate_limit.denied.key_kind": "provider" }],
+        [1, { "harness.rate_limit.denied.key_kind": "control_plane" }],
+        [1, { "harness.rate_limit.degraded.backend": "postgres" }],
+        [1, { "harness.rate_limit.degraded.backend": "redis" }],
+      ]);
+      expect(METRIC_ALLOWLIST["harness.rate_limit.denied"]).toEqual([
+        "harness.rate_limit.denied.key_kind",
+      ]);
+      expect(METRIC_ALLOWLIST["harness.rate_limit.degraded"]).toEqual([
+        "harness.rate_limit.degraded.backend",
+      ]);
+    });
   });
 
   it("records the bounded reason as the counter's only attribute", () => {
@@ -241,6 +276,8 @@ describe("countDroppedTelemetry", () => {
       "harness.policy.decision": POLICY_DECISIONS,
       "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
       "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
+      "harness.rate_limit.denied.key_kind": RATE_LIMIT_KEY_KINDS,
+      "harness.rate_limit.degraded.backend": RATE_LIMIT_BACKENDS,
     });
     expect(
       TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.telemetry.dropped.reason"].length,
@@ -307,6 +344,12 @@ describe("countDroppedTelemetry", () => {
     }
     for (const outcome of WORKER_JOB_OUTCOMES) {
       countWorkerJob(outcome);
+    }
+    for (const keyKind of RATE_LIMIT_KEY_KINDS) {
+      countRateLimitDenied(keyKind);
+    }
+    for (const backend of RATE_LIMIT_BACKENDS) {
+      countRateLimitDegraded(backend);
     }
     recordWorkerQueueLag(1);
 
