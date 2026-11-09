@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Id } from "@rovinos/schemas";
+import { type Id } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import {
   forceFlushTelemetry,
@@ -22,6 +22,7 @@ import type { Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { inheritedBudgets } from "./continue.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
+import { defaultProcessLike, RunInputMissingError } from "./runtime-process.js";
 import type { RunLoopResult } from "./loop.js";
 import type { RoleRegistry } from "./roles.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
@@ -56,30 +57,6 @@ export type {
   RuntimeRunHandle,
 } from "./runtime-config.js";
 export { EvalRunMetadataSchema } from "./runtime-config.js";
-
-class RunInputMissingError extends HarnessError {
-  readonly code = "run_input_missing";
-
-  constructor() {
-    super("The run input is unavailable.");
-  }
-}
-
-const defaultProcessLike: ShutdownProcessLike = {
-  on: (signal, listener) => process.on(signal, listener),
-  removeListener: (signal, listener) => process.removeListener(signal, listener),
-  get exitCode(): number | undefined {
-    return typeof process.exitCode === "number" ? process.exitCode : undefined;
-  },
-  set exitCode(code) {
-    if (code !== undefined) {
-      process.exitCode = code;
-    }
-  },
-  // The shutdown grace deadline must force termination if the active operation does not flush.
-  // eslint-disable-next-line n/no-process-exit -- shutdown deadline is the final safety bound
-  exit: (code) => process.exit(code),
-};
 
 interface RunControlOptions {
   readonly store: EventStore;
@@ -293,6 +270,9 @@ function composeRuntime(
         ...(options.closeToolPort === undefined ? {} : { closeToolPort: options.closeToolPort }),
         vault,
         keys,
+        ...(options.closeRateLimitStore === undefined
+          ? {}
+          : { closeRateLimitStore: options.closeRateLimitStore }),
         sandboxBackend: options.sandboxBackend,
         instanceHeartbeat: options.instanceHeartbeat,
         flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
