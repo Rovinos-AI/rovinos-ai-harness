@@ -56,6 +56,8 @@ export {
   countModelUsage,
   countMcpDiscoveryFailed,
   countMcpInputRequest,
+  countRateLimitDenied,
+  countRateLimitDegraded,
   countPiiBlobHit,
   countPiiDetectorDegraded,
   countPolicyDecision,
@@ -69,7 +71,11 @@ export {
   type PolicyDecision,
   POLICY_DECISIONS,
   type WorkerJobOutcome,
+  type RateLimitBackend,
+  type RateLimitKeyKind,
   WORKER_JOB_OUTCOMES,
+  RATE_LIMIT_BACKENDS,
+  RATE_LIMIT_KEY_KINDS,
   type TelemetryDropReason,
 } from "./metrics.js";
 export {
