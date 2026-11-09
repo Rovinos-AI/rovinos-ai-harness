@@ -55,7 +55,7 @@ describe("ControlPlaneConfigSchema", () => {
   });
 
   it("accepts the longest token id that fits its principal prefix", () => {
-    const tokenId = "a".repeat(58);
+    const tokenId = "a".repeat(55);
     expect(
       ControlPlaneConfigSchema.safeParse({
         auth: { tokens: [{ id: tokenId, secret: "env:TOKEN", scopes: ["read"] }] },

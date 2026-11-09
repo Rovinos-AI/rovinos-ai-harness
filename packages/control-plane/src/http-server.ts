@@ -5,13 +5,14 @@ import {
   HarnessError,
   type ControlPlaneConfig,
 } from "@rovinos/schemas";
+import { InMemoryRateLimitStore } from "@rovinos/core";
 import type { EventStore } from "@rovinos/store";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
-import { emitControlPlaneAudit } from "@rovinos/telemetry";
+import { countRateLimitDenied, emitControlPlaneAudit } from "@rovinos/telemetry";
 import {
   authenticateBearerToken,
   ControlPlaneAuthError,
@@ -62,8 +63,8 @@ interface HttpServerDependencies {
 interface RequestListenerInput {
   readonly controlPlane: ControlPlaneConfig;
   readonly tokens: Awaited<ReturnType<typeof resolveControlPlaneTokens>>;
-  readonly limiter: ControlPlaneRateLimiter;
   readonly failedAuthLimiter: ControlPlaneRateLimiter;
+  readonly rateLimitStore: NonNullable<ControlPlaneServerOptions["rateLimitStore"]>;
   readonly clock: ControlPlaneClock | undefined;
   readonly audit: ControlPlaneAuditHandler;
   readonly requestHandler: (
@@ -105,13 +106,12 @@ export async function startControlPlaneHttpTransport({
   const requestHandler = (
     principal: ControlPlanePrincipal,
   ): ReturnType<typeof toNodeHandler> | undefined => requestHandlers.get(principal.tokenId);
-  const limiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
   const failedAuthLimiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
   const handleRequest = createRequestListener({
     controlPlane,
     tokens,
-    limiter,
     failedAuthLimiter,
+    rateLimitStore: options.rateLimitStore ?? new InMemoryRateLimitStore(options.clock),
     clock: options.clock,
     audit: options.onAudit ?? emitControlPlaneAudit,
     requestHandler,
@@ -177,10 +177,16 @@ function createRequestListener(
   input: RequestListenerInput,
 ): (request: IncomingMessage, response: ServerResponse) => void {
   return (request, response) => {
-    const authenticated = authenticateHttpRequest(input, request, response);
-    if (authenticated !== undefined) {
-      handleAuthenticatedRequest(input, request, response, authenticated);
-    }
+    void authenticateHttpRequest(input, request, response)
+      .then((authenticated) => {
+        if (authenticated !== undefined) {
+          handleAuthenticatedRequest(input, request, response, authenticated);
+        }
+      })
+      .catch(() => {
+        countRateLimitDenied("control_plane");
+        rejectRateLimitedRequest(input.audit, UNAUTHENTICATED_TOKEN, response);
+      });
   };
 }
 
@@ -189,11 +195,11 @@ interface AuthenticatedHttpRequest {
   readonly requestHandler: ReturnType<typeof toNodeHandler>;
 }
 
-function authenticateHttpRequest(
+async function authenticateHttpRequest(
   input: RequestListenerInput,
   request: IncomingMessage,
   response: ServerResponse,
-): AuthenticatedHttpRequest | undefined {
+): Promise<AuthenticatedHttpRequest | undefined> {
   if ((request.url ?? "").split("?", 1)[0] !== HTTP_PATH) {
     response.writeHead(404).end();
     return undefined;
@@ -214,7 +220,12 @@ function authenticateHttpRequest(
     rejectUnauthenticatedRequest(input, request, response);
     return undefined;
   }
-  if (!input.limiter.tryAcquire(principal.tokenId, input.clock?.now() ?? Date.now())) {
+  const rateLimit = await input.rateLimitStore.take(Code.parse(`cp.token.${principal.tokenId}`), {
+    capacity: input.controlPlane.rateLimitPerMinute,
+    refillPerSecond: input.controlPlane.rateLimitPerMinute / 60,
+  });
+  if (!rateLimit.allowed) {
+    countRateLimitDenied("control_plane");
     rejectRateLimitedRequest(input.audit, principal.tokenId, response);
     return undefined;
   }

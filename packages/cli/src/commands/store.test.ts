@@ -220,7 +220,19 @@ describe("harness store migrate", () => {
     expect(exitCode).toBe(ExitCode.ok);
     expect(parseJson(StoreMigrateResultSchema, stdout[0] ?? "")).toEqual({
       applied: [],
-      pending: ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0010", "0011"],
+      pending: [
+        "0001",
+        "0002",
+        "0003",
+        "0004",
+        "0005",
+        "0006",
+        "0007",
+        "0008",
+        "0010",
+        "0011",
+        "0012",
+      ],
     });
     expect(postgresState.queries).toEqual([
       "SELECT to_regclass('schema_migrations') IS NOT NULL AS present",
