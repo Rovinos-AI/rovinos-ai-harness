@@ -16,7 +16,7 @@ import {
 import type { Detection } from "@rovinos/pii";
 import { DetectionSchema, parseJson } from "@rovinos/schemas";
 import { z } from "zod";
-import { PiiCorpusSampleSchema } from "./gen-pii-corpus.ts";
+import { materializePiiCorpusSample, PiiCorpusSampleSchema } from "./gen-pii-corpus.ts";
 
 const PiiThresholdSchema = z
   .object({
@@ -78,9 +78,7 @@ interface MatchCounts {
   readonly falseNegative: number;
 }
 
-const corpusPath = fileURLToPath(
-  new URL("../test/pii-corpus/__fixtures__/corpus.jsonl", import.meta.url),
-);
+const corpusPath = fileURLToPath(new URL("../test/pii-corpus/corpus.jsonl", import.meta.url));
 const thresholdsPath = fileURLToPath(
   new URL("../test/pii-corpus/thresholds.json", import.meta.url),
 );
@@ -278,7 +276,7 @@ function readCorpus(path: string): PiiCorpusSample[] {
   if (lines.length === 0) {
     throw new TypeError("PII corpus is empty.");
   }
-  return lines.map((line) => parseJson(PiiCorpusSampleSchema, line));
+  return lines.map((line) => materializePiiCorpusSample(parseJson(PiiCorpusSampleSchema, line)));
 }
 
 function regexRegistry(): DetectorRegistry {

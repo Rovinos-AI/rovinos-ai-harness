@@ -53,16 +53,20 @@ other storage unless those systems are separately configured to do so.
 ### Binary MCP artifacts
 
 MCP binary results are blocked by default. When an operator opts in per server,
-offloaded binary parts are stored without tokenization in that run's workspace. This is
-an explicit exception to the files-carry-tokens rule and is not encrypted with
-the vault key in this release.
+offloaded binary parts are stored in that run's workspace using AES-GCM with the
+configured current vault key. The encrypted artifact is authenticated to its
+run and opaque handle; reads require the same run scope. The artifact reference
+retains the plaintext byte count and SHA-256 digest. Artifacts written before
+encryption are not readable and return `artifact_legacy_unsupported`.
 
 - **Evidence:** [MCP result validation tests](../packages/mcp/src/tool-port.test.ts)
-  and [workspace artifact tests](../packages/context/src/offload.test.ts).
-  CI job: `unit`.
+  and [encrypted workspace artifact tests](../packages/context/src/offload.test.ts).
+  CI jobs: `unit`, `gates`.
 - **Assumptions:** operators explicitly allow binary results only for servers
-  whose output and workspace access they trust, and protect workspace storage
-  and backups. Vault-key encryption is a follow-up.
+  whose output and workspace access they trust, protect workspace storage and
+  backups, and retain every key needed by stored artifacts. Key rotation is
+  transparent while the artifact's original key remains available. This does
+  not tokenize binary content or detect PII in images and audio.
 
 ### App telemetry validation and host stamping
 
