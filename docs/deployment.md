@@ -32,6 +32,9 @@ its database files; do not copy an active SQLite database file directly. Retain 
 needed to read vault backups separately from the data, and verify restore procedures with a
 non-production copy.
 
+See the [operational recovery audit and rehearsal](deployment-recovery.md) for the current
+support matrix, recovery acceptance criteria, and a synthetic restore procedure.
+
 `HARNESS_DATA_DIR` selects the event-store directory; `HARNESS_VAULT_DATA_DIR` optionally selects
 the vault directory and otherwise defaults to `HARNESS_DATA_DIR`.
 
