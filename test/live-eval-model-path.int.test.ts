@@ -217,32 +217,36 @@ async function runScenario(
   cleanup.push(provider.close);
   try {
     const clock = new FakeClock(1_000);
+    const providerConfig = (() => {
+      switch (profile) {
+        case "anthropic":
+          return {
+            id: "fixture",
+            kind: "anthropic",
+            apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
+            streaming: false,
+          };
+        case "openai":
+          return {
+            id: "fixture",
+            kind: "openai",
+            apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
+            streaming: false,
+          };
+        case "openai_compatible":
+          return {
+            id: "fixture",
+            kind: "openai_compatible",
+            baseUrl: provider.baseUrl,
+            apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
+            trust: "local",
+            streaming: false,
+          };
+      }
+    })();
     const session = await createLiveModelSession({
       models: ModelsConfigSchema.parse({
-        providers: [
-          profile === "anthropic"
-            ? {
-                id: "fixture",
-                kind: "anthropic",
-                apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
-                streaming: false,
-              }
-            : profile === "openai"
-              ? {
-                  id: "fixture",
-                  kind: "openai",
-                  apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
-                  streaming: false,
-                }
-              : {
-                  id: "fixture",
-                  kind: "openai_compatible",
-                  baseUrl: provider.baseUrl,
-                  apiKey: "env:MODEL_PATH_SYNTHETIC_KEY",
-                  trust: "local",
-                  streaming: false,
-                },
-        ],
+        providers: [providerConfig],
         retry: { maxAttempts: 1 },
         routing: { default: [{ provider: "fixture", model: "fixture-model" }] },
       }),
@@ -365,9 +369,9 @@ async function runScenario(
     expect(gateway.rejections).toBe(selection === "hidden" || !targetConfigured ? 1 : 0);
     const expectedRequests = selection === "hidden" || !targetConfigured ? 1 : 2;
     expect(provider.requests).toHaveLength(expectedRequests);
-    expect(provider.credentials.every((credential) => credential?.includes(credentialCanary))).toBe(
-      true,
-    );
+    expect(
+      provider.credentials.every((credential) => credential?.includes(credentialCanary) === true),
+    ).toBe(true);
     const exposedFixtureTools = provider.requests[0]?.tools?.filter(
       (candidate) =>
         candidate.description === toolDescription ||
@@ -437,14 +441,17 @@ async function runScenario(
         expect.objectContaining({ type: "approval_resolved", decidedBy: "human" }),
       );
     }
+    let providerAcceptance: z.infer<typeof ModelPathReportSchema>["providerAcceptance"];
+    if (provider.requests.length === 0) {
+      providerAcceptance = "not_reached";
+    } else if (events.some(({ type }) => type === "model_response")) {
+      providerAcceptance = "accepted";
+    } else {
+      providerAcceptance = "rejected";
+    }
     return {
       report: ModelPathReportSchema.parse({
-        providerAcceptance:
-          provider.requests.length === 0
-            ? "not_reached"
-            : events.some(({ type }) => type === "model_response")
-              ? "accepted"
-              : "rejected",
+        providerAcceptance,
         toolExecution: calls.length > 0 ? "invoked" : "not_invoked",
         modelTurn: finalStatus,
       }),
