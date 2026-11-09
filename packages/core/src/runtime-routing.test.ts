@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -243,7 +244,14 @@ describe("createRuntime model routing", () => {
           { type: "image", mimeType: "image/png", artifact: reference },
         ]);
         expect(reference.bytes).toBe(bytes.byteLength);
-        expect(files.get(`.harness/offload/${reference.handle}.bin`)).toEqual(bytes);
+        const stored = files.get(`.harness/offload/${reference.handle}.bin`);
+        expect(stored).toBeDefined();
+        if (stored === undefined) {
+          throw new Error("The encrypted artifact was not stored.");
+        }
+        expect(stored).not.toEqual(bytes);
+        expect(Buffer.from(stored).includes(bytes)).toBe(false);
+        expect(reference.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
       },
     },
     {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Size limits and offsets use UTF-8 bytes; returned text pages end at code-point boundaries.
-import { JsonValue, type Code } from "@rovinos/schemas";
+import { JsonValue, type Code, type Id, type KeyProvider } from "@rovinos/schemas";
 import {
   OffloadedHandleSchema,
   ReadOffloadedInputSchema,
@@ -8,6 +8,7 @@ import {
 } from "./offload-schemas.js";
 import type { OffloadedHandle } from "./offload-schemas.js";
 import type { OffloadToolCall, OffloadToolExecutionResult, WorkspacePort } from "./offload.js";
+import { decryptOffloadArtifact, OffloadArtifactCryptoError } from "./offload-artifact-crypto.js";
 
 const MAX_READ_BYTES = 16 * 1024;
 const MAX_BASE64_READ_BYTES = (MAX_READ_BYTES / 4) * 3;
@@ -25,6 +26,13 @@ interface LoadOffloadPageOptions {
   readonly knownSizes: Map<OffloadedHandle, number>;
   readonly offset: number;
   readonly length: number;
+  readonly runId: Id;
+  readonly keyProvider: KeyProvider | undefined;
+}
+
+interface ArtifactReadContext {
+  readonly runId: Id;
+  readonly keyProvider: KeyProvider | undefined;
 }
 
 function toolError(errorCode: Code): OffloadToolExecutionResult {
@@ -106,8 +114,17 @@ async function findWorkspaceFileSize(workspace: WorkspacePort, path: string): Pr
 }
 
 async function loadOffloadPage(options: LoadOffloadPageOptions): Promise<LoadedOffloadPage> {
-  const { workspace, handle, knownSizes, offset, length, encoding } = options;
+  const { workspace, handle, knownSizes, offset, length, encoding, runId, keyProvider } = options;
   const path = encoding === "base64" ? binaryArtifactPath(handle) : offloadPath(handle);
+  if (encoding === "base64") {
+    const stored = await workspace.read(path);
+    const bytes = await decryptOffloadArtifact(keyProvider, runId, handle, stored);
+    knownSizes.set(handle, bytes.byteLength);
+    return {
+      page: bytes.slice(offset, offset + length),
+      totalBytes: bytes.byteLength,
+    };
+  }
   let totalBytes = knownSizes.get(handle);
   if (totalBytes === undefined) {
     totalBytes = await findWorkspaceFileSize(workspace, path);
@@ -183,6 +200,7 @@ export async function readOffloaded(
   workspace: WorkspacePort,
   knownSizes: Map<OffloadedHandle, number>,
   call: OffloadToolCall,
+  context: ArtifactReadContext,
 ): Promise<OffloadToolExecutionResult> {
   const input = ReadOffloadedInputSchema.safeParse(call.args);
   if (!input.success) {
@@ -195,10 +213,22 @@ export async function readOffloaded(
   const length = Math.min(input.data.length ?? maxBytes, maxBytes);
   let loaded: LoadedOffloadPage;
   try {
-    loaded = await loadOffloadPage({ workspace, handle, encoding, knownSizes, offset, length });
+    loaded = await loadOffloadPage({
+      workspace,
+      handle,
+      encoding,
+      knownSizes,
+      offset,
+      length,
+      runId: context.runId,
+      keyProvider: context.keyProvider,
+    });
   } catch (error) {
     if (isFileNotFound(error)) {
       return toolError("handle_not_found");
+    }
+    if (error instanceof OffloadArtifactCryptoError) {
+      return toolError(error.code);
     }
     throw error;
   }

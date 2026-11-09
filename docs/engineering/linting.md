@@ -23,6 +23,10 @@ words deliberately to `docs/engineering/project-words.txt`.
 - TypeScript uses the strict and stylistic type-aware presets and `projectService`. Explicit checks
   prohibit unsafe types and assertions, unchecked promises, weak boolean conditions, incomplete
   switches, and untyped public boundaries.
+- `yarn lint:ts` runs packages and top-level directories in separate ESLint processes. The SDK and
+  cross-package tests are linted one file per process to bound their larger type graphs. Each process
+  runs with a 3 GiB V8 heap cap; measured peak RSS is printed and must stay at or below 2,900,000 KiB
+  (under 3 GB). The GitHub Actions `static` job runs this guard through `yarn lint`.
 - Core JavaScript and TypeScript rules enforce straightforward control flow, named exports, bounded
   function complexity, and no console or dynamic-code execution.
 - Import, Node, Promise, RegExp, and Unicorn rules enforce package hygiene, safe regular expressions,
