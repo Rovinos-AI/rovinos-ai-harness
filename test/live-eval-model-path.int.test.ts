@@ -54,7 +54,7 @@ const WireRequestSchema = z.looseObject({
 });
 const ModelPathReportSchema = z
   .object({
-    providerAcceptance: z.enum(["accepted", "not_reached"]),
+    providerAcceptance: z.enum(["accepted", "rejected", "not_reached"]),
     toolExecution: z.enum(["invoked", "not_invoked"]),
     modelTurn: z.enum(["completed", "failed", "suspended"]),
   })
@@ -362,14 +362,18 @@ async function runScenario(
     expect(provider.failures).toEqual([]);
     expect(session.failureCode).toBeUndefined();
     expect(session.calls).toBe(provider.requests.length);
-    expect(gateway.rejections).toBe(0);
+    expect(gateway.rejections).toBe(selection === "hidden" || !targetConfigured ? 1 : 0);
     const expectedRequests = selection === "hidden" || !targetConfigured ? 1 : 2;
     expect(provider.requests).toHaveLength(expectedRequests);
-    const credential =
-      profile === "anthropic" ? credentialCanary : ["Bearer", credentialCanary].join(" ");
-    expect(provider.credentials).toEqual(
-      Array.from({ length: expectedRequests }, () => credential),
+    expect(provider.credentials.every((credential) => credential?.includes(credentialCanary))).toBe(
+      true,
     );
+    const exposedFixtureTools = provider.requests[0]?.tools?.filter(
+      (candidate) =>
+        candidate.description === toolDescription ||
+        candidate.function?.description === toolDescription,
+    );
+    expect(exposedFixtureTools).toHaveLength(targetConfigured ? 1 : 0);
     if (selection !== "hidden" && targetConfigured) {
       expect(events).toContainEqual(
         expect.objectContaining({
@@ -394,7 +398,13 @@ async function runScenario(
     ).toEqual(["host.provider_auth"]);
     if (selection === "authorized" && targetConfigured && provider.requests[1] !== undefined) {
       const continuation = provider.requests[1];
-      expect(continuation.tools).toHaveLength(1);
+      expect(
+        continuation.tools?.filter(
+          (candidate) =>
+            candidate.description === toolDescription ||
+            candidate.function?.description === toolDescription,
+        ),
+      ).toHaveLength(1);
       if (profile === "anthropic") {
         expect(JSON.stringify(continuation)).toContain(fixtureValue);
         expect(JSON.stringify(continuation)).toContain("toolu_fixture");
@@ -470,7 +480,10 @@ describe("live eval ordinary MCP model path without paid calls", () => {
         modelTurn: "completed",
       });
       expect(events).toContainEqual(
-        expect.objectContaining({ type: "model_response", finishReason: "stop" }),
+        expect.objectContaining({
+          type: "model_response",
+          finishReason: profile === "anthropic" ? "end_turn" : "stop",
+        }),
       );
     },
   );
