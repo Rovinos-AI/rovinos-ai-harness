@@ -170,6 +170,7 @@ async function closeStorageResources(options: {
   readonly vault: RuntimeComposition["vault"];
   readonly keys: RuntimeComposition["keys"];
   readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+  readonly closeRateLimitStore?: RuntimeComposition["closeRateLimitStore"];
 }): Promise<void> {
   try {
     await options.store.close();
@@ -178,9 +179,13 @@ async function closeStorageResources(options: {
       await options.vault.close();
     } finally {
       try {
-        await options.instanceHeartbeat?.close();
+        await options.closeRateLimitStore?.();
       } finally {
-        options.keys.dispose();
+        try {
+          await options.instanceHeartbeat?.close();
+        } finally {
+          options.keys.dispose();
+        }
       }
     }
   }
@@ -194,6 +199,7 @@ export async function closeRuntimeResources(options: {
   readonly keys: RuntimeComposition["keys"];
   readonly sandboxBackend: RuntimeComposition["sandboxBackend"];
   readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+  readonly closeRateLimitStore?: RuntimeComposition["closeRateLimitStore"];
   readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
 }): Promise<void> {
   try {

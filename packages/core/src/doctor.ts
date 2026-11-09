@@ -5,12 +5,15 @@ import {
   Code,
   HarnessError,
   SecretRefSchema,
+  TelemetryConfigSchema,
   type Code as HarnessCode,
   type DoctorCheckStatus,
   type DoctorCheckResult,
   type SecretRef,
 } from "@rovinos/schemas";
+import { assertSinkPolicies, SinkPolicyError } from "@rovinos/telemetry";
 import { AkvSecretResolverError } from "@rovinos/vault";
+import { resolveCollectorConfigDir } from "./runtime-data-dir.js";
 
 /** Inputs available to registered environment checks. */
 export interface DoctorContext {
@@ -95,6 +98,27 @@ function safeReferenceName(ref: SecretRef): Code {
   return Code.parse(`${scheme ?? "secret"}_${safeName}`.slice(0, 64));
 }
 
+async function checkSinkPolicies(ctx: DoctorContext): Promise<DoctorCheckStatus> {
+  if (!isRecord(ctx.config)) {
+    return result("ok", "sink_policies");
+  }
+  const telemetry = TelemetryConfigSchema.safeParse(ctx.config.telemetry ?? {});
+  if (!telemetry.success) {
+    return result("fail", "sink_policy_violation");
+  }
+  try {
+    await assertSinkPolicies(telemetry.data, {
+      collectorConfigDir: resolveCollectorConfigDir(ctx.env),
+    });
+    return result("ok", "sink_policies");
+  } catch (error) {
+    if (error instanceof SinkPolicyError) {
+      return result("fail", Code.parse(error.code), error.sinkId);
+    }
+    return result("fail", "sink_policy_violation");
+  }
+}
+
 function knownSecretErrorCode(error: unknown): Code {
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = error.code;
@@ -152,6 +176,11 @@ const initialChecks: DoctorCheck[] = [
         hasPolicyFile ? result("ok", "policy_configured") : result("warn", "policy_default_deny"),
       );
     },
+  },
+  {
+    id: "sink_policies",
+    title: "Telemetry sink policies",
+    run: checkSinkPolicies,
   },
   {
     id: "secret_refs_resolvable",

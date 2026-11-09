@@ -120,6 +120,7 @@ describe("migratePostgresConnection", () => {
       "0008",
       "0010",
       "0011",
+      "0012",
     ]);
     expect(postgresState.queries).toEqual([
       "SELECT to_regclass('schema_migrations') IS NOT NULL AS present",
