@@ -4,7 +4,9 @@ import type { ProviderAdapter } from "@rovinos/models";
 import { z } from "zod";
 import { isBoundedJsonValue } from "./extension-json.js";
 import {
-  ExtensionError, ExtensionManifestSchema, ExtensionRegistrationStatusSchema,
+  ExtensionError,
+  ExtensionManifestSchema,
+  ExtensionRegistrationStatusSchema,
 } from "./extension-contracts.js";
 import type {
   ExtensionCapabilityStatus,
@@ -62,7 +64,9 @@ export function validateGrants(
     }
   }
   activeGrants.set(namespace, namespaceGrants);
-  const statuses = allCapabilities.map((capability) => makeCapabilityStatus(capability, activeTargets));
+  const statuses = allCapabilities.map((capability) =>
+    makeCapabilityStatus(capability, activeTargets),
+  );
   for (const [index, capability] of manifest.capabilities.required.entries()) {
     if (!supportsCapability(capability)) {
       throw new ExtensionError("extension_capability_unsupported");
@@ -221,9 +225,11 @@ function isExtensionContributions(value: unknown): value is ExtensionContributio
   ) {
     return false;
   }
-  const toolsValid = value.tools === undefined ||
+  const toolsValid =
+    value.tools === undefined ||
     (Array.isArray(value.tools) && value.tools.every(asToolDefinition));
-  const providersValid = value.providers === undefined ||
+  const providersValid =
+    value.providers === undefined ||
     (Array.isArray(value.providers) && value.providers.every(validateProviderAdapter));
   return toolsValid && providersValid;
 }
@@ -257,10 +263,7 @@ function declaredTargets(
   kind: "tools.contribute" | "providers.contribute",
 ): ReadonlySet<string> {
   const targets = new Set<string>();
-  for (const capability of [
-    ...manifest.capabilities.required,
-    ...manifest.capabilities.optional,
-  ]) {
+  for (const capability of [...manifest.capabilities.required, ...manifest.capabilities.optional]) {
     if (kind === "tools.contribute" && capability.kind === "tools.contribute") {
       capability.names.forEach((name) => targets.add(name));
     }
@@ -298,10 +301,7 @@ function registerTools(
   return registered;
 }
 
-function registerTool(
-  context: EnabledRegistration,
-  candidate: ExtensionToolDefinition,
-): void {
+function registerTool(context: EnabledRegistration, candidate: ExtensionToolDefinition): void {
   const toolIdValue = `${context.namespace}.${candidate.name}`;
   const toolId = Code.safeParse(toolIdValue);
   if (!toolId.success || context.state.tools.has(toolIdValue)) {

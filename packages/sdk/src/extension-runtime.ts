@@ -2,22 +2,18 @@
 import type { ToolPort } from "@rovinos/core";
 import type { ProviderAdapter } from "@rovinos/models";
 import {
-  ExtensionError, ExtensionManifestSchema, ExtensionRegistrationStatusSchema,
+  ExtensionError,
+  ExtensionManifestSchema,
+  ExtensionRegistrationStatusSchema,
 } from "./extension-contracts.js";
 import type {
   ExtensionGrantRevocation,
   ExtensionManifest,
   ExtensionRegistration,
 } from "./extension-contracts.js";
-import {
-  DEFAULT_EXTENSION_TOOL_TIMEOUT_MS,
-  MAX_EXTENSION_COUNT,
-} from "./extension-constants.js";
+import { DEFAULT_EXTENSION_TOOL_TIMEOUT_MS, MAX_EXTENSION_COUNT } from "./extension-constants.js";
 import { makeCapabilityStatus, grantTarget } from "./extension-runtime-helpers.js";
-import {
-  validateProviderAdapter,
-  registerOne,
-} from "./extension-registration.js";
+import { validateProviderAdapter, registerOne } from "./extension-registration.js";
 import type { ExtensionRegistrationState } from "./extension-registration.js";
 import { makeExtensionToolPort, composeToolPorts } from "./extension-tool-port.js";
 import type { PreparedExtensions } from "./extension-runtime-types.js";

@@ -13,9 +13,7 @@ import type { RuntimeOverrides } from "@rovinos/core";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
-import {
-  ExtensionRegistrationSchema,
-} from "./extensions.js";
+import { ExtensionRegistrationSchema } from "./extensions.js";
 import type {
   ExtensionGrantRevocation,
   ExtensionRegistration,
@@ -150,10 +148,12 @@ export const CreateHarnessOptionsSchema = z.union([
 
 /** Validated options accepted by {@link createHarness}. */
 type CreateHarnessOptionsInput = z.input<typeof CreateHarnessOptionsSchema>;
-type WithExtensionRegistrations<Options, Registrations extends readonly ExtensionRegistration[]> =
-  Options extends { readonly extensions?: unknown }
-    ? Omit<Options, "extensions"> & { readonly extensions?: Registrations }
-    : Options;
+type WithExtensionRegistrations<
+  Options,
+  Registrations extends readonly ExtensionRegistration[],
+> = Options extends { readonly extensions?: unknown }
+  ? Omit<Options, "extensions"> & { readonly extensions?: Registrations }
+  : Options;
 /** Options passed to {@link createHarness}, with optional literal registrations preserved. */
 export type CreateHarnessOptions<
   Registrations extends readonly ExtensionRegistration[] = readonly ExtensionRegistration[],
@@ -450,7 +450,6 @@ export interface Harness {
    */
   close(): Promise<void>;
 }
-
 
 /** Coded SDK failure that does not include untrusted input values. */
 export class SdkError extends HarnessError {

@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { JsonValue as JsonValueSchema } from "@rovinos/schemas";
-import type {
-  Code,
-  JsonValue,
-  Sha256Hex as Sha256HexType,
-  ToolSpec,
-} from "@rovinos/schemas";
+import type { Code, JsonValue, Sha256Hex as Sha256HexType, ToolSpec } from "@rovinos/schemas";
 import type { ModelToolCall, ToolDescription, ToolExecutionResult, ToolPort } from "@rovinos/core";
-import { z } from "zod";
+import type { ZodType } from "zod";
 import { ExtensionError, type ExtensionToolDefinition } from "./extension-contracts.js";
 import { isBoundedJsonValue } from "./extension-json.js";
 import { canonicalJson, fingerprint } from "./extension-runtime-helpers.js";
@@ -16,8 +11,8 @@ import { canonicalJson, fingerprint } from "./extension-runtime-helpers.js";
 export interface RegisteredTool {
   readonly toolId: ReturnType<typeof Code.parse>;
   readonly name: string;
-  readonly inputSchema: z.ZodType;
-  readonly outputSchema: z.ZodType;
+  readonly inputSchema: ZodType;
+  readonly outputSchema: ZodType;
   readonly inputJsonSchema: JsonValue;
   readonly description: string;
   readonly timeoutMs: number;
@@ -36,11 +31,13 @@ export function makeExtensionToolPort(
   }
   const get = (toolId: string) => tools.get(toolId);
   const getToolSpecs = (): readonly ToolSpec[] =>
-    [...tools.values()].filter((tool) => tool.isGranted()).map((tool) => ({
-      toolId: tool.toolId,
-      description: tool.description,
-      inputSchema: tool.inputJsonSchema,
-    }));
+    [...tools.values()]
+      .filter((tool) => tool.isGranted())
+      .map((tool) => ({
+        toolId: tool.toolId,
+        description: tool.description,
+        inputSchema: tool.inputJsonSchema,
+      }));
   const catalogFingerprints = (): Readonly<Record<string, Sha256HexType>> =>
     Object.fromEntries(
       [...tools.values()]
@@ -161,10 +158,7 @@ export function composeToolPorts(base: ToolPort | undefined, additions: ToolPort
   };
 }
 
-function assertNoToolCollisions(
-  base: ToolPort | undefined,
-  additions: readonly ToolSpec[],
-): void {
+function assertNoToolCollisions(base: ToolPort | undefined, additions: readonly ToolSpec[]): void {
   const baseToolIds = new Set((base?.getToolSpecs?.() ?? []).map(({ toolId }) => toolId));
   for (const spec of additions) {
     if (baseToolIds.has(spec.toolId) || base?.describe(spec.toolId) !== undefined) {
@@ -173,10 +167,7 @@ function assertNoToolCollisions(
   }
 }
 
-function mergedToolSpecs(
-  base: ToolPort | undefined,
-  additions: ToolPort,
-): readonly ToolSpec[] {
+function mergedToolSpecs(base: ToolPort | undefined, additions: ToolPort): readonly ToolSpec[] {
   return [...(base?.getToolSpecs?.() ?? []), ...(additions.getToolSpecs?.() ?? [])];
 }
 
@@ -210,10 +201,11 @@ function optionalPortHooks(
   const pinForRun: ToolPort["pinForRun"] =
     base?.pinForRun === undefined
       ? undefined
-      : async (options) =>
-          composeToolPorts(await base.pinForRun?.(options), additions);
+      : async (options) => composeToolPorts(await base.pinForRun?.(options), additions);
   const prepare: ToolPort["prepare"] =
-    base?.prepare === undefined ? undefined : (call, context) => base.prepare?.(call, context) ?? Promise.resolve(call);
+    base?.prepare === undefined
+      ? undefined
+      : (call, context) => base.prepare?.(call, context) ?? Promise.resolve(call);
   const hasInputValidation =
     base?.validateInputSchema !== undefined || additions.validateInputSchema !== undefined;
   const validateInputSchema: ToolPort["validateInputSchema"] = hasInputValidation

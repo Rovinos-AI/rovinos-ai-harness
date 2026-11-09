@@ -11,6 +11,24 @@ import {
   type CreateHarnessOptions,
   type Harness,
 } from "./types.js";
+import type { ZodError } from "zod";
+
+type HarnessIssue = ZodError["issues"][number];
+
+function findExtensionIssue(issues: readonly HarnessIssue[]): HarnessIssue | undefined {
+  for (const issue of issues) {
+    if (issue.path[0] === "extensions") {
+      return issue;
+    }
+    if (issue.code === "invalid_union") {
+      const nestedIssue = findExtensionIssue(issue.errors.flat());
+      if (nestedIssue !== undefined) {
+        return nestedIssue;
+      }
+    }
+  }
+  return undefined;
+}
 
 /**
  * Creates a validated public SDK around the internal runtime.
@@ -23,9 +41,7 @@ export async function createHarness<
 >(options: CreateHarnessOptions<Registrations>): Promise<Harness> {
   const parsedOptionsResult = CreateHarnessOptionsSchema.safeParse(options);
   if (!parsedOptionsResult.success) {
-    const extensionIssue = parsedOptionsResult.error.issues.find(
-      (issue) => issue.path[0] === "extensions",
-    );
+    const extensionIssue = findExtensionIssue(parsedOptionsResult.error.issues);
     if (extensionIssue !== undefined) {
       let code:
         | "extension_config_invalid"

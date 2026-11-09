@@ -44,7 +44,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validatePrimitive(value: unknown, state: ValidationState, limit: number): boolean | undefined {
+function validatePrimitive(
+  value: unknown,
+  state: ValidationState,
+  limit: number,
+): boolean | undefined {
   if (value === null) {
     return state.addBytes("null", limit);
   }
@@ -73,7 +77,9 @@ function pushArrayItems(
   if (
     keys.length !== value.length + 1 ||
     !keys.includes("length") ||
-    keys.some((key) => key !== "length" && (typeof key !== "string" || !/^(?:0|[1-9]\d*)$/u.test(key)))
+    keys.some(
+      (key) => key !== "length" && (typeof key !== "string" || !/^(?:0|[1-9]\d*)$/u.test(key)),
+    )
   ) {
     return false;
   }

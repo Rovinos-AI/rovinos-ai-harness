@@ -29,24 +29,35 @@ const SafeEventKindSchema = z.enum([
   "run_created",
 ]);
 
-const CapabilityTargets = z.array(Code).min(1).max(MAX_CAPABILITY_TARGETS).refine(
-  (targets) => new Set(targets).size === targets.length,
-  "Capability targets must be unique.",
-);
+const CapabilityTargets = z
+  .array(Code)
+  .min(1)
+  .max(MAX_CAPABILITY_TARGETS)
+  .refine(
+    (targets) => new Set(targets).size === targets.length,
+    "Capability targets must be unique.",
+  );
 
 /** Closed capability requests. These declarations describe needs; they never grant access. */
 export const ExtensionCapabilitySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("tools.contribute"), names: CapabilityTargets }).strict(),
   z.object({ kind: z.literal("providers.contribute"), providers: CapabilityTargets }).strict(),
-  z.object({ kind: z.literal("events.observe"), kinds: z.array(SafeEventKindSchema).min(1).max(12) }).strict(),
+  z
+    .object({
+      kind: z.literal("events.observe"),
+      kinds: z.array(SafeEventKindSchema).min(1).max(12),
+    })
+    .strict(),
   z.object({ kind: z.literal("content.read"), bindings: CapabilityTargets }).strict(),
 ]);
 
 /** Inferred extension capability request. */
 export type ExtensionCapability = z.infer<typeof ExtensionCapabilitySchema>;
 
-const CapabilityListSchema = z.array(ExtensionCapabilitySchema).max(MAX_CAPABILITIES).refine(
-  (capabilities) => {
+const CapabilityListSchema = z
+  .array(ExtensionCapabilitySchema)
+  .max(MAX_CAPABILITIES)
+  .refine((capabilities) => {
     const seen = new Set<string>();
     for (const capability of capabilities) {
       if (seen.has(capability.kind)) {
@@ -55,9 +66,7 @@ const CapabilityListSchema = z.array(ExtensionCapabilitySchema).max(MAX_CAPABILI
       seen.add(capability.kind);
     }
     return true;
-  },
-  "Capability declarations must be unique.",
-);
+  }, "Capability declarations must be unique.");
 
 /** Serialized manifest data. It contains no executable expressions or module paths. */
 export const ExtensionManifestSchema = z
@@ -119,10 +128,7 @@ export interface ExtensionToolDefinition<
 }
 
 /** Create a tool definition with input and output types inferred from its Zod schemas. */
-export function defineTool<
-  InputSchema extends z.ZodType,
-  OutputSchema extends z.ZodType,
->(
+export function defineTool<InputSchema extends z.ZodType, OutputSchema extends z.ZodType>(
   definition: ExtensionToolDefinition<InputSchema, OutputSchema>,
 ): ExtensionToolDefinition<InputSchema, OutputSchema> {
   return definition;
@@ -186,22 +192,16 @@ export const ExtensionRegistrationSchema = z
   });
 
 /** Inferred direct extension registration request. */
-export type ExtensionRegistration<
-  Definition extends ExtensionDefinition = ExtensionDefinition,
-> = Omit<z.input<typeof ExtensionRegistrationSchema>, "definition" | "config"> & {
-  readonly definition: Definition;
-  readonly config?: (z.input<Definition["configSchema"]> & JsonValue) | undefined;
-};
+export type ExtensionRegistration<Definition extends ExtensionDefinition = ExtensionDefinition> =
+  Omit<z.input<typeof ExtensionRegistrationSchema>, "definition" | "config"> & {
+    readonly definition: Definition;
+    readonly config?: (z.input<Definition["configSchema"]> & JsonValue) | undefined;
+  };
 
 /** Metadata describing which requested capabilities are enabled or explicitly unsupported. */
 export const ExtensionCapabilityStatusSchema = z
   .object({
-    kind: z.enum([
-      "tools.contribute",
-      "providers.contribute",
-      "events.observe",
-      "content.read",
-    ]),
+    kind: z.enum(["tools.contribute", "providers.contribute", "events.observe", "content.read"]),
     requested: z.array(Code),
     enabled: z.array(Code),
     unsupported: z.array(Code),

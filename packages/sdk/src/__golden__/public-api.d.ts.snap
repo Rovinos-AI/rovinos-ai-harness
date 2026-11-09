@@ -18,7 +18,7 @@ export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRu
 export type { SafeEvent } from "@rovinos/telemetry";
 
 import type { ExtensionRegistration } from "./extensions.js";
-import { type Harness, type CreateHarnessOptions } from "./types.js";
+import { type CreateHarnessOptions, type Harness } from "./types.js";
 /**
  * Creates a validated public SDK around the internal runtime.
  *
@@ -681,7 +681,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 }, z.core.$strict>;
             }, z.core.$strict>;
             configSchema: z.ZodCustom<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>, z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
-            createContributions: z.ZodCustom<(config: unknown) => import("./extensions.js").ExtensionContributions, (config: unknown) => import("./extensions.js").ExtensionContributions>;
+            createContributions: z.ZodCustom<(config: unknown) => import("./extension-contracts.js").ExtensionContributions, (config: unknown) => import("./extension-contracts.js").ExtensionContributions>;
         }, z.core.$strict>;
         config: z.ZodOptional<z.ZodCustom<z.core.util.JSONType, z.core.util.JSONType>>;
         grants: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -806,7 +806,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 }, z.core.$strict>;
             }, z.core.$strict>;
             configSchema: z.ZodCustom<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>, z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
-            createContributions: z.ZodCustom<(config: unknown) => import("./extensions.js").ExtensionContributions, (config: unknown) => import("./extensions.js").ExtensionContributions>;
+            createContributions: z.ZodCustom<(config: unknown) => import("./extension-contracts.js").ExtensionContributions, (config: unknown) => import("./extension-contracts.js").ExtensionContributions>;
         }, z.core.$strict>;
         config: z.ZodOptional<z.ZodCustom<z.core.util.JSONType, z.core.util.JSONType>>;
         grants: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -846,6 +846,7 @@ type WithExtensionRegistrations<Options, Registrations extends readonly Extensio
 } ? Omit<Options, "extensions"> & {
     readonly extensions?: Registrations;
 } : Options;
+/** Options passed to {@link createHarness}, with optional literal registrations preserved. */
 export type CreateHarnessOptions<Registrations extends readonly ExtensionRegistration[] = readonly ExtensionRegistration[]> = WithExtensionRegistrations<CreateHarnessOptionsInput, Registrations>;
 /** Branded ULID accepted by public run and approval operations. */
 export type RunId = z.infer<typeof Id>;

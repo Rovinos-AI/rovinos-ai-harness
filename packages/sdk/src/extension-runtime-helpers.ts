@@ -54,9 +54,7 @@ export function isValidSdkRangeSyntax(range: string): boolean {
     terms.every((term) => {
       const match = SDK_RANGE_TERM_PATTERN.exec(term);
       return (
-        match !== null &&
-        isValidOperator(match[1]) &&
-        parseVersion(match[2] ?? "") !== undefined
+        match !== null && isValidOperator(match[1]) && parseVersion(match[2] ?? "") !== undefined
       );
     })
   );

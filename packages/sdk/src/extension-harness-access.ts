@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  ExtensionError,
-  ExtensionGrantRevocationSchema,
-} from "./extensions.js";
-import type {
-  ExtensionGrantRevocation,
-  ExtensionRegistrationStatus,
-} from "./extensions.js";
+import { ExtensionError, ExtensionGrantRevocationSchema } from "./extensions.js";
+import type { ExtensionGrantRevocation, ExtensionRegistrationStatus } from "./extensions.js";
 
 /** Narrow extension-status and revocation callbacks supplied by the harness factory. */
 export interface ExtensionHarnessAccessOptions {

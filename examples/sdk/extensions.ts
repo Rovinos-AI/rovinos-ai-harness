@@ -1,18 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  CodeSchema,
-  ProviderResultSchema,
-  createHarness,
-  defineTool,
-} from "@rovinos/sdk";
+import { CodeSchema, ProviderResultSchema, createHarness, defineTool } from "@rovinos/sdk";
 import type { ExtensionDefinition, Harness, ProviderAdapter } from "@rovinos/sdk";
 import { z } from "zod";
 
 const ConfigurationSchema = z.object({ maxResults: z.number().int().min(1).max(5) }).strict();
 const SearchInputSchema = z.object({ query: z.string().trim().min(1).max(200) }).strict();
-const SearchOutputSchema = z
-  .object({ matches: z.array(z.string().max(200)).max(5) })
-  .strict();
+const SearchOutputSchema = z.object({ matches: z.array(z.string().max(200)).max(5) }).strict();
 
 const provider: ProviderAdapter = {
   provider: CodeSchema.parse("sample.provider"),

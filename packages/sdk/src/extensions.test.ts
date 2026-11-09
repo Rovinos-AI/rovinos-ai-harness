@@ -15,6 +15,7 @@ import {
 } from "./index.js";
 import type {
   ExtensionCapability,
+  ExtensionContributions,
   ExtensionDefinition,
   ExtensionGrant,
   ExtensionRegistration,
@@ -24,16 +25,19 @@ import type {
 import { prepareExtensions } from "./extensions.js";
 import { InMemoryEventStore } from "@rovinos/store";
 import { z } from "zod";
+import { isBoundedJsonValue } from "./extension-json.js";
 
 const configSchema = z.object({ label: z.string().min(1).max(40) }).strict();
 const inputSchema = z.object({ query: z.string().min(1).max(40) }).strict();
 const outputSchema = z.object({ answer: z.string().max(80) }).strict();
 
-function definition(capabilities: {
-  readonly required?: readonly ExtensionCapability[];
-  readonly optional?: readonly ExtensionCapability[];
-  readonly createContributions?: ExtensionDefinition<typeof configSchema>["createContributions"];
-} = {}): ExtensionDefinition<typeof configSchema> {
+function definition(
+  capabilities: {
+    readonly required?: readonly ExtensionCapability[];
+    readonly optional?: readonly ExtensionCapability[];
+    readonly createContributions?: ExtensionDefinition<typeof configSchema>["createContributions"];
+  } = {},
+): ExtensionDefinition<typeof configSchema> {
   return {
     manifest: {
       id: "sample.search",
@@ -93,6 +97,41 @@ const toolContext: RunContext = {
 };
 
 describe("SDK extension registration", () => {
+  it("bounds JSON values without invoking accessors", () => {
+    expect(isBoundedJsonValue(null)).toBe(true);
+    expect(isBoundedJsonValue({ valid: [true, 1, "value"] })).toBe(true);
+    expect(isBoundedJsonValue(Number.NaN)).toBe(false);
+    expect(isBoundedJsonValue(new Array(1))).toBe(false);
+    expect(isBoundedJsonValue({ [Symbol("key")]: "value" })).toBe(false);
+    expect(isBoundedJsonValue(Object.defineProperty({}, "hidden", { value: true }))).toBe(false);
+    expect(isBoundedJsonValue(new Date())).toBe(false);
+
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    expect(isBoundedJsonValue(cycle)).toBe(false);
+
+    let accessorCalled = false;
+    const accessor = Object.defineProperty({}, "value", {
+      enumerable: true,
+      get() {
+        accessorCalled = true;
+        return "value";
+      },
+    });
+    expect(isBoundedJsonValue(accessor)).toBe(false);
+    expect(accessorCalled).toBe(false);
+
+    const throwingProxy = new Proxy(
+      {},
+      {
+        ownKeys: () => {
+          throw new Error("synthetic");
+        },
+      },
+    );
+    expect(isBoundedJsonValue(throwingProxy)).toBe(false);
+  });
+
   it("uses the manifest schema and rejects incompatible SDK ranges", () => {
     expect(SDK_VERSION).toBe("0.3.0");
     expect(
@@ -145,11 +184,7 @@ describe("SDK extension registration", () => {
     );
     expect(createContributions).not.toHaveBeenCalled();
 
-    const grantedCandidate = registration(
-      candidate.definition,
-      [toolGrant],
-      { label: "" },
-    );
+    const grantedCandidate = registration(candidate.definition, [toolGrant], { label: "" });
     expect(() => prepareExtensions([grantedCandidate], undefined, [])).toThrow(
       new ExtensionError("extension_config_invalid"),
     );
@@ -284,6 +319,18 @@ describe("SDK extension registration", () => {
       result: { answer: "refund" },
     });
     expect(tool.catalogFingerprints?.()).toHaveProperty("knowledge.search");
+    expect(tool.catalogVersion?.()).toBeDefined();
+    await expect(
+      tool.validateInputSchema?.(
+        Code.parse("knowledge.search"),
+        { query: "refund" },
+        {},
+        toolContext,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      tool.execute({ ...toolCall, toolId: Code.parse("unknown.tool") }, toolContext),
+    ).resolves.toMatchObject({ errorCode: "unknown_tool" });
     await expect(
       tool.execute({ ...toolCall, args: { query: "" } }, toolContext),
     ).resolves.toMatchObject({ outcome: "error", errorCode: "extension_input_invalid" });
@@ -310,18 +357,12 @@ describe("SDK extension registration", () => {
 
   it("uses the lower of the operator tool timeout and the run wall-clock budget", () => {
     const registrationWithTimeout = {
-      ...registration(
-        definition({ required: [{ kind: "tools.contribute", names: ["search"] }] }),
-        [toolGrant],
-      ),
+      ...registration(definition({ required: [{ kind: "tools.contribute", names: ["search"] }] }), [
+        toolGrant,
+      ]),
       toolTimeoutMs: 20_000,
     };
-    const prepared = prepareExtensions(
-      [registrationWithTimeout],
-      undefined,
-      [],
-      5_000,
-    );
+    const prepared = prepareExtensions([registrationWithTimeout], undefined, [], 5_000);
     expect(prepared.tool?.describe(Code.parse("knowledge.search"))?.timeoutMs).toBe(5_000);
   });
 
@@ -408,9 +449,7 @@ describe("SDK extension registration", () => {
       [
         registration(
           definition({
-            required: [
-              { kind: "providers.contribute", providers: ["sample.provider"] },
-            ],
+            required: [{ kind: "providers.contribute", providers: ["sample.provider"] }],
             createContributions: () => ({ providers: [adapter] }),
           }),
           [providerGrant],
@@ -446,6 +485,100 @@ describe("SDK extension registration", () => {
       );
     await expect(invokeProvider()).rejects.toMatchObject({ code: "extension_grant_missing" });
     expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("mediates provider streams and rechecks a revoked grant while streaming", async () => {
+    const adapter: ProviderAdapter = {
+      provider: Code.parse("sample.provider"),
+      kind: "openai_compatible",
+      complete: () => Promise.reject(new Error("not used")),
+      async *stream() {
+        yield { type: "activity" };
+        yield { type: "activity" };
+      },
+    };
+    const prepared = prepareExtensions(
+      [
+        registration(
+          definition({
+            required: [{ kind: "providers.contribute", providers: ["sample.provider"] }],
+            createContributions: () => ({ providers: [adapter] }),
+          }),
+          [providerGrant],
+        ),
+      ],
+      undefined,
+      [],
+    );
+    const provider = prepared.providers[0];
+    if (provider?.stream === undefined) {
+      throw new Error("The granted provider stream should be registered.");
+    }
+    const request = {
+      requestId: Id.parse("00000000000000000000000005"),
+      model: {
+        provider: Code.parse("sample.provider"),
+        model: Code.parse("sample.model"),
+      },
+      messages: [],
+    };
+    const context = {
+      signal: new AbortController().signal,
+      ids: new SequentialIdGenerator(),
+      clock: new FakeClock(1),
+    };
+    const stream = provider.stream(request, context)[Symbol.asyncIterator]();
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { type: "activity" },
+      done: false,
+    });
+    expect(
+      prepared.revokeGrant({
+        namespace: "knowledge",
+        kind: "providers.contribute",
+        target: "sample.provider",
+      }),
+    ).toBe(true);
+    await expect(stream.next()).rejects.toMatchObject({ code: "extension_grant_missing" });
+  });
+
+  it("rejects malformed or inconsistent direct contributions", () => {
+    const requiredTool = { required: [{ kind: "tools.contribute", names: ["search"] }] } as const;
+    const createContributionsList: ExtensionDefinition<
+      typeof configSchema
+    >["createContributions"][] = [
+      () => {
+        throw new Error("synthetic");
+      },
+      () => ({ unexpected: true }) as unknown as ExtensionContributions,
+      () => ({
+        tools: [
+          defineTool({
+            name: "search",
+            description: "Search the synthetic source.",
+            inputSchema,
+            outputSchema,
+            execute: ({ query }) => Promise.resolve({ answer: query }),
+          }),
+          defineTool({
+            name: "search",
+            description: "Duplicate contribution.",
+            inputSchema,
+            outputSchema,
+            execute: ({ query }) => Promise.resolve({ answer: query }),
+          }),
+        ],
+      }),
+    ];
+    for (const createContributions of createContributionsList) {
+      expect(() =>
+        prepareExtensions(
+          [registration(definition({ ...requiredTool, createContributions }), [toolGrant])],
+          undefined,
+          [],
+        ),
+      ).toThrow(new ExtensionError("extension_contribution_invalid"));
+    }
   });
 
   it("rejects duplicate extension identities and undeclared tool contributions", () => {
@@ -514,6 +647,59 @@ describe("SDK extension registration", () => {
         ],
       }),
     ).rejects.toMatchObject({ code: "extension_grant_missing" });
+  });
+
+  it("maps malformed extension registration fields to typed harness errors", async () => {
+    const config = HarnessConfigSchema.parse({});
+    const tooLargeConfig = registration(definition(), [], { label: "x".repeat(65 * 1024) });
+    const invalidManifest = registration({
+      ...definition(),
+      manifest: { ...definition().manifest, sdkRange: "unsupported" },
+    });
+    const invalidGrants = {
+      ...registration(definition()),
+      grants: [{ kind: "tools.contribute", names: ["search"], extra: true }],
+    } as unknown as ExtensionRegistration;
+
+    await expect(createHarness({ config, extensions: [tooLargeConfig] })).rejects.toMatchObject({
+      code: "extension_config_invalid",
+    });
+    await expect(createHarness({ config, extensions: [invalidGrants] })).rejects.toMatchObject({
+      code: "extension_grant_invalid",
+    });
+    await expect(createHarness({ config, extensions: [invalidManifest] })).rejects.toMatchObject({
+      code: "extension_manifest_invalid",
+    });
+    await expect(
+      createHarness({ config: null } as unknown as Parameters<typeof createHarness>[0]),
+    ).rejects.toBeDefined();
+  });
+
+  it("rejects excessive registrations and duplicate base providers", () => {
+    const candidate = registration(definition());
+    expect(() =>
+      prepareExtensions(
+        Array.from({ length: 33 }, () => candidate),
+        undefined,
+        [],
+      ),
+    ).toThrow(new ExtensionError("extension_contribution_invalid"));
+
+    const provider: ProviderAdapter = {
+      provider: Code.parse("sample.provider"),
+      kind: "openai_compatible",
+      complete: () => Promise.reject(new Error("not used")),
+    };
+    expect(() => prepareExtensions([], undefined, [provider, provider])).toThrow(
+      new ExtensionError("extension_contribution_invalid"),
+    );
+    expect(
+      prepareExtensions([], undefined, []).revokeGrant({
+        namespace: "missing",
+        kind: "tools.contribute",
+        target: "search",
+      }),
+    ).toBe(false);
   });
 
   it("reports and revokes grants through the public harness lifecycle", async () => {
