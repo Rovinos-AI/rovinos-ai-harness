@@ -207,7 +207,11 @@ class HarnessClient implements Harness {
           lastSeq: lastEvent.seq,
           lastTs: lastEvent.ts,
           steps: state.steps,
-          usage: state.usage,
+          usage: {
+            inputTokens: state.usage.inputTokens,
+            outputTokens: state.usage.outputTokens,
+            cost: state.usage.cost,
+          },
           pendingApprovals: Array.from(state.pendingApprovals.keys()),
           recentEvents: await this.projectSafeEvents(events.slice(-20)),
         });
