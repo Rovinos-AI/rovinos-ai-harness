@@ -28,6 +28,92 @@ durable SQLite and Postgres stores can also be selected through configuration.
 An optional `role` is passed to model routing. `requestedBy` records the run's requesting principal
 in `run_created` metadata; it is not an authorization mechanism.
 
+## MCP server onboarding
+
+The SDK helpers support the configure, inspect, select, and start flow without importing internal
+packages. Registration is configuration-only: it does not change an already-created harness and it
+sets `toolAllowlist` to an empty list unless you explicitly provide one. Inspection connects to the
+server and reads its catalog without calling tools. Tool descriptions and schemas are untrusted server
+content.
+
+```ts
+import {
+  createHarness,
+  inspectMcpServer,
+  registerMcpServer,
+  selectMcpTools,
+} from "@rovinos/sdk";
+
+const registered = registerMcpServer(
+  {},
+  {
+    id: "weather",
+    transport: {
+      kind: "stdio",
+      command: "/absolute/path/to/weather-mcp",
+      env: { WEATHER_API_KEY: "env:WEATHER_API_KEY" },
+    },
+  },
+);
+const server = registered.servers.find(({ id }) => id === "weather");
+if (server === undefined) throw new Error("configured_server_missing");
+
+const inspection = await inspectMcpServer(server, {
+  resolveSecret: async (ref) => {
+    if (ref !== "env:WEATHER_API_KEY") throw new Error("secret_reference_not_configured");
+    const value = process.env.WEATHER_API_KEY;
+    if (value === undefined) throw new Error("secret_reference_unavailable");
+    return value;
+  },
+});
+const reviewed = selectMcpTools(registered, inspection, ["forecast"]);
+const selectedToolIds = reviewed.selection.tools.map(({ toolId }) => toolId);
+const harness = await createHarness({ config: reviewed.config });
+try {
+  await harness.startRun({ goal: "Use the selected forecast tool." });
+} finally {
+  await harness.close();
+}
+```
+
+`inspection.tools` lists every valid candidate and indicates whether it is currently exposed.
+`selection.tools` is the exact exposure preview, including normalized tool ids. Selecting tools only
+controls model exposure; every call still passes through the run's `allow`, `ask`, or `deny` policy.
+`selection.authorization` is always `policy_unchanged`. Policy independently supports explicit
+allow, ask, and deny decisions; the default must remain `ask` or `deny`:
+
+```yaml
+version: 1
+defaultDecision: deny
+rules:
+  - id: allow_forecast
+    match:
+      tools: [weather.forecast]
+    decision: allow
+    reason: forecast_reviewed
+  - id: review_report
+    match:
+      tools: [weather.send_report]
+    decision: ask
+    reason: human_review_required
+  - id: deny_delete
+    match:
+      tools: [weather.delete_record]
+    decision: deny
+    reason: delete_not_permitted
+```
+
+Do not turn discovery into blanket permission. Re-inspect and explicitly review the selection after
+catalog changes; runs pin the catalog they were shown and fail closed if a selected tool changes
+before dispatch. Secret values are resolved only at the transport boundary; configuration contains
+`env:`, `file:`, or `akv:` references.
+
+Configuration and selection validation errors use `SdkError` codes
+`sdk_mcp_config_invalid`, `sdk_mcp_server_exists`, `sdk_mcp_server_not_found`,
+`sdk_mcp_tool_not_found`, `sdk_mcp_catalog_invalid`, and `sdk_mcp_selection_invalid`.
+Invalid inspection options use `sdk_mcp_inspection_options_invalid`; connection failures retain
+their existing `mcp_*` codes; unexpected inspection failures use `sdk_mcp_inspection_failed`.
+
 ## Metadata and events
 
 `getRun` and `listRuns` return run status, usage totals, approval identifiers, pagination metadata,

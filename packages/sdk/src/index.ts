@@ -6,6 +6,18 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./harness.js";
+export {
+  inspectMcpServer,
+  registerMcpServer,
+  selectMcpTools,
+  McpCatalogInspectionSchema,
+  type InspectMcpServerOptions,
+  type McpCatalogInspection,
+  type McpServerConfig,
+  type McpToolSelection,
+  type McpToolSelectionResult,
+} from "./mcp-onboarding.js";
+export type { HarnessConfig } from "@rovinos/config";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
 export {
