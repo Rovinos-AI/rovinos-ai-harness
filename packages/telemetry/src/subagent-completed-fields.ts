@@ -1,7 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Event } from "@rovinos/schemas";
+import type { SafeEvent } from "./safe-event.js";
 
-export function subagentCompletedFields(event: Extract<Event, { type: "subagent_completed" }>) {
+type SubagentCompletedSafeEvent = Extract<SafeEvent, { kind: "subagent_completed" }>;
+
+/** Project bounded usage and outcome fields from a completed subagent event. */
+export function subagentCompletedFields(
+  event: Extract<Event, { type: "subagent_completed" }>,
+): Pick<
+  SubagentCompletedSafeEvent,
+  | "kind"
+  | "childRunId"
+  | "outcome"
+  | "inputTokens"
+  | "outputTokens"
+  | "costVersion"
+  | "costState"
+  | "costKnownMicros"
+  | "costEstimatedMicros"
+  | "costPartialMicros"
+  | "costKnownCount"
+  | "costEstimatedCount"
+  | "costPartialCount"
+  | "costUnknownCount"
+> {
   return {
     kind: "subagent_completed" as const,
     childRunId: event.childRunId,

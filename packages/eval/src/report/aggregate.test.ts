@@ -85,7 +85,6 @@ describe("eval report aggregation", () => {
       steps: { mean: 3, median: 3, p95: 5 },
       latencyMs: { mean: 12, median: 12, p95: 14 },
     });
-
   });
 
   it("keeps unknown evidence visible in mixed report totals", () => {
