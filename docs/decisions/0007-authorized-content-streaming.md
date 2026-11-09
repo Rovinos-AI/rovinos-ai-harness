@@ -53,8 +53,8 @@ Tests cover missing and denied authorization, principal/run mismatch, reauthoriz
 revocation, caller cancellation, reconnecting from a cursor, independent concurrent readers, slow
 consumption, tokenized content, and the unchanged metadata-only watch path. Canary tests verify that
 synthetic sensitive input is tokenized in stored events and the authorized content stream and is
-absent from safe events. The repository canary gate continues to scan its captured telemetry and
-logs for the synthetic canary set.
+absent from safe events, runtime spans, and captured logs. The repository canary gate continues to
+scan its captured telemetry and logs for the synthetic canary set.
 
 The stream does not promise replay of provider deltas that were never committed. A slow consumer
 does not cause a stream-side queue to grow, but the event store's configured retention, capacity,

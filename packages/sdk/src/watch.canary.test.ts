@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import { logs, trace } from "@opentelemetry/api";
+import type { LogRecord, LoggerProvider } from "@opentelemetry/api";
 import type { ModelPort } from "@rovinos/core";
 import { HarnessConfigSchema } from "@rovinos/config";
 import { InMemoryEventStore } from "@rovinos/store";
 import { Code, FakeClock, Id, Principal, SequentialIdGenerator } from "@rovinos/schemas";
 import type { SafeEvent } from "@rovinos/telemetry";
+import { createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness } from "./index.js";
 import type { Harness } from "./types.js";
@@ -96,67 +99,109 @@ describe("SDK safe-event canary", () => {
   });
 
   it("keeps sensitive values tokenized in committed content and out of safe streams and events", async () => {
-    const store = new InMemoryEventStore();
-    const harness = await createHarness({
-      config: HarnessConfigSchema.parse({}),
-      contentAuthorizer: ({ principal }) => principal === "cli.content_reader",
-      overrides: {
-        store,
-        clock: new FakeClock(30_000),
-        ids: new SequentialIdGenerator(),
-        transientVault: true,
-        model: {
-          complete: () =>
-            Promise.resolve({
-              parts: [{ type: "text", text: `Answer for ${sensitiveCanary}` }],
-              usage: { inputTokens: 1, outputTokens: 1 },
-              finishReason: "stop",
-              provider: Code.parse("test"),
-              model: Code.parse("canary"),
-              latencyMs: 0,
-              schemaValid: true,
-              repairAttempts: 0,
-              fallbackDepth: 0,
-              providerBlobs: null,
-            }),
+    const spanCollector = createTestSpanCollector();
+    const capturedLogs: LogRecord[] = [];
+    const loggerProvider: LoggerProvider = {
+      getLogger: () => ({
+        enabled: () => true,
+        emit: (record) => {
+          capturedLogs.push(record);
         },
-      },
-    });
-    harnesses.push(harness);
+      }),
+    };
+    trace.disable();
+    logs.disable();
+    trace.setGlobalTracerProvider(spanCollector.provider);
+    logs.setGlobalLoggerProvider(loggerProvider);
 
-    const { runId } = await harness.startRun({ goal: sensitiveCanary });
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await harness.getRun(runId)).status === "completed") {
-        break;
+    const store = new InMemoryEventStore();
+    let harness: Harness | undefined;
+    try {
+      harness = await createHarness({
+        config: HarnessConfigSchema.parse({}),
+        contentAuthorizer: ({ principal }) => principal === "cli.content_reader",
+        overrides: {
+          store,
+          clock: new FakeClock(30_000),
+          ids: new SequentialIdGenerator(),
+          transientVault: true,
+          model: {
+            complete: () =>
+              Promise.resolve({
+                parts: [{ type: "text", text: `Answer for ${sensitiveCanary}` }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: "stop",
+                provider: Code.parse("test"),
+                model: Code.parse("canary"),
+                latencyMs: 0,
+                schemaValid: true,
+                repairAttempts: 0,
+                fallbackDepth: 0,
+                providerBlobs: null,
+              }),
+          },
+        },
+      });
+      harnesses.push(harness);
+
+      const { runId } = await harness.startRun({ goal: sensitiveCanary });
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((await harness.getRun(runId)).status === "completed") {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1));
       }
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-    expect((await harness.getRun(runId)).status).toBe("completed");
+      expect((await harness.getRun(runId)).status).toBe("completed");
 
-    const stored: unknown[] = [];
-    for await (const event of store.read(Id.parse(runId))) {
-      stored.push(event);
-    }
-    const safe: SafeEvent[] = [];
-    for await (const event of harness.watch(runId, { fromSeq: 0 })) {
-      safe.push(event);
-    }
-    const content: unknown[] = [];
-    for await (const entry of harness.streamRunContent(runId, {
-      principal: Principal.parse("cli.content_reader"),
-    })) {
-      content.push(entry);
-    }
+      const stored: unknown[] = [];
+      for await (const event of store.read(Id.parse(runId))) {
+        stored.push(event);
+      }
+      const safe: SafeEvent[] = [];
+      for await (const event of harness.watch(runId, { fromSeq: 0 })) {
+        safe.push(event);
+      }
+      const content: unknown[] = [];
+      for await (const entry of harness.streamRunContent(runId, {
+        principal: Principal.parse("cli.content_reader"),
+      })) {
+        content.push(entry);
+      }
 
-    expect(JSON.stringify(stored)).not.toContain(sensitiveCanary);
-    expect(JSON.stringify(safe)).not.toContain(sensitiveCanary);
-    expect(JSON.stringify(content)).not.toContain(sensitiveCanary);
-    expect(JSON.stringify(content)).toMatch(/<EMAIL_\d+>/u);
-    await expect(
-      harness
-        .streamRunContent(runId, { principal: Principal.parse("cli.unauthorized") })
-        [Symbol.asyncIterator]()
-        .next(),
-    ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
+      expect(JSON.stringify(stored)).not.toContain(sensitiveCanary);
+      expect(JSON.stringify(safe)).not.toContain(sensitiveCanary);
+      expect(JSON.stringify(content)).not.toContain(sensitiveCanary);
+      expect(JSON.stringify(content)).toMatch(/<EMAIL_\d+>/u);
+
+      await spanCollector.provider.forceFlush();
+      const telemetry = JSON.stringify({
+        spans: spanCollector.getFinishedSpans().map(({ name, attributes, events }) => ({
+          name,
+          attributes,
+          events,
+        })),
+        logs: capturedLogs.map(({ body, eventName, attributes }) => ({
+          body,
+          eventName,
+          attributes,
+        })),
+      });
+      expect(telemetry).not.toContain(sensitiveCanary);
+      expect(spanCollector.getFinishedSpans().length).toBeGreaterThan(0);
+
+      await expect(
+        harness
+          .streamRunContent(runId, { principal: Principal.parse("cli.unauthorized") })
+          [Symbol.asyncIterator]()
+          .next(),
+      ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
+    } finally {
+      if (harness !== undefined) {
+        await harness.close();
+      }
+      await spanCollector.provider.shutdown();
+      trace.disable();
+      logs.disable();
+    }
   });
 });
