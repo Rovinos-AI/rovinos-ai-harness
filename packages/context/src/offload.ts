@@ -9,6 +9,7 @@ import {
   type Code,
   type Id as IdValue,
   type JsonValue as JsonValueType,
+  type KeyProvider,
   type ToolSpec,
   type PiiActionSummary,
 } from "@rovinos/schemas";
@@ -254,6 +255,7 @@ export class OffloadingToolPort implements OffloadToolPortLike {
   private readonly options: z.infer<typeof OffloadingToolOptionsSchema>;
   private readonly knownSizes = new Map<OffloadedHandle, number>();
   private readonly ids: OffloadIdGenerator;
+  private readonly artifactKeyProvider: KeyProvider | undefined;
 
   /**
    * Wraps an executor with workspace offloading for large tool results.
@@ -261,16 +263,20 @@ export class OffloadingToolPort implements OffloadToolPortLike {
    * @param inner - Tool port that performs PII tokenization before returning results.
    * @param workspace - Workspace used to persist and page offloaded results.
    * @param options - Byte threshold and preview character limit.
-   * @param ids - Optional ULID generator, replaceable in tests.
+   * @param dependencies - Optional ID generator and artifact encryption key provider.
    */
   constructor(
     private readonly inner: OffloadToolPortLike,
     private readonly workspace: WorkspacePort,
     options: OffloadingToolOptions = {},
-    ids: OffloadIdGenerator = new SystemOffloadIdGenerator(),
+    dependencies: {
+      readonly ids?: OffloadIdGenerator;
+      readonly artifactKeyProvider?: KeyProvider;
+    } = {},
   ) {
     this.options = OffloadingToolOptionsSchema.parse(options);
-    this.ids = ids;
+    this.ids = dependencies.ids ?? new SystemOffloadIdGenerator();
+    this.artifactKeyProvider = dependencies.artifactKeyProvider;
   }
 
   /** {@inheritDoc OffloadToolPortLike.describe} */
@@ -302,7 +308,10 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     context: OffloadRunContext,
   ): Promise<OffloadToolExecutionResult> {
     if (call.toolId === "read_offloaded") {
-      return readOffloaded(this.workspace, this.knownSizes, call);
+      return readOffloaded(this.workspace, this.knownSizes, call, {
+        runId: context.runId,
+        keyProvider: this.artifactKeyProvider,
+      });
     }
 
     const execution = await this.inner.execute(call, context);
@@ -312,11 +321,16 @@ export class OffloadingToolPort implements OffloadToolPortLike {
   /** Offloads a recovered result without invoking the underlying tool again. */
   async offloadRecoveredResult(
     call: OffloadToolCall,
-    _context: OffloadRunContext,
+    context: OffloadRunContext,
     execution: OffloadToolExecutionResult,
   ): Promise<OffloadToolExecutionResult> {
     if (execution.artifacts !== undefined && execution.artifacts.length > 0) {
-      return offloadArtifactResult(execution, this.workspace, this.ids, this.knownSizes);
+      return offloadArtifactResult(execution, this.workspace, {
+        ids: this.ids,
+        knownSizes: this.knownSizes,
+        keyProvider: this.artifactKeyProvider,
+        runId: context.runId,
+      });
     }
     if (execution.binary === true && !ToolBinaryPayloadSchema.safeParse(execution.result).success) {
       return toolError("pii_input_invalid");

@@ -58,6 +58,12 @@ jobs:
         run: yarn check:pii-corpus
       - name: Check documentation claims
         run: yarn lint:claims
+      - name: Check package READMEs and Markdown
+        run: |
+          yarn gen:readmes --check
+          yarn check:readmes
+          yarn check:links
+          yarn check:mermaid
       - name: Lint
         run: yarn lint
         # Scoped to this step so unit tests never inherit it; they must not depend on the environment.
