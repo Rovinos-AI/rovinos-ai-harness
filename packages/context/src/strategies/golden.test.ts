@@ -39,6 +39,7 @@ const events: Event[] = [
     model: "golden",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" } as const,
     finishReason: "stop" as const,
     latencyMs: 0,
     schemaValid: true,
@@ -61,6 +62,7 @@ const events: Event[] = [
     model: "golden",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" } as const,
     finishReason: "tool_calls",
     latencyMs: 0,
     schemaValid: true,
@@ -106,6 +108,7 @@ const events: Event[] = [
     model: "golden",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" } as const,
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: true,
@@ -128,6 +131,7 @@ const events: Event[] = [
     strategy: "summarizing",
     strategyVersion: "v1",
     summary: "summary of compacted work",
+    cost: { version: 1, state: "unknown" } as const,
   },
 ];
 const input = {

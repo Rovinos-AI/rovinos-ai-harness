@@ -580,7 +580,7 @@ describe("SubagentSupervisor", () => {
       childRunId,
       status: "completed",
       value: { text: "cached answer" },
-      usage: { inputTokens: 1, outputTokens: 1, cost: EMPTY_COST_TOTAL },
+      usage: { inputTokens: 1, outputTokens: 1, cost: costTotal(2) },
     });
     expect(runChild).not.toHaveBeenCalled();
   });

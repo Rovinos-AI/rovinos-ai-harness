@@ -1481,6 +1481,7 @@ describe("SQLite compaction crash recovery", () => {
       };
       const budgets = {
         maxSteps: 10,
+        unknownCostPolicy: "fail" as const,
         maxWallClockMs: 60_000,
         countSuspendedTime: false,
       };

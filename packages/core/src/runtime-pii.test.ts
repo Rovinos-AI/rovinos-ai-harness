@@ -645,7 +645,7 @@ describe("createRuntime PII composition", () => {
       expect(JSON.stringify(recordedJudgeRequest)).toContain("<EMAIL_1>");
       expect(judgeResponse).toMatchObject({
         type: "model_response",
-        costMicros: 12,
+        cost: { version: 1, state: "estimated", amountMicros: 12 },
       });
       expect(
         result.events

@@ -135,11 +135,13 @@ function createInnerStore(): EventStoreLike {
           period: delta.period,
           periodStart: delta.periodStart,
           costMicros: 0,
+          unknownCostCount: 0,
           runsStarted: 0,
         };
         usageLedger.set(key, {
           ...previous,
           costMicros: previous.costMicros + delta.costMicros,
+          unknownCostCount: previous.unknownCostCount + (delta.unknownCostCount ?? 0),
           runsStarted: previous.runsStarted + delta.runsStarted,
         });
       }
@@ -300,7 +302,14 @@ describe("PiiEventStore", () => {
     expect(events[1]).toMatchObject({ type: "run_input", input: { text: "<EMAIL_1>" } });
     expect(JSON.stringify(events)).not.toContain(rawEmail);
     await expect(store.readUsageLedger("team", "day", [0])).resolves.toEqual([
-      { quotaId: "team", period: "day", periodStart: 0, costMicros: 5, runsStarted: 0 },
+      {
+        quotaId: "team",
+        period: "day",
+        periodStart: 0,
+        costMicros: 5,
+        unknownCostCount: 0,
+        runsStarted: 0,
+      },
     ]);
   });
 

@@ -99,6 +99,7 @@ describe("QuotaService", () => {
         period: "hour",
         periodStart: Date.UTC(2026, 9, 20, 14),
         costMicros: 0,
+        unknownCostCount: 0,
         runsStarted: 3,
       },
     ]);
@@ -114,6 +115,7 @@ describe("QuotaService", () => {
         period: "month",
         periodStart: Date.UTC(2026, 9, 1),
         costMicros: 20,
+        unknownCostCount: 0,
         runsStarted: 0,
       },
     ]);
@@ -130,6 +132,7 @@ describe("QuotaService", () => {
         period: "day",
         periodStart: Date.UTC(2026, 9, 20),
         costMicros: 10,
+        unknownCostCount: 0,
         runsStarted: 0,
       },
     ]);

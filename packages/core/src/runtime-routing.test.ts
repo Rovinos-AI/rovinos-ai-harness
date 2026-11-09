@@ -804,7 +804,9 @@ describe("createRuntime model routing", () => {
       const response = result.events.find(({ type }) => type === "model_response");
 
       expect(result.status).toBe("failed");
-      expect(response).toMatchObject({ costMicros: 2 });
+      expect(response).toMatchObject({
+        cost: { version: 1, state: "estimated", amountMicros: 2 },
+      });
       expect(result.events).toContainEqual(
         expect.objectContaining({ type: "budget_exceeded", budget: "cost", observed: 2 }),
       );
@@ -822,6 +824,7 @@ describe("createRuntime model routing", () => {
         period: "day",
         periodStart: Date.UTC(2026, 9, 20),
         costMicros: 10,
+        unknownCostCount: 0,
         runsStarted: 0,
       },
     ]);
@@ -915,6 +918,7 @@ describe("createRuntime model routing", () => {
           period: "day",
           periodStart: Date.UTC(2026, 9, 20),
           costMicros: 10,
+          unknownCostCount: 0,
           runsStarted: 0,
         },
       ]);
