@@ -15,6 +15,7 @@ import {
 } from "./index.js";
 import type {
   ExtensionCapability,
+  ExtensionContributions,
   ExtensionDefinition,
   ExtensionGrant,
   ExtensionRegistration,
@@ -543,7 +544,7 @@ describe("SDK extension registration", () => {
   });
 
   it("rejects malformed or inconsistent direct contributions", () => {
-    const unexpectedContribution = { unexpected: true };
+    const unexpectedContribution = z.custom<ExtensionContributions>().parse({ unexpected: true });
     const createContributionsList: ExtensionDefinition<
       typeof configSchema
     >["createContributions"][] = [
