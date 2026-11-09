@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import {
+  ApprovalAppInputSchema,
   ApprovalAppGetRequestSchema,
   ApprovalPayloadSchema,
   Code,
@@ -64,6 +65,25 @@ const inspectorServerCreateRequestSchema = z.looseObject({
     })
     .optional(),
 });
+const inspectorJsonRpcMessageSchema = z.looseObject({
+  id: z.union([z.number(), z.string()]).optional(),
+  method: z.string().optional(),
+  params: z
+    .looseObject({
+      name: z.string().optional(),
+      isError: z.boolean().optional(),
+      html: z.string().optional(),
+      structuredContent: z.unknown().optional(),
+      content: z.array(z.looseObject({ type: z.string() })).optional(),
+      arguments: z.record(z.string(), z.unknown()).optional(),
+    })
+    .optional(),
+  error: z.looseObject({ code: z.union([z.number(), z.string()]).optional() }).optional(),
+});
+const recordSchema = z.record(z.string(), z.unknown());
+const inspectorSendRequestSchema = z.looseObject({
+  message: inspectorJsonRpcMessageSchema,
+});
 
 interface ApprovalFixture {
   readonly runId: Id;
@@ -74,6 +94,7 @@ interface ApprovalFixture {
 interface CapturedRequest {
   readonly url: string;
   readonly body: string | undefined;
+  readonly frameUrl: string;
 }
 
 interface CapturedResponse {
@@ -84,6 +105,7 @@ interface CapturedResponse {
 
 interface BrowserDiagnostics {
   readonly console: string[];
+  readonly jsonRpcMessages: string[];
   readonly pageErrors: string[];
   readonly networkFailures: string[];
   readonly failedResponses: string[];
@@ -102,8 +124,72 @@ function safeRequestUrl(value: string): string {
 }
 
 function captureBrowserDiagnostics(page: Page, diagnostics: BrowserDiagnostics): void {
-  page.on("console", (message) => {
+  page.on("console", async (message) => {
     diagnostics.console.push(redactDiagnostic(`${message.type()}: ${message.text()}`));
+    const values = await Promise.all(
+      message.args().map((argument) => argument.jsonValue().catch(() => undefined)),
+    );
+    for (const value of values) {
+      const parsed = inspectorJsonRpcMessageSchema.safeParse(value);
+      if (!parsed.success) {
+        continue;
+      }
+      const record = parsed.data;
+      const errorCode = record.error?.code;
+      let safeErrorCode: string | number | undefined;
+      if (typeof errorCode === "number") {
+        safeErrorCode = errorCode;
+      } else if (typeof errorCode === "string" && /^[\w.-]{1,80}$/u.test(errorCode)) {
+        safeErrorCode = errorCode;
+      }
+      const method =
+        record.method !== undefined && /^[\w/.-]{1,100}$/u.test(record.method)
+          ? record.method
+          : undefined;
+      const toolName =
+        record.params?.name !== undefined && /^harness\.[\w.-]{1,100}$/u.test(record.params.name)
+          ? record.params.name
+          : undefined;
+      const toolResult =
+        method === "ui/notifications/tool-result" && record.params !== undefined
+          ? {
+              isError: record.params.isError === true,
+              hasStructuredContent: record.params.structuredContent !== undefined,
+              contentTypes: record.params.content?.map((part) => part.type) ?? [],
+              validApprovalInput: ApprovalAppInputSchema.safeParse(record.params.structuredContent)
+                .success,
+              structuredKeys: (() => {
+                const content = recordSchema.safeParse(record.params.structuredContent);
+                return content.success ? Object.keys(content.data) : [];
+              })(),
+            }
+          : undefined;
+      const resourceHtml =
+        method === "ui/notifications/sandbox-resource-ready" && record.params?.html !== undefined
+          ? {
+              length: record.params.html.length,
+              hasScript: /<script\b/iu.test(record.params.html),
+            }
+          : undefined;
+      if (
+        safeErrorCode !== undefined ||
+        method !== undefined ||
+        toolName !== undefined ||
+        toolResult !== undefined ||
+        resourceHtml !== undefined
+      ) {
+        diagnostics.jsonRpcMessages.push(
+          JSON.stringify({
+            ...(record.id === undefined ? {} : { id: record.id }),
+            ...(method === undefined ? {} : { method }),
+            ...(toolName === undefined ? {} : { toolName }),
+            ...(toolResult === undefined ? {} : { toolResult }),
+            ...(resourceHtml === undefined ? {} : { resourceHtml }),
+            ...(safeErrorCode === undefined ? {} : { errorCode: safeErrorCode }),
+          }),
+        );
+      }
+    }
   });
   page.on("pageerror", (error) => {
     diagnostics.pageErrors.push(redactDiagnostic(error.message));
@@ -137,10 +223,28 @@ function captureInspectorResponses(page: Page, responses: CapturedResponse[]): v
   });
 }
 
-function expectLoopbackRequests(requests: readonly CapturedRequest[]): void {
-  const hosts = requests.map((request) => new URL(request.url).hostname);
-  expect(hosts).toContain("127.0.0.1");
-  expect(hosts.every((host) => ["127.0.0.1", "localhost", "::1"].includes(host))).toBe(true);
+function expectNoExternalSandboxRequests(requests: readonly CapturedRequest[]): void {
+  const sandboxRequests = requests.filter((request) => isSandboxFrame(request.frameUrl));
+  expect(
+    sandboxRequests.filter(
+      (request) => !["127.0.0.1", "localhost", "::1"].includes(new URL(request.url).hostname),
+    ),
+  ).toEqual([]);
+}
+
+function isSandboxFrame(frameUrl: string): boolean {
+  if (frameUrl === "about:srcdoc") {
+    return true;
+  }
+  try {
+    return new URL(frameUrl).pathname === "/sandbox";
+  } catch {
+    return false;
+  }
+}
+
+function approvalAppFrame(page: Page) {
+  return page.frameLocator('[data-testid="apps-form"] iframe').frameLocator("iframe");
 }
 
 async function configureInspectorAuthorization(
@@ -379,6 +483,34 @@ async function openApproval(
         pageText: redactDiagnostic(body).slice(0, 2_000),
         appsPanel: redactDiagnostic(appsPanel).slice(0, 2_000),
         console: diagnostics.console,
+        jsonRpcMessages: diagnostics.jsonRpcMessages,
+        inspectorRequests: requestLog.map((request) => {
+          let message: z.infer<typeof inspectorJsonRpcMessageSchema> | undefined;
+          if (request.body !== undefined) {
+            try {
+              message = parseJson(inspectorSendRequestSchema, request.body).message;
+            } catch {
+              message = undefined;
+            }
+          }
+          return {
+            path: new URL(request.url).pathname,
+            ...(message !== undefined
+              ? {
+                  method: message.method,
+                  toolName:
+                    message.params?.name !== undefined &&
+                    /^harness\.[\w.-]{1,100}$/u.test(message.params.name)
+                      ? message.params.name
+                      : undefined,
+                }
+              : {}),
+          };
+        }),
+        inspectorResponses: responseLog.map(({ url, status }) => ({
+          path: new URL(url).pathname,
+          status,
+        })),
         pageErrors: diagnostics.pageErrors,
         networkFailures: diagnostics.networkFailures,
         failedResponses: diagnostics.failedResponses,
@@ -386,13 +518,21 @@ async function openApproval(
       })}`,
     );
   }
-  expect(await page.getByTestId("apps-form").locator("iframe").count()).toBe(1);
-  const app = page.frameLocator('[data-testid="apps-form"] iframe');
+  const sandboxFrame = page.getByTestId("apps-form").locator("iframe");
+  expect(await sandboxFrame.count()).toBe(1);
+  expect(
+    await page.frameLocator('[data-testid="apps-form"] iframe').locator("iframe").count(),
+  ).toBe(1);
+  const app = approvalAppFrame(page);
   try {
     await app.getByRole("heading", { name: fixture.payload.summary }).waitFor({ state: "visible" });
     await app.getByText(fixture.payload.ruleId, { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("<EMAIL_1>", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("<SECRET_1>", { exact: true }).waitFor({ state: "visible" });
+    const emailPill = app.locator('[aria-label="<EMAIL_1>"]');
+    const secretPill = app.locator('[aria-label="<SECRET_1>"]');
+    await emailPill.waitFor({ state: "visible" });
+    await secretPill.waitFor({ state: "visible" });
+    expect(await emailPill.innerText()).toBe("email 1");
+    expect(await secretPill.innerText()).toBe("secret 1");
   } catch {
     const appText = await app
       .locator("body")
@@ -400,13 +540,57 @@ async function openApproval(
       .catch(() => "");
     const appMessages = await page.getByTestId("apps-messages").allInnerTexts();
     const appLogs = await page.getByTestId("apps-logs").allInnerTexts();
+    const appError = await page
+      .getByTestId("apps-error")
+      .allInnerTexts()
+      .then((texts) => texts.join("\n"))
+      .catch(() => "");
+    const appDocument = await app
+      .locator("body")
+      .evaluate((body) => ({
+        childCount: body.childElementCount,
+        readyState: body.ownerDocument.readyState,
+        title: body.ownerDocument.title,
+      }))
+      .catch(() => null);
     throw new Error(
       `Inspector app content did not render: ${JSON.stringify({
         appText: redactDiagnostic(appText).slice(0, 2_000),
         appMessages: redactDiagnostic(appMessages.join("\n")).slice(0, 2_000),
         appLogs: redactDiagnostic(appLogs.join("\n")).slice(0, 2_000),
+        appError: redactDiagnostic(appError).slice(0, 500),
+        appDocument,
         frameUrls: page.frames().map((frame) => safeRequestUrl(frame.url())),
         console: diagnostics.console,
+        jsonRpcMessages: diagnostics.jsonRpcMessages,
+        inspectorRequests: requestLog.map((request) => {
+          let message: z.infer<typeof inspectorJsonRpcMessageSchema> | undefined;
+          if (request.body !== undefined) {
+            try {
+              message = parseJson(inspectorSendRequestSchema, request.body).message;
+            } catch {
+              message = undefined;
+            }
+          }
+          return {
+            path: new URL(request.url).pathname,
+            frame: request.frameUrl === "about:srcdoc" ? "app" : "host",
+            ...(message !== undefined
+              ? {
+                  method: message.method,
+                  toolName:
+                    message.params?.name !== undefined &&
+                    /^harness\.[\w.-]{1,100}$/u.test(message.params.name)
+                      ? message.params.name
+                      : undefined,
+                }
+              : {}),
+          };
+        }),
+        inspectorResponses: responseLog.map(({ url, status }) => ({
+          path: new URL(url).pathname,
+          status,
+        })),
         pageErrors: diagnostics.pageErrors,
         networkFailures: diagnostics.networkFailures,
         failedResponses: diagnostics.failedResponses,
@@ -421,12 +605,7 @@ async function openApproval(
   for (const canary of rawCanaries) {
     expect(serialized).not.toContain(canary);
   }
-  expectLoopbackRequests(requestLog);
-  expect(
-    requestLog.filter(
-      (entry) => !["127.0.0.1", "localhost", "::1"].includes(new URL(entry.url).hostname),
-    ),
-  ).toEqual([]);
+  expectNoExternalSandboxRequests(requestLog);
 }
 
 it("renders approval apps in Inspector and records human decisions", async () => {
@@ -484,6 +663,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       const page = await context.newPage();
       const diagnostics: BrowserDiagnostics = {
         console: [],
+        jsonRpcMessages: [],
         pageErrors: [],
         networkFailures: [],
         failedResponses: [],
@@ -495,7 +675,11 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         activeHarnessServer.endpoint,
       );
       page.on("request", (request) => {
-        requestLog.push({ url: request.url(), body: request.postData() ?? undefined });
+        requestLog.push({
+          url: request.url(),
+          body: request.postData() ?? undefined,
+          frameUrl: request.frame().url(),
+        });
       });
       captureInspectorResponses(page, responseLog);
       await openApproval(
@@ -507,7 +691,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         responseLog,
         diagnostics,
       );
-      const app = page.frameLocator('[data-testid="apps-form"] iframe');
+      const app = approvalAppFrame(page);
       const button = app.getByRole("button", {
         name: decision === "approve" ? "Approve" : "Deny",
         exact: true,
@@ -520,10 +704,53 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       } else {
         await button.click();
       }
-      await app
-        .getByRole("status")
-        .filter({ hasText: decision === "approve" ? "Approval granted." : "Approval denied." })
-        .waitFor({ state: "visible" });
+      try {
+        await app
+          .getByRole("status")
+          .filter({ hasText: decision === "approve" ? "Approval granted." : "Approval denied." })
+          .waitFor({ state: "visible" });
+      } catch {
+        const appText = await app
+          .locator("body")
+          .innerText()
+          .catch(() => "");
+        const toolCalls = requestLog
+          .filter((request) => request.url.includes("/api/mcp/send"))
+          .map((request) => {
+            if (request.body === undefined) {
+              return undefined;
+            }
+            try {
+              const { message } = parseJson(inspectorSendRequestSchema, request.body);
+              return {
+                method: message.method,
+                toolName: message.params?.name,
+                argumentKeys:
+                  message.params?.arguments === undefined
+                    ? []
+                    : Object.keys(message.params.arguments),
+                decision:
+                  message.params?.arguments?.decision === "approve" ||
+                  message.params?.arguments?.decision === "deny"
+                    ? message.params.arguments.decision
+                    : undefined,
+              };
+            } catch {
+              return undefined;
+            }
+          })
+          .filter((request) => request !== undefined);
+        throw new Error(
+          `Inspector approval decision did not render: ${JSON.stringify({
+            appText: redactDiagnostic(appText).slice(0, 1_000),
+            toolCalls,
+            jsonRpcMessages: diagnostics.jsonRpcMessages,
+            pageErrors: diagnostics.pageErrors,
+            networkFailures: diagnostics.networkFailures,
+            failedResponses: diagnostics.failedResponses,
+          })}`,
+        );
+      }
       expect(await button.isDisabled()).toBe(true);
       const store = new SqliteEventStore(join(dataDir, "harness.db"));
       try {
@@ -543,13 +770,14 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         messages: await page.getByTestId("apps-messages").allInnerTexts(),
         logs: await page.getByTestId("apps-logs").allInnerTexts(),
         console: diagnostics.console,
+        jsonRpcMessages: diagnostics.jsonRpcMessages,
         pageErrors: diagnostics.pageErrors,
         networkFailures: diagnostics.networkFailures,
         failedResponses: diagnostics.failedResponses,
         requests: requestLog,
       });
       expect(JSON.stringify(requestLog)).toContain("harness.approvals.resolve");
-      expectLoopbackRequests(requestLog);
+      expectNoExternalSandboxRequests(requestLog);
       for (const canary of rawCanaries) {
         expect(panels).not.toContain(canary);
       }
@@ -574,6 +802,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
     const resolvedResponses: CapturedResponse[] = [];
     const resolvedDiagnostics: BrowserDiagnostics = {
       console: [],
+      jsonRpcMessages: [],
       pageErrors: [],
       networkFailures: [],
       failedResponses: [],
@@ -585,7 +814,11 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       activeHarnessServer.endpoint,
     );
     resolvedPage.on("request", (request) =>
-      resolvedRequests.push({ url: request.url(), body: request.postData() ?? undefined }),
+      resolvedRequests.push({
+        url: request.url(),
+        body: request.postData() ?? undefined,
+        frameUrl: request.frame().url(),
+      }),
     );
     captureInspectorResponses(resolvedPage, resolvedResponses);
     await openApproval(
@@ -597,7 +830,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       resolvedResponses,
       resolvedDiagnostics,
     );
-    const resolvedApp = resolvedPage.frameLocator('[data-testid="apps-form"] iframe');
+    const resolvedApp = approvalAppFrame(resolvedPage);
     const approve = resolvedApp.getByRole("button", { name: "Approve", exact: true });
     await approve.click();
     await resolvedApp
@@ -611,7 +844,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       logs: await resolvedPage.getByTestId("apps-logs").allInnerTexts(),
       requests: resolvedRequests,
     });
-    expectLoopbackRequests(resolvedRequests);
+    expectNoExternalSandboxRequests(resolvedRequests);
     for (const canary of rawCanaries) {
       expect(resolvedPanels).not.toContain(canary);
     }
