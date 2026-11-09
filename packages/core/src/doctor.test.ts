@@ -202,9 +202,28 @@ describe("doctor registry", () => {
       "node_version",
       "config_valid",
       "policy_configured",
+      "sink_policies",
       "secret_refs_resolvable",
       "data_dir_writable",
     ]);
+  });
+
+  it("reports a failed sink policy check without exposing collector details", async () => {
+    const collectorConfigDir = await createTemporaryDirectory();
+    const check = doctorChecks().find(({ id }) => id === "sink_policies");
+    if (check === undefined) {
+      throw new Error("sink_policies check is not registered");
+    }
+
+    await expect(
+      runDoctor(
+        context({
+          config: { telemetry: { sinks: [{ id: "events", kind: "datadog" }] } },
+          env: { HARNESS_COLLECTOR_CONFIG_DIR: collectorConfigDir },
+        }),
+        [check],
+      ),
+    ).resolves.toEqual([{ id: "sink_policies", status: "fail", code: "sink_policy_violation" }]);
   });
 
   it("warns that the built-in policy denies every tool when no policy file is configured", async () => {

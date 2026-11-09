@@ -66,7 +66,7 @@ processors:
     error_mode: "ignore"
     metrics:
       metric:
-        - "not (name == \"harness.host.app_rejected\" or name == \"harness.host.app_spans_accepted\" or name == \"harness.mcp.discovery_failed\" or name == \"harness.mcp.input_requests\" or name == \"harness.model.cache_read_tokens\" or name == \"harness.model.cache_write_tokens\" or name == \"harness.model.cost_micros\" or name == \"harness.model.tokens\" or name == \"harness.pii.blob_hit\" or name == \"harness.pii.detector_degraded\" or name == \"harness.policy.decisions\" or name == \"harness.quota.rejections\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\" or name == \"harness.worker.jobs\" or name == \"harness.worker.queue_lag_ms\")"
+        - "not (name == \"harness.host.app_rejected\" or name == \"harness.host.app_spans_accepted\" or name == \"harness.mcp.discovery_failed\" or name == \"harness.mcp.input_requests\" or name == \"harness.model.cache_read_tokens\" or name == \"harness.model.cache_write_tokens\" or name == \"harness.model.cost_micros\" or name == \"harness.model.tokens\" or name == \"harness.pii.blob_hit\" or name == \"harness.pii.detector_degraded\" or name == \"harness.policy.decisions\" or name == \"harness.quota.rejections\" or name == \"harness.rate_limit.degraded\" or name == \"harness.rate_limit.denied\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\" or name == \"harness.worker.jobs\" or name == \"harness.worker.queue_lag_ms\")"
   transform/metric_attributes:
     error_mode: "ignore"
     metric_statements:
@@ -90,6 +90,8 @@ processors:
           - "keep_keys(attributes, []) where metric.name == \"harness.pii.detector_degraded\""
           - "keep_keys(attributes, [\"harness.policy.decision\"]) where metric.name == \"harness.policy.decisions\""
           - "keep_keys(attributes, [\"harness.quota.id\"]) where metric.name == \"harness.quota.rejections\""
+          - "keep_keys(attributes, [\"harness.rate_limit.degraded.backend\"]) where metric.name == \"harness.rate_limit.degraded\""
+          - "keep_keys(attributes, [\"harness.rate_limit.denied.key_kind\"]) where metric.name == \"harness.rate_limit.denied\""
           - "keep_keys(attributes, []) where metric.name == \"harness.sentinel.scope_reduced\""
           - "keep_keys(attributes, []) where metric.name == \"harness.sentinel.short_values_skipped\""
           - "keep_keys(attributes, [\"harness.telemetry.dropped.reason\"]) where metric.name == \"harness.telemetry.dropped\""

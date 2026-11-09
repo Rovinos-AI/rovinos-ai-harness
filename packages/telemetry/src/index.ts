@@ -18,6 +18,12 @@ export {
 } from "./logger.js";
 export { POLICY_VERSION } from "./generated/policy-version.js";
 export {
+  assertSinkPolicies,
+  SinkPolicyError,
+  type AssertSinkPoliciesOptions,
+  type SinkPolicyConfig,
+} from "./sinks/policy.js";
+export {
   SafeEvent,
   toSafeEvent,
   type SafeEvent as SafeEventType,
@@ -50,6 +56,8 @@ export {
   countModelUsage,
   countMcpDiscoveryFailed,
   countMcpInputRequest,
+  countRateLimitDenied,
+  countRateLimitDegraded,
   countPiiBlobHit,
   countPiiDetectorDegraded,
   countPolicyDecision,
@@ -63,7 +71,11 @@ export {
   type PolicyDecision,
   POLICY_DECISIONS,
   type WorkerJobOutcome,
+  type RateLimitBackend,
+  type RateLimitKeyKind,
   WORKER_JOB_OUTCOMES,
+  RATE_LIMIT_BACKENDS,
+  RATE_LIMIT_KEY_KINDS,
   type TelemetryDropReason,
 } from "./metrics.js";
 export {
