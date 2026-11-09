@@ -63,6 +63,7 @@ function responseEvent(seq: number, req: ModelRequest, text: string, eventRunId 
     model: req.model.model,
     inputTokens: 2,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" },
     finishReason: "stop",
     latencyMs: 5,
     schemaValid: true,

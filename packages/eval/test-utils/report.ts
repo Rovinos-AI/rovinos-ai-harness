@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EvalTrialRecordSchema } from "../src/trial.js";
+import { EvalTrialRecordSchema, TrialUsageSchema } from "../src/trial.js";
 import type { EvalTrialRecord, TrialResult } from "../src/trial.js";
 import { GradeResultSchema } from "../src/graders/types.js";
 import type { GradeResult } from "../src/graders/types.js";
@@ -11,7 +11,9 @@ export function reportTrial(
     readonly taskId?: string;
     readonly variantId?: string;
     readonly trialIndex?: number;
-    readonly result?: Partial<TrialResult>;
+    readonly result?: Omit<Partial<TrialResult>, "usage"> & {
+      readonly usage?: Partial<TrialResult["usage"]>;
+    };
   } = {},
 ): EvalTrialRecord {
   return EvalTrialRecordSchema.parse({
@@ -36,13 +38,13 @@ export function reportGrade(
   pass: boolean,
   codes: readonly string[] = [],
   graderId = "file_diff",
-  usage?: GradeResult["usage"],
+  usage?: Partial<NonNullable<GradeResult["usage"]>>,
 ): GradeResult {
   return GradeResultSchema.parse({
     graderId,
     pass,
     score: pass ? 1 : 0,
     codes,
-    ...(usage === undefined ? {} : { usage }),
+    ...(usage === undefined ? {} : { usage: TrialUsageSchema.parse(usage) }),
   });
 }

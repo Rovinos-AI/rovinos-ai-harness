@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { addCostValue, EMPTY_COST_TOTAL } from "@rovinos/schemas";
 import { aggregateEvalMetrics, passAtK, summarize } from "./aggregate.js";
 import { EvalTrialMetricsSchema } from "./schema.js";
 
@@ -15,6 +16,11 @@ function metric(trialIndex: number, passed: boolean, costMicros = 0) {
     inputTokens: trialIndex + 1,
     outputTokens: trialIndex + 2,
     costMicros,
+    cost: addCostValue(EMPTY_COST_TOTAL, {
+      version: 1,
+      state: "known",
+      amountMicros: costMicros,
+    }),
     wallTimeMs: trialIndex + 10,
     repairAttempts: 0,
     fallbackDepth: 0,
@@ -62,11 +68,39 @@ describe("eval report aggregation", () => {
         { k: 5, rate: 1 },
       ],
       costMicros: { mean: 30, median: 30, p95: 50 },
+      cost: {
+        version: 1,
+        state: "known",
+        knownMicros: 150,
+        estimatedMicros: 0,
+        partialMicros: 0,
+        knownCount: 5,
+        estimatedCount: 0,
+        partialCount: 0,
+        unknownCount: 0,
+      },
       inputTokens: { mean: 3, median: 3, p95: 5 },
       outputTokens: { mean: 4, median: 4, p95: 6 },
       totalTokens: { mean: 7, median: 7, p95: 11 },
       steps: { mean: 3, median: 3, p95: 5 },
       latencyMs: { mean: 12, median: 12, p95: 14 },
+    });
+
+  });
+
+  it("keeps unknown evidence visible in mixed report totals", () => {
+    const report = aggregateEvalMetrics([
+      metric(0, true, 10),
+      EvalTrialMetricsSchema.parse({
+        ...metric(1, true, 0),
+        cost: addCostValue(EMPTY_COST_TOTAL, { version: 1, state: "unknown" }),
+      }),
+    ]);
+
+    expect(report[0]?.cost).toMatchObject({
+      state: "partial",
+      knownMicros: 10,
+      unknownCount: 1,
     });
   });
 

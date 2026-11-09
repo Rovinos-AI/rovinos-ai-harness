@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { addCostValue, EMPTY_COST_TOTAL } from "../cost.js";
 import { InspectResultSchema } from "./inspect.js";
 
 describe("inspect CLI schema", () => {
@@ -8,7 +9,11 @@ describe("inspect CLI schema", () => {
       runId: "00000000000000000000000000",
       status: "suspended",
       steps: 1,
-      usage: { inputTokens: 2, outputTokens: 3, costMicros: 0 },
+      usage: {
+        inputTokens: 2,
+        outputTokens: 3,
+        cost: addCostValue(EMPTY_COST_TOTAL, { version: 1, state: "unknown" }),
+      },
       lastCheckpoint: null,
       pendingApprovals: [{ approvalId: "11111111111111111111111111", toolId: "test_tool" }],
       continuations: [],

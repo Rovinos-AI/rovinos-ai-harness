@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@rovinos/schemas";
+import { Code, CostTotalSchema } from "@rovinos/schemas";
 import { z } from "zod";
 import { ApprovalCountsSchema, EvalTrialRecordSchema, InputCountsSchema } from "../trial.js";
 import { GradeResultSchema } from "../graders/types.js";
@@ -101,6 +101,7 @@ export const EvalTrialMetricsSchema = z
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     costMicros: z.number().int().nonnegative(),
+    cost: CostTotalSchema.optional(),
     wallTimeMs: z.number().int().nonnegative(),
     repairAttempts: z.number().int().nonnegative(),
     fallbackDepth: z.number().int().nonnegative(),
@@ -149,6 +150,7 @@ export const EvalAggregateSchema = z
     standardError: z.number().nonnegative(),
     passAtK: z.array(PassAtKSchema),
     costMicros: MetricSummarySchema,
+    cost: CostTotalSchema.optional(),
     inputTokens: MetricSummarySchema,
     outputTokens: MetricSummarySchema,
     totalTokens: MetricSummarySchema,

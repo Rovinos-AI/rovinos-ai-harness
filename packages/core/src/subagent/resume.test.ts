@@ -154,6 +154,7 @@ async function seed(
       inputTokens: 0,
       outputTokens: 0,
       steps: 0,
+      cost: EMPTY_COST_TOTAL,
     });
     await store.append(parentRunId, [completion], events.length);
     events.push(completion);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
+import { CostTotalSchema } from "../cost.js";
 import { Code, Id } from "../primitives.js";
 import { JsonValue } from "../json.js";
 import { RunStatus } from "../events.js";
@@ -26,7 +27,7 @@ export const InspectResultSchema = z
       .object({
         inputTokens: z.number().int().nonnegative(),
         outputTokens: z.number().int().nonnegative(),
-        costMicros: z.number().int().nonnegative(),
+        cost: CostTotalSchema,
       })
       .strict(),
     lastCheckpoint: z

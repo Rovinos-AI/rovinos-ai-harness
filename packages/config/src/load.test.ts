@@ -65,6 +65,7 @@ describe("loadConfig", () => {
 
     expect(config.run.budgets).toEqual({
       maxSteps: 12,
+      unknownCostPolicy: "fail",
       maxWallClockMs: 3_600_000,
       countSuspendedTime: false,
     });
@@ -132,6 +133,7 @@ describe("loadConfig", () => {
 
     expect(config.run.budgets).toEqual({
       maxSteps: 12,
+      unknownCostPolicy: "fail",
       maxCostUsd: 2.5,
       maxWallClockMs: 60_000,
       countSuspendedTime: false,
@@ -150,6 +152,7 @@ describe("loadConfig", () => {
 
     expect(config.run.budgets).toEqual({
       maxSteps: 50,
+      unknownCostPolicy: "fail",
       maxCostUsd: 2.5,
       maxWallClockMs: 1000,
       countSuspendedTime: false,
@@ -506,7 +509,12 @@ store: {}`,
           inheritBudgets: false,
         },
         resume: { onNonIdempotent: "escalate" },
-        budgets: { maxSteps: 200, maxWallClockMs: 3_600_000, countSuspendedTime: false },
+        budgets: {
+          maxSteps: 200,
+          unknownCostPolicy: "fail",
+          maxWallClockMs: 3_600_000,
+          countSuspendedTime: false,
+        },
         subagents: { maxDepth: 4, maxChildrenPerRun: 8, maxConcurrentChildren: 2 },
       },
       quotas: [],
@@ -568,6 +576,7 @@ store: {}`,
 
     expect(config.run.budgets).toEqual({
       maxSteps: 50,
+      unknownCostPolicy: "fail",
       maxWallClockMs: 3_600_000,
       countSuspendedTime: false,
     });
@@ -595,6 +604,7 @@ store: {}`,
 
     expect(config.run.budgets).toEqual({
       maxSteps: 200,
+      unknownCostPolicy: "fail",
       maxWallClockMs: 3_600_000,
       countSuspendedTime: false,
     });

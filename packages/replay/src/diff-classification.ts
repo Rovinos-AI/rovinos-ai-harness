@@ -22,7 +22,8 @@ export function isNoiseDiffField(field: string, options: NoiseClassificationOpti
   return (
     name === "latencyMs" ||
     name === "waitMs" ||
-    (options.ignoreMetrics === true && (name === "costMicros" || name === "repairAttempts"))
+    (options.ignoreMetrics === true &&
+      (name.startsWith("cost") || name === "repairAttempts"))
   );
 }
 
