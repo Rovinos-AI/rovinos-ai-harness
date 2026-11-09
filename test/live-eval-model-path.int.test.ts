@@ -286,7 +286,11 @@ async function runScenario(
       return { tools: [{ name: "read", description: toolDescription, inputSchema }] };
     });
     mcp.server.setRequestHandler("tools/call", (request) => {
-      calls.push(request.params.arguments);
+      const args = request.params.arguments;
+      if (args === undefined) {
+        throw new Error("model_path_fixture_arguments_missing");
+      }
+      calls.push(JsonValue.parse(args));
       return { content: [{ type: "text", text: fixtureValue }] };
     });
     await mcp.connect(serverTransport);
