@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { advisoryConformanceOutcome } from "./mcp-conformance.ts";
-import { conformanceReportSchema, protocolRevision, runnerRevision } from "./mcp-conformance-schema.ts";
+import {
+  conformanceReportSchema,
+  protocolRevision,
+  runnerRevision,
+} from "./mcp-conformance-schema.ts";
 
 describe("advisory conformance outcomes", () => {
   it("warns for failed scenarios but does not fail CI", () => {
