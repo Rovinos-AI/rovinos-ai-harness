@@ -148,7 +148,7 @@ async function pipeline(
     ),
     workspace,
     { thresholdBytes: 100, previewChars: 100 },
-    ids,
+    { ids },
   );
   const store = new InMemoryEventStore();
   const runtime = await createRuntime(
