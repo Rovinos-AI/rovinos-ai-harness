@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from "node:crypto";
 import type { Runtime, RuntimeOverrides, ModelCompletion, ToolPort } from "@rovinos/core";
 import { FakeModelPort } from "@rovinos/core/testing";
 import { Code, Id } from "@rovinos/schemas";
@@ -11,6 +12,7 @@ export const ECHO_TOOL = Code.parse("canary.echo");
 export const FAIL_TOOL = Code.parse("canary.fail");
 export const SAMPLE_MCP_FAIL_TOOL = Code.parse("sample_mcp.fail");
 export const ASK_TOOL = Code.parse("canary.ask");
+export const BINARY_TOOL = Code.parse("canary.binary");
 export const TEST_KEY_REF = "env:CANARY_TEST_KEY";
 
 /** In-memory raw boundary data used to prove tool execution receives and throws canaries. */
@@ -94,11 +96,11 @@ export function createCanaryToolPort(
 ): ToolPort {
   return {
     describe: (toolId) =>
-      [ECHO_TOOL, FAIL_TOOL, SAMPLE_MCP_FAIL_TOOL, ASK_TOOL].includes(toolId)
+      [ECHO_TOOL, FAIL_TOOL, SAMPLE_MCP_FAIL_TOOL, ASK_TOOL, BINARY_TOOL].includes(toolId)
         ? { idempotent: true, timeoutMs: 1_000 }
         : undefined,
     getToolSpecs: () =>
-      [ECHO_TOOL, FAIL_TOOL, SAMPLE_MCP_FAIL_TOOL, ASK_TOOL].map((toolId) => ({
+      [ECHO_TOOL, FAIL_TOOL, SAMPLE_MCP_FAIL_TOOL, ASK_TOOL, BINARY_TOOL].map((toolId) => ({
         toolId,
         description: "Synthetic canary tool",
         inputSchema: {},
@@ -126,6 +128,27 @@ export function createCanaryToolPort(
         return Promise.resolve({
           outcome: "ok",
           result: { value: canaries.phone.value, repeated: canaries.phone.value },
+        });
+      }
+      if (call.toolId === BINARY_TOOL) {
+        const bytes = Buffer.from(canaries.email.value, "utf8");
+        return Promise.resolve({
+          outcome: "ok",
+          result: {
+            format: "mcp-tool-result",
+            version: 1,
+            isError: false,
+            parts: [{ type: "image", mimeType: "image/png" }],
+          },
+          artifacts: [
+            {
+              partIndex: 0,
+              target: "data",
+              mimeType: "image/png",
+              bytes,
+              sha256: createHash("sha256").update(bytes).digest("hex"),
+            },
+          ],
         });
       }
       return Promise.resolve({ outcome: "ok", result: { accepted: true } });
@@ -160,6 +183,12 @@ export function createCanaryModel(canaries: CanarySet): FakeModelPort {
       {
         type: "tool_call",
         callId: callId(4),
+        toolId: BINARY_TOOL,
+        args: {},
+      },
+      {
+        type: "tool_call",
+        callId: callId(5),
         toolId: ASK_TOOL,
         args: { value: canaries.person.value },
       },
