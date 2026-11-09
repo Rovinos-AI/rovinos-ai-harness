@@ -17,7 +17,6 @@ export {
   ExtensionRegistrationSchema,
   ExtensionRegistrationStatusSchema,
   SDK_VERSION,
-  defineTool,
 } from "./extensions.js";
 export type {
   ExtensionCapability,
@@ -32,6 +31,8 @@ export type {
   ExtensionToolDefinition,
   ToolInvocationContext,
 } from "./extensions.js";
+/** Closed error codes exposed by SDK extension validation and execution. */
+export type { ExtensionErrorCode } from "./extensions.js";
 export {
   Code as CodeSchema,
   Id as IdSchema,
@@ -53,11 +54,13 @@ export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
 export {
   SdkError,
+  CreateHarnessOptionsSchema,
   type ApprovalDecision,
   type AnswerInputOptions,
   type CancelRunResult,
   type ContinueRunOptions,
   type CreateHarnessOptions,
+  type CreateHarnessOptionsInput,
   type GetRunContentOptions,
   type Harness,
   type HarnessOverrides,
@@ -73,5 +76,9 @@ export {
   type RunView,
   type StartRunOptions,
   type WatchOptions,
+  type WithExtensionRegistrations,
 } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
+
+/** Defines a typed extension tool contribution using its input and output schemas. */
+export { defineTool } from "./extensions.js";

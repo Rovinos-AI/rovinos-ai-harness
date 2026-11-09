@@ -6,16 +6,20 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./harness.js";
-export { ExtensionCapabilitySchema, ExtensionCapabilityStatusSchema, ExtensionDefinitionSchema, ExtensionError, ExtensionGrantSchema, ExtensionGrantRevocationSchema, ExtensionManifestSchema, ExtensionRegistrationSchema, ExtensionRegistrationStatusSchema, SDK_VERSION, defineTool, } from "./extensions.js";
+export { ExtensionCapabilitySchema, ExtensionCapabilityStatusSchema, ExtensionDefinitionSchema, ExtensionError, ExtensionGrantSchema, ExtensionGrantRevocationSchema, ExtensionManifestSchema, ExtensionRegistrationSchema, ExtensionRegistrationStatusSchema, SDK_VERSION, } from "./extensions.js";
 export type { ExtensionCapability, ExtensionCapabilityStatus, ExtensionContributions, ExtensionDefinition, ExtensionGrant, ExtensionGrantRevocation, ExtensionManifest, ExtensionRegistration, ExtensionRegistrationStatus, ExtensionToolDefinition, ToolInvocationContext, } from "./extensions.js";
+/** Closed error codes exposed by SDK extension validation and execution. */
+export type { ExtensionErrorCode } from "./extensions.js";
 export { Code as CodeSchema, Id as IdSchema, JsonValue as JsonValueSchema, ModelRefSchema, ModelRequestSchema, ModelUsageSchema, PartSchema, } from "@rovinos/schemas";
 export type { Code, Id, JsonValue, ModelRequest, ModelUsage, Part } from "@rovinos/schemas";
 export { ProviderDeltaSchema, ProviderResultSchema } from "@rovinos/models";
 export type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult, } from "@rovinos/models";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
-export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, type WatchOptions, } from "./types.js";
+export { SdkError, CreateHarnessOptionsSchema, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type CreateHarnessOptionsInput, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, type WatchOptions, type WithExtensionRegistrations, } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
+/** Defines a typed extension tool contribution using its input and output schemas. */
+export { defineTool } from "./extensions.js";
 
 import type { ExtensionRegistration } from "./extensions.js";
 import { type CreateHarnessOptions, type Harness } from "./types.js";
@@ -857,8 +861,9 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
     }, z.core.$strict>>>;
 }, z.core.$strict>]>;
 /** Validated options accepted by {@link createHarness}. */
-type CreateHarnessOptionsInput = z.input<typeof CreateHarnessOptionsSchema>;
-type WithExtensionRegistrations<Options, Registrations extends readonly ExtensionRegistration[]> = Options extends {
+export type CreateHarnessOptionsInput = z.input<typeof CreateHarnessOptionsSchema>;
+/** Preserves literal extension registration types in harness construction options. */
+export type WithExtensionRegistrations<Options, Registrations extends readonly ExtensionRegistration[]> = Options extends {
     readonly extensions?: unknown;
 } ? Omit<Options, "extensions"> & {
     readonly extensions?: Registrations;
@@ -1395,4 +1400,3 @@ export declare class SdkError extends HarnessError {
     /** Creates a stable SDK error with a closed code. */
     constructor(code: SdkError["code"]);
 }
-export {};

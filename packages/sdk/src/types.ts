@@ -147,8 +147,9 @@ export const CreateHarnessOptionsSchema = z.union([
 ]);
 
 /** Validated options accepted by {@link createHarness}. */
-type CreateHarnessOptionsInput = z.input<typeof CreateHarnessOptionsSchema>;
-type WithExtensionRegistrations<
+export type CreateHarnessOptionsInput = z.input<typeof CreateHarnessOptionsSchema>;
+/** Preserves literal extension registration types in harness construction options. */
+export type WithExtensionRegistrations<
   Options,
   Registrations extends readonly ExtensionRegistration[],
 > = Options extends { readonly extensions?: unknown }

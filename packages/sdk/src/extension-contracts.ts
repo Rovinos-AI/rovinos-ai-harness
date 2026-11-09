@@ -237,7 +237,8 @@ export const ExtensionGrantRevocationSchema = z
 /** Inferred extension grant revocation request. */
 export type ExtensionGrantRevocation = z.infer<typeof ExtensionGrantRevocationSchema>;
 
-type ExtensionErrorCode =
+/** Closed error codes returned when extension validation or mediated operations fail. */
+export type ExtensionErrorCode =
   | "extension_manifest_invalid"
   | "extension_incompatible"
   | "extension_config_invalid"

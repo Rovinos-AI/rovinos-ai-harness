@@ -15,6 +15,7 @@ export type {
   ExtensionCapabilityStatus,
   ExtensionContributions,
   ExtensionDefinition,
+  ExtensionErrorCode,
   ExtensionGrant,
   ExtensionGrantRevocation,
   ExtensionManifest,
