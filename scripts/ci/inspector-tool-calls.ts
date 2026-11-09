@@ -219,12 +219,12 @@ export async function checkRestrictedHttp(input: {
   assertToolError(
     await call("harness.approvals.get", '{"approvalId":"00000000000000000000000001"}'),
     "restricted guessed App tool",
-    "approval_not_found",
+    "tool_not_found",
   );
   assertToolError(
     await call("start_run", '{"goal":"synthetic denied run"}'),
     "restricted start_run",
-    "control_plane_scope_required",
+    "tool_not_found",
   );
   const afterRunIds = assertSuccessfulToolCall(
     await readRuns(),

@@ -17,11 +17,13 @@ rejects the request before MCP handling; the CLI reports `auth_required` and exi
 The integration gate also invokes the synthetic `list_runs` tool over stdio and HTTP, rejects
 malformed arguments and an unknown tool, and checks that the MCP App visibility metadata matches
 the negotiated client capability. A second HTTP token has only `read` scope: its permitted
-`list_runs` call succeeds, while guessed App-only and `start_run` calls fail with
-`control_plane_scope_required`. The run list is compared before and after the denied mutation to
-confirm it did not create a run. Inspector exit statuses are interpreted by failure type; in
-particular, its documented status 3 is the unauthenticated path, status 5 is an MCP tool error, and
-protocol errors are asserted from their error envelope rather than treated as tool errors.
+`list_runs` call succeeds. A guessed App-only call without Apps negotiation fails with the JSON-RPC
+`tool_not_found` error; the same error is returned for a guessed `start_run` call because the
+restricted principal's `tools/list` omits tools outside its scope. The run list is compared before
+and after the denied mutation to confirm it did not create a run. Inspector exit statuses are
+interpreted by failure type; in particular, its documented status 3 is the unauthenticated path,
+status 5 is an MCP tool error, and protocol errors are asserted from their error envelope rather
+than treated as tool errors.
 
 For an endpoint that implements MCP OAuth, first authorize that server using the Inspector UI so its
 OAuth credentials are stored in the shared Inspector credential store. Then run the CLI with
