@@ -61,6 +61,15 @@ export async function safeEvents(
   return projected.filter((event): event is SafeEvent => event !== null);
 }
 
+/** Projects events for one runtime using its correlation policy and key provider. */
+export function projectSafeEvents(
+  runtime: Runtime,
+  events: readonly Event[],
+  correlationEnabled: boolean,
+): Promise<SafeEvent[]> {
+  return safeEvents(events, correlationEnabled, runtime.keys);
+}
+
 /** Selects tokenized content entries from events for explicit content access. */
 export function contentEntries(events: readonly Event[]): unknown[] {
   return events.flatMap((event) => {
