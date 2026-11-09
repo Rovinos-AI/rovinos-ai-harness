@@ -242,7 +242,13 @@ export {
   type CustomDetector,
   type Detection,
 } from "./pii-detection.js";
-export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
+export {
+  SinkPolicySchema,
+  TelemetryConfigSchema,
+  type SinkPolicy,
+  type TelemetryConfig,
+  type TelemetryConfigInput,
+} from "./config/telemetry.js";
 export {
   ElicitationConfigSchema,
   ServerElicitationConfigSchema,

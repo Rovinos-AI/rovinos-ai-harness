@@ -37,6 +37,17 @@ afterEach(() => {
 });
 
 describe("createTelemetrySdk", () => {
+  it("accepts raw telemetry config and applies schema defaults", async () => {
+    const sdk = createTelemetrySdk({
+      ...exporters(),
+      telemetry: { sentinel: { enabled: false } },
+    });
+
+    expect(sdk.tracerProvider).toBeDefined();
+    await sdk.forceFlush();
+    await sdk.shutdown();
+  });
+
   it("does not build an SDK pipeline without a gate unless explicitly disabled outside production", async () => {
     expect(() =>
       createTelemetrySdk({

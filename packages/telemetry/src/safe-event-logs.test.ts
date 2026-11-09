@@ -319,6 +319,8 @@ describe("SafeEvent log projection", () => {
         sentinel: { minValueLength: 6, enabled: false },
         correlation: { enabled: false },
         metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+        sinks: [],
+        unsafe: { allowContentSinks: false },
       } satisfies TelemetryConfig,
     });
     const provider = new LoggerProvider({
