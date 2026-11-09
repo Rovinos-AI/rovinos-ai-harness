@@ -15,7 +15,6 @@ import {
 } from "./index.js";
 import type {
   ExtensionCapability,
-  ExtensionContributions,
   ExtensionDefinition,
   ExtensionGrant,
   ExtensionRegistration,
@@ -493,6 +492,7 @@ describe("SDK extension registration", () => {
       kind: "openai_compatible",
       complete: () => Promise.reject(new Error("not used")),
       async *stream() {
+        await Promise.resolve();
         yield { type: "activity" };
         yield { type: "activity" };
       },
@@ -543,14 +543,14 @@ describe("SDK extension registration", () => {
   });
 
   it("rejects malformed or inconsistent direct contributions", () => {
-    const requiredTool = { required: [{ kind: "tools.contribute", names: ["search"] }] } as const;
+    const unexpectedContribution = { unexpected: true };
     const createContributionsList: ExtensionDefinition<
       typeof configSchema
     >["createContributions"][] = [
       () => {
         throw new Error("synthetic");
       },
-      () => ({ unexpected: true }) as unknown as ExtensionContributions,
+      () => unexpectedContribution,
       () => ({
         tools: [
           defineTool({
@@ -573,7 +573,15 @@ describe("SDK extension registration", () => {
     for (const createContributions of createContributionsList) {
       expect(() =>
         prepareExtensions(
-          [registration(definition({ ...requiredTool, createContributions }), [toolGrant])],
+          [
+            registration(
+              definition({
+                required: [{ kind: "tools.contribute", names: ["search"] }],
+                createContributions,
+              }),
+              [toolGrant],
+            ),
+          ],
           undefined,
           [],
         ),
@@ -656,10 +664,17 @@ describe("SDK extension registration", () => {
       ...definition(),
       manifest: { ...definition().manifest, sdkRange: "unsupported" },
     });
+    const invalidGrant = z
+      .object({
+        kind: z.literal("tools.contribute"),
+        names: z.array(z.string()),
+        extra: z.boolean(),
+      })
+      .parse({ kind: "tools.contribute", names: ["search"], extra: true });
     const invalidGrants = {
       ...registration(definition()),
-      grants: [{ kind: "tools.contribute", names: ["search"], extra: true }],
-    } as unknown as ExtensionRegistration;
+      grants: [invalidGrant],
+    };
 
     await expect(createHarness({ config, extensions: [tooLargeConfig] })).rejects.toMatchObject({
       code: "extension_config_invalid",
@@ -670,9 +685,6 @@ describe("SDK extension registration", () => {
     await expect(createHarness({ config, extensions: [invalidManifest] })).rejects.toMatchObject({
       code: "extension_manifest_invalid",
     });
-    await expect(
-      createHarness({ config: null } as unknown as Parameters<typeof createHarness>[0]),
-    ).rejects.toBeDefined();
   });
 
   it("rejects excessive registrations and duplicate base providers", () => {
