@@ -10,6 +10,7 @@ import type {
   ModelRetryConfig,
   ModelsConfig,
   PiiActionSummary,
+  RateLimitStore,
 } from "@rovinos/schemas";
 import type { z } from "zod";
 import type {
@@ -20,7 +21,6 @@ import type {
 } from "./enforce/index.js";
 import type { PreparedEnforcement } from "./enforce/provider-output.js";
 import type { ModelProgress, Clock, IdGenerator, ProviderAdapter } from "./types.js";
-import type { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import type { Semaphore } from "./resilience/semaphore.js";
 import type { Random, Sleep } from "./resilience/retry.js";
 
@@ -33,11 +33,17 @@ export interface ModelGatewayDependencies {
   readonly random?: Random;
   readonly sleep?: Sleep;
   readonly requestsPerMinute?: Readonly<Partial<Record<Code, number>>>;
+  readonly rateLimitStore?: RateLimitStore;
   readonly maxConcurrent?: number;
   readonly pricing?: ModelsConfig["pricing"];
   readonly providerTrust?: Readonly<Partial<Record<Code, "hosted" | "local">>>;
   readonly providerStreaming?: Readonly<Partial<Record<Code, boolean>>>;
   readonly requestSanitizer?: RequestSanitizer;
+}
+
+/** Provider limiter contract accepted by one adapter attempt. */
+export interface ProviderRateLimiter {
+  acquire(signal: AbortSignal, deadlineTs?: number, lastError?: unknown): Promise<void>;
 }
 
 /** Sanitizes a full provider request for one routed provider attempt. */
@@ -98,6 +104,6 @@ export interface PreparedCompletionOptions<OutputSchema extends z.ZodType> {
   readonly context: ModelGatewayContext<OutputSchema>;
   readonly adapter: ProviderAdapter;
   readonly prepared: PreparedEnforcement;
-  readonly limiter: TokenBucketRateLimiter | undefined;
+  readonly limiter: ProviderRateLimiter | undefined;
   readonly semaphore: Semaphore;
 }

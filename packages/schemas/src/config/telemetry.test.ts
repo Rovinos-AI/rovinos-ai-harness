@@ -8,6 +8,8 @@ describe("TelemetryConfigSchema", () => {
       sentinel: { minValueLength: 6 },
       correlation: { enabled: false },
       metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+      sinks: [],
+      unsafe: { allowContentSinks: false },
     });
   });
 
@@ -16,6 +18,8 @@ describe("TelemetryConfigSchema", () => {
       sentinel: { minValueLength: 6 },
       correlation: { enabled: true },
       metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+      sinks: [],
+      unsafe: { allowContentSinks: false },
     });
   });
 
@@ -24,6 +28,8 @@ describe("TelemetryConfigSchema", () => {
       sentinel: { minValueLength: 10 },
       correlation: { enabled: false },
       metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+      sinks: [],
+      unsafe: { allowContentSinks: false },
     });
   });
 
@@ -32,6 +38,8 @@ describe("TelemetryConfigSchema", () => {
       sentinel: { minValueLength: 6, enabled: false },
       correlation: { enabled: false },
       metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+      sinks: [],
+      unsafe: { allowContentSinks: false },
     });
   });
 
@@ -42,6 +50,39 @@ describe("TelemetryConfigSchema", () => {
       }).metrics,
     ).toEqual({ enabled: false, ownership: "host", maxSeries: 25 });
     expect(TelemetryConfigSchema.safeParse({ metrics: { maxSeries: 1_001 } }).success).toBe(false);
+  });
+
+  it("defaults sink policy fields and rejects duplicate or unknown sink settings", () => {
+    expect(
+      TelemetryConfigSchema.parse({ sinks: [{ id: "events", kind: "datadog" }] }).sinks,
+    ).toEqual([
+      {
+        id: "events",
+        kind: "datadog",
+        maxClassification: "metadata",
+        enabled: true,
+      },
+    ]);
+    expect(
+      TelemetryConfigSchema.safeParse({
+        sinks: [
+          { id: "events", kind: "datadog" },
+          { id: "events", kind: "stdout" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      TelemetryConfigSchema.safeParse({ sinks: [{ id: "events", kind: "unknown" }] }).success,
+    ).toBe(false);
+  });
+
+  it("defaults content sinks to unsafe-disabled", () => {
+    expect(TelemetryConfigSchema.parse({ unsafe: {} }).unsafe).toEqual({
+      allowContentSinks: false,
+    });
+    expect(TelemetryConfigSchema.safeParse({ unsafe: { allowContentSinks: "yes" } }).success).toBe(
+      false,
+    );
   });
 
   it("rejects non-positive, fractional, and unknown values", () => {

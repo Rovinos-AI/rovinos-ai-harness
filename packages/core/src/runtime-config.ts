@@ -25,6 +25,8 @@ import {
   type ElicitationConfig,
   type VaultConfig,
   type TelemetryConfig,
+  type RateLimitsConfig,
+  type RateLimitStore,
 } from "@rovinos/schemas";
 import { z } from "zod";
 import type { Context } from "@opentelemetry/api";
@@ -64,6 +66,8 @@ export interface RuntimeOverrides {
   readonly store?: EventStore;
   /** Optional durable queue used for worker execution and automatic approval resumption. */
   readonly queue?: RunQueue;
+  /** Shared request-rate backend override; caller-owned stores are not closed by the runtime. */
+  readonly rateLimitStore?: RateLimitStore;
   readonly dataDir?: string;
   /** Directory used to resolve role prompt and result-schema references. */
   readonly roleConfigDirectory?: string;
@@ -121,6 +125,7 @@ export interface RuntimeConfig {
   readonly servers?: ServersConfig;
   readonly elicitation?: ElicitationConfig;
   readonly controlPlane?: ControlPlaneConfig | undefined;
+  readonly rateLimits?: RateLimitsConfig;
 }
 
 /** Optional cooperative cancellation and claim notification for a resumed run. */
@@ -253,6 +258,8 @@ export interface RuntimeComposition {
       }
     | undefined;
   readonly model: ModelPort;
+  readonly rateLimitStore: RateLimitStore;
+  readonly closeRateLimitStore?: () => Promise<void>;
   readonly tool: ToolPort;
   readonly closeToolPort?: () => Promise<void>;
   readonly policy: PolicyPort;

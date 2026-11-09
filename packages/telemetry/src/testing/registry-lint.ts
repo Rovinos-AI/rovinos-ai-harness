@@ -18,6 +18,8 @@ const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
   correlation: { enabled: false },
   metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
+  sinks: [],
+  unsafe: { allowContentSinks: false },
 };
 
 export const adversarialStrings = fc.oneof(
