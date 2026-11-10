@@ -200,13 +200,19 @@ afterEach(async () => {
 });
 
 describe("app-only approval tools", () => {
-  it("returns a validated payload only for an accessible pending approval", async () => {
+  it("returns a validated payload for accessible pending and resolved approvals", async () => {
     const { store, client } = await connect();
     const approval = await createApproval(store);
+    const resolvedConnection = await connect();
+    const resolved = await createApproval(resolvedConnection.store, { resolved: true });
 
     const result = await client.callTool({
       name: "harness.approvals.get",
       arguments: { approvalId: approval.approvalId },
+    });
+    const resolvedResult = await resolvedConnection.client.callTool({
+      name: "harness.approvals.get",
+      arguments: { approvalId: resolved.approvalId },
     });
 
     expect(result.isError).not.toBe(true);
@@ -215,12 +221,32 @@ describe("app-only approval tools", () => {
       approvalId: approval.approvalId,
       payload: { summary: "Review this request." },
     });
+    expect(resolvedResult.isError).not.toBe(true);
+    expect(ApprovalAppInputSchema.parse(resolvedResult.structuredContent)).toMatchObject({
+      approvalId: resolved.approvalId,
+      payload: { summary: "Review this request." },
+    });
     const denied = await client.callTool({
       name: "harness.approvals.get",
       arguments: { approvalId: "00000000000000000000000099" },
     });
     expect(denied.isError).toBe(true);
     expect(denied.content).toEqual([{ type: "text", text: "approval_not_found" }]);
+
+    const unauthorized = await connect({
+      authorize: () => ({
+        allowed: false,
+        tokenId: Code.parse("token.test"),
+        principal: "token.token.test",
+      }),
+    });
+    const inaccessible = await createApproval(unauthorized.store, { resolved: true });
+    const inaccessibleResult = await unauthorized.client.callTool({
+      name: "harness.approvals.get",
+      arguments: { approvalId: inaccessible.approvalId },
+    });
+    expect(inaccessibleResult.isError).toBe(true);
+    expect(inaccessibleResult.content).toEqual([{ type: "text", text: "approval_not_found" }]);
   });
 
   it("resolves an allowed edit through the runtime operation", async () => {
