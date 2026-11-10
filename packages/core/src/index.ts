@@ -174,6 +174,7 @@ export {
 } from "./doctor.js";
 export { resolveDataDir } from "./runtime-data-dir.js";
 export {
+  openConfiguredRateLimitStore,
   migrateConfiguredStore,
   openConfiguredKeyRotation,
   openConfiguredVaultAdmin,
@@ -195,6 +196,9 @@ export {
   type WorkerOptions,
 } from "./worker.js";
 export { QuotaExceededError, QuotaService } from "./quotas.js";
+export { InMemoryRateLimitStore } from "./rate-limit/memory.js";
+export { UnavailableRateLimitStore } from "./rate-limit/unavailable.js";
+export type { RateLimit, RateLimitResult, RateLimitStore } from "./rate-limit/types.js";
 export {
   ASK_USER_TOOL_SPEC,
   AskUserInputSchema,

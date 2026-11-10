@@ -139,18 +139,31 @@ export const HarnessOverridesSchema = z
 /** Dependencies used when embedding or testing the harness. */
 export type HarnessOverrides = z.infer<typeof HarnessOverridesSchema>;
 
+/** Claimed principal and run requested for content access; the host application verifies identity. */
+export const ContentAccessRequestSchema = z.object({ principal: Principal, runId: Id }).strict();
+
+/** Inferred authorization input for tokenized content access. */
+export type ContentAccessRequest = z.infer<typeof ContentAccessRequestSchema>;
+
+/** Trusted host application policy binding an authenticated caller to tokenized run-content access. */
+export type ContentAuthorizer = (request: ContentAccessRequest) => boolean | Promise<boolean>;
+
+const contentAuthorizerSchema = z.custom<ContentAuthorizer>((value) => typeof value === "function");
+
 /** Configuration object or path and optional injectable runtime adapters. */
 export const CreateHarnessOptionsSchema = z.union([
   z
     .object({
       config: HarnessConfigSchema,
       overrides: HarnessOverridesSchema.optional(),
+      contentAuthorizer: contentAuthorizerSchema.optional(),
     })
     .strict(),
   z
     .object({
       configPath: z.string().min(1),
       overrides: HarnessOverridesSchema.optional(),
+      contentAuthorizer: contentAuthorizerSchema.optional(),
     })
     .strict(),
 ]);
@@ -279,6 +292,26 @@ export const GetRunContentOptionsSchema = z.object({ reveal: z.literal(false) })
 /** Options accepted by {@link Harness.getRunContent}. */
 export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
 
+/** Options for a separately authorized stream of durable, tokenized run content. */
+export const StreamRunContentOptionsSchema = z
+  .object({
+    principal: Principal,
+    fromSeq: z.number().int().nonnegative().default(0),
+    signal: z
+      .custom<AbortSignal>(
+        (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          hasMethod(value, "addEventListener") &&
+          hasMethod(value, "removeEventListener"),
+      )
+      .optional(),
+  })
+  .strict();
+
+/** Options accepted by {@link Harness.streamRunContent}. */
+export type StreamRunContentOptions = z.input<typeof StreamRunContentOptionsSchema>;
+
 type ContentEventType = {
   [Type in EventType]: Extract<
     (typeof EVENT_FIELD_CLASS)[Type][keyof (typeof EVENT_FIELD_CLASS)[Type]],
@@ -330,6 +363,14 @@ export const RunContentSchema = z.array(RunContentEntrySchema);
 
 /** Inferred tokenized content result. Treat values as sensitive. */
 export type RunContent = z.infer<typeof RunContentSchema>;
+
+/** A committed tokenized content entry streamed from the durable event log. */
+export const RunContentStreamEntrySchema = RunContentEntrySchema.extend({
+  durability: z.literal("committed"),
+}).strict();
+
+/** Inferred stream item. Treat values as sensitive. */
+export type RunContentStreamEntry = z.infer<typeof RunContentStreamEntrySchema>;
 
 /** A decision that can be applied to a pending approval. */
 export const ApprovalDecisionSchema = z.enum(["approve", "deny", "edit"]);
@@ -439,6 +480,18 @@ export interface Harness {
   /** Explicitly read tokenized content. This method returns sensitive data. */
   getRunContent(runId: RunId, options: GetRunContentOptions): Promise<RunContent>;
   /**
+   * Stream separately authorized, tokenized content from committed events only.
+   *
+   * `fromSeq` is inclusive and may be reused after reconnecting; persist the last yielded
+   * `seq` and resume at `seq + 1`. The configured authorizer is checked before subscription and
+   * before each content item. Abort `signal` on cancellation or immediate permission revocation.
+   * Values already yielded cannot be recalled.
+   */
+  streamRunContent(
+    runId: RunId,
+    options: StreamRunContentOptions,
+  ): AsyncIterable<RunContentStreamEntry>;
+  /**
    * Stop admitting executions, drain them for `run.shutdownGraceMs`, then request suspension.
    * The returned promise resolves after managed executions settle and runtime resources close.
    * Work owned by external queue workers is not cancelled.
@@ -461,6 +514,7 @@ export class SdkError extends HarnessError {
     | "sdk_run_not_found"
     | "sdk_closed"
     | "sdk_content_unavailable"
+    | "sdk_content_access_denied"
     | "sdk_input_unavailable"
     | "sdk_input_ambiguous";
 

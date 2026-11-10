@@ -182,7 +182,14 @@ describe("GitHub workflows", () => {
   it("runs the CI jobs in order and skips draft pull requests", () => {
     const { jobs } = readWorkflow();
 
-    expect(Object.keys(jobs)).toEqual(["static", "image-scan", "unit", "integration", "gates"]);
+    expect(Object.keys(jobs)).toEqual([
+      "static",
+      "image-scan",
+      "unit",
+      "integration",
+      "gates",
+      "conformance-advisory",
+    ]);
     expect(jobs.static?.if).toBe(
       "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
     );
@@ -194,6 +201,8 @@ describe("GitHub workflows", () => {
     expect(jobs.integration?.needs).toBe("unit");
     expect(jobs.gates?.needs).toEqual(["integration", "image-scan"]);
     expect(jobs.gates?.if).toContain("always()");
+    expect(jobs["conformance-advisory"]).toMatchObject({ "continue-on-error": true });
+    expect(jobs["conformance-advisory"]?.needs).toBeUndefined();
     expect(jobSteps("gates").find((step) => step.name === "Require CI jobs")?.if).toBe("always()");
   });
 

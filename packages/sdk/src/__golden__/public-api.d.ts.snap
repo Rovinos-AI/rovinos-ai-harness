@@ -5,22 +5,24 @@
  * @param options - Validated config or config path and optional runtime adapters.
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
-export { createHarness } from "./harness.js";
+export { createHarness } from "./create-harness.js";
 export { inspectMcpServer, registerMcpServer, selectMcpTools, McpCatalogInspectionSchema, InspectMcpServerOptionsSchema, McpToolSelectionSchema, type InspectMcpServerOptions, type McpCatalogInspection, type McpServerConfig, type McpToolSelection, type McpToolSelectionResult, } from "./mcp-onboarding.js";
 export { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
-export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, type WatchOptions, } from "./types.js";
+export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
 
-import { type Harness, type CreateHarnessOptions } from "./types.js";
-/**
- * Creates a validated public SDK around the internal runtime.
- *
- * @param options - Validated config object or config path and optional runtime adapters.
- * @returns Programmatic run, metadata, approval, and subscription operations.
- */
-export declare function createHarness(options: CreateHarnessOptions): Promise<Harness>;
+import { type Runtime } from "@rovinos/core";
+import { type Harness, type ContentAuthorizer } from "./types.js";
+/** Creates the internal SDK client around a validated runtime. */
+export declare function createHarnessClient(input: {
+    readonly runtime: Runtime;
+    readonly piiEnabled: boolean;
+    readonly correlationEnabled: boolean;
+    readonly shutdownGraceMs: number;
+    readonly contentAuthorizer: ContentAuthorizer | undefined;
+}): Harness;
 
 import { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
 import { ServerConfigSchema, type SecretRef } from "@rovinos/schemas";
@@ -148,6 +150,15 @@ export declare const HarnessOverridesSchema: z.ZodObject<{
 }, z.core.$strict>;
 /** Dependencies used when embedding or testing the harness. */
 export type HarnessOverrides = z.infer<typeof HarnessOverridesSchema>;
+/** Claimed principal and run requested for content access; the host application verifies identity. */
+export declare const ContentAccessRequestSchema: z.ZodObject<{
+    principal: z.ZodString;
+    runId: z.ZodString;
+}, z.core.$strict>;
+/** Inferred authorization input for tokenized content access. */
+export type ContentAccessRequest = z.infer<typeof ContentAccessRequestSchema>;
+/** Trusted host application policy binding an authenticated caller to tokenized run-content access. */
+export type ContentAuthorizer = (request: ContentAccessRequest) => boolean | Promise<boolean>;
 /** Configuration object or path and optional injectable runtime adapters. */
 export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObject<{
     config: z.ZodObject<{
@@ -608,6 +619,23 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 }>>;
                 maxSeries: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;
+            sinks: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    datadog: "datadog";
+                    file: "file";
+                    kusto: "kusto";
+                    stdout: "stdout";
+                }>;
+                maxClassification: z.ZodDefault<z.ZodEnum<{
+                    content_tokenized: "content_tokenized";
+                    metadata: "metadata";
+                }>>;
+                enabled: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>>;
+            unsafe: z.ZodPrefault<z.ZodObject<{
+                allowContentSinks: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         sandbox: z.ZodPrefault<z.ZodObject<{
             allowUnsafeInProcess: z.ZodOptional<z.ZodBoolean>;
@@ -704,6 +732,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         processLike: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ShutdownProcessLike, import("@rovinos/core").ShutdownProcessLike>>;
         flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
     }, z.core.$strict>>;
+    contentAuthorizer: z.ZodOptional<z.ZodCustom<ContentAuthorizer, ContentAuthorizer>>;
 }, z.core.$strict>, z.ZodObject<{
     configPath: z.ZodString;
     overrides: z.ZodOptional<z.ZodObject<{
@@ -733,6 +762,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         processLike: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ShutdownProcessLike, import("@rovinos/core").ShutdownProcessLike>>;
         flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
     }, z.core.$strict>>;
+    contentAuthorizer: z.ZodOptional<z.ZodCustom<ContentAuthorizer, ContentAuthorizer>>;
 }, z.core.$strict>]>;
 /** Validated options accepted by {@link createHarness}. */
 export type CreateHarnessOptions = z.input<typeof CreateHarnessOptionsSchema>;
@@ -1101,6 +1131,14 @@ export declare const GetRunContentOptionsSchema: z.ZodObject<{
 }, z.core.$strict>;
 /** Options accepted by {@link Harness.getRunContent}. */
 export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
+/** Options for a separately authorized stream of durable, tokenized run content. */
+export declare const StreamRunContentOptionsSchema: z.ZodObject<{
+    principal: z.ZodString;
+    fromSeq: z.ZodDefault<z.ZodNumber>;
+    signal: z.ZodOptional<z.ZodCustom<AbortSignal, AbortSignal>>;
+}, z.core.$strict>;
+/** Options accepted by {@link Harness.streamRunContent}. */
+export type StreamRunContentOptions = z.input<typeof StreamRunContentOptionsSchema>;
 /** A single tokenized content entry from the event log. */
 export declare const RunContentEntrySchema: z.ZodObject<{
     seq: z.ZodNumber;
@@ -1139,6 +1177,27 @@ export declare const RunContentSchema: z.ZodArray<z.ZodObject<{
 }, z.core.$strict>>;
 /** Inferred tokenized content result. Treat values as sensitive. */
 export type RunContent = z.infer<typeof RunContentSchema>;
+/** A committed tokenized content entry streamed from the durable event log. */
+export declare const RunContentStreamEntrySchema: z.ZodObject<{
+    seq: z.ZodNumber;
+    type: z.ZodEnum<{
+        app_content: "app_content";
+        approval_requested: "approval_requested";
+        approval_resolved: "approval_resolved";
+        context_compacted: "context_compacted";
+        input_requested: "input_requested";
+        input_resolved: "input_resolved";
+        model_request: "model_request";
+        model_response: "model_response";
+        run_input: "run_input";
+        tool_intent: "tool_intent";
+        tool_result: "tool_result";
+    }>;
+    content: z.ZodJSONSchema;
+    durability: z.ZodLiteral<"committed">;
+}, z.core.$strict>;
+/** Inferred stream item. Treat values as sensitive. */
+export type RunContentStreamEntry = z.infer<typeof RunContentStreamEntrySchema>;
 /** A decision that can be applied to a pending approval. */
 export declare const ApprovalDecisionSchema: z.ZodEnum<{
     approve: "approve";
@@ -1250,6 +1309,15 @@ export interface Harness {
     /** Explicitly read tokenized content. This method returns sensitive data. */
     getRunContent(runId: RunId, options: GetRunContentOptions): Promise<RunContent>;
     /**
+     * Stream separately authorized, tokenized content from committed events only.
+     *
+     * `fromSeq` is inclusive and may be reused after reconnecting; persist the last yielded
+     * `seq` and resume at `seq + 1`. The configured authorizer is checked before subscription and
+     * before each content item. Abort `signal` on cancellation or immediate permission revocation.
+     * Values already yielded cannot be recalled.
+     */
+    streamRunContent(runId: RunId, options: StreamRunContentOptions): AsyncIterable<RunContentStreamEntry>;
+    /**
      * Stop admitting executions, drain them for `run.shutdownGraceMs`, then request suspension.
      * The returned promise resolves after managed executions settle and runtime resources close.
      * Work owned by external queue workers is not cancelled.
@@ -1258,7 +1326,7 @@ export interface Harness {
 }
 /** Coded SDK failure that does not include untrusted input values. */
 export declare class SdkError extends HarnessError {
-    readonly code: SdkMcpConnectionErrorCode | "sdk_mcp_catalog_invalid" | "sdk_mcp_config_invalid" | "sdk_mcp_inspection_failed" | "sdk_mcp_inspection_options_invalid" | "sdk_mcp_selection_invalid" | "sdk_mcp_server_exists" | "sdk_mcp_server_not_found" | "sdk_mcp_tool_not_found" | "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable" | "sdk_input_ambiguous";
+    readonly code: SdkMcpConnectionErrorCode | "sdk_mcp_catalog_invalid" | "sdk_mcp_config_invalid" | "sdk_mcp_inspection_failed" | "sdk_mcp_inspection_options_invalid" | "sdk_mcp_selection_invalid" | "sdk_mcp_server_exists" | "sdk_mcp_server_not_found" | "sdk_mcp_tool_not_found" | "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_content_access_denied" | "sdk_input_unavailable" | "sdk_input_ambiguous";
     /** Creates a stable SDK error with a closed code. */
     constructor(code: SdkError["code"]);
 }
