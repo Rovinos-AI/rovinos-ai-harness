@@ -281,10 +281,7 @@ async function captureInspectorServerResults(
       } else if (input instanceof URL) {
         url = input.href;
       }
-      if (
-        url === undefined ||
-        new URL(url, window.location.href).pathname !== "/api/mcp/events"
-      ) {
+      if (url === undefined || new URL(url, window.location.href).pathname !== "/api/mcp/events") {
         return response;
       }
       window.__captureInspectorMcpEvent?.("inspector-event-stream-open");
@@ -627,8 +624,7 @@ async function openApproval(
                     message.params?.arguments === undefined
                       ? []
                       : Object.keys(message.params.arguments),
-                  approvalIdMatches:
-                    message.params?.arguments?.approvalId === fixture.approvalId,
+                  approvalIdMatches: message.params?.arguments?.approvalId === fixture.approvalId,
                 }
               : {}),
           };
@@ -899,9 +895,7 @@ it("renders approval apps in Inspector and fails closed on decisions without con
       });
       expect(JSON.stringify(requestLog)).toContain("harness.approvals.resolve");
       expect(
-        requestLog.some(
-          (request) => request.body?.includes(`"decision":"${decision}"`) === true,
-        ),
+        requestLog.some((request) => request.body?.includes(`"decision":"${decision}"`) === true),
       ).toBe(true);
       expectNoExternalSandboxRequests(requestLog);
       for (const canary of rawCanaries) {
