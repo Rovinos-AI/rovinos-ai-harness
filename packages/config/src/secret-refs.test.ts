@@ -92,6 +92,10 @@ describe("getConfigSecretRefs", () => {
           keyFile: "file:/run/secrets/control-plane-key",
         },
       },
+      rateLimits: {
+        backend: "redis",
+        redis: { url: "file:/run/secrets/rate_limit_redis_url" },
+      },
     });
 
     expect(getConfigSecretRefs(config)).toEqual([
@@ -108,6 +112,7 @@ describe("getConfigSecretRefs", () => {
       "env:CONTROL_PLANE_TOKEN",
       "file:/run/secrets/control-plane-cert",
       "file:/run/secrets/control-plane-key",
+      "file:/run/secrets/rate_limit_redis_url",
     ]);
   });
 });

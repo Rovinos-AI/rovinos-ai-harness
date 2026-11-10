@@ -10,6 +10,7 @@ import {
   PiiConfigSchema,
   PolicyConfigSchema,
   QuotasConfigSchema,
+  RateLimitsConfigSchema,
   RunConfigSchema,
   RolesConfigSchema,
   SandboxConfigSchema,
@@ -36,6 +37,7 @@ export const HarnessConfigSchema = z
     sandbox: SandboxConfigSchema,
     elicitation: ElicitationConfigSchema,
     controlPlane: ControlPlaneConfigSchema.optional(),
+    rateLimits: RateLimitsConfigSchema,
     deployment: DeploymentConfigSchema,
     cli: CliConfigSchema.optional(),
   })
