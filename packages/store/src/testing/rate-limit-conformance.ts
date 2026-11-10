@@ -12,7 +12,8 @@ export interface RateLimitStoreFactory {
 }
 
 /** Creates an isolated rate-limit store factory. */
-export type RateLimitStoreFactoryCreator = () => Promise<RateLimitStoreFactory>;
+export type RateLimitStoreFactoryCreator = () =>
+  Promise<RateLimitStoreFactory> | RateLimitStoreFactory;
 
 async function withStore(
   createFactory: RateLimitStoreFactoryCreator,
@@ -81,7 +82,16 @@ export function rateLimitStoreConformance(
         });
       });
     });
+  });
 
+  registerMultiClientConformance(name, createFactory);
+}
+
+function registerMultiClientConformance(
+  name: string,
+  createFactory: RateLimitStoreFactoryCreator,
+): void {
+  describe(`${name} multi-client behavior`, () => {
     it("enforces aggregate capacity across 200 concurrent requests", async () => {
       await withStore(createFactory, async (factory) => {
         const first = factory.open();

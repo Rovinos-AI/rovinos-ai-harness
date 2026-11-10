@@ -12,7 +12,7 @@ function uniquePrefix(): string {
   return `test.${randomBytes(12).toString("hex")}`;
 }
 
-async function createFactory(): Promise<RateLimitStoreFactory> {
+function createFactory(): RateLimitStoreFactory {
   const keyPrefix = Code.parse(uniquePrefix());
   const stores = new Set<RedisRateLimitStore>();
   return {
@@ -68,14 +68,20 @@ it("isolates separate backend prefixes while sharing one prefix across clients",
 });
 
 it("does not refund a granted token when the requesting caller cancels", async () => {
-  const factory = await createFactory();
+  const factory = createFactory();
   const first = factory.open();
   const second = factory.open();
   const key = Code.parse("provider.cancelled");
   const limit = { capacity: 1, refillPerSecond: 0.000001 };
   const controller = new AbortController();
   const cancelled = new Promise<undefined>((resolve) => {
-    controller.signal.addEventListener("abort", () => resolve(undefined), { once: true });
+    controller.signal.addEventListener(
+      "abort",
+      () => {
+        resolve(undefined);
+      },
+      { once: true },
+    );
   });
 
   try {

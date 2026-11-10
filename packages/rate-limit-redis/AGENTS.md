@@ -10,7 +10,7 @@ Optional published Redis/Valkey adapter for shared request-rate limits.
 
 ## Allowed internal imports
 
-- `@rovinos/schemas`. Nothing else from `@rovinos/*`.
+- `@rovinos/schemas`, `@rovinos/store`. Nothing else from `@rovinos/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->

@@ -3,13 +3,15 @@ import { RateLimitStoreUnavailableError } from "@rovinos/schemas";
 import { expect, it, vi } from "vitest";
 import { RedisRateLimitStore } from "./rate-limit.js";
 
-const state = vi.hoisted(() => ({ failure: undefined as Error | undefined }));
+const state = vi.hoisted((): { failure: Error | undefined } => ({ failure: undefined }));
 
 vi.mock("ioredis", () => ({
   Redis: class {
     status = "wait";
 
-    async connect(): Promise<void> {}
+    connect(): Promise<void> {
+      return Promise.resolve();
+    }
 
     on(): this {
       return this;
@@ -19,17 +21,17 @@ vi.mock("ioredis", () => ({
       this.status = "end";
     }
 
-    async script(): Promise<string> {
-      throw state.failure;
+    script(): Promise<string> {
+      return Promise.reject(state.failure ?? new Error("synthetic script failure"));
     }
 
-    async eval(): Promise<never> {
-      throw state.failure;
+    eval(): Promise<never> {
+      return Promise.reject(state.failure ?? new Error("synthetic eval failure"));
     }
 
-    async quit(): Promise<string> {
+    quit(): Promise<string> {
       this.status = "end";
-      return "OK";
+      return Promise.resolve("OK");
     }
   },
 }));

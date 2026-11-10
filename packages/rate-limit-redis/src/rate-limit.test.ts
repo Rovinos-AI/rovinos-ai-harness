@@ -3,13 +3,25 @@ import { RateLimitStoreUnavailableError } from "@rovinos/schemas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RedisRateLimitStore } from "./rate-limit.js";
 
-const state = vi.hoisted(() => ({
+interface MockState {
+  scriptResult: string;
+  scriptError: Error | undefined;
+  evalshaResult: unknown;
+  evalshaError: Error | undefined;
+  evalResult: unknown;
+  evalError: Error | undefined;
+  connectCalls: number;
+  evalshaCalls: number;
+  evalCalls: number;
+}
+
+const state = vi.hoisted((): MockState => ({
   scriptResult: "script-sha",
-  scriptError: undefined as Error | undefined,
-  evalshaResult: ["1", "0", "2"] as unknown,
-  evalshaError: undefined as Error | undefined,
-  evalResult: ["1", "0", "2"] as unknown,
-  evalError: undefined as Error | undefined,
+  scriptError: undefined,
+  evalshaResult: ["1", "0", "2"],
+  evalshaError: undefined,
+  evalResult: ["1", "0", "2"],
+  evalError: undefined,
   connectCalls: 0,
   evalshaCalls: 0,
   evalCalls: 0,
@@ -19,8 +31,9 @@ vi.mock("ioredis", () => ({
   Redis: class {
     status = "wait";
 
-    async connect(): Promise<void> {
+    connect(): Promise<void> {
       state.connectCalls += 1;
+      return Promise.resolve();
     }
 
     on(): this {
@@ -31,32 +44,32 @@ vi.mock("ioredis", () => ({
       this.status = "end";
     }
 
-    async script(): Promise<string> {
+    script(): Promise<string> {
       if (state.scriptError !== undefined) {
-        throw state.scriptError;
+        return Promise.reject(state.scriptError);
       }
-      return state.scriptResult;
+      return Promise.resolve(state.scriptResult);
     }
 
-    async evalsha(): Promise<unknown> {
+    evalsha(): Promise<unknown> {
       state.evalshaCalls += 1;
       if (state.evalshaError !== undefined) {
-        throw state.evalshaError;
+        return Promise.reject(state.evalshaError);
       }
-      return state.evalshaResult;
+      return Promise.resolve(state.evalshaResult);
     }
 
-    async eval(): Promise<unknown> {
+    eval(): Promise<unknown> {
       state.evalCalls += 1;
       if (state.evalError !== undefined) {
-        throw state.evalError;
+        return Promise.reject(state.evalError);
       }
-      return state.evalResult;
+      return Promise.resolve(state.evalResult);
     }
 
-    async quit(): Promise<string> {
+    quit(): Promise<string> {
       this.status = "end";
-      return "OK";
+      return Promise.resolve("OK");
     }
   },
 }));

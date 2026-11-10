@@ -45,7 +45,7 @@ describe("openConfiguredRateLimitStore", () => {
       { secretResolver: { resolve: () => Promise.resolve({ reveal: () => url }) } },
     );
 
-    expect(store.close).toBeTypeOf("function");
+    expect(store).toHaveProperty("close", expect.any(Function));
   });
 
   it("rejects invalid Redis URLs without exposing the URL", async () => {

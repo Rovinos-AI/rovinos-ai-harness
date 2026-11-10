@@ -120,29 +120,25 @@ export class RedisRateLimitStore implements RateLimitStore {
   }
 
   private connect(): Promise<void> {
-    if (this.connection === undefined) {
-      this.connection = this.client.connect().catch((error: unknown) => {
-        this.connection = undefined;
-        throw error;
-      });
-    }
+    this.connection ??= this.client.connect().catch((error: unknown) => {
+      this.connection = undefined;
+      throw error;
+    });
     return this.connection;
   }
 
   private loadScript(): Promise<string | undefined> {
-    if (this.scriptLoad === undefined) {
-      this.scriptLoad = this.client
-        .script("LOAD", takeScript)
-        .then((sha) => {
-          const parsedSha = z.string().parse(sha);
-          this.scriptSha = parsedSha;
-          return parsedSha;
-        })
-        .catch(() => {
-          this.useEvalFallback = true;
-          return undefined;
-        });
-    }
+    this.scriptLoad ??= this.client
+      .script("LOAD", takeScript)
+      .then((sha) => {
+        const parsedSha = z.string().parse(sha);
+        this.scriptSha = parsedSha;
+        return parsedSha;
+      })
+      .catch(() => {
+        this.useEvalFallback = true;
+        return undefined;
+      });
     return this.scriptLoad;
   }
 

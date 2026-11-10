@@ -49,12 +49,7 @@ export async function openConfiguredRateLimitStore(
     } catch {
       throw new StoreUnavailableError();
     }
-    let redisModule: typeof import("@rovinos/rate-limit-redis");
-    try {
-      redisModule = await import("@rovinos/rate-limit-redis");
-    } catch {
-      throw new RateLimitConfigError("rate_limit_redis_adapter_unavailable");
-    }
+    const redisModule = await loadRedisRateLimitAdapter();
     let redisRateLimitStore: RateLimitStore;
     try {
       redisRateLimitStore = new redisModule.RedisRateLimitStore(url, {
@@ -84,6 +79,14 @@ export async function openConfiguredRateLimitStore(
   );
   const shared = new PostgresRateLimitStore(connectionString);
   return new UnavailableRateLimitStore(shared, "postgres", rateLimits.onUnavailable, options.clock);
+}
+
+async function loadRedisRateLimitAdapter() {
+  try {
+    return await import("@rovinos/rate-limit-redis");
+  } catch {
+    throw new RateLimitConfigError("rate_limit_redis_adapter_unavailable");
+  }
 }
 
 async function resolvePostgresConnectionString(
