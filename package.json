@@ -82,6 +82,7 @@
     "@changesets/cli": "3.0.3",
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
     "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/conformance": "0.2.0-alpha.12",
     "@modelcontextprotocol/inspector": "2.13.0",
     "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",

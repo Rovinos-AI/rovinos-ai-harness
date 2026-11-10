@@ -4,7 +4,9 @@ import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseJson } from "@rovinos/schemas";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const scanScript = join(root, "scripts/security/secret-scan.sh");
@@ -96,6 +98,55 @@ describe("secret-scan.sh", () => {
 
     expect(result.status).toBe(0);
     expect(`${result.stdout}${result.stderr}`).not.toContain(syntheticValue);
+  });
+
+  it("suppresses only the acknowledged commit for a pinned ignore fingerprint", () => {
+    const key = ["AK", "IA", "QWERTY9876543210"].join("");
+    const repository = createRepository("secret.txt");
+    const scan = () =>
+      spawnSync("bash", [scanScript, "--nightly", "--source", repository], { encoding: "utf8" });
+    const git = (args: string[]) => {
+      const result = spawnSync("git", args, { cwd: repository, encoding: "utf8" });
+      expect(result.status).toBe(0);
+      return result.stdout.trim();
+    };
+    const reportPath = join(repository, "reports/security/gitleaks-report.json");
+
+    expect(scan().status).not.toBe(0);
+    const findings = parseJson(
+      z.array(z.object({ Fingerprint: z.string().min(1) }).loose()),
+      readFileSync(reportPath, "utf8"),
+    );
+    expect(findings).toHaveLength(1);
+    const fingerprint = findings[0]?.Fingerprint ?? "";
+    expect(fingerprint.startsWith(`${git(["rev-parse", "HEAD"])}:secret.txt:`)).toBe(true);
+
+    writeFileSync(
+      join(repository, ".gitleaksignore"),
+      `# Synthetic control acknowledged for this one commit.\n${fingerprint}\n`,
+    );
+    git(["add", ".gitleaksignore"]);
+    git(["commit", "-m", "acknowledge synthetic control"]);
+    expect(scan().status).toBe(0);
+
+    writeFileSync(join(repository, "again.txt"), `synthetic AWS access key: ${key}\n`);
+    git(["add", "again.txt"]);
+    git(["commit", "-m", "add the same synthetic key again"]);
+    const repeated = scan();
+    expect(repeated.status).not.toBe(0);
+    expect(`${repeated.stdout}${repeated.stderr}`).not.toContain(key);
+    expect(readFileSync(reportPath, "utf8")).not.toContain(key);
+  });
+
+  it("pins and comments every repository ignore fingerprint", () => {
+    const lines = readFileSync(join(root, ".gitleaksignore"), "utf8").split(/\r?\n/u);
+    const entries = lines.filter((line) => line.trim() !== "" && !line.startsWith("#"));
+
+    expect(entries).toHaveLength(7);
+    for (const entry of entries) {
+      expect(entry).toMatch(/^[0-9a-f]{40}:[^:\s]+:[a-z0-9-]+:[1-9]\d*$/u);
+      expect(lines[lines.indexOf(entry) - 1]).toMatch(/^# \S/u);
+    }
   });
 
   it("comments every narrow allowlist entry", () => {

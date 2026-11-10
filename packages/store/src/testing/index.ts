@@ -12,3 +12,8 @@ export { assertWatchSubscriptionConformance } from "./conformance-watch.js";
 export type { EventStoreTestBuilders } from "./testing.js";
 export { runQueueConformance } from "../queue/conformance.js";
 export type { RunQueueFactory, RunQueueFactoryCreator } from "../queue/conformance.js";
+export { rateLimitStoreConformance } from "./rate-limit-conformance.js";
+export type {
+  RateLimitStoreFactory,
+  RateLimitStoreFactoryCreator,
+} from "./rate-limit-conformance.js";

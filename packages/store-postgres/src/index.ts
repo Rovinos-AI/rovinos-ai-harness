@@ -2,6 +2,7 @@
 export { PostgresEventStore } from "./postgres/adapter.js";
 export type { PostgresEventStoreOptions } from "./postgres/adapter.js";
 export { PostgresRunQueue } from "./queue/postgres.js";
+export { PostgresRateLimitStore, PostgresRateLimitStoreError } from "./rate-limit.js";
 /**
  * Opens a Postgres event store from worker-thread arguments.
  *
