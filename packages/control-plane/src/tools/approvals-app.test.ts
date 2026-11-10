@@ -339,6 +339,33 @@ describe("app-only approval tools", () => {
     expect(JSON.stringify([missing, alreadyResolved, wrongRun])).not.toContain(PRIVATE_CANARY);
   });
 
+  it("fails closed with a typed result when approval resolution requires elicitation", async () => {
+    const resolveApproval = vi.fn(() => Promise.resolve(undefined));
+    const { store, client } = await connect({
+      hasElicitation: true,
+      isAppContext: false,
+      resolveApproval,
+    });
+    const approval = await createApproval(store);
+
+    const result = await client.callTool({
+      name: "harness.approvals.resolve",
+      arguments: { approvalId: approval.approvalId, decision: "approve" },
+    });
+    let decisionRecorded = false;
+    for await (const event of store.read(approval.runId)) {
+      decisionRecorded ||= event.type === "approval_resolved";
+    }
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      ok: false,
+      code: "human_confirmation_unavailable",
+    });
+    expect(resolveApproval).not.toHaveBeenCalled();
+    expect(decisionRecorded).toBe(false);
+  });
+
   it("refuses edits that are outside the stored editable field list", async () => {
     const resolveApproval = vi.fn(() => Promise.resolve(undefined));
     const { store, client } = await connect({ isAppContext: true, resolveApproval });

@@ -242,7 +242,8 @@ async function handleResolveRequest(
     },
   });
   if (gate.status === "input_required") {
-    return gate.result;
+    // The Apps bridge cannot resume an elicitation-backed resolve request.
+    return resolveFailure(options, tokenId, "human_confirmation_unavailable");
   }
   if (gate.status === "denied") {
     return resolveFailure(options, tokenId, gate.code);

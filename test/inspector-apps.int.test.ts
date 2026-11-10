@@ -79,7 +79,7 @@ const inspectorJsonRpcMessageSchema = z.looseObject({
       isError: z.boolean().optional(),
       html: z.string().optional(),
       structuredContent: z.unknown().optional(),
-      content: z.array(z.looseObject({ type: z.string() })).optional(),
+      content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })).optional(),
       arguments: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),
@@ -169,6 +169,11 @@ function captureBrowserDiagnostics(page: Page, diagnostics: BrowserDiagnostics):
                 const code = content.success ? content.data.code : undefined;
                 return typeof code === "string" && /^[\w.-]{1,80}$/u.test(code) ? code : undefined;
               })(),
+              contentCode: record.params.content?.find(
+                (part) =>
+                  part.text === "approval_not_found" ||
+                  part.text === "human_confirmation_unavailable",
+              )?.text,
               contentTypes: record.params.content?.map((part) => part.type) ?? [],
               validApprovalInput: ApprovalAppInputSchema.safeParse(record.params.structuredContent)
                 .success,
@@ -373,7 +378,12 @@ async function configureInspectorAuthorization(
           ...request,
           settings: {
             ...request.settings,
-            headers: request.settings?.headers ?? [],
+            headers: [
+              ...(request.settings?.headers ?? []).filter(
+                ({ key }) => key.toLowerCase() !== "authorization",
+              ),
+              { key: "Authorization", value: authorization },
+            ],
             metadata: request.settings?.metadata ?? {},
             protocolEra: "modern",
             connectionTimeout: request.settings?.connectionTimeout ?? 30_000,
@@ -602,6 +612,12 @@ async function openApproval(
                     /^harness\.[\w.-]{1,100}$/u.test(message.params.name)
                       ? message.params.name
                       : undefined,
+                  argumentKeys:
+                    message.params?.arguments === undefined
+                      ? []
+                      : Object.keys(message.params.arguments),
+                  approvalIdMatches:
+                    message.params?.arguments?.approvalId === fixture.approvalId,
                 }
               : {}),
           };
