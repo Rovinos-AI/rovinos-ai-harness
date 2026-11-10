@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# Historical Gitleaks findings acknowledged by the maintainers.
+#
+# Each entry is a full fingerprint: <commit SHA>:<file>:<rule>:<line>. It suppresses only that
+# finding in that one commit, so the same value in any other commit, file, or line still fails the
+# scan. Entries are added only for synthetic test data or non-secret constants in commits already
+# merged to main (history is not rewritten), with a comment saying what the value is.
+# The current files were rewritten in #736; see docs/security/secrets.md.
+
+# Fake AWS-style key used as the scanner's own positive control (now built from fragments).
+5c66cdbbeff1afa5a4e5c0fef990dcf24f1a1099:scripts/security/secret-scan.test.ts:generic-api-key:72
+
+# Synthetic unsigned JWT in the PII corpus (now stored as fragments and joined at runtime).
+182a125543431a83e857fd2263d78eeb18b80510:test/pii-corpus/corpus.jsonl:jwt:39
+
+# HKDF info label constant "harness/pseudonym"; not key material.
+1605044faf1084f39b89c45e4ff9820848f4843e:packages/vault/src/pseudonym.ts:generic-api-key:14
+
+# AAD prefix constant "harness/vault/scope/"; not key material.
+1dec2c24c8c01c7f9d7a00ecf1a4f9f7a99ad572:packages/vault/src/scope-crypto.ts:generic-api-key:8
+
+# Migration filename tuple in a vault test; not key material.
+1dec2c24c8c01c7f9d7a00ecf1a4f9f7a99ad572:packages/vault/src/sqlite.test.ts:generic-api-key:45
+
+# Fake PEM private-key header in a PII detector test fixture (now built from fragments).
+1d31d19c79630689c31563866f71748a73f2d71f:packages/pii/src/detectors/detectors.test.ts:private-key:93
+
+# Fake PEM private-key header in a PII detector test fixture (earlier revision of the same test).
+79ee0ee095aff42f48ebc169c19ad44d8e86ee47:packages/pii/src/detectors/detectors.test.ts:private-key:84
