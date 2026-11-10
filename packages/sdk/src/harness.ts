@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { foldRunState, type Runtime } from "@rovinos/core";
 import { JsonValue as JsonValueSchema, RunInputSchema, type Id } from "@rovinos/schemas";
@@ -8,6 +7,7 @@ import { SdkError } from "./types.js";
 import { projectSafeEvents, readEvents } from "./event-views.js";
 import { getRunContent as readRunContent, streamRunContentEvents } from "./content-access.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
+import { idempotencyKeyHash } from "./idempotency.js";
 import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
 import {
   CancelRunResultSchema,
@@ -68,15 +68,7 @@ class HarnessClient implements Harness {
       const keyHash =
         input.idempotencyKey === undefined
           ? undefined
-          : (() => {
-              const hash = createHash("sha256")
-                .update("harness/sdk/idempotency/v1\0")
-                .update(input.idempotencyKey);
-              if (input.toolProfile !== undefined) {
-                hash.update("\0tool-profile\0").update(input.toolProfile);
-              }
-              return hash.digest("hex");
-            })();
+          : idempotencyKeyHash(input.idempotencyKey, input.toolProfile);
       const existingStart = keyHash === undefined ? undefined : this.idempotencyKeys.get(keyHash);
       if (existingStart !== undefined) {
         return await this.existingRunResult(await existingStart);

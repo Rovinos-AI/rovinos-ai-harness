@@ -65,12 +65,12 @@ function createResumeStrategy(
   };
 }
 
-/** Builds the runtime's PII/offload-wrapped subagent tool port. */
-export function createRuntimeToolPort(options: RuntimeToolPortOptions): ToolPort {
-  const builtins = composeToolPorts(new AskUserTool(), new VerifyTool());
-  const toolWithBuiltins = composeToolPorts(builtins, options.tool, {
-    preferAdditionalSpecs: true,
-  });
+function createWrappedSubagentTool(options: RuntimeToolPortOptions) {
+  const toolWithBuiltins = composeToolPorts(
+    composeToolPorts(new AskUserTool(), new VerifyTool()),
+    options.tool,
+    { preferAdditionalSpecs: true },
+  );
   const subagentTool = createSubagentTool({
     config: options.config,
     clock: options.clock,
@@ -107,7 +107,19 @@ export function createRuntimeToolPort(options: RuntimeToolPortOptions): ToolPort
             artifactKeyProvider: options.keys,
           },
         );
-  const composed = offloadingPort ?? piiTool;
+  return {
+    composed: offloadingPort ?? piiTool,
+    offloadingPort,
+    piiPort,
+    subagentTool,
+    toolWithBuiltins,
+  };
+}
+
+/** Builds the runtime's PII/offload-wrapped subagent tool port. */
+export function createRuntimeToolPort(options: RuntimeToolPortOptions): ToolPort {
+  const { composed, offloadingPort, piiPort, subagentTool, toolWithBuiltins } =
+    createWrappedSubagentTool(options);
   const spawnResumeStrategy = subagentTool.resumeStrategy?.bind(subagentTool);
   const innerResumeStrategy = toolWithBuiltins.resumeStrategy?.bind(toolWithBuiltins);
   const pinToolForRun = options.tool.pinForRun?.bind(options.tool);

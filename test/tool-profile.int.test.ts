@@ -12,13 +12,11 @@ import {
   type ModelRequest,
 } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
-import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
+import { NaiveContext, RunRecorder, runLoop } from "@rovinos/core";
+import type { ModelCompletion, ModelPort, PolicyPort } from "@rovinos/core";
 import { McpToolPort } from "@rovinos/mcp";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NaiveContext } from "./context/naive-context.js";
-import { RunRecorder } from "./recorder.js";
-import { runLoop } from "./loop.js";
-import type { ModelCompletion, ModelPort, PolicyPort } from "./ports.js";
 
 const spanCollector = createTestSpanCollector();
 const inputSchema = {

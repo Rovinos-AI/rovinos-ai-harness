@@ -20,15 +20,13 @@ describe("ToolProfilesConfigSchema", () => {
       inspect: ["server.read", "server.read"],
     });
     expect(duplicate.success).toBe(false);
-    if (!duplicate.success) {
-      expect(duplicate.error.issues[0]?.params).toMatchObject({
-        errorCode: "tool_profile_tool_duplicate",
-      });
-    }
+    expect(duplicate.error?.issues[0]?.params).toMatchObject({
+      errorCode: "tool_profile_tool_duplicate",
+    });
 
     expect(
       ToolProfilesConfigSchema.safeParse({
-        inspect: Array.from({ length: 1_001 }, (_, index) => `tool.${index}`),
+        inspect: Array.from({ length: 1_001 }, (_, index) => `tool.${String(index)}`),
       }).success,
     ).toBe(false);
   });

@@ -220,7 +220,7 @@ async function executeRegisteredTool(options: {
  * limited to stable codes and never copies server text into telemetry.
  */
 export class McpToolPort {
-  readonly supportsToolProfiles: true = true;
+  readonly supportsToolProfiles = true as const;
 
   private constructor(
     private readonly catalog: CatalogState,

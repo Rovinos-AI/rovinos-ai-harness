@@ -1297,8 +1297,7 @@ describe("runLoop", () => {
       toolProfile: Code.parse("focused"),
     });
 
-    expect(pinForRun).toHaveBeenCalledOnce();
-    expect(pinForRun).toHaveBeenCalledWith({ toolProfile: "focused" });
+    expect(pinForRun).toHaveBeenCalledExactlyOnceWith({ toolProfile: "focused" });
     expect(result.events[0]).toMatchObject({
       type: "run_created",
       v: 3,
