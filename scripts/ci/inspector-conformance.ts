@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve as resolvePath } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ControlPlaneConfigSchema, Id, parseJson, type NewEvent } from "@rovinos/schemas";
-import { SqliteEventStore } from "@rovinos/store-sqlite";
+import { parseJson } from "@rovinos/schemas";
 import { z } from "zod";
 import {
+  checkRestrictedHttp,
+  checkStrictNegative,
+  checkToolCalls,
+  type InspectorRequest,
+  type ProcessResult,
+} from "./inspector-tool-calls.ts";
+import {
   INSPECTOR_HTTP_TOKEN,
-  minimalInspectorEnvironment,
-  startInspectorHttpServer,
-  type RunningInspectorServer,
-} from "./inspector-http.js";
+  INSPECTOR_READ_TOKEN,
+  startInspectorFixture,
+} from "./inspector-http.ts";
 
 const root = resolvePath(import.meta.dirname, "../..");
 const harness = resolvePath(root, "packages/cli/dist/bin.js");
@@ -22,22 +25,25 @@ const inspector = resolvePath(
 );
 const objectSchema = z.record(z.string(), z.unknown());
 const protocolVersions = { modern: "2026-07-28", legacy: "2025-11-25" } as const;
-const appTools = ["harness.approvals.resolve", "harness.approvals.reveal"] as const;
-
-interface ProcessResult {
-  readonly status: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-interface InspectorRequest {
-  readonly transport: "stdio" | "http";
-  readonly endpoint: string | undefined;
-  readonly protocolEra: "modern" | "legacy";
-  readonly method: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly flags?: readonly string[];
-}
+const appOnlyTools = [
+  "approve",
+  "deny",
+  "answer_input",
+  "harness.approvals.get",
+  "harness.approvals.resolve",
+  "harness.approvals.reveal",
+  "harness.inputs.answer",
+  "harness.runs.list",
+  "harness.runs.get",
+] as const;
+const appMetadataTools = [
+  { name: "harness.approvals.get", resourceUri: "ui://harness/approval/v1" },
+  { name: "harness.approvals.resolve", resourceUri: "ui://harness/approval/v1" },
+  { name: "harness.approvals.reveal", resourceUri: "ui://harness/approval/v1" },
+  { name: "harness.inputs.answer", resourceUri: "ui://harness/input/v1" },
+  { name: "harness.runs.list", resourceUri: "ui://harness/runs/v1" },
+  { name: "harness.runs.get", resourceUri: "ui://harness/runs/v1" },
+] as const;
 
 function failure(message: string, code = "inspector_conformance_failed"): never {
   throw new Error(`${message}\n${JSON.stringify({ error: { code } })}`);
@@ -68,6 +74,13 @@ function inspectorError(result: ProcessResult, label: string): never {
       ? result.stderr.trim()
       : JSON.stringify({ error: { code: `inspector_exit_${String(result.status)}` } });
   throw new Error(`${label}: ${reasons[result.status] ?? "Inspector failed"}\n${detail}`);
+}
+
+function assertNoCredentialCanary(result: ProcessResult, label: string): void {
+  const output = `${result.stdout}${result.stderr}`;
+  if ([INSPECTOR_HTTP_TOKEN, INSPECTOR_READ_TOKEN].some((token) => output.includes(token))) {
+    failure(`${label} exposed an HTTP bearer-token canary.`);
+  }
 }
 
 function runProcess(args: readonly string[], env: NodeJS.ProcessEnv): Promise<ProcessResult> {
@@ -138,12 +151,7 @@ function argsForTransport(request: InspectorRequest): string[] {
 
 async function invoke(request: InspectorRequest): Promise<ProcessResult> {
   const result = await runProcess(argsForTransport(request), request.env);
-  if (
-    request.transport === "http" &&
-    `${result.stdout}${result.stderr}`.includes(INSPECTOR_HTTP_TOKEN)
-  ) {
-    failure("The Inspector exposed the HTTP bearer-token canary.");
-  }
+  assertNoCredentialCanary(result, "The Inspector");
   if (result.status !== 0) {
     inspectorError(
       result,
@@ -195,25 +203,31 @@ function hasPermission(value: unknown): boolean {
 }
 
 function assertAppVisibility(rows: readonly Record<string, unknown>[], advertised: boolean): void {
-  for (const name of appTools) {
+  for (const name of appOnlyTools) {
     const row = appToolRow(rows, name);
-    if (!advertised) {
-      if (row?.hasApp === true) {
-        failure(`App-only tool ${name} was reported as visible without Apps support.`);
-      }
-      continue;
+    if (!advertised && row !== undefined) {
+      failure(`App-only tool ${name} was listed without Apps support.`);
     }
-    if (row?.hasApp !== true || row.resourceUri !== "ui://harness/approval/v1") {
+    if (advertised && row === undefined) {
+      failure(`App-only tool ${name} was not listed with Apps support.`);
+    }
+  }
+  if (!advertised) {
+    return;
+  }
+  for (const appTool of appMetadataTools) {
+    const row = appToolRow(rows, appTool.name);
+    if (row?.hasApp !== true || row.resourceUri !== appTool.resourceUri) {
       const observed =
         row === undefined
           ? rows.map((entry) => entry.toolName ?? entry.name)
           : { hasApp: row.hasApp, resourceUri: row.resourceUri };
       failure(
-        `App-only tool ${name} did not advertise the approval app: ${JSON.stringify(observed)}.`,
+        `App-only tool ${appTool.name} did not advertise its MCP App: ${JSON.stringify(observed)}.`,
       );
     }
     if (hasPermission(row.csp) || hasPermission(row.permissions)) {
-      failure(`Approval app ${name} declared CSP domains or extra permissions.`);
+      failure(`MCP App for ${appTool.name} declared CSP domains or extra permissions.`);
     }
   }
 }
@@ -246,6 +260,15 @@ async function checkTransport(
   // The Inspector rejects --strict with --app-info, so gate the full Apps-advertised list separately.
   await invokeWithFlags(["--strict", "--advertise-apps"]);
   assertAppVisibility(toolRows(await invokeWithFlags(["--app-info", "--advertise-apps"])), true);
+  await checkToolCalls({
+    transport,
+    endpoint,
+    env,
+    flags,
+    invoke,
+    runProcess,
+    argsForTransport,
+  });
   const resource = jsonObject(
     (
       await invoke({
@@ -284,105 +307,29 @@ async function checkUnauthenticatedHttp(endpoint: string, env: NodeJS.ProcessEnv
     env,
   );
   const output = `${result.stdout}${result.stderr}`;
-  if (output.includes(INSPECTOR_HTTP_TOKEN)) {
-    failure("The unauthenticated Inspector attempt exposed the HTTP bearer-token canary.");
-  }
+  assertNoCredentialCanary(result, "The unauthenticated Inspector attempt");
   if (result.status !== 3 || !output.includes("auth_required")) {
     failure("Unauthenticated Inspector initialization did not exit 3 with auth_required.");
   }
 }
 
-function fixtureSource(): string {
-  return [
-    'import { McpServer } from "@modelcontextprotocol/server";',
-    'import { serveStdio } from "@modelcontextprotocol/server/stdio";',
-    'const server = new McpServer({ name: "nonportable-fixture", version: "1.0.0" });',
-    "server.server.registerCapabilities({ tools: {} });",
-    'server.server.setRequestHandler("tools/list", () => ({ tools: [{ name: "invalid_schema", description: "fixture", inputSchema: { type: "object", properties: { value: true } } }] }));',
-    "serveStdio(() => server);",
-  ].join("\n");
-}
-
-async function checkStrictNegative(env: NodeJS.ProcessEnv): Promise<void> {
-  const result = await runProcess(
-    [
-      process.execPath,
-      "--input-type=module",
-      "-e",
-      fixtureSource(),
-      "--",
-      "--cwd",
-      root,
-      "--protocol-era",
-      "modern",
-      "--method",
-      "tools/list",
-      "--strict",
-    ],
-    env,
-  );
-  if (
-    result.status !== 6 ||
-    !result.stderr.includes("schema_unportable") ||
-    !result.stderr.includes('"error"')
-  ) {
-    inspectorError(result, "The non-portable schema fixture did not fail with exit code 6");
-  }
-}
-
-async function seedSyntheticRun(dataDir: string): Promise<void> {
-  const store = new SqliteEventStore(join(dataDir, "harness.db"));
-  try {
-    const runId = Id.parse("00000000000000000000000001");
-    const event: NewEvent = {
-      runId,
-      ts: 1,
-      v: 1,
-      traceId: "a".repeat(32),
-      spanId: "b".repeat(16),
-      segmentId: runId,
-      type: "run_created",
-      configHash: "c".repeat(64),
-      policyVersion: "policy.v1",
-      depth: 0,
-    };
-    await store.append(runId, [event], 0);
-  } finally {
-    await store.close();
-  }
-}
-
 /** Runs the MCP Inspector conformance gate against both harness server transports. */
 export async function runInspectorConformance(): Promise<void> {
-  const workDir = await mkdtemp(join(tmpdir(), "harness-inspector-conformance-"));
-  const home = join(workDir, "home");
-  const dataDir = join(workDir, "data");
-  const configPath = join(workDir, "harness.config.json");
-  let httpServer: RunningInspectorServer | undefined;
+  const fixture = await startInspectorFixture({ root, harness });
   try {
-    await Promise.all([mkdir(home), mkdir(dataDir)]);
-    const controlPlane = ControlPlaneConfigSchema.parse({
-      auth: {
-        tokens: [
-          {
-            id: "token.inspector",
-            secret: "env:CONTROL_PLANE_INSPECTOR_TOKEN",
-            scopes: ["admin"],
-          },
-        ],
-      },
+    await checkTransport("stdio", undefined, fixture.env);
+    await checkUnauthenticatedHttp(fixture.endpoint, fixture.env);
+    await checkTransport("http", fixture.endpoint, fixture.env);
+    await checkRestrictedHttp({
+      endpoint: fixture.endpoint,
+      env: fixture.env,
+      invoke,
+      runProcess,
+      argsForTransport,
     });
-    await writeFile(configPath, `${JSON.stringify({ controlPlane })}\n`, { mode: 0o600 });
-    await seedSyntheticRun(dataDir);
-    const env = minimalInspectorEnvironment(home, configPath, dataDir);
-    await checkTransport("stdio", undefined, env);
-    httpServer = await startInspectorHttpServer({ root, harness, env });
-    await checkUnauthenticatedHttp(httpServer.endpoint, env);
-    await checkTransport("http", httpServer.endpoint, env);
-    await checkStrictNegative(env);
+    await checkStrictNegative(fixture.env, root, runProcess);
   } finally {
-    await httpServer?.close();
-    await rm(workDir, { recursive: true, force: true });
+    await fixture.close();
   }
 }
 

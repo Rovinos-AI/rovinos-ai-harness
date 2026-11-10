@@ -1,4 +1,4 @@
-# ADR 0007: Typed multi-modal parts and artifact interoperability
+# ADR 0008: Typed multi-modal parts and artifact interoperability
 
 - **Status:** Proposed
 - **Date:** 2026-11-09
