@@ -1389,9 +1389,9 @@ describe("runLoop", () => {
       toolProfile: Code.parse("focused"),
     });
 
-    await expect(
-      runLoop(options(new FakeToolPort())),
-    ).rejects.toMatchObject({ code: "tool_profile_unsupported" });
+    await expect(runLoop(options(new FakeToolPort()))).rejects.toMatchObject({
+      code: "tool_profile_unsupported",
+    });
     await expect(
       runLoop(options(Object.assign(new FakeToolPort(), { supportsToolProfiles: true }))),
     ).rejects.toMatchObject({ code: "tool_profile_unsupported" });
