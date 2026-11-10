@@ -18,10 +18,13 @@ export const RateLimitsConfigSchema = z
       .optional(),
   })
   .strict()
-  .refine(({ backend, redis }) => (backend === "redis" ? redis !== undefined : redis === undefined), {
-    path: ["redis"],
-    message: "redis_rate_limit_config_required_only_for_redis_backend",
-  })
+  .refine(
+    ({ backend, redis }) => (backend === "redis" ? redis !== undefined : redis === undefined),
+    {
+      path: ["redis"],
+      message: "redis_rate_limit_config_required_only_for_redis_backend",
+    },
+  )
   .prefault({});
 
 /** Inferred shared rate-limit configuration. */

@@ -6,7 +6,5 @@
     "noEmit": true
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../schemas/tsconfig.build.json" }
-  ]
+  "references": [{ "path": "../schemas/tsconfig.build.json" }]
 }

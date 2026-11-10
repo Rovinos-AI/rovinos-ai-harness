@@ -177,11 +177,7 @@ function networkViolations(
       externallyReachableNetworks.has(network) &&
       name !== "otel-collector" &&
       name !== "sandbox-egress-proxy" &&
-      !(
-        profile === "test" &&
-        (name === "postgres" || name === "valkey") &&
-        network === "test-host"
-      )
+      !(profile === "test" && (name === "postgres" || name === "valkey") && network === "test-host")
     ) {
       violations.push(`${name}: external_network`);
     }

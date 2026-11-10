@@ -101,11 +101,7 @@ function inspectRuntimeDependencies(manifest: PackageManifest): string[] {
       dependency.name === "@rovinos/rate-limit-redis" &&
       dependency.group === "peerDependencies" &&
       manifest.peerDependenciesMeta?.["@rovinos/rate-limit-redis"]?.optional === true;
-    if (
-      dependency.name.startsWith("@rovinos/") &&
-      !optionalSdkPeer &&
-      !optionalRedisAdapterPeer
-    ) {
+    if (dependency.name.startsWith("@rovinos/") && !optionalSdkPeer && !optionalRedisAdapterPeer) {
       violations.push("publish_internal_dependency");
     }
   }

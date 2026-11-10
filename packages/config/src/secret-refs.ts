@@ -42,8 +42,7 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
       ? []
       : [config.controlPlane.tls.certFile, config.controlPlane.tls.keyFile]),
   ];
-  const rateLimitRefs =
-    config.rateLimits.redis === undefined ? [] : [config.rateLimits.redis.url];
+  const rateLimitRefs = config.rateLimits.redis === undefined ? [] : [config.rateLimits.redis.url];
   return [
     ...modelRefs,
     ...serverRefs,

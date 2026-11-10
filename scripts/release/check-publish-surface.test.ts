@@ -58,7 +58,10 @@ describe("publish surface checks", () => {
           dependencies: { ioredis: "6.0.0" },
           peerDependencies: { "@rovinos/sdk": "*" },
         },
-        [{ path: "package/package.json", size: 256 }, { path: "package/dist/index.js", size: 32 }],
+        [
+          { path: "package/package.json", size: 256 },
+          { path: "package/dist/index.js", size: 32 },
+        ],
       ),
     ).toEqual([]);
   });
@@ -71,7 +74,10 @@ describe("publish surface checks", () => {
           peerDependencies: { "@rovinos/rate-limit-redis": "*" },
           peerDependenciesMeta: { "@rovinos/rate-limit-redis": { optional: true } },
         },
-        [{ path: "package/package.json", size: 256 }, { path: "package/dist/index.js", size: 32 }],
+        [
+          { path: "package/package.json", size: 256 },
+          { path: "package/dist/index.js", size: 32 },
+        ],
       ),
     ).toEqual([]);
   });
