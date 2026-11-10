@@ -47,7 +47,7 @@ definitions (`harness.tool.definition_count` and `harness.tool.definition_bytes`
 input tokens are recorded separately; byte size is a deterministic prompt-size diagnostic, not a
 provider-independent token count or a guarantee of selection quality.
 
-A local synthetic microbenchmark measured `ToolRegistry.retainToolIds` over 100 in-memory selections
+A local synthetic micro-benchmark measured `ToolRegistry.retainToolIds` over 100 in-memory selections
 after constructing catalogs of simple 221-byte tool definitions. Each profile retained 10% of the
 catalog; the byte counts below are JSON-serialized `ToolSpec` arrays. The run used Node 26.12.0 on
 Linux x86_64 (AMD EPYC 7763).
@@ -58,7 +58,7 @@ Linux x86_64 (AMD EPYC 7763).
 | 100 | 10 | 22,201 | 2,221 | 0.218 ms | 0.297 ms |
 | 1,000 | 100 | 222,001 | 22,201 | 0.969 ms | 1.976 ms |
 
-This microbenchmark covers registry filtering only; it excludes server discovery, model-provider
+This micro-benchmark covers registry filtering only; it excludes server discovery, model-provider
 serialization, and inference latency. These measurements are not performance budgets; fixed-runner
 catalog benchmarks are tracked with [performance budgets and soak tests](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/238).
 
