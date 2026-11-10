@@ -9,6 +9,7 @@ import { projectSafeEvents, readEvents } from "./event-views.js";
 import { getRunContent as readRunContent, streamRunContentEvents } from "./content-access.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
 import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
+import { projectRunViewUsage } from "./run-view-usage.js";
 import {
   CancelRunResultSchema,
   ContinueRunOptionsSchema,
@@ -201,11 +202,7 @@ class HarnessClient implements Harness {
           lastSeq: lastEvent.seq,
           lastTs: lastEvent.ts,
           steps: state.steps,
-          usage: {
-            inputTokens: state.usage.inputTokens,
-            outputTokens: state.usage.outputTokens,
-            cost: state.usage.cost,
-          },
+          usage: projectRunViewUsage(state.usage),
           pendingApprovals: Array.from(state.pendingApprovals.keys()),
           recentEvents: await projectSafeEvents(
             this.runtime,
