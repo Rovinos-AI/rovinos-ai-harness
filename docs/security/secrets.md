@@ -13,6 +13,16 @@ domain, explicit `FAKE_` or `test_` values, and non-secret `akv://` references.
 Fixture and example files must contain synthetic values only; do not put real
 credentials in an allowlisted path.
 
+Findings in commits already merged to `main` cannot be removed without rewriting
+history. When such a finding is synthetic test data or a non-secret constant,
+fix the current file first, then acknowledge the historical finding in
+[`.gitleaksignore`](../../.gitleaksignore) with its full fingerprint
+(`<commit SHA>:<file>:<rule>:<line>`) and a comment explaining what the value
+is. A fingerprint suppresses only that finding in that one commit; the same
+value in any other commit, file, or line still fails the scan. A real
+credential is never acknowledged: rotate it instead. Each entry needs
+maintainer approval in the pull request.
+
 Run `scripts/security/apply-github-security-settings.sh --dry-run` to review
 the GitHub API requests. After reviewing them, run the script with `--apply`
 from a configured `gh` CLI session to enable secret scanning, push protection,
