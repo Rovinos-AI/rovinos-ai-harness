@@ -11,6 +11,10 @@ the new sink in the captured-output scan and add a negative control if protectio
 could be bypassed. Keep committed fixtures synthetic; cassette and `__fixtures__` files are
 scanned for canary-like patterns.
 
+The advisory MCP conformance gate scans its archived report tree for the synthetic bearer-token
+canaries; `scripts/ci/mcp-conformance-report-safety.canary.test.ts` is the negative control for
+that report sink.
+
 The hostile MCP App integration tests send run-seeded canaries through rejected telemetry fields
 and scan the host's exported spans, logs, metrics, diagnostics, and captured stdout.
 The canary pipeline exercises the sample MCP fixture's error-result shape with a run-seeded raw
@@ -34,13 +38,18 @@ Eval trials reuse the seeded canary generator and scanner from `@rovinos/eval`. 
 stdout/stderr; workspace values already present in the original fixture are allowed.
 
 The deterministic live-eval model-path integration uses a seeded synthetic API-key canary
-with a loopback OpenAI-compatible provider. It scans gateway/client request and response
-payloads, runtime events, MCP arguments, and provider request bodies for the raw,
-percent-encoded, and base64 forms. The captured host-only authorization header is the
-positive control: the scanner must find that sink and no other captured sink. The same
-scenario checks allow, deny, and human approval/resume through the ordinary runtime.
-A negative control deliberately inserts each credential form into a client-payload
-capture and requires the scan to identify that sink.
+with OpenAI, Anthropic, and loopback OpenAI-compatible provider fixtures. It scans
+gateway/client request and response payloads, runtime events, MCP arguments, and provider
+request bodies for the raw, percent-encoded, and base64 forms. The captured host-only
+provider credential header is the positive control: the scanner must find that sink and
+no other captured sink. The same scenario checks allow, deny, human approval/resume, hidden
+and malformed tool calls, and an unconfigured target through the ordinary runtime. Its
+provider acceptance, invocation, and model-turn outcomes are asserted separately, including
+that the tool result appears in the follow-up provider request. A negative control
+deliberately inserts each credential form into a client-payload capture and requires the
+scan to identify that sink.
+These outbound model-path checks are separate from `harness servers check`, Inspector
+interoperability, and upstream MCP conformance; none establishes the outcome of another.
 The end-to-end skeleton also routes its MCP CLI approval/edit/deny scenario through the
 Unix-socket eval gateway. These checks make no paid provider calls and do not demonstrate
 container isolation or coverage of every possible credential encoding.
