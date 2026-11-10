@@ -85,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/verify-release.ts --dry-run
-          for package in sdk cli store-sqlite store-postgres; do
+          for package in sdk cli store-sqlite store-postgres rate-limit-redis; do
             (cd "packages/$package" && yarn pack --dry-run)
           done
       - name: Validate Compose security profiles
@@ -342,6 +342,7 @@ jobs:
         env:
           TEST_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness
           TEST_VAULT_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness_vault
+          TEST_REDIS_URL: redis://127.0.0.1:6379/0
           LINT_PULL_IMAGES: "1"
       - name: Presidio detector precision and recall report
         if: success() || failure()

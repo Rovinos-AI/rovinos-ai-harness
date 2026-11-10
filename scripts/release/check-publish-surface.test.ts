@@ -49,6 +49,33 @@ describe("publish surface checks", () => {
     ).toEqual([]);
   });
 
+  it("accepts the Redis adapter with its client and optional SDK peer", () => {
+    expect(
+      inspectPackedPackage(
+        {
+          ...publishableManifest,
+          name: "@rovinos/rate-limit-redis",
+          dependencies: { ioredis: "6.0.0" },
+          peerDependencies: { "@rovinos/sdk": "*" },
+        },
+        [{ path: "package/package.json", size: 256 }, { path: "package/dist/index.js", size: 32 }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("allows the optional Redis adapter peer on the SDK", () => {
+    expect(
+      inspectPackedPackage(
+        {
+          ...publishableManifest,
+          peerDependencies: { "@rovinos/rate-limit-redis": "*" },
+          peerDependenciesMeta: { "@rovinos/rate-limit-redis": { optional: true } },
+        },
+        [{ path: "package/package.json", size: 256 }, { path: "package/dist/index.js", size: 32 }],
+      ),
+    ).toEqual([]);
+  });
+
   it("rejects packages over their size budget", () => {
     expect(
       inspectPackedPackage(publishableManifest, [
