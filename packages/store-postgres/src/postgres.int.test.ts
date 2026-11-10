@@ -200,7 +200,14 @@ it("serializes concurrent quota ledger updates with event appends", async () => 
       throw new Error("Expected a ledger store");
     }
     await expect(firstStore.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
-      { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
+      {
+        quotaId: "hourly",
+        period: "hour",
+        periodStart: 3_600_000,
+        costMicros: 0,
+        unknownCostCount: 0,
+        runsStarted: 5,
+      },
     ]);
     const rejectedRunIds = results.flatMap((result, index) =>
       result.status === "rejected" && runIds[index] !== undefined ? [runIds[index]] : [],

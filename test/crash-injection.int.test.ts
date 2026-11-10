@@ -1530,7 +1530,22 @@ describe("SQLite compaction crash recovery", () => {
         expect(resumed.status).toBe("completed");
         expect(events.filter((event) => event.type === "context_compacted")).toHaveLength(1);
         expect(events.filter((event) => event.type === "model_response")).toHaveLength(2);
-        expect(resumed.state.usage).toEqual({ inputTokens: 8, outputTokens: 4, costMicros: 3 });
+        expect(resumed.state.usage).toEqual({
+          inputTokens: 8,
+          outputTokens: 4,
+          costMicros: 3,
+          cost: {
+            version: 1,
+            state: "partial",
+            knownMicros: 3,
+            estimatedMicros: 0,
+            partialMicros: 0,
+            knownCount: 1,
+            estimatedCount: 0,
+            partialCount: 0,
+            unknownCount: 2,
+          },
+        });
         expect(summarize).toHaveBeenCalledTimes(mode === "before_commit" ? 2 : 1);
       } finally {
         await database.close();

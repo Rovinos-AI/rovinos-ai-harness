@@ -424,17 +424,26 @@ class TwoChildBudgetModel implements ModelPort {
     if (this.parentCalls <= 2) {
       const callId = this.parentCalls === 1 ? childCallId : makeCallId;
       return Promise.resolve(
-        completion([
-          {
-            type: "tool_call",
-            callId,
-            toolId: Code.parse("agent.spawn"),
-            args: { role: "worker", goal: `child ${String(this.parentCalls)}` },
-          },
-        ]),
+        completion(
+          [
+            {
+              type: "tool_call",
+              callId,
+              toolId: Code.parse("agent.spawn"),
+              args: { role: "worker", goal: `child ${String(this.parentCalls)}` },
+            },
+          ],
+          { inputTokens: 1, outputTokens: 1, costMicros: 0 },
+        ),
       );
     }
-    return Promise.resolve(completion([{ type: "text", text: "parent answer" }]));
+    return Promise.resolve(
+      completion([{ type: "text", text: "parent answer" }], {
+        inputTokens: 1,
+        outputTokens: 1,
+        costMicros: 0,
+      }),
+    );
   }
 }
 
@@ -512,8 +521,8 @@ describe("runtime subagent spawning", () => {
       expect(parent.state.steps).toBe(5);
       expect(parent.state.usage.costMicros).toBe(10);
       expect(completions).toMatchObject([
-        { outcome: "completed", steps: 1, costMicros: 6 },
-        { outcome: "completed", steps: 1, costMicros: 4 },
+        { outcome: "completed", steps: 1, cost: { state: "known", knownMicros: 6 } },
+        { outcome: "completed", steps: 1, cost: { state: "known", knownMicros: 4 } },
       ]);
     } finally {
       await runtime.close();
