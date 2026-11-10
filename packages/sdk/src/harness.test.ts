@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness } from "./index.js";
 import { GetRunContentOptionsSchema, ListRunsFilterSchema } from "./types.js";
-import type { Harness } from "./types.js";
+import type { ContentAuthorizer, Harness, RunContentStreamEntry } from "./types.js";
 import type { EventStore } from "@rovinos/store";
 
 function fakeModel(responses?: readonly string[]): ModelPort {
@@ -154,6 +154,7 @@ async function createTestHarness(
     readonly store?: InMemoryEventStore;
     readonly idStart?: bigint;
     readonly shutdownGraceMs?: number;
+    readonly contentAuthorizer?: ContentAuthorizer;
   } = {},
 ): Promise<{ readonly harness: Harness; readonly store: InMemoryEventStore }> {
   const store = options.store ?? new InMemoryEventStore();
@@ -170,6 +171,9 @@ async function createTestHarness(
         ? {}
         : { run: { shutdownGraceMs: options.shutdownGraceMs } }),
     }),
+    ...(options.contentAuthorizer === undefined
+      ? {}
+      : { contentAuthorizer: options.contentAuthorizer }),
     overrides: {
       store,
       clock: new FakeClock(10_000),
@@ -825,6 +829,177 @@ describe("@rovinos/sdk", () => {
     await expect(harness.getRunContent(started.runId, { reveal: false })).rejects.toMatchObject({
       code: "sdk_content_unavailable",
     });
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.test"),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "sdk_content_unavailable" });
+  });
+
+  it("denies content streams without an authorizer or for an unauthorized principal and run", async () => {
+    const { harness } = await createTestHarness();
+    const started = await harness.startRun({ goal: "Synthetic content" });
+    await waitForRun(harness, started.runId, "completed");
+
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.test"),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
+
+    const allowedRunIds = new Set<string>();
+    const authorizedHarness = await createTestHarness({
+      contentAuthorizer: ({ principal, runId }) =>
+        principal === "cli.reader" && allowedRunIds.has(runId),
+    });
+    const authorizedRun = await authorizedHarness.harness.startRun({
+      goal: "Another synthetic run",
+    });
+    await waitForRun(authorizedHarness.harness, authorizedRun.runId, "completed");
+    allowedRunIds.add(authorizedRun.runId);
+
+    await expect(
+      collectContent(
+        authorizedHarness.harness.streamRunContent(authorizedRun.runId, {
+          principal: Principal.parse("cli.other"),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
+    await expect(
+      collectContent(
+        authorizedHarness.harness.streamRunContent(Id.parse("00000000000000000000000099"), {
+          principal: Principal.parse("cli.reader"),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
+  });
+
+  it("fails closed when the content authorizer rejects", async () => {
+    const { harness } = await createTestHarness({
+      contentAuthorizer: () => {
+        throw new Error("synthetic authorization failure");
+      },
+    });
+    const started = await harness.startRun({ goal: "Synthetic content" });
+    await waitForRun(harness, started.runId, "completed");
+
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.reader"),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "sdk_content_access_denied" });
+  });
+
+  it("stops streams cancelled before and during authorization", async () => {
+    const cancelledDuringAuthorization = new AbortController();
+    let abortDuringAuthorization = false;
+    const authorizer = vi.fn(() => {
+      if (abortDuringAuthorization) {
+        cancelledDuringAuthorization.abort();
+      }
+      return true;
+    });
+    const { harness } = await createTestHarness({ contentAuthorizer: authorizer });
+    const started = await harness.startRun({ goal: "Synthetic content" });
+    await waitForRun(harness, started.runId, "completed");
+
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort();
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.reader"),
+          signal: alreadyAborted.signal,
+        }),
+      ),
+    ).resolves.toEqual([]);
+    expect(authorizer).not.toHaveBeenCalled();
+
+    abortDuringAuthorization = true;
+    await expect(
+      collectContent(
+        harness.streamRunContent(started.runId, {
+          principal: Principal.parse("cli.reader"),
+          signal: cancelledDuringAuthorization.signal,
+        }),
+      ),
+    ).resolves.toEqual([]);
+    expect(authorizer).toHaveBeenCalledOnce();
+  });
+
+  it("streams committed content with independent readers, bounded slow-consumer delivery, and replay", async () => {
+    const { harness } = await createTestHarness({
+      contentAuthorizer: ({ principal }) => principal === "cli.reader",
+    });
+    const started = await harness.startRun({ goal: "Synthetic streaming content" });
+    await waitForRun(harness, started.runId, "completed");
+
+    const options = { principal: Principal.parse("cli.reader") };
+    const iterator = harness.streamRunContent(started.runId, options)[Symbol.asyncIterator]();
+    const first = await iterator.next();
+    expect(first.done).toBe(false);
+    if (first.done === true) {
+      throw new Error("Expected committed content.");
+    }
+    expect(first.value.durability).toBe("committed");
+
+    const concurrent = await collectContent(harness.streamRunContent(started.runId, options));
+    const remainder: RunContentStreamEntry[] = [];
+    let next = await iterator.next();
+    while (next.done === false) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      remainder.push(next.value);
+      next = await iterator.next();
+    }
+    const complete = [first.value, ...remainder];
+    expect(concurrent).toEqual(complete);
+    expect(complete.map(({ seq }) => seq)).toEqual(
+      complete.map(({ seq }) => seq).sort((left, right) => left - right),
+    );
+
+    const resumed = await collectContent(
+      harness.streamRunContent(started.runId, {
+        ...options,
+        fromSeq: first.value.seq + 1,
+      }),
+    );
+    expect(resumed).toEqual(remainder);
+  });
+
+  it("stops a stream when authorization is revoked and on caller cancellation", async () => {
+    let authorized = true;
+    const { harness } = await createTestHarness({
+      contentAuthorizer: () => authorized,
+    });
+    const started = await harness.startRun({ goal: "Synthetic revocation content" });
+    await waitForRun(harness, started.runId, "completed");
+
+    const options = { principal: Principal.parse("cli.reader") };
+    const revokedIterator = harness
+      .streamRunContent(started.runId, options)
+      [Symbol.asyncIterator]();
+    const first = await revokedIterator.next();
+    expect(first.done).toBe(false);
+    authorized = false;
+    await expect(revokedIterator.next()).rejects.toMatchObject({
+      code: "sdk_content_access_denied",
+    });
+
+    authorized = true;
+    const controller = new AbortController();
+    const cancelledIterator = harness
+      .streamRunContent(started.runId, { ...options, signal: controller.signal })
+      [Symbol.asyncIterator]();
+    const item = await cancelledIterator.next();
+    expect(item.done).toBe(false);
+    controller.abort();
+    await expect(cancelledIterator.next()).resolves.toMatchObject({ done: true });
   });
 
   it("watches safe events and accepts cooperative cancellation", async () => {
@@ -841,6 +1016,16 @@ describe("@rovinos/sdk", () => {
     expect(await harness.cancelRun(started.runId)).toBe("already_terminal");
     await expect(harness.getRun("invalid")).rejects.toThrow();
   });
+
+  async function collectContent(
+    content: AsyncIterable<RunContentStreamEntry>,
+  ): Promise<RunContentStreamEntry[]> {
+    const entries: RunContentStreamEntry[] = [];
+    for await (const entry of content) {
+      entries.push(entry);
+    }
+    return entries;
+  }
 
   it("resolves approvals and resumes suspended runs", async () => {
     const { harness, store } = await createTestHarness({ approval: true });
