@@ -22,7 +22,7 @@ export type { SafeEvent } from "@rovinos/telemetry";
 export { defineTool } from "./extensions.js";
 
 import { type Runtime } from "@rovinos/core";
-import type { ExtensionHarnessAccessOptions } from "./extension-harness-access.js";
+import { type ExtensionHarnessAccessOptions } from "./extension-harness-access.js";
 import { type Harness, type ContentAuthorizer } from "./types.js";
 /** Creates the internal SDK client around a validated runtime. */
 export declare function createHarnessClient(input: {
