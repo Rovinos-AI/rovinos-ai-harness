@@ -82,7 +82,7 @@ export function rateLimitStoreConformance(
       });
     });
 
-    it("enforces aggregate capacity across two concurrent clients", async () => {
+    it("enforces aggregate capacity across 200 concurrent requests", async () => {
       await withStore(createFactory, async (factory) => {
         const first = factory.open();
         const second = factory.open();
@@ -94,12 +94,33 @@ export function rateLimitStoreConformance(
         );
 
         expect(results.filter(({ allowed }) => allowed)).toHaveLength(limit.capacity);
-        expect(
-          results.filter(({ allowed }, index) => allowed && index % 2 === 0).length,
-        ).toBeGreaterThan(0);
-        expect(
-          results.filter(({ allowed }, index) => allowed && index % 2 === 1).length,
-        ).toBeGreaterThan(0);
+      });
+    });
+
+    it("shares grants fairly when clients have interleaved arrivals", async () => {
+      await withStore(createFactory, async (factory) => {
+        const first = factory.open();
+        const second = factory.open();
+        const limit = { capacity: 100, refillPerSecond: 0.000001 };
+        let firstGrants = 0;
+        let secondGrants = 0;
+
+        for (let index = 0; index < limit.capacity; index += 1) {
+          const [firstResult, secondResult] = await Promise.all([
+            first.take(Code.parse("provider.openai"), limit),
+            second.take(Code.parse("provider.openai"), limit),
+          ]);
+          if (firstResult.allowed) {
+            firstGrants += 1;
+          }
+          if (secondResult.allowed) {
+            secondGrants += 1;
+          }
+        }
+
+        expect(firstGrants + secondGrants).toBe(limit.capacity);
+        expect(firstGrants).toBeGreaterThan(0);
+        expect(secondGrants).toBeGreaterThan(0);
       });
     });
   });
