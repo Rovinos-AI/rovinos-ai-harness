@@ -149,7 +149,10 @@ The profile is an operator attestation, not proof of the credential's permission
 provision and restrict the staging key outside the harness. Without these
 settings the paid smoke is skipped. Its run is capped at four provider requests.
 Deterministic MCP model-path fixtures exercise the same gateway without paid calls;
-they are not evidence of live-provider compatibility. See
+they are not evidence of live-provider compatibility. Provider response acceptance, MCP
+invocation, and completion of the model turn are checked as separate outcomes. These
+outbound tests are independent of `harness servers check`, Inspector interoperability, and
+upstream MCP conformance; none is evidence for the others. See
 [ADR 0006](./decisions/0006-live-eval-model-gateway.md) for the trust assumptions,
 credential boundary, rejected alternatives, and remaining restrictions.
 
