@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   evalshaError: undefined as Error | undefined,
   evalResult: ["1", "0", "2"] as unknown,
   evalError: undefined as Error | undefined,
+  connectCalls: 0,
   evalshaCalls: 0,
   evalCalls: 0,
 }));
@@ -18,8 +19,16 @@ vi.mock("ioredis", () => ({
   Redis: class {
     status = "wait";
 
+    async connect(): Promise<void> {
+      state.connectCalls += 1;
+    }
+
     on(): this {
       return this;
+    }
+
+    disconnect(): void {
+      this.status = "end";
     }
 
     async script(): Promise<string> {
@@ -60,6 +69,7 @@ describe("RedisRateLimitStore", () => {
     state.evalshaError = undefined;
     state.evalResult = ["1", "0", "2"];
     state.evalError = undefined;
+    state.connectCalls = 0;
     state.evalshaCalls = 0;
     state.evalCalls = 0;
   });
@@ -72,6 +82,7 @@ describe("RedisRateLimitStore", () => {
     );
     expect(state.evalshaCalls).toBe(1);
     expect(state.evalCalls).toBe(0);
+    expect(state.connectCalls).toBe(1);
     await store.close();
   });
 
@@ -132,5 +143,12 @@ describe("RedisRateLimitStore", () => {
     expect(state.evalshaCalls).toBe(0);
     expect(state.evalCalls).toBe(0);
     await store.close();
+  });
+
+  it("closes without connecting when no request was made", async () => {
+    const store = new RedisRateLimitStore("redis://redis.example.invalid:6379/0");
+
+    await expect(store.close()).resolves.toBeUndefined();
+    expect(state.connectCalls).toBe(0);
   });
 });

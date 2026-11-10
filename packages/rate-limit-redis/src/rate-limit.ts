@@ -53,6 +53,7 @@ export interface RedisRateLimitStoreOptions {
 export class RedisRateLimitStore implements RateLimitStore {
   private readonly client: Redis;
   private readonly keyPrefix: string;
+  private connection: Promise<void> | undefined;
   private scriptSha: string | undefined;
   private scriptLoad: Promise<string | undefined> | undefined;
   private useEvalFallback = false;
@@ -86,6 +87,7 @@ export class RedisRateLimitStore implements RateLimitStore {
     const ttl = validateTake(key, limit, cost);
     const redisKey = `${this.keyPrefix}:rl:${Code.parse(key)}`;
     try {
+      await this.connect();
       const result =
         this.useEvalFallback || (await this.loadScript()) === undefined
           ? await this.client.eval(
@@ -107,12 +109,24 @@ export class RedisRateLimitStore implements RateLimitStore {
   /** Closes the Redis connection. */
   async close(): Promise<void> {
     try {
-      if (this.client.status !== "end") {
+      if (this.client.status === "wait") {
+        this.client.disconnect();
+      } else if (this.client.status !== "end") {
         await this.client.quit();
       }
     } catch {
       throw unavailable();
     }
+  }
+
+  private connect(): Promise<void> {
+    if (this.connection === undefined) {
+      this.connection = this.client.connect().catch((error: unknown) => {
+        this.connection = undefined;
+        throw error;
+      });
+    }
+    return this.connection;
   }
 
   private loadScript(): Promise<string | undefined> {

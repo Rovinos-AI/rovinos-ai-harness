@@ -9,8 +9,14 @@ vi.mock("ioredis", () => ({
   Redis: class {
     status = "wait";
 
+    async connect(): Promise<void> {}
+
     on(): this {
       return this;
+    }
+
+    disconnect(): void {
+      this.status = "end";
     }
 
     async script(): Promise<string> {
