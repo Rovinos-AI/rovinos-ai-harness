@@ -228,7 +228,7 @@ describe("SDK MCP onboarding", () => {
 
     const result = await inspectMcpServer(
       { ...server, toolAllowlist: ["forecast"] },
-      { resolveSecret: async () => "synthetic-secret" },
+      { resolveSecret: () => Promise.resolve("synthetic-secret") },
     );
 
     expect(result.serverId).toBe("weather");
@@ -251,7 +251,7 @@ describe("SDK MCP onboarding", () => {
     mcpMocks.connect.mockRejectedValueOnce(new McpConnectionError("mcp_connect_timeout"));
 
     await expect(
-      inspectMcpServer(server, { resolveSecret: async () => "synthetic-secret" }),
+      inspectMcpServer(server, { resolveSecret: () => Promise.resolve("synthetic-secret") }),
     ).rejects.toMatchObject({ code: "mcp_connect_timeout" });
     expect(mcpMocks.close).toHaveBeenCalledOnce();
   });
@@ -260,12 +260,12 @@ describe("SDK MCP onboarding", () => {
     mcpMocks.connect.mockRejectedValueOnce(new McpAuthRequiredError());
 
     await expect(
-      inspectMcpServer(server, { resolveSecret: async () => "synthetic-secret" }),
+      inspectMcpServer(server, { resolveSecret: () => Promise.resolve("synthetic-secret") }),
     ).rejects.toMatchObject({ code: "mcp_auth_required" });
 
     mcpMocks.listTools.mockRejectedValueOnce(new Error("synthetic_remote_error"));
     await expect(
-      inspectMcpServer(server, { resolveSecret: async () => "synthetic-secret" }),
+      inspectMcpServer(server, { resolveSecret: () => Promise.resolve("synthetic-secret") }),
     ).rejects.toMatchObject({ code: "sdk_mcp_inspection_failed" });
   });
 
@@ -273,7 +273,7 @@ describe("SDK MCP onboarding", () => {
     mcpMocks.listTools.mockResolvedValueOnce([tool("same"), tool("Same")]);
 
     await expect(
-      inspectMcpServer(server, { resolveSecret: async () => "synthetic-secret" }),
+      inspectMcpServer(server, { resolveSecret: () => Promise.resolve("synthetic-secret") }),
     ).rejects.toMatchObject({ code: "sdk_mcp_catalog_invalid" });
 
   });
@@ -281,15 +281,15 @@ describe("SDK MCP onboarding", () => {
   it("rejects invalid catalogs and selections for absent servers", () => {
     const config = registerMcpServer({}, server);
 
-    expect(() =>
-      Reflect.apply(selectMcpTools, undefined, [config, {}, ["forecast"]]),
-    ).toThrow(expect.objectContaining({ code: "sdk_mcp_catalog_invalid" }));
-    expect(() =>
-      selectMcpTools(config, { ...inspection, serverId: "other" }, ["forecast"]),
-    ).toThrow(expect.objectContaining({ code: "sdk_mcp_server_not_found" }));
-    expect(() =>
-      Reflect.apply(selectMcpTools, undefined, [config, inspection, null]),
-    ).toThrow(expect.objectContaining({ code: "sdk_mcp_selection_invalid" }));
+    expect(() => {
+      Reflect.apply(selectMcpTools, undefined, [config, {}, ["forecast"]]);
+    }).toThrow(expect.objectContaining({ code: "sdk_mcp_catalog_invalid" }));
+    expect(() => {
+      selectMcpTools(config, { ...inspection, serverId: "other" }, ["forecast"]);
+    }).toThrow(expect.objectContaining({ code: "sdk_mcp_server_not_found" }));
+    expect(() => {
+      Reflect.apply(selectMcpTools, undefined, [config, inspection, null]);
+    }).toThrow(expect.objectContaining({ code: "sdk_mcp_selection_invalid" }));
   });
 
   it("selects only catalog tools, preserves selected idempotency, and supports empty exposure", () => {
