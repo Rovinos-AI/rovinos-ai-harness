@@ -27,6 +27,12 @@ import {
   type RunningInspectorWebClient,
 } from "../scripts/ci/inspector-web.js";
 
+declare global {
+  interface Window {
+    __captureInspectorMcpEvent?: (payload: string) => void;
+  }
+}
+
 const root = resolve(import.meta.dirname, "..");
 const harness = resolve(root, "packages/cli/dist/bin.js");
 const inspector = resolve(
@@ -267,46 +273,51 @@ async function captureInspectorServerResults(
     window.fetch = async (...args) => {
       const response = await fetch(...args);
       const input = args[0];
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof Request
-            ? input.url
-            : input instanceof URL
-              ? input.href
-              : undefined;
-      if (url !== undefined && new URL(url, window.location.href).pathname === "/api/mcp/events") {
-        const capture = Reflect.get(window, "__captureInspectorMcpEvent");
-        if (typeof capture === "function") {
-          Reflect.apply(capture, window, ["inspector-event-stream-open"]);
-        }
-        const reader = response.clone().body?.getReader();
-        if (reader !== undefined) {
-          void (async () => {
-            const decoder = new TextDecoder();
-            let buffer = "";
-            while (true) {
-              const { done, value } = await reader.read();
-              buffer += decoder.decode(value, { stream: !done });
-              const chunks = buffer.split("\n\n");
-              buffer = chunks.pop() ?? "";
-              for (const chunk of chunks) {
-                const data = chunk
-                  .split("\n")
-                  .find((line) => line.startsWith("data: "))
-                  ?.slice(6);
-                const capture = Reflect.get(window, "__captureInspectorMcpEvent");
-                if (data !== undefined && typeof capture === "function") {
-                  Reflect.apply(capture, window, [data]);
-                }
-              }
-              if (done) {
-                break;
-              }
-            }
-          })();
-        }
+      let url: string | undefined;
+      if (typeof input === "string") {
+        url = input;
+      } else if (input instanceof Request) {
+        url = input.url;
+      } else if (input instanceof URL) {
+        url = input.href;
       }
+      if (
+        url === undefined ||
+        new URL(url, window.location.href).pathname !== "/api/mcp/events"
+      ) {
+        return response;
+      }
+      window.__captureInspectorMcpEvent?.("inspector-event-stream-open");
+      const reader = response.clone().body?.getReader();
+      if (reader === undefined) {
+        return response;
+      }
+      void (async () => {
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            buffer += decoder.decode();
+          } else {
+            buffer += decoder.decode(value, { stream: true });
+          }
+          const chunks = buffer.split("\n\n");
+          buffer = chunks.pop() ?? "";
+          for (const chunk of chunks) {
+            const data = chunk
+              .split("\n")
+              .find((line) => line.startsWith("data: "))
+              ?.slice(6);
+            if (data !== undefined) {
+              window.__captureInspectorMcpEvent?.(data);
+            }
+          }
+          if (done) {
+            break;
+          }
+        }
+      })();
       return response;
     };
   });
@@ -860,12 +871,9 @@ it("renders approval apps in Inspector and fails closed on decisions without con
           })}`,
         );
       }
-      expect(
-        diagnostics.jsonRpcMessages.some((message) =>
-          message.includes('"structuredCode":"human_confirmation_unavailable"'),
-        ),
-        JSON.stringify(diagnostics.jsonRpcMessages),
-      ).toBe(true);
+      expect(diagnostics.jsonRpcMessages.join("\n")).toContain(
+        '"structuredCode":"human_confirmation_unavailable"',
+      );
       const store = new SqliteEventStore(join(dataDir, "harness.db"));
       try {
         const events: HarnessEvent[] = [];
@@ -890,9 +898,11 @@ it("renders approval apps in Inspector and fails closed on decisions without con
         requests: requestLog,
       });
       expect(JSON.stringify(requestLog)).toContain("harness.approvals.resolve");
-      expect(requestLog.some((request) => request.body?.includes(`"decision":"${decision}"`))).toBe(
-        true,
-      );
+      expect(
+        requestLog.some(
+          (request) => request.body?.includes(`"decision":"${decision}"`) === true,
+        ),
+      ).toBe(true);
       expectNoExternalSandboxRequests(requestLog);
       for (const canary of rawCanaries) {
         expect(panels).not.toContain(canary);
