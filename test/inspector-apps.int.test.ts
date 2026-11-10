@@ -68,6 +68,11 @@ const inspectorServerCreateRequestSchema = z.looseObject({
 const inspectorJsonRpcMessageSchema = z.looseObject({
   id: z.union([z.number(), z.string()]).optional(),
   method: z.string().optional(),
+  result: z
+    .looseObject({
+      structuredContent: z.unknown().optional(),
+    })
+    .optional(),
   params: z
     .looseObject({
       name: z.string().optional(),
@@ -79,6 +84,10 @@ const inspectorJsonRpcMessageSchema = z.looseObject({
     })
     .optional(),
   error: z.looseObject({ code: z.union([z.number(), z.string()]).optional() }).optional(),
+});
+const inspectorServerEventSchema = z.looseObject({
+  type: z.literal("message"),
+  data: inspectorJsonRpcMessageSchema,
 });
 const recordSchema = z.record(z.string(), z.unknown());
 const inspectorSendRequestSchema = z.looseObject({
@@ -155,6 +164,11 @@ function captureBrowserDiagnostics(page: Page, diagnostics: BrowserDiagnostics):
           ? {
               isError: record.params.isError === true,
               hasStructuredContent: record.params.structuredContent !== undefined,
+              structuredCode: (() => {
+                const content = recordSchema.safeParse(record.params.structuredContent);
+                const code = content.success ? content.data.code : undefined;
+                return typeof code === "string" && /^[\w.-]{1,80}$/u.test(code) ? code : undefined;
+              })(),
               contentTypes: record.params.content?.map((part) => part.type) ?? [],
               validApprovalInput: ApprovalAppInputSchema.safeParse(record.params.structuredContent)
                 .success,
@@ -205,6 +219,91 @@ function captureBrowserDiagnostics(page: Page, diagnostics: BrowserDiagnostics):
         `${safeRequestUrl(response.url())}: HTTP ${String(response.status())}`,
       );
     }
+  });
+}
+
+async function captureInspectorServerResults(
+  page: Page,
+  diagnostics: BrowserDiagnostics,
+): Promise<void> {
+  await page.exposeBinding("__captureInspectorMcpEvent", (_source, payload: unknown) => {
+    if (typeof payload !== "string") {
+      return;
+    }
+    if (payload === "inspector-event-stream-open") {
+      diagnostics.jsonRpcMessages.push(JSON.stringify({ eventStream: "opened" }));
+      return;
+    }
+    let event: z.infer<typeof inspectorServerEventSchema>;
+    try {
+      event = parseJson(inspectorServerEventSchema, payload);
+    } catch {
+      return;
+    }
+    const result = recordSchema.safeParse(event.data.result?.structuredContent);
+    const code = result.success ? result.data.code : undefined;
+    const errorCode = event.data.error?.code;
+    diagnostics.jsonRpcMessages.push(
+      JSON.stringify({
+        ...(event.data.id === undefined ? {} : { id: event.data.id }),
+        hasResult: event.data.result !== undefined,
+        ...(typeof code === "string" && /^[\w.-]{1,80}$/u.test(code)
+          ? { structuredCode: code }
+          : {}),
+        ...(typeof errorCode === "number" ||
+        (typeof errorCode === "string" && /^[\w.-]{1,80}$/u.test(errorCode))
+          ? { errorCode }
+          : {}),
+      }),
+    );
+  });
+  await page.addInitScript(() => {
+    const fetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+      const response = await fetch(...args);
+      const input = args[0];
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : input instanceof URL
+              ? input.href
+              : undefined;
+      if (url !== undefined && new URL(url, window.location.href).pathname === "/api/mcp/events") {
+        const capture = Reflect.get(window, "__captureInspectorMcpEvent");
+        if (typeof capture === "function") {
+          Reflect.apply(capture, window, ["inspector-event-stream-open"]);
+        }
+        const reader = response.clone().body?.getReader();
+        if (reader !== undefined) {
+          void (async () => {
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              buffer += decoder.decode(value, { stream: !done });
+              const chunks = buffer.split("\n\n");
+              buffer = chunks.pop() ?? "";
+              for (const chunk of chunks) {
+                const data = chunk
+                  .split("\n")
+                  .find((line) => line.startsWith("data: "))
+                  ?.slice(6);
+                const capture = Reflect.get(window, "__captureInspectorMcpEvent");
+                if (data !== undefined && typeof capture === "function") {
+                  Reflect.apply(capture, window, [data]);
+                }
+              }
+              if (done) {
+                break;
+              }
+            }
+          })();
+        }
+      }
+      return response;
+    };
   });
 }
 
@@ -608,7 +707,7 @@ async function openApproval(
   expectNoExternalSandboxRequests(requestLog);
 }
 
-it("renders approval apps in Inspector and records human decisions", async () => {
+it("renders approval apps in Inspector and fails closed on decisions without confirmation", async () => {
   const activeBrowser = browser;
   if (activeBrowser === undefined) {
     throw new Error("Playwright browser was not initialized.");
@@ -668,6 +767,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         networkFailures: [],
         failedResponses: [],
       };
+      await captureInspectorServerResults(page, diagnostics);
       captureBrowserDiagnostics(page, diagnostics);
       await configureInspectorAuthorization(
         page,
@@ -696,18 +796,11 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         name: decision === "approve" ? "Approve" : "Deny",
         exact: true,
       });
-      if (decision === "approve") {
-        await button.evaluate((element: HTMLButtonElement) => {
-          element.click();
-          element.click();
-        });
-      } else {
-        await button.click();
-      }
+      await button.click();
       try {
         await app
           .getByRole("status")
-          .filter({ hasText: decision === "approve" ? "Approval granted." : "Approval denied." })
+          .filter({ hasText: "The approval could not be resolved." })
           .waitFor({ state: "visible" });
       } catch {
         const appText = await app
@@ -751,7 +844,12 @@ it("renders approval apps in Inspector and records human decisions", async () =>
           })}`,
         );
       }
-      expect(await button.isDisabled()).toBe(true);
+      expect(
+        diagnostics.jsonRpcMessages.some((message) =>
+          message.includes('"structuredCode":"human_confirmation_unavailable"'),
+        ),
+        JSON.stringify(diagnostics.jsonRpcMessages),
+      ).toBe(true);
       const store = new SqliteEventStore(join(dataDir, "harness.db"));
       try {
         const events: HarnessEvent[] = [];
@@ -759,8 +857,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
           events.push(event);
         }
         const decisions = events.filter((event) => event.type === "approval_resolved");
-        expect(decisions).toHaveLength(1);
-        expect(decisions[0]).toMatchObject({ decision, decidedBy: "human" });
+        expect(decisions).toHaveLength(0);
       } finally {
         await store.close();
       }
@@ -777,6 +874,9 @@ it("renders approval apps in Inspector and records human decisions", async () =>
         requests: requestLog,
       });
       expect(JSON.stringify(requestLog)).toContain("harness.approvals.resolve");
+      expect(requestLog.some((request) => request.body?.includes(`"decision":"${decision}"`))).toBe(
+        true,
+      );
       expectNoExternalSandboxRequests(requestLog);
       for (const canary of rawCanaries) {
         expect(panels).not.toContain(canary);
@@ -807,6 +907,7 @@ it("renders approval apps in Inspector and records human decisions", async () =>
       networkFailures: [],
       failedResponses: [],
     };
+    await captureInspectorServerResults(resolvedPage, resolvedDiagnostics);
     captureBrowserDiagnostics(resolvedPage, resolvedDiagnostics);
     await configureInspectorAuthorization(
       resolvedPage,
