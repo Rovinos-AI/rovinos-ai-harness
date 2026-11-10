@@ -219,11 +219,7 @@ describe("SDK MCP onboarding", () => {
   });
 
   it("validates a discovered catalog and reports configured exposure and rejected tools", async () => {
-    mcpMocks.listTools.mockResolvedValue([
-      tool("forecast"),
-      tool("send_report"),
-      tool(""),
-    ]);
+    mcpMocks.listTools.mockResolvedValue([tool("forecast"), tool("send_report"), tool("")]);
     mcpMocks.setProtocolEra(undefined);
 
     const result = await inspectMcpServer(
@@ -275,7 +271,6 @@ describe("SDK MCP onboarding", () => {
     await expect(
       inspectMcpServer(server, { resolveSecret: () => Promise.resolve("synthetic-secret") }),
     ).rejects.toMatchObject({ code: "sdk_mcp_catalog_invalid" });
-
   });
 
   it("rejects invalid catalogs and selections for absent servers", () => {
