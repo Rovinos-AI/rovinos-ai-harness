@@ -16,6 +16,7 @@ import {
 import { FakeClock, Id, type Event } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { TripQueue } from "@rovinos/telemetry";
+import * as telemetry from "@rovinos/telemetry";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LeaseLostError,
@@ -298,6 +299,99 @@ describe("RunRecorder", () => {
     expect(second.seq).toBe(1);
     expect(recorder.nextSeq).toBe(2);
     expect(await store.head(runId)).toBe(2);
+  });
+
+  it("emits completion, model, approval, and tool metrics from recorded events", async () => {
+    const recorder = makeRecorder(new InMemoryEventStore());
+    const completionMetric = vi
+      .spyOn(telemetry, "countCompletedRun")
+      .mockImplementation(() => undefined);
+    const latencyMetric = vi
+      .spyOn(telemetry, "recordModelLatency")
+      .mockImplementation(() => undefined);
+    const approvalMetric = vi
+      .spyOn(telemetry, "recordApprovalWait")
+      .mockImplementation(() => undefined);
+    const toolMetric = vi.spyOn(telemetry, "countToolCall").mockImplementation(() => undefined);
+
+    try {
+      await recorder.withStepSpan(
+        MODEL_CALL_SPAN,
+        {
+          "harness.context.strategy": "naive",
+          "harness.context.strategy_version": "v3",
+          "harness.context.estimated_tokens": 0,
+          "harness.context.message_count": 0,
+        },
+        () =>
+          recorder.recordBatch([
+            runCreated(),
+            {
+              type: "run_status_changed",
+              v: 1,
+              from: "running",
+              to: "completed",
+              reason: "final_answer",
+            },
+            {
+              type: "run_status_changed",
+              v: 1,
+              from: "running",
+              to: "failed",
+              reason: "failure",
+            },
+            {
+              type: "run_status_changed",
+              v: 1,
+              from: "running",
+              to: "cancelled",
+              reason: "cancelled",
+            },
+            {
+              type: "model_response",
+              v: 1,
+              requestId: "22222222222222222222222222",
+              provider: "sample",
+              model: "model-a",
+              inputTokens: 2,
+              outputTokens: 3,
+              finishReason: "stop",
+              latencyMs: 17,
+              schemaValid: true,
+              repairAttempts: 0,
+              content: [],
+              providerBlobs: null,
+            },
+            {
+              type: "approval_resolved",
+              v: 1,
+              approvalId: "33333333333333333333333333",
+              decision: "approve",
+              decidedBy: "policy",
+              waitMs: 19,
+            },
+            {
+              type: "tool_result",
+              v: 2,
+              callId: "44444444444444444444444444",
+              toolId: "test.tool",
+              outcome: "timeout",
+              latencyMs: 20,
+              result: null,
+            },
+          ]),
+      );
+
+      expect(completionMetric.mock.calls).toEqual([["completed"], ["failed"], ["cancelled"]]);
+      expect(latencyMetric).toHaveBeenCalledExactlyOnceWith(17, "sample", "model-a");
+      expect(approvalMetric).toHaveBeenCalledExactlyOnceWith(19, "approve");
+      expect(toolMetric).toHaveBeenCalledExactlyOnceWith("timeout");
+    } finally {
+      completionMetric.mockRestore();
+      latencyMetric.mockRestore();
+      approvalMetric.mockRestore();
+      toolMetric.mockRestore();
+    }
   });
 
   it("leaves the log and sequence unchanged when a batch contains an invalid event", async () => {

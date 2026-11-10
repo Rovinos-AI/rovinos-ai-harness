@@ -50,6 +50,8 @@ export {
 export { emitApprovalAppAudit } from "./approval-app-audit.js";
 export { emitControlPlaneAudit } from "./control-plane-audit.js";
 export {
+  APPROVAL_DECISIONS,
+  countCompletedRun,
   countDroppedTelemetry,
   countHostAppRejected,
   countHostAppSpansAccepted,
@@ -62,9 +64,15 @@ export {
   countPiiDetectorDegraded,
   countPolicyDecision,
   countQuotaRejection,
+  countToolCall,
   countWorkerJob,
   METRIC_ALLOWLIST,
+  recordApprovalWait,
+  recordModelLatency,
   recordWorkerQueueLag,
+  RUN_COMPLETION_OUTCOMES,
+  TOOL_CALL_OUTCOMES,
+  type ApprovalDecision,
   type HostAppRejectedReason,
   type McpInputRequestOutcome,
   MCP_INPUT_REQUEST_OUTCOMES,
@@ -73,6 +81,8 @@ export {
   type WorkerJobOutcome,
   type RateLimitBackend,
   type RateLimitKeyKind,
+  type RunCompletionOutcome,
+  type ToolCallOutcome,
   WORKER_JOB_OUTCOMES,
   RATE_LIMIT_BACKENDS,
   RATE_LIMIT_KEY_KINDS,
