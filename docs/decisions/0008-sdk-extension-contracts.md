@@ -1,4 +1,4 @@
-# ADR 0007: SDK extension contracts and governed registration
+# ADR 0008: SDK extension contracts and governed registration
 
 - **Status:** Accepted
 - **Date:** 2026-11-08

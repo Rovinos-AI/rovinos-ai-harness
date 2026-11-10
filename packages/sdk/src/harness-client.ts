@@ -6,7 +6,8 @@ import { JsonValue as JsonValueSchema, RunInputSchema } from "@rovinos/schemas";
 import type { Event, Id } from "@rovinos/schemas";
 import type { SafeEvent } from "@rovinos/telemetry";
 import { SdkError } from "./types.js";
-import { contentEntries, readEvents, safeEvents } from "./event-views.js";
+import { readEvents, safeEvents } from "./event-views.js";
+import { getRunContent as readRunContent, streamRunContent } from "./content-access.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
 import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
 import { ExtensionHarnessAccess } from "./extension-harness-access.js";
@@ -14,9 +15,7 @@ import type { ExtensionHarnessAccessOptions } from "./extension-harness-access.j
 import {
   CancelRunResultSchema,
   ContinueRunOptionsSchema,
-  GetRunContentOptionsSchema,
   ListRunsFilterSchema,
-  RunContentSchema,
   RunIdInputSchema,
   RunPageSchema,
   RunStartResultSchema,
@@ -31,11 +30,14 @@ import {
   type ListRunsFilter,
   type ResolveApprovalOptions,
   type RunContent,
+  type RunContentStreamEntry,
   type RunPage,
   type RunStartResult,
   type RunView,
   type StartRunOptions,
   type WatchOptions,
+  type StreamRunContentOptions,
+  type ContentAuthorizer,
 } from "./types.js";
 
 const IDEMPOTENCY_ORPHAN_GRACE_MS = 30_000;
@@ -46,6 +48,7 @@ interface HarnessClientOptions extends ExtensionHarnessAccessOptions {
   readonly piiEnabled: boolean;
   readonly correlationEnabled: boolean;
   readonly shutdownGraceMs: number;
+  readonly contentAuthorizer?: ContentAuthorizer;
 }
 
 /** Implements the public SDK lifecycle over the governed core runtime. */
@@ -61,11 +64,13 @@ export class HarnessClient extends ExtensionHarnessAccess implements Harness {
   private readonly runtime: Runtime;
   private readonly piiEnabled: boolean;
   private readonly correlationEnabled: boolean;
+  private readonly contentAuthorizer: ContentAuthorizer | undefined;
   constructor(runtime: Runtime, options: HarnessClientOptions) {
     super(options);
     this.runtime = runtime;
     this.piiEnabled = options.piiEnabled;
     this.correlationEnabled = options.correlationEnabled;
+    this.contentAuthorizer = options.contentAuthorizer;
     this.lifecycle = new LifecycleTracker(options.shutdownGraceMs);
   }
 
@@ -289,19 +294,32 @@ export class HarnessClient extends ExtensionHarnessAccess implements Harness {
   async getRunContent(runId: string, options: GetRunContentOptions): Promise<RunContent> {
     const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
     this.assertAvailable(parsedRunId);
-    GetRunContentOptionsSchema.parse(options);
-    if (!this.piiEnabled) {
-      throw new SdkError("sdk_content_unavailable");
-    }
-    return this.lifecycle.trackOperation(
-      (async () => {
-        const events = await readEvents(this.runtime, parsedRunId);
-        if (events[0]?.type !== "run_created") {
-          throw new SdkError("sdk_run_not_found");
-        }
-        return RunContentSchema.parse(contentEntries(events));
-      })(),
-    );
+    return readRunContent({
+      runtime: this.runtime,
+      runId: parsedRunId,
+      options,
+      piiEnabled: this.piiEnabled,
+      assertAvailable: this.assertAvailable.bind(this),
+      trackOperation: (operation) => this.lifecycle.trackOperation(operation),
+    });
+  }
+
+  streamRunContent(
+    runId: string,
+    options: StreamRunContentOptions,
+  ): AsyncIterable<RunContentStreamEntry> {
+    return streamRunContent({
+      runtime: this.runtime,
+      tracker: this.lifecycle,
+      runId,
+      options,
+      piiEnabled: this.piiEnabled,
+      contentAuthorizer: this.contentAuthorizer,
+      assertOpen: () => {
+        this.assertOpen();
+      },
+      assertAvailable: this.assertAvailable.bind(this),
+    });
   }
 
   close(): Promise<void> {

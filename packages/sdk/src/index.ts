@@ -5,7 +5,7 @@
  * @param options - Validated config or config path and optional runtime adapters.
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
-export { createHarness } from "./harness.js";
+export { createHarness } from "./create-harness.js";
 export {
   ExtensionCapabilitySchema,
   ExtensionCapabilityStatusSchema,
@@ -58,6 +58,9 @@ export {
   type ApprovalDecision,
   type AnswerInputOptions,
   type CancelRunResult,
+  ContentAccessRequestSchema,
+  type ContentAccessRequest,
+  type ContentAuthorizer,
   type ContinueRunOptions,
   type CreateHarnessOptions,
   type CreateHarnessOptionsInput,
@@ -69,12 +72,16 @@ export {
   type ListRunsFilter,
   type ResolveApprovalOptions,
   type RunContent,
+  RunContentStreamEntrySchema,
+  type RunContentStreamEntry,
   type RunPage,
   type RunId,
   type RunStartResult,
   type RunSummary,
   type RunView,
   type StartRunOptions,
+  StreamRunContentOptionsSchema,
+  type StreamRunContentOptions,
   type WatchOptions,
   type WithExtensionRegistrations,
 } from "./types.js";
