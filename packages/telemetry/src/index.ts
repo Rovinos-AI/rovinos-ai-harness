@@ -51,7 +51,6 @@ export { emitApprovalAppAudit } from "./approval-app-audit.js";
 export { emitControlPlaneAudit } from "./control-plane-audit.js";
 export {
   APPROVAL_DECISIONS,
-  countCompletedRun,
   countDroppedTelemetry,
   countHostAppRejected,
   countHostAppSpansAccepted,
@@ -64,11 +63,9 @@ export {
   countPiiDetectorDegraded,
   countPolicyDecision,
   countQuotaRejection,
-  countToolCall,
   countWorkerJob,
+  METRIC_ATTRIBUTE_BOUNDS,
   METRIC_ALLOWLIST,
-  recordApprovalWait,
-  recordModelLatency,
   recordWorkerQueueLag,
   RUN_COMPLETION_OUTCOMES,
   TOOL_CALL_OUTCOMES,
@@ -88,6 +85,12 @@ export {
   RATE_LIMIT_KEY_KINDS,
   type TelemetryDropReason,
 } from "./metrics.js";
+export {
+  countCompletedRun,
+  countToolCall,
+  recordApprovalWait,
+  recordModelLatency,
+} from "./metrics-api.js";
 export {
   __resetRegistryForTests,
   defineSpan,

@@ -323,8 +323,8 @@ describe("RunRecorder", () => {
           "harness.context.estimated_tokens": 0,
           "harness.context.message_count": 0,
         },
-        () =>
-          recorder.recordBatch([
+        async () => {
+          const events = await recorder.recordBatch([
             runCreated(),
             {
               type: "run_status_changed",
@@ -379,7 +379,13 @@ describe("RunRecorder", () => {
               latencyMs: 20,
               result: null,
             },
-          ]),
+          ]);
+          const last = events.at(-1);
+          if (last === undefined) {
+            throw new Error("Expected the metric fixture to record events.");
+          }
+          return last;
+        },
       );
 
       expect(completionMetric.mock.calls).toEqual([["completed"], ["failed"], ["cancelled"]]);

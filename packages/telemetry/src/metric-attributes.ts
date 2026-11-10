@@ -170,3 +170,76 @@ export const METRIC_ALLOWLIST = {
   "harness.approval.wait_ms": ["harness.approval.wait_ms.decision"],
   "harness.tool.calls": ["harness.tool.calls.outcome"],
 } as const;
+
+/** Declares the finite or configuration-owned value set for every allowlisted metric attribute. */
+export const METRIC_ATTRIBUTE_BOUNDS = {
+  "harness.host.app_rejected": {
+    "harness.host.app_rejected.reason": { kind: "enum", values: HOST_APP_REJECTED_REASONS },
+  },
+  "harness.host.app_spans_accepted": {},
+  "harness.model.cache_read_tokens": {
+    "harness.model.provider": { kind: "config", source: "models.providers" },
+    "harness.model.name": { kind: "config", source: "models.providers" },
+  },
+  "harness.model.cache_write_tokens": {
+    "harness.model.provider": { kind: "config", source: "models.providers" },
+    "harness.model.name": { kind: "config", source: "models.providers" },
+  },
+  "harness.model.tokens": {
+    "harness.model.provider": { kind: "config", source: "models.providers" },
+    "harness.model.name": { kind: "config", source: "models.providers" },
+  },
+  "harness.model.cost_micros": {
+    "harness.model.provider": { kind: "config", source: "models.providers" },
+    "harness.model.name": { kind: "config", source: "models.providers" },
+  },
+  "harness.policy.decisions": {
+    "harness.policy.decision": { kind: "enum", values: POLICY_DECISIONS },
+  },
+  "harness.quota.rejections": {
+    "harness.quota.id": { kind: "config", source: "config.quotas" },
+  },
+  "harness.pii.blob_hit": {},
+  "harness.pii.detector_degraded": {},
+  "harness.sentinel.scope_reduced": {},
+  "harness.sentinel.short_values_skipped": {},
+  "harness.telemetry.dropped": {
+    "harness.telemetry.dropped.reason": { kind: "enum", values: TELEMETRY_DROP_REASONS },
+  },
+  "harness.mcp.discovery_failed": {},
+  "harness.mcp.input_requests": {
+    "harness.mcp.input_requests.outcome": { kind: "enum", values: MCP_INPUT_REQUEST_OUTCOMES },
+  },
+  "harness.worker.jobs": {
+    "harness.worker.jobs.outcome": { kind: "enum", values: WORKER_JOB_OUTCOMES },
+  },
+  "harness.rate_limit.denied": {
+    "harness.rate_limit.denied.key_kind": { kind: "enum", values: RATE_LIMIT_KEY_KINDS },
+  },
+  "harness.rate_limit.degraded": {
+    "harness.rate_limit.degraded.backend": { kind: "enum", values: RATE_LIMIT_BACKENDS },
+  },
+  "harness.worker.queue_lag_ms": {},
+  "harness.run.completed": {
+    "harness.run.completed.outcome": { kind: "enum", values: RUN_COMPLETION_OUTCOMES },
+  },
+  "harness.model.latency_ms": {
+    "harness.model.provider": { kind: "config", source: "models.providers" },
+    "harness.model.name": { kind: "config", source: "models.providers" },
+  },
+  "harness.approval.wait_ms": {
+    "harness.approval.wait_ms.decision": { kind: "enum", values: APPROVAL_DECISIONS },
+  },
+  "harness.tool.calls": {
+    "harness.tool.calls.outcome": { kind: "enum", values: TOOL_CALL_OUTCOMES },
+  },
+} as const satisfies Record<
+  keyof typeof METRIC_ALLOWLIST,
+  Readonly<
+    Record<
+      string,
+      | { readonly kind: "enum"; readonly values: readonly Code[] }
+      | { readonly kind: "config"; readonly source: Code }
+    >
+  >
+>;

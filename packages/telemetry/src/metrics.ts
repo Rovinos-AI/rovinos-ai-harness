@@ -13,7 +13,6 @@ import type {
   HostAppRejectedAttributes,
   HostAppRejectedReason,
   METRIC_ALLOWLIST,
-  ApprovalDecision,
   ApprovalWaitAttributes,
   McpInputRequestAttributes,
   McpInputRequestOutcome,
@@ -24,11 +23,9 @@ import type {
   RateLimitBackend,
   RateLimitKeyKind,
   RunCompletedAttributes,
-  RunCompletionOutcome,
   TelemetryDropAttributes,
   TelemetryDropReason,
   ToolCallAttributes,
-  ToolCallOutcome,
   WorkerJobAttributes,
   WorkerJobOutcome,
 } from "./metric-attributes.js";
@@ -44,6 +41,7 @@ export {
   RATE_LIMIT_BACKENDS,
   RATE_LIMIT_KEY_KINDS,
   RUN_COMPLETION_OUTCOMES,
+  METRIC_ATTRIBUTE_BOUNDS,
   TELEMETRY_DROP_REASONS,
   TELEMETRY_METRIC_STRING_ATTRIBUTES,
   TOOL_CALL_OUTCOMES,
@@ -303,21 +301,24 @@ function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
   return workerQueueLagHistogram;
 }
 
-function getModelLatencyHistogram(): Histogram<ModelUsageAttributes> {
+/** Returns the registry-owned model-latency histogram. */
+export function getModelLatencyHistogram(): Histogram<ModelUsageAttributes> {
   modelLatencyHistogram ??= getTelemetryMeter().createHistogram<ModelUsageAttributes>(
     "harness.model.latency_ms",
   );
   return modelLatencyHistogram;
 }
 
-function getApprovalWaitHistogram(): Histogram<ApprovalWaitAttributes> {
+/** Returns the registry-owned approval-wait histogram. */
+export function getApprovalWaitHistogram(): Histogram<ApprovalWaitAttributes> {
   approvalWaitHistogram ??= getTelemetryMeter().createHistogram<ApprovalWaitAttributes>(
     "harness.approval.wait_ms",
   );
   return approvalWaitHistogram;
 }
 
-function getRunCompletedCounter(): Counter<RunCompletedAttributes> {
+/** Returns the registry-owned completed-run counter. */
+export function getRunCompletedCounter(): Counter<RunCompletedAttributes> {
   runCompletedCounter ??= createCounter<RunCompletedAttributes>(
     "harness.run.completed",
     (meter, name) => meter.createCounter<RunCompletedAttributes>(name),
@@ -325,7 +326,8 @@ function getRunCompletedCounter(): Counter<RunCompletedAttributes> {
   return runCompletedCounter;
 }
 
-function getToolCallsCounter(): Counter<ToolCallAttributes> {
+/** Returns the registry-owned tool-call counter. */
+export function getToolCallsCounter(): Counter<ToolCallAttributes> {
   toolCallsCounter ??= createCounter<ToolCallAttributes>("harness.tool.calls", (meter, name) =>
     meter.createCounter<ToolCallAttributes>(name),
   );
@@ -449,42 +451,5 @@ export function recordWorkerQueueLag(lagMs: number): void {
   }
   safelyRecordMetric(() => {
     getWorkerQueueLagHistogram().record(lagMs);
-  });
-}
-
-/** Counts one run entering a terminal state. */
-export function countCompletedRun(outcome: RunCompletionOutcome): void {
-  safelyRecordMetric(() => {
-    getRunCompletedCounter().add(1, { "harness.run.completed.outcome": outcome });
-  });
-}
-
-/** Records one model response latency using its configured provider and model codes. */
-export function recordModelLatency(latencyMs: number, provider: string, model: string): void {
-  if (!Number.isFinite(latencyMs) || latencyMs < 0) {
-    return;
-  }
-  safelyRecordMetric(() => {
-    getModelLatencyHistogram().record(latencyMs, {
-      "harness.model.provider": Code.parse(provider),
-      "harness.model.name": Code.parse(model),
-    });
-  });
-}
-
-/** Records one resolved approval wait using its bounded decision. */
-export function recordApprovalWait(waitMs: number, decision: ApprovalDecision): void {
-  if (!Number.isFinite(waitMs) || waitMs < 0) {
-    return;
-  }
-  safelyRecordMetric(() => {
-    getApprovalWaitHistogram().record(waitMs, { "harness.approval.wait_ms.decision": decision });
-  });
-}
-
-/** Counts one recorded tool result using its bounded outcome. */
-export function countToolCall(outcome: ToolCallOutcome): void {
-  safelyRecordMetric(() => {
-    getToolCallsCounter().add(1, { "harness.tool.calls.outcome": outcome });
   });
 }

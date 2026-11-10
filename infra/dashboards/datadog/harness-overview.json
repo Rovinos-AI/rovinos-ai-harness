@@ -1,0 +1,184 @@
+{
+  "title": "Rovinos Harness Overview",
+  "description": "Starter dashboard. Verify query syntax against your Datadog account before applying.",
+  "layout_type": "ordered",
+  "widgets": [
+    {
+      "definition": {
+        "type": "group",
+        "title": "Runs",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Run completions by outcome",
+              "requests": [
+                {
+                  "q": "sum:harness.run.completed{*} by {harness.run.completed.outcome}.as_count()",
+                  "display_type": "line"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "title": "Models",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Model latency p50 and p95 by model",
+              "requests": [
+                {
+                  "q": "p50:harness.model.latency_ms{*} by {harness.model.name}",
+                  "display_type": "line"
+                },
+                {
+                  "q": "p95:harness.model.latency_ms{*} by {harness.model.name}",
+                  "display_type": "line"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Model tokens by model",
+              "requests": [
+                {
+                  "q": "sum:harness.model.tokens{*} by {harness.model.name}.as_count()",
+                  "display_type": "line"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Model cost by model",
+              "requests": [
+                {
+                  "q": "sum:harness.model.cost_micros{*} by {harness.model.name}.as_count()",
+                  "display_type": "line"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "title": "Safety",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "query_value",
+              "title": "Leak-sentinel drops (must be 0)",
+              "requests": [
+                {
+                  "q": "sum:harness.telemetry.dropped{harness.telemetry.dropped.reason:leak_sentinel}.as_count()"
+                }
+              ],
+              "autoscale": true,
+              "precision": 0,
+              "conditional_formats": [
+                {
+                  "comparator": ">",
+                  "value": 0,
+                  "palette": "red_on_white"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "PII detector degradation",
+              "requests": [
+                {
+                  "q": "sum:harness.pii.detector_degraded{*}.as_count()",
+                  "display_type": "line"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Rejected app spans by reason",
+              "requests": [
+                {
+                  "q": "sum:harness.host.app_rejected{*} by {harness.host.app_rejected.reason}.as_count()",
+                  "display_type": "line"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "title": "Approvals",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Approval wait p95 by decision",
+              "requests": [
+                {
+                  "q": "p95:harness.approval.wait_ms{*} by {harness.approval.wait_ms.decision}",
+                  "display_type": "line"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Approval decisions",
+              "requests": [
+                {
+                  "q": "count:harness.approval.wait_ms{*} by {harness.approval.wait_ms.decision}",
+                  "display_type": "line"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "title": "Tools",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Tool calls by outcome",
+              "requests": [
+                {
+                  "q": "sum:harness.tool.calls{*} by {harness.tool.calls.outcome}.as_count()",
+                  "display_type": "line"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

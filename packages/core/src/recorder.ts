@@ -342,21 +342,16 @@ export class RunRecorder {
       EventSchema.parse({ ...event, seq: expectedSeq + index }),
     );
     for (const event of events) {
-      switch (event.type) {
-        case "run_status_changed":
-          if (event.to === "completed" || event.to === "failed" || event.to === "cancelled") {
-            countCompletedRun(event.to);
-          }
-          break;
-        case "model_response":
-          recordModelLatency(event.latencyMs, event.provider, event.model);
-          break;
-        case "approval_resolved":
-          recordApprovalWait(event.waitMs, event.decision);
-          break;
-        case "tool_result":
-          countToolCall(event.outcome);
-          break;
+      if (event.type === "run_status_changed") {
+        if (event.to === "completed" || event.to === "failed" || event.to === "cancelled") {
+          countCompletedRun(event.to);
+        }
+      } else if (event.type === "model_response") {
+        recordModelLatency(event.latencyMs, event.provider, event.model);
+      } else if (event.type === "approval_resolved") {
+        recordApprovalWait(event.waitMs, event.decision);
+      } else if (event.type === "tool_result") {
+        countToolCall(event.outcome);
       }
     }
     return events;
