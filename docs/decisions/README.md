@@ -8,3 +8,4 @@
 - [0006: Live eval model gateway](./0006-live-eval-model-gateway.md)
 - [0007: Separately authorized content streaming](./0007-authorized-content-streaming.md)
 - [0008: SDK extension contracts and governed registration](./0008-sdk-extension-contracts.md)
+- [0009: typed multi-modal parts and artifact interoperability](./0009-multimodal-parts-artifact-interoperability.md) (proposed)
