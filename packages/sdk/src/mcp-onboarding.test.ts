@@ -178,7 +178,7 @@ describe("SDK MCP onboarding", () => {
   });
 
   it("rejects invalid harness configuration without exposing validation details", () => {
-    expect(() => registerMcpServer({ servers: "invalid" }, server)).toThrow(
+    expect(() => registerMcpServer({ servers: [server, server] }, server)).toThrow(
       expect.objectContaining({ code: "sdk_mcp_config_invalid" }),
     );
   });
