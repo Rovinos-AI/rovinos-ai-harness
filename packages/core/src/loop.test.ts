@@ -1280,7 +1280,7 @@ describe("runLoop", () => {
     const pinForRun = vi.fn(() => Promise.resolve(pinnedTool));
     const tool: ToolPort = Object.assign(new FakeToolPort(), {
       pinForRun,
-      supportsToolProfiles: true,
+      supportsToolProfiles: true as const,
     });
     const result = await runLoop({
       recorder: new RunRecorder(store, runId, segmentId, 0, clock),
@@ -1324,7 +1324,7 @@ describe("runLoop", () => {
     const pinForRun = vi.fn(() => Promise.resolve(selectedTool));
     const tool = Object.assign(new FakeToolPort(), {
       pinForRun,
-      supportsToolProfiles: true,
+      supportsToolProfiles: true as const,
     });
     const policy: PolicyPort = {
       version: "test.policy",
@@ -1392,7 +1392,9 @@ describe("runLoop", () => {
       code: "tool_profile_unsupported",
     });
     await expect(
-      runLoop(options(Object.assign(new FakeToolPort(), { supportsToolProfiles: true }))),
+      runLoop(
+        options(Object.assign(new FakeToolPort(), { supportsToolProfiles: true as const })),
+      ),
     ).rejects.toMatchObject({ code: "tool_profile_unsupported" });
   });
 
@@ -2659,7 +2661,7 @@ describe("runLoop", () => {
       ]),
     );
     const tool = Object.assign(new FakeToolPort(), {
-      supportsToolProfiles: true,
+      supportsToolProfiles: true as const,
       pinForRun: vi.fn(() => Promise.resolve(selectedTool)),
     });
     const model = new FakeModelPort([

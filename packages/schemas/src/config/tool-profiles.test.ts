@@ -20,8 +20,10 @@ describe("ToolProfilesConfigSchema", () => {
       inspect: ["server.read", "server.read"],
     });
     expect(duplicate.success).toBe(false);
-    expect(duplicate.error?.issues[0]?.params).toMatchObject({
-      errorCode: "tool_profile_tool_duplicate",
+    const duplicateIssue = duplicate.error?.issues.find((issue) => issue.code === "custom");
+    expect(duplicateIssue).toMatchObject({
+      code: "custom",
+      params: { errorCode: "tool_profile_tool_duplicate" },
     });
 
     expect(
