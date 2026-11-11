@@ -140,6 +140,7 @@ function createMetricFixture(canary: string, resourceAttributes: OtlpAttributes)
                       key: "harness.model.provider",
                       value: { stringValue: "fixture" },
                     },
+                    { key: "harness.user.id", value: { stringValue: canary } },
                     { key: "custom.note", value: { stringValue: canary } },
                   ]),
                 ]),

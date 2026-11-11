@@ -4,5 +4,5 @@ processors:
   resource/policy_version:
     attributes:
       - key: harness.policy.version
-        value: "p-6530862e61e7"
+        value: "p-0f5c6b56b3d1"
         action: upsert

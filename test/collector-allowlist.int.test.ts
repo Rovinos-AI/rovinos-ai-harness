@@ -127,6 +127,7 @@ function expectProtectedOutputs(outputs: CollectorFixtureOutput, canary: string)
   expect(allOutput).not.toContain("custom.note");
   expect(allOutput).not.toContain("http.url");
   expect(allOutput).not.toContain("exception.message");
+  expect(allOutput).not.toContain("harness.user.id");
   expect(allOutput).not.toContain("custom.unregistered.");
   expect(allOutput).not.toContain("free-text-");
 

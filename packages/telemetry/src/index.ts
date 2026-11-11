@@ -32,6 +32,14 @@ export {
 export { AllowlistSpanProcessor, sanitizeSpan } from "./processors/allowlist-span-processor.js";
 export { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
 export {
+  CardinalityGuard,
+  metricAttributeBoundViolations,
+  type CardinalityGuardOptions,
+  type MetricAttributeAllowlist,
+  type MetricAttributeBound,
+  type MetricAttributeBounds,
+} from "./cardinality.js";
+export {
   defineLogRecord,
   listLogDefinitions,
   lookupLogDefinition,

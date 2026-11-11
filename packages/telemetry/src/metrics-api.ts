@@ -16,7 +16,7 @@ import type {
 /** Counts one run entering a terminal state. */
 export function countCompletedRun(outcome: RunCompletionOutcome): void {
   safelyRecordMetric(() => {
-    getRunCompletedCounter().add(1, { "harness.run.completed.outcome": outcome });
+    getRunCompletedCounter().add(1, { "harness.execution.outcome": outcome });
   });
 }
 
