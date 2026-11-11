@@ -177,7 +177,16 @@ describe("createTelemetrySdk", () => {
         .getMetrics()
         .flatMap(({ scopeMetrics }) => scopeMetrics.flatMap(({ metrics: entries }) => entries))
         .find(({ descriptor }) => descriptor.name === "harness.model.tokens");
+      const droppedMetric = exporter
+        .getMetrics()
+        .flatMap(({ scopeMetrics }) => scopeMetrics.flatMap(({ metrics: entries }) => entries))
+        .find(({ descriptor }) => descriptor.name === "harness.telemetry.dropped");
       expect(metricData?.dataPoints.length).toBeLessThanOrEqual(2);
+      expect(
+        droppedMetric?.dataPoints.map(
+          ({ attributes }) => attributes["harness.telemetry.dropped.reason"],
+        ),
+      ).toContain("cardinality");
       expect(JSON.stringify(metricData).toLowerCase()).not.toContain("exemplar");
     } finally {
       await sdk.shutdown();

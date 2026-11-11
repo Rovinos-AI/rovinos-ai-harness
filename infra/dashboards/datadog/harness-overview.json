@@ -15,7 +15,7 @@
               "title": "Run completions by outcome",
               "requests": [
                 {
-                  "q": "sum:harness.run.completed{*} by {harness.run.completed.outcome}.as_count()",
+                  "q": "sum:harness.run.completed{*} by {harness.execution.outcome}.as_count()",
                   "display_type": "line"
                 }
               ]
