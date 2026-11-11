@@ -580,15 +580,15 @@ describe("Vertex AI adapter", () => {
     expect(sent).toHaveProperty("toolConfig.functionCallingConfig.mode", mode);
   });
 
-  it("rejects a forced tool that is not declared before sending a request", async () => {
+  it("rejects a forced tool excluded by a profile before sending a request", async () => {
     const mock = mockedAdapter({ candidates: [] });
 
     const error = await mock.adapter
       .complete(
         {
           ...baseRequest,
-          toolChoice: { forced: "missing" },
-          tools: [{ toolId: "lookup", description: "", inputSchema: {} }],
+          toolChoice: { forced: "mcp_test.hidden" },
+          tools: [{ toolId: "mcp_test.visible", description: "", inputSchema: {} }],
         },
         context(),
       )

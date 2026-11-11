@@ -393,6 +393,7 @@ describe("McpConnection", () => {
       "McpPoolError",
       "McpProtocolError",
       "McpToolPort",
+      "McpToolProfileError",
       "OAuthCredentialRecordSchema",
       "OAuthTokenStore",
       "OAuthTokenStoreError",

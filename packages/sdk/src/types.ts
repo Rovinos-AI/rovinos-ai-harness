@@ -203,6 +203,8 @@ export const StartRunOptionsSchema = z
     goal: goalSchema,
     metadata: runMetadataSchema,
     role: Code.optional(),
+    /** Named MCP tool subset configured by the operator. */
+    toolProfile: Code.optional(),
     idempotencyKey: z.string().min(1).max(256).optional(),
     requestedBy: Principal.optional(),
   })
@@ -216,6 +218,8 @@ export const ContinueRunOptionsSchema = z
   .object({
     goal: goalSchema,
     metadata: runMetadataSchema,
+    /** Named MCP tool subset configured by the operator. */
+    toolProfile: Code.optional(),
   })
   .strict();
 

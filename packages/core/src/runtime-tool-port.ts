@@ -34,6 +34,25 @@ function collectCatalogFingerprints(
   return fingerprints;
 }
 
+function validateToolOwners(
+  ports: readonly ToolPort[],
+  advertised: readonly ReadonlySet<Code>[],
+  toolIds: ReadonlySet<Code>,
+  preferAdditionalSpecs: boolean,
+): void {
+  for (const toolId of toolIds) {
+    const owners = ports.filter((port, index) => {
+      const advertisesTool = advertised[index]?.has(toolId) === true;
+      const shadowedByAdditionalSpec =
+        preferAdditionalSpecs && index > 0 && advertised[0]?.has(toolId) === true;
+      return advertisesTool || (!shadowedByAdditionalSpec && port.describe(toolId) !== undefined);
+    });
+    if (owners.length > 1) {
+      throw new ToolPortCollisionError(toolId);
+    }
+  }
+}
+
 /** Routes a built-in tool alongside an existing runtime tool port. */
 export function composeToolPorts(
   additional: ToolPort,
@@ -45,17 +64,7 @@ export function composeToolPorts(
     (port) => new Set((port.getToolSpecs?.() ?? []).map(({ toolId }) => toolId)),
   );
   const toolIds = new Set(advertised.flatMap((toolIdsForPort) => [...toolIdsForPort]));
-  for (const toolId of toolIds) {
-    const owners = ports.filter((port, index) => {
-      const advertisesTool = advertised[index]?.has(toolId) === true;
-      const shadowedByAdditionalSpec =
-        options.preferAdditionalSpecs === true && index > 0 && advertised[0]?.has(toolId) === true;
-      return advertisesTool || (!shadowedByAdditionalSpec && port.describe(toolId) !== undefined);
-    });
-    if (owners.length > 1) {
-      throw new ToolPortCollisionError(toolId);
-    }
-  }
+  validateToolOwners(ports, advertised, toolIds, options.preferAdditionalSpecs === true);
   const portFor = (toolId: Code): ToolPort =>
     ports.find((port) => port.describe(toolId) !== undefined) ?? existing;
   const getToolSpecs = () => {
@@ -89,6 +98,11 @@ export function composeToolPorts(
   const catalogFingerprints = ports.some((port) => port.catalogFingerprints !== undefined)
     ? () => collectCatalogFingerprints(toolIds, portFor)
     : undefined;
+  const profileSupport: Pick<ToolPort, "supportsToolProfiles"> = ports.some(
+    (port) => port.supportsToolProfiles === true,
+  )
+    ? { supportsToolProfiles: true }
+    : {};
   const validateInputSchema = ports.some((port) => port.validateInputSchema !== undefined)
     ? (
         toolId: Code,
@@ -100,6 +114,7 @@ export function composeToolPorts(
         Promise.resolve(true)
     : undefined;
   return {
+    ...profileSupport,
     ...(prepare === undefined ? {} : { prepare }),
     ...(pinForRun === undefined ? {} : { pinForRun }),
     ...(catalogVersion === undefined ? {} : { catalogVersion }),

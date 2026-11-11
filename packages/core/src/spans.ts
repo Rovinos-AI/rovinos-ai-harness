@@ -74,6 +74,8 @@ export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     "harness.context.strategy_version": attr.code(),
     "harness.context.estimated_tokens": attr.int(),
     "harness.context.message_count": attr.int(),
+    "harness.tool.definition_count": attr.nonnegativeInt(),
+    "harness.tool.definition_bytes": attr.nonnegativeInt(),
   },
   { taskId: "4.1", packageName: "@rovinos/core" },
 );
