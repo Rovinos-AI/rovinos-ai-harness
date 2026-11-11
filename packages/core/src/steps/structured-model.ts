@@ -19,7 +19,7 @@ type QuotaHooks = ReturnType<typeof modelQuotaHooks>;
 interface StructuredModelOptions {
   readonly options: Pick<
     RunLoopExecutionOptions,
-    "recorder" | "model" | "ids" | "provider" | "modelName" | "inputTokenizer"
+    "recorder" | "model" | "ids" | "provider" | "modelName" | "inputTokenizer" | "budgets"
   >;
   readonly events: Event[];
   readonly execution: RunLoopExecution;
@@ -87,6 +87,7 @@ export function createStructuredModelRequester(
       role: "judge",
       ...(options.provider === undefined ? {} : { provider: options.provider }),
       ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+      unknownCostPolicy: options.budgets.unknownCostPolicy,
       outputSchema,
       temperature,
       failureMode: "tool",

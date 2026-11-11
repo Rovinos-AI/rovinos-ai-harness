@@ -162,11 +162,35 @@ describe("Event", () => {
     }
 
     expect(
-      Event.parse({ ...completed, inputTokens: 10, outputTokens: 4, costMicros: 3 }),
-    ).toMatchObject({ inputTokens: 10, outputTokens: 4, costMicros: 3 });
+      Event.parse({
+        ...completed,
+        inputTokens: 10,
+        outputTokens: 4,
+        cost: {
+          version: 1,
+          state: "estimated",
+          knownMicros: 0,
+          estimatedMicros: 3,
+          partialMicros: 0,
+          knownCount: 0,
+          estimatedCount: 1,
+          partialCount: 0,
+          unknownCount: 0,
+        },
+      }),
+    ).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 4,
+      cost: { version: 1, state: "estimated", estimatedMicros: 3 },
+    });
     expect(Event.safeParse({ ...completed, inputTokens: -1 }).success).toBe(false);
     expect(Event.safeParse({ ...completed, outputTokens: -1 }).success).toBe(false);
-    expect(Event.safeParse({ ...completed, costMicros: -1 }).success).toBe(false);
+    expect(
+      Event.safeParse({
+        ...completed,
+        cost: { version: 1, state: "estimated", estimatedMicros: -1 },
+      }).success,
+    ).toBe(false);
     const withoutInput = { ...completed };
     Reflect.deleteProperty(withoutInput, "inputTokens");
     expect(Event.safeParse(withoutInput).success).toBe(false);

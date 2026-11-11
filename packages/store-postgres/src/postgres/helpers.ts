@@ -278,12 +278,13 @@ async function applyUsageUpdates(
 ): Promise<void> {
   for (const delta of usageUpdates) {
     const result = await client.query<{ quota_id: string }>(
-      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, runs_started) SELECT $1, $2, $3, $4, $5 WHERE $6::BIGINT IS NULL OR $5 <= $6 ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + EXCLUDED.cost_micros, runs_started = usage_ledger.runs_started + EXCLUDED.runs_started WHERE $6::BIGINT IS NULL OR usage_ledger.runs_started + EXCLUDED.runs_started <= $6 RETURNING quota_id",
+      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, unknown_cost_count, runs_started) SELECT $1, $2, $3, $4, $5, $6 WHERE $7::BIGINT IS NULL OR $6 <= $7 ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + EXCLUDED.cost_micros, unknown_cost_count = usage_ledger.unknown_cost_count + EXCLUDED.unknown_cost_count, runs_started = usage_ledger.runs_started + EXCLUDED.runs_started WHERE $7::BIGINT IS NULL OR usage_ledger.runs_started + EXCLUDED.runs_started <= $7 RETURNING quota_id",
       [
         delta.quotaId,
         delta.period,
         delta.periodStart,
         delta.costMicros,
+        delta.unknownCostCount ?? 0,
         delta.runsStarted,
         delta.maxRunsStarted ?? null,
       ],

@@ -4,11 +4,15 @@ import { performance } from "node:perf_hooks";
 import { foldRunState, type Runtime } from "@rovinos/core";
 import { JsonValue as JsonValueSchema, RunInputSchema, type Id } from "@rovinos/schemas";
 import type { SafeEvent } from "@rovinos/telemetry";
-import { SdkError } from "./types.js";
 import { projectSafeEvents, readEvents } from "./event-views.js";
-import { getRunContent as readRunContent, streamRunContentEvents } from "./content-access.js";
+import { getRunContent as readRunContent, streamRunContent } from "./content-access.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
 import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
+import { projectRunViewUsage } from "./run-view-usage.js";
+import {
+  ExtensionHarnessAccess,
+  type ExtensionHarnessAccessOptions,
+} from "./extension-harness-access.js";
 import {
   CancelRunResultSchema,
   ContinueRunOptionsSchema,
@@ -18,8 +22,8 @@ import {
   RunStartResultSchema,
   RunViewSchema,
   StartRunOptionsSchema,
-  StreamRunContentOptionsSchema,
   WatchOptionsSchema,
+  SdkError,
   type Harness,
   type StartRunOptions,
   type ContinueRunOptions,
@@ -38,7 +42,7 @@ const IDEMPOTENCY_ORPHAN_GRACE_MS = 30_000;
 const IDEMPOTENCY_START_WAIT_MS = 5_000;
 const IDEMPOTENCY_POLL_INTERVAL_MS = 10;
 
-class HarnessClient implements Harness {
+class HarnessClient extends ExtensionHarnessAccess implements Harness {
   private readonly idempotencyKeys = new Map<string, Promise<Id>>();
   private readonly lifecycle: LifecycleTracker;
   private readonly admittedRunIds = new Set<string>();
@@ -48,6 +52,7 @@ class HarnessClient implements Harness {
   private closePromise: Promise<void> | undefined;
 
   constructor(input: Parameters<typeof createHarnessClient>[0]) {
+    super(input);
     this.runtime = input.runtime;
     this.piiEnabled = input.piiEnabled;
     this.correlationEnabled = input.correlationEnabled;
@@ -201,7 +206,7 @@ class HarnessClient implements Harness {
           lastSeq: lastEvent.seq,
           lastTs: lastEvent.ts,
           steps: state.steps,
-          usage: state.usage,
+          usage: projectRunViewUsage(state.usage),
           pendingApprovals: Array.from(state.pendingApprovals.keys()),
           recentEvents: await projectSafeEvents(
             this.runtime,
@@ -292,20 +297,15 @@ class HarnessClient implements Harness {
     runId: string,
     options: StreamRunContentOptions,
   ): AsyncIterable<RunContentStreamEntry> {
-    this.assertOpen();
-    const parsedRunId = RunIdInputSchema.parse({ runId }).runId;
-    this.assertAvailable(parsedRunId);
-    const input = StreamRunContentOptionsSchema.parse(options);
-    return streamRunContentEvents({
+    return streamRunContent({
       runtime: this.runtime,
       tracker: this.lifecycle,
-      runId: parsedRunId,
-      options: input,
+      runId,
+      options,
       piiEnabled: this.piiEnabled,
       contentAuthorizer: this.contentAuthorizer,
-      assertOpen: () => {
-        this.assertOpen();
-      },
+      assertOpen: this.assertOpen.bind(this),
+      assertAvailable: this.assertAvailable.bind(this),
     });
   }
 
@@ -419,12 +419,14 @@ class HarnessClient implements Harness {
 }
 
 /** Creates the internal SDK client around a validated runtime. */
-export function createHarnessClient(input: {
-  readonly runtime: Runtime;
-  readonly piiEnabled: boolean;
-  readonly correlationEnabled: boolean;
-  readonly shutdownGraceMs: number;
-  readonly contentAuthorizer: ContentAuthorizer | undefined;
-}): Harness {
+export function createHarnessClient(
+  input: {
+    readonly runtime: Runtime;
+    readonly piiEnabled: boolean;
+    readonly correlationEnabled: boolean;
+    readonly shutdownGraceMs: number;
+    readonly contentAuthorizer: ContentAuthorizer | undefined;
+  } & ExtensionHarnessAccessOptions,
+): Harness {
   return new HarnessClient(input);
 }

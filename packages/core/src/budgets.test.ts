@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { RunConfigSchema, type Event } from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL, RunConfigSchema, type Event } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { accountForOpenChildren, BudgetTracker } from "./budgets.js";
 import { foldRunState, type RunState } from "./run-state.js";
@@ -29,7 +29,7 @@ function runState(overrides: Partial<RunState> = {}): RunState {
     status: "running",
     nextSeq: 2,
     steps: 0,
-    usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, costMicros: 0, cost: EMPTY_COST_TOTAL },
     pendingToolCalls: new Map(),
     toolExecutionAttempts: new Map(),
     pendingApprovals: new Map(),
@@ -63,10 +63,30 @@ describe("BudgetTracker", () => {
     const tracker = new BudgetTracker(configuredBudgets({ maxCostUsd: 0.000002 }));
 
     expect(
-      tracker.check(runState({ usage: { inputTokens: 0, outputTokens: 0, costMicros: 2 } }), 100),
+      tracker.check(
+        runState({
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            costMicros: 2,
+            cost: { ...EMPTY_COST_TOTAL, knownMicros: 2, knownCount: 1 },
+          },
+        }),
+        100,
+      ),
     ).toEqual({ ok: true });
     expect(
-      tracker.check(runState({ usage: { inputTokens: 0, outputTokens: 0, costMicros: 3 } }), 100),
+      tracker.check(
+        runState({
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            costMicros: 3,
+            cost: { ...EMPTY_COST_TOTAL, knownMicros: 3, knownCount: 1 },
+          },
+        }),
+        100,
+      ),
     ).toEqual({ ok: false, budget: "cost", limit: 2, observed: 3 });
   });
 
@@ -129,12 +149,13 @@ describe("BudgetTracker", () => {
       {
         ...eventEnvelope(2, 110, firstSegmentId),
         type: "model_response",
+        v: 2,
         requestId: runId,
         provider: "test",
         model: "test",
         inputTokens: 1,
         outputTokens: 1,
-        costMicros: 1,
+        cost: { version: 1, state: "known", amountMicros: 1 },
         finishReason: "stop",
         latencyMs: 1,
         schemaValid: true,
@@ -160,12 +181,13 @@ describe("BudgetTracker", () => {
       {
         ...eventEnvelope(5, 430, resumedSegmentId),
         type: "model_response",
+        v: 2,
         requestId: runId,
         provider: "test",
         model: "test",
         inputTokens: 1,
         outputTokens: 1,
-        costMicros: 1,
+        cost: { version: 1, state: "known", amountMicros: 1 },
         finishReason: "stop",
         latencyMs: 1,
         schemaValid: true,
@@ -197,7 +219,12 @@ describe("BudgetTracker", () => {
   it("reserves open child allocations in the parent's execution budget", () => {
     const state = runState({
       steps: 1,
-      usage: { inputTokens: 0, outputTokens: 0, costMicros: 2 },
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        costMicros: 2,
+        cost: { ...EMPTY_COST_TOTAL, knownMicros: 2, knownCount: 1 },
+      },
     });
     const openChild: Event = {
       ...eventEnvelope(2, 110, firstSegmentId),
@@ -228,7 +255,12 @@ describe("BudgetTracker", () => {
         inputTokens: 0,
         outputTokens: 0,
         steps: 2,
-        costMicros: 4,
+        cost: {
+          ...EMPTY_COST_TOTAL,
+          state: "estimated",
+          estimatedMicros: 4,
+          estimatedCount: 1,
+        },
       },
     ];
 

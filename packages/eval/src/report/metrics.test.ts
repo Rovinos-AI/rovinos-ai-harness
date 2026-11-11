@@ -24,6 +24,7 @@ function modelResponse(seq: number, repairAttempts: number, fallbackDepth: numbe
     model: "test_model",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" },
     finishReason: "stop",
     latencyMs: 1,
     schemaValid: true,

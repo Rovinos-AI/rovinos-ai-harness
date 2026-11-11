@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { combineCostTotals, parseJson } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
-import { parseJson } from "@rovinos/schemas";
 import { GradeResultSchema } from "../graders/types.js";
 import type { GradeResult } from "../graders/types.js";
 import { EvalTrialRecordSchema, TrialExecutionMetricsSchema } from "../trial.js";
@@ -64,6 +64,11 @@ export function computeTrialMetrics(
   const costMicros =
     record.result.usage.costMicros +
     grades.reduce((total, grade) => total + (grade.usage?.costMicros ?? 0), 0);
+  const gradeCost = grades.reduce(
+    (total, grade) =>
+      grade.usage === undefined ? total : combineCostTotals(total, grade.usage.cost),
+    record.result.usage.cost,
+  );
 
   return EvalTrialMetricsSchema.parse({
     taskId: record.taskId,
@@ -80,6 +85,7 @@ export function computeTrialMetrics(
     inputTokens,
     outputTokens,
     costMicros,
+    cost: gradeCost,
     wallTimeMs: record.result.durationMs,
     repairAttempts: record.result.metrics.repairAttempts,
     fallbackDepth: record.result.metrics.fallbackDepth,

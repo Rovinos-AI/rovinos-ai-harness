@@ -55,9 +55,9 @@ describe("Markdown eval report", () => {
 
       ## Variant \`baseline\`
 
-      | Task | Trials | Passes | Pass rate | pass@k | Cost mean / median / p95 (µUSD) | Tokens mean / median / p95 | Steps mean / median / p95 | Latency mean / median / p95 (ms) |
-      | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
-      | task_one | 2 | 1 | 50.0% | 1: 50.0%, 2: 100.0% | 7.5 / 7.5 / 10 | 7 / 7 / 9 | 3 / 3 / 4 | 150 / 150 / 200 |
+      | Task | Trials | Passes | Pass rate | pass@k | Reported cost mean / median / p95 (µUSD) | Cost completeness | Tokens mean / median / p95 | Steps mean / median / p95 | Latency mean / median / p95 (ms) |
+      | --- | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: |
+      | task_one | 2 | 1 | 50.0% | 1: 50.0%, 2: 100.0% | 7.5 / 7.5 / 10 | known: known 15, estimated 0, partial 0, unknown 0 | 7 / 7 / 9 | 3 / 3 / 4 | 150 / 150 / 200 |
 
       ## Failures
 

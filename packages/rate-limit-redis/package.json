@@ -1,0 +1,47 @@
+{
+  "name": "@rovinos/rate-limit-redis",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rovinos-AI/rovinos-ai-harness.git",
+    "directory": "packages/rate-limit-redis"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "ioredis": "6.0.0",
+    "zod": "4.6.7"
+  },
+  "peerDependencies": {
+    "@rovinos/sdk": "*"
+  },
+  "peerDependenciesMeta": {
+    "@rovinos/sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@rovinos/schemas": "workspace:^",
+    "@rovinos/store": "workspace:^",
+    "@types/node": "26.6.6",
+    "tsup": "9.0.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  }
+}

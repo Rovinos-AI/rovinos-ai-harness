@@ -67,7 +67,7 @@ function collectPairs(events: readonly Event[]): EventLogPair[] {
           ...(event.cacheWriteTokens === undefined
             ? {}
             : { cacheWriteTokens: event.cacheWriteTokens }),
-          ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
+          ...(event.cost.state === "unknown" ? {} : { costMicros: event.cost.amountMicros }),
         },
         finishReason: event.finishReason,
         latencyMs: event.latencyMs,

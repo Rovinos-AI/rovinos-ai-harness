@@ -19,6 +19,7 @@ export const RunBudgetsSchema = z
   .object({
     maxSteps: z.coerce.number().int().positive().default(200),
     maxCostUsd: z.coerce.number().positive().optional(),
+    unknownCostPolicy: z.enum(["fail", "allow"]).default("fail"),
     maxWallClockMs: z.coerce.number().int().positive().default(3_600_000),
     countSuspendedTime: z
       .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])

@@ -339,11 +339,13 @@ function mapUsage(usage: ChatCompletionLike["usage"]): {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cacheReadTokens?: number;
+  readonly usageComplete?: boolean;
 } {
   const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
   return {
     inputTokens: usage?.prompt_tokens ?? 0,
     outputTokens: usage?.completion_tokens ?? 0,
+    ...(usage === null || usage === undefined ? { usageComplete: false } : {}),
     ...(cachedTokens === undefined ? {} : { cacheReadTokens: cachedTokens }),
   };
 }
@@ -365,7 +367,11 @@ export function fromChatResponse(
   } = {},
 ): {
   readonly parts: ModelRequest["messages"][number]["parts"];
-  readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
+  readonly usage: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly usageComplete?: boolean;
+  };
   readonly finishReason: string;
 } {
   const choice = response.choices[0];

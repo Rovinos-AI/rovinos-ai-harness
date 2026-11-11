@@ -227,7 +227,7 @@ async function applyToolResumeDecision(
   if (decision.completion !== undefined) {
     batch.push({
       type: "subagent_completed",
-      v: 1,
+      v: 2,
       ...decision.completion,
     });
   }

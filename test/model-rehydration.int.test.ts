@@ -123,6 +123,7 @@ async function persistAndReadResponse(provider: string, parts: Part[]): Promise<
         model: provider === "anthropic" ? "claude-test" : "gpt-test",
         inputTokens: 1,
         outputTokens: 2,
+        cost: { version: 1, state: "unknown" },
         finishReason: "stop",
         latencyMs: 1,
         schemaValid: true,

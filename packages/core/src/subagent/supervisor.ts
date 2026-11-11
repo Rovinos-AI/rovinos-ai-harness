@@ -9,6 +9,7 @@ import {
   type SpanContext,
 } from "@opentelemetry/api";
 import {
+  EMPTY_COST_TOTAL,
   HarnessError,
   type Code,
   type Event,
@@ -243,14 +244,14 @@ export class SubagentSupervisor {
       if (completion !== undefined) {
         return this.cachedResult(completion, options.request.role);
       }
-      const { inputTokens, outputTokens, costMicros, steps } = result.usage;
+      const { inputTokens, outputTokens, cost, steps } = result.usage;
       await options.recordCompleted({
         childRunId: options.childRunId,
         outcome: result.status,
         inputTokens,
         outputTokens,
         steps: steps ?? 0,
-        ...(costMicros === undefined ? {} : { costMicros }),
+        cost,
       });
     }
     return result;
@@ -279,7 +280,7 @@ export class SubagentSupervisor {
         inputTokens: completion.inputTokens,
         outputTokens: completion.outputTokens,
         ...(completion.steps === undefined ? {} : { steps: completion.steps }),
-        ...(completion.costMicros === undefined ? {} : { costMicros: completion.costMicros }),
+        cost: completion.cost,
       },
     };
   }
@@ -297,7 +298,12 @@ export class SubagentSupervisor {
       const events = await this.childEvents(childRunId);
       const usage =
         events.length === 0
-          ? { inputTokens: 0, outputTokens: 0, steps: 0 }
+          ? {
+              inputTokens: 0,
+              outputTokens: 0,
+              steps: 0,
+              cost: EMPTY_COST_TOTAL,
+            }
           : aggregateSubagentUsage(events);
       const outcome =
         events.length > 0 && foldRunState(events).status === "cancelled" ? "cancelled" : "failed";
@@ -307,7 +313,7 @@ export class SubagentSupervisor {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         steps: usage.steps,
-        ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+        cost: usage.cost,
       });
     } catch {
       setActiveSpanAttribute("harness.subagent.completion_record_failed", true);

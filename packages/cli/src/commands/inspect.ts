@@ -71,7 +71,11 @@ export const inspectCommand: CommandModule = {
             runId,
             status: state.status,
             steps: state.steps,
-            usage: state.usage,
+            usage: {
+              inputTokens: state.usage.inputTokens,
+              outputTokens: state.usage.outputTokens,
+              cost: state.usage.cost,
+            },
             lastCheckpoint: state.lastCheckpoint ?? null,
             pendingApprovals: Array.from(state.pendingApprovals.values(), (approval) => ({
               approvalId: approval.approvalId,

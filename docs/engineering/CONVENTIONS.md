@@ -63,6 +63,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `config` | `schemas` |
 | `store` | `schemas`, `telemetry`, `crypto` |
 | `store-postgres` | `schemas`, `store` |
+| `rate-limit-redis` | `schemas`, `store` |
 | `store-sqlite` | `schemas`, `store` |
 | `vault` | `schemas`, `telemetry`, `crypto` |
 | `pii` | `schemas`, `telemetry`, `vault` |
@@ -72,7 +73,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `mcp` | `schemas`, `telemetry`, `crypto` |
 | `sandbox` | `schemas`, `telemetry`, `crypto`, `context` |
 | `approval-app` | `schemas`, `app-telemetry` |
-| `core` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox` |
+| `core` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `rate-limit-redis`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox` |
 | `host` | `schemas`, `telemetry`, `core` |
 | `control-plane` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `replay` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
