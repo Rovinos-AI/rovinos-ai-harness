@@ -6,7 +6,6 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./create-harness.js";
-<<<<<<< HEAD
 export { ExtensionCapabilitySchema, ExtensionCapabilityStatusSchema, ExtensionDefinitionSchema, ExtensionError, ExtensionGrantSchema, ExtensionGrantRevocationSchema, ExtensionManifestSchema, ExtensionRegistrationSchema, ExtensionRegistrationStatusSchema, SDK_VERSION, } from "./extensions.js";
 export type { ExtensionCapability, ExtensionCapabilityStatus, ExtensionContributions, ExtensionDefinition, ExtensionGrant, ExtensionGrantRevocation, ExtensionManifest, ExtensionRegistration, ExtensionRegistrationStatus, ExtensionToolDefinition, ToolInvocationContext, } from "./extensions.js";
 /** Closed error codes exposed by SDK extension validation and execution. */
@@ -15,16 +14,11 @@ export { Code as CodeSchema, Id as IdSchema, JsonValue as JsonValueSchema, Model
 export type { Code, Id, JsonValue, ModelRequest, ModelUsage, Part } from "@rovinos/schemas";
 export { ProviderDeltaSchema, ProviderResultSchema } from "@rovinos/models";
 export type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult, } from "@rovinos/models";
-export { Principal as PrincipalSchema } from "@rovinos/schemas";
-export type { Principal } from "@rovinos/schemas";
-export { SdkError, CreateHarnessOptionsSchema, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type CreateHarnessOptionsInput, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, type WithExtensionRegistrations, } from "./types.js";
-=======
 export { inspectMcpServer, registerMcpServer, selectMcpTools, McpCatalogInspectionSchema, InspectMcpServerOptionsSchema, McpToolSelectionSchema, type InspectMcpServerOptions, type McpCatalogInspection, type McpServerConfig, type McpToolSelection, type McpToolSelectionResult, } from "./mcp-onboarding.js";
 export { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
-export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, } from "./types.js";
->>>>>>> origin/main
+export { SdkError, CreateHarnessOptionsSchema, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type CreateHarnessOptionsInput, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, type WithExtensionRegistrations, } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
 /** Defines a typed extension tool contribution using its input and output schemas. */
 export { defineTool } from "./extensions.js";
@@ -135,12 +129,9 @@ export declare function selectMcpTools(config: z.input<typeof HarnessConfigSchem
 import { HarnessError, Id } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
-<<<<<<< HEAD
 import type { ExtensionGrantRevocation, ExtensionRegistration, ExtensionRegistrationStatus } from "./extensions.js";
-=======
 /** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
 export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_tools_failed" | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
->>>>>>> origin/main
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
 export declare const HarnessOverridesSchema: z.ZodObject<{
     store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
