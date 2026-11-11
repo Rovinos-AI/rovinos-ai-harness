@@ -92,7 +92,7 @@ export function decisionResult(
         text: result.code ?? (result.ok ? "Decision recorded." : "No change."),
       },
     ],
-    ...(result.ok ? {} : { isError: true }),
+    ...(result.ok || result.code === "human_confirmation_unavailable" ? {} : { isError: true }),
   };
 }
 
