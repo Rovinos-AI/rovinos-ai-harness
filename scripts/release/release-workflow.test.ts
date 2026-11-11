@@ -33,6 +33,17 @@ function readWorkflow(): z.infer<typeof workflowSchema> {
   );
 }
 
+function publishedPackages(): string[] {
+  const source = readFileSync(resolve(root, "yarn.config.cjs"), "utf8");
+  const publishedSet = source.match(
+    /const publishedWorkspaceIdents = new Set\(\[([\s\S]*?)\n\]\);/u,
+  )?.[1];
+  if (publishedSet === undefined) {
+    throw new Error("published_workspace_idents_missing");
+  }
+  return [...publishedSet.matchAll(/"@rovinos\/([^"]+)"/gu)].map((match) => match[1] ?? "");
+}
+
 describe("release workflow", () => {
   it("runs only for version tags", () => {
     const { on } = readWorkflow();
@@ -120,6 +131,37 @@ describe("release workflow", () => {
     expect(latestIndex).toBeGreaterThan(npmPublishIndex);
     expect(latest?.run).toContain("imagetools create");
     expect(latest?.run).toContain(":latest");
+  });
+
+  it("packs every published workspace with an explicit artifact branch", () => {
+    const workflow = readWorkflow();
+    const publishScript =
+      workflow.jobs.publish?.steps?.find(
+        (step) => step.name === "Pack and publish npm packages with provenance",
+      )?.run ?? "";
+    const packageLoop = publishScript.match(/for package in ([^;]+); do/u)?.[1];
+    const packages = packageLoop?.trim().split(/\s+/u) ?? [];
+    const caseBranches = [...publishScript.matchAll(/^\s*([a-z0-9-]+)\)\s*$/gmu)].map(
+      (match) => match[1],
+    );
+    const published = publishedPackages();
+
+    expect(packages).toEqual(expect.arrayContaining(published));
+    expect(caseBranches).toEqual(expect.arrayContaining(published));
+    expect(packages.indexOf("rate-limit-redis")).toBeLessThan(packages.indexOf("sdk"));
+    expect(packages.indexOf("rate-limit-redis")).toBeLessThan(packages.indexOf("cli"));
+    expect(publishScript).toContain('"package/dist/index.js"');
+    expect(publishScript).toContain('"package/dist/index.d.ts"');
+  });
+
+  it("includes every published workspace changelog in GitHub release notes", () => {
+    const release = readWorkflow().jobs.publish?.steps?.find(
+      (step) => step.name === "Create GitHub Release",
+    );
+    const packageLoop = release?.run?.match(/for package in ([^;]+); do/u)?.[1];
+    const packages = packageLoop?.trim().split(/\s+/u) ?? [];
+
+    expect(packages).toEqual(expect.arrayContaining(publishedPackages()));
   });
 
   it("reuses BuildKit SBOMs and keyless-signs release image digests only", () => {

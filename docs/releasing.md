@@ -64,10 +64,10 @@ Before the first release, configure the GitHub Actions trusted publisher for eac
 the [npm trusted publishing guide](https://docs.npmjs.com/guides/trusted-publishers)), using
 repository `Rovinos-AI/rovinos-ai-harness` and workflow `.github/workflows/release.yml`.
 **Verified:** npm requires the package to exist before its trusted publisher can be configured.
-Maintainers must therefore publish a one-time `0.0.0` placeholder for each package with a
-short-lived npm token, then configure the trusted publisher and remove that token. Do this manually;
-the release workflow never accepts or stores an npm token. Ensure the first release uses a version
-newer than the placeholder.
+For a newly added package, maintainers must first publish a one-time `0.0.0` placeholder with a
+short-lived npm token, then configure the trusted publisher for that package and remove the token.
+Do this manually; the release workflow never accepts or stores an npm token. Ensure the first
+release uses a version newer than the placeholder.
 
 Releases are blocked if any CI gate fails, release metadata is inconsistent, a packed package
 contains an unresolved `workspace:` dependency, the community-file check with `RELEASE=1` fails, or
