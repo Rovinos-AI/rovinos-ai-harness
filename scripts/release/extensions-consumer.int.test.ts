@@ -20,6 +20,13 @@ const extensionsExportsSchema = z.object({
   }),
 });
 
+function commandOutput(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return Buffer.isBuffer(value) ? value.toString("utf8") : "";
+}
+
 async function runCommand(
   command: string,
   arguments_: readonly string[],
@@ -29,8 +36,8 @@ async function runCommand(
     await execFileAsync(command, [...arguments_], { cwd });
   } catch (error) {
     if (typeof error === "object" && error !== null) {
-      const stderr = "stderr" in error ? String(error.stderr ?? "") : "";
-      const stdout = "stdout" in error ? String(error.stdout ?? "") : "";
+      const stderr = "stderr" in error ? commandOutput(error.stderr) : "";
+      const stdout = "stdout" in error ? commandOutput(error.stdout) : "";
       const output = [stderr, stdout].filter((value) => value.length > 0).join("\n");
       if (output.length > 0) {
         throw new Error(output);
@@ -139,8 +146,8 @@ describe("packed extensions consumer", () => {
       extensionsExportsSchema,
       await readFile(join(nodeModules, "@rovinos", "extensions", "package.json"), "utf8"),
     );
-    expect(extensionsPackage.exports?.["."]?.default).toBe("./dist/index.js");
-    expect(extensionsPackage.exports?.["./testing"]?.default).toBe("./dist/testing.js");
+    expect(extensionsPackage.exports["."].default).toBe("./dist/index.js");
+    expect(extensionsPackage.exports["./testing"].default).toBe("./dist/testing.js");
     const runtimeEntry = await readFile(
       join(nodeModules, "@rovinos", "extensions", "dist", "index.js"),
       "utf8",
