@@ -24,6 +24,11 @@ transports reject unknown fields.
 | `maxArtifactBytes` | positive integer | `52428800` | Maximum combined decoded size of binary result artifacts for one call. |
 | `binaryResults` | `block` or `allow` | `block` | Whether binary MCP result parts may be stored as run-workspace artifacts. |
 
+`toolAllowlist` controls which discovered tools are registered and exposed to the model; it does not
+authorize execution. Each proposed call still goes through the configured `allow`, `ask`, or `deny`
+policy. SDK applications can use `registerMcpServer`, `inspectMcpServer`, and `selectMcpTools` for a
+typed onboarding flow that starts with no exposed tools by default. See the [public SDK recipe](sdk.md#mcp-server-onboarding).
+
 MCP binary result parts are blocked by default (`mcp_binary_result_blocked`). To
 enable them for a server, set `binaryResults: allow`. The combined decoded bytes
 of all offloaded parts must fit `maxArtifactBytes`; the inline envelope after

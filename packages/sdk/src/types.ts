@@ -14,6 +14,23 @@ import { HarnessConfigSchema } from "@rovinos/config";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 
+/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
+export type SdkMcpConnectionErrorCode =
+  | "mcp_connect_failed"
+  | "mcp_connect_timeout"
+  | "mcp_auth_required"
+  | "mcp_connection_lost"
+  | "mcp_list_tools_failed"
+  | "mcp_too_many_tools"
+  | "mcp_discovery_page_limit"
+  | "mcp_discovery_schema_limit"
+  | "mcp_discovery_data_limit"
+  | "mcp_discovery_timeout"
+  | "mcp_discovery_cancelled"
+  | "mcp_apps_unsupported"
+  | "mcp_tool_arguments_invalid"
+  | "mcp_tool_call_failed";
+
 function hasMethod(value: unknown, name: string): boolean {
   return (
     typeof value === "object" &&
@@ -489,6 +506,15 @@ export interface Harness {
 /** Coded SDK failure that does not include untrusted input values. */
 export class SdkError extends HarnessError {
   readonly code:
+    | SdkMcpConnectionErrorCode
+    | "sdk_mcp_catalog_invalid"
+    | "sdk_mcp_config_invalid"
+    | "sdk_mcp_inspection_failed"
+    | "sdk_mcp_inspection_options_invalid"
+    | "sdk_mcp_selection_invalid"
+    | "sdk_mcp_server_exists"
+    | "sdk_mcp_server_not_found"
+    | "sdk_mcp_tool_not_found"
     | "sdk_run_not_found"
     | "sdk_closed"
     | "sdk_content_unavailable"
