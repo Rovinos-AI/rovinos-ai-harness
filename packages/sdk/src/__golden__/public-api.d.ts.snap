@@ -696,6 +696,22 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             allowedHosts: z.ZodDefault<z.ZodArray<z.ZodString>>;
             rateLimitPerMinute: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>>;
+        rateLimits: z.ZodPrefault<z.ZodObject<{
+            backend: z.ZodDefault<z.ZodEnum<{
+                memory: "memory";
+                postgres: "postgres";
+                redis: "redis";
+            }>>;
+            onUnavailable: z.ZodDefault<z.ZodEnum<{
+                deny: "deny";
+                local: "local";
+            }>>;
+            redis: z.ZodOptional<z.ZodObject<{
+                url: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+                keyPrefix: z.ZodDefault<z.ZodString>;
+                tls: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
         deployment: z.ZodPrefault<z.ZodObject<{
             mode: z.ZodDefault<z.ZodEnum<{
                 multi: "multi";

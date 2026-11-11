@@ -109,6 +109,7 @@ export function checkApiCoverage(jsonPath: string): ApiCoverage {
   });
   const coverage = calculateApiCoverage(project, [
     "@rovinos/cli",
+    "@rovinos/rate-limit-redis",
     "@rovinos/sdk",
     "@rovinos/store-postgres",
     "@rovinos/store-sqlite",

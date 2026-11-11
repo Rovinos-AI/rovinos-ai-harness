@@ -50,6 +50,7 @@ export {
 export { emitApprovalAppAudit } from "./approval-app-audit.js";
 export { emitControlPlaneAudit } from "./control-plane-audit.js";
 export {
+  APPROVAL_DECISIONS,
   countDroppedTelemetry,
   countHostAppRejected,
   countHostAppSpansAccepted,
@@ -63,8 +64,12 @@ export {
   countPolicyDecision,
   countQuotaRejection,
   countWorkerJob,
+  METRIC_ATTRIBUTE_BOUNDS,
   METRIC_ALLOWLIST,
   recordWorkerQueueLag,
+  RUN_COMPLETION_OUTCOMES,
+  TOOL_CALL_OUTCOMES,
+  type ApprovalDecision,
   type HostAppRejectedReason,
   type McpInputRequestOutcome,
   MCP_INPUT_REQUEST_OUTCOMES,
@@ -73,11 +78,19 @@ export {
   type WorkerJobOutcome,
   type RateLimitBackend,
   type RateLimitKeyKind,
+  type RunCompletionOutcome,
+  type ToolCallOutcome,
   WORKER_JOB_OUTCOMES,
   RATE_LIMIT_BACKENDS,
   RATE_LIMIT_KEY_KINDS,
   type TelemetryDropReason,
 } from "./metrics.js";
+export {
+  countCompletedRun,
+  countToolCall,
+  recordApprovalWait,
+  recordModelLatency,
+} from "./metrics-api.js";
 export {
   __resetRegistryForTests,
   defineSpan,

@@ -121,6 +121,18 @@ ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
+      code: 'meter.createCounter<RunCompletedAttributes>("harness.run.completed");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
+      code: 'meter.createHistogram<ApprovalWaitAttributes>("harness.approval.wait_ms");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
+      code: 'meter.createCounter<ToolCallAttributes>("harness.tool.calls");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
       code: 'meter.createCounter<McpInputRequestAttributes>("harness.mcp.input_requests");',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },

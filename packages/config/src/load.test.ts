@@ -545,6 +545,7 @@ store: {}`,
         allowRawToLocalModels: false,
         failMode: "closed",
       },
+      rateLimits: { backend: "memory", onUnavailable: "local" },
       vault: { backend: "sqlite", purgeAfterDays: 7 },
       telemetry: {
         sentinel: { minValueLength: 6 },
