@@ -57,6 +57,7 @@ export async function runStructuredFinalOutput(
       ...(options.role === undefined ? {} : { role: options.role }),
       ...(options.provider === undefined ? {} : { provider: options.provider }),
       ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+      unknownCostPolicy: options.budgets.unknownCostPolicy,
       outputSchema,
       ...modelQuotaHooks(options),
       ...(options.valueTransform === undefined ? {} : { valueTransform: options.valueTransform }),

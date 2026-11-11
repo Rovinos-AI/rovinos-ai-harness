@@ -616,7 +616,10 @@ describe("createRuntime PII composition", () => {
         (event) => event.type === "model_response" && event.requestId === judgeRequest?.requestId,
       );
       const responseCost = result.events.reduce(
-        (sum, event) => (event.type === "model_response" ? sum + (event.costMicros ?? 0) : sum),
+        (sum, event) =>
+          event.type === "model_response" && event.cost.state !== "unknown"
+            ? sum + event.cost.amountMicros
+            : sum,
         0,
       );
 
@@ -642,7 +645,7 @@ describe("createRuntime PII composition", () => {
       expect(JSON.stringify(recordedJudgeRequest)).toContain("<EMAIL_1>");
       expect(judgeResponse).toMatchObject({
         type: "model_response",
-        costMicros: 12,
+        cost: { version: 1, state: "estimated", amountMicros: 12 },
       });
       expect(
         result.events

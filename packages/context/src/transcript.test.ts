@@ -44,6 +44,7 @@ function modelResponse(seq: number, content: Part[]): Event {
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" } as const,
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: true,
@@ -135,6 +136,7 @@ describe("eventsToTranscript", () => {
         strategy: "summary" as const,
         strategyVersion: "v1",
         summary: "the earlier question was answered",
+        cost: { version: 1, state: "unknown" } as const,
       },
     ];
     const followUp = {
@@ -182,6 +184,7 @@ describe("eventsToTranscript", () => {
           strategy: "summary",
           strategyVersion: "v1",
           summary: "completed the setup",
+          cost: { version: 1, state: "unknown" } as const,
         },
         modelResponse(4, [{ type: "text", text: "next" }]),
       ],
@@ -199,6 +202,7 @@ describe("eventsToTranscript", () => {
           strategy: "summary",
           strategyVersion: "v1",
           summary: "tool call was compacted",
+          cost: { version: 1, state: "unknown" } as const,
         },
         toolResult(3, { value: "found" }),
       ],
@@ -247,6 +251,7 @@ describe("eventsToTranscript", () => {
         strategy: "summary",
         strategyVersion: "v1",
         summary: "older",
+        cost: { version: 1, state: "unknown" } as const,
       },
     ];
     const transcript = eventsToTranscript(events);
@@ -270,6 +275,7 @@ describe("eventsToTranscript", () => {
         strategy: "summarizing",
         strategyVersion: "v1",
         summary: "first summary",
+        cost: { version: 1, state: "unknown" } as const,
       },
       modelResponse(3, [{ type: "text", text: "later work" }]),
       {
@@ -280,6 +286,7 @@ describe("eventsToTranscript", () => {
         strategy: "summarizing",
         strategyVersion: "v1",
         summary: "replacement summary",
+        cost: { version: 1, state: "unknown" } as const,
       },
     ]);
 
@@ -301,6 +308,7 @@ describe("eventsToTranscript", () => {
         strategy: "summary",
         strategyVersion: "v1",
         summary: { outcome: "done" },
+        cost: { version: 1, state: "unknown" } as const,
       },
     ]);
 
@@ -396,6 +404,7 @@ describe("NaiveStrategy", () => {
           strategy: "summary",
           strategyVersion: "v1",
           summary: "input retained",
+          cost: { version: 1, state: "unknown" } as const,
         },
       ],
       budget: { maxTokens: 1, reserveOutputTokens: 1 },

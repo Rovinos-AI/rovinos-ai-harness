@@ -9,6 +9,7 @@ import { Principal } from "./principal.js";
 import { FormSchema } from "./form-schema.js";
 import { refineInputRequestPayload } from "./human-input.js";
 import { LegacyToolResultSchema, McpToolResultEnvelopeSchema } from "./mcp-tool-result.js";
+import { CostTotalSchema, CostValueSchema } from "./cost.js";
 
 /** Supported run lifecycle states. */
 export const RunStatus = z.enum([
@@ -101,7 +102,8 @@ const modelResponseEvent = z
     outputTokens: z.number().int().nonnegative(),
     cacheReadTokens: z.number().int().nonnegative().optional(),
     cacheWriteTokens: z.number().int().nonnegative().optional(),
-    costMicros: z.number().int().nonnegative().optional(),
+    cost: CostValueSchema,
+    costWarningCode: Code.optional(),
     finishReason: Code,
     latencyMs: z.number().int().nonnegative(),
     schemaValid: z.boolean(),
@@ -280,7 +282,8 @@ const contextCompactedEvent = z
     summary: JsonValue,
     inputTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),
-    costMicros: z.number().int().nonnegative().optional(),
+    cost: CostValueSchema,
+    costWarningCode: Code.optional(),
   })
   .strict();
 
@@ -333,7 +336,7 @@ const subagentCompletedEvent = z
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     steps: z.number().int().nonnegative().optional(),
-    costMicros: z.number().int().nonnegative().optional(),
+    cost: CostTotalSchema,
   })
   .strict();
 

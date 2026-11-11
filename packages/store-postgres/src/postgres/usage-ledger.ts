@@ -14,6 +14,7 @@ interface UsageLedgerRowRecord {
   readonly period: UsageLedgerPeriod;
   readonly period_start: number | string;
   readonly cost_micros: number | string;
+  readonly unknown_cost_count: number | string;
   readonly runs_started: number | string;
 }
 
@@ -45,7 +46,7 @@ export async function queryPostgresUsageLedger(
   periodStarts: readonly number[],
 ): Promise<readonly UsageLedgerRowRecord[]> {
   const result = await pool.query(
-    "SELECT quota_id, period, period_start, cost_micros, runs_started FROM usage_ledger WHERE quota_id = $1 AND period = $2 AND period_start = ANY($3::BIGINT[])",
+    "SELECT quota_id, period, period_start, cost_micros, unknown_cost_count, runs_started FROM usage_ledger WHERE quota_id = $1 AND period = $2 AND period_start = ANY($3::BIGINT[])",
     [quotaId, period, [...periodStarts]],
   );
   return result.rows;
@@ -74,6 +75,7 @@ export async function readPostgresUsageLedger(
         period: row.period,
         periodStart: integer(row.period_start),
         costMicros: integer(row.cost_micros),
+        unknownCostCount: integer(row.unknown_cost_count),
         runsStarted: integer(row.runs_started),
       }),
     );

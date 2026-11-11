@@ -11,6 +11,7 @@ import {
   JsonValue,
   type Capabilities,
   type ModelRequest,
+  type ModelUsage,
   type Part,
 } from "@rovinos/schemas";
 import { ProviderError } from "../errors.js";
@@ -252,7 +253,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     const streamParams = createAnthropicStreamingParams(params);
     const stream = this.client.messages.stream(streamParams, { signal: context.signal });
     const state = createAnthropicStreamState();
-    let usage = { inputTokens: 0, outputTokens: 0 };
+    let usage: ModelUsage = { inputTokens: 0, outputTokens: 0, usageComplete: false };
     try {
       for await (const event of stream) {
         const mapped = streamEventDeltas(event, state, context.ids, usage);

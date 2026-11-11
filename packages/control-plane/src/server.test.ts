@@ -514,7 +514,21 @@ describe("control-plane inspection tools", () => {
       runId,
       status: "running",
       steps: 1,
-      usage: { inputTokens: 1, outputTokens: 2, costMicros: 3 },
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        cost: {
+          version: 1,
+          state: "estimated",
+          knownMicros: 0,
+          estimatedMicros: 3,
+          partialMicros: 0,
+          knownCount: 0,
+          estimatedCount: 1,
+          partialCount: 0,
+          unknownCount: 0,
+        },
+      },
       pendingApprovals: [
         {
           toolId: "tool.execute",

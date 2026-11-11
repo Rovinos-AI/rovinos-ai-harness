@@ -2,6 +2,7 @@
 import { Code, type Event, type Code as EventCode, type Pseudonym } from "@rovinos/schemas";
 import { attr } from "./attr.js";
 import { POLICY_VERSION } from "./generated/policy-version.js";
+import { subagentCompletedFields } from "./subagent-completed-fields.js";
 import { z } from "zod";
 
 const commonFields = {
@@ -139,7 +140,15 @@ const subagentCompleted = z
     outcome: attr.enum(["completed", "failed", "cancelled"]),
     inputTokens: attr.nonnegativeInt(),
     outputTokens: attr.nonnegativeInt(),
-    costMicros: attr.optional(attr.nonnegativeInt()),
+    costVersion: attr.nonnegativeInt(),
+    costState: attr.enum(["known", "estimated", "partial", "unknown"]),
+    costKnownMicros: attr.nonnegativeInt(),
+    costEstimatedMicros: attr.nonnegativeInt(),
+    costPartialMicros: attr.nonnegativeInt(),
+    costKnownCount: attr.nonnegativeInt(),
+    costEstimatedCount: attr.nonnegativeInt(),
+    costPartialCount: attr.nonnegativeInt(),
+    costUnknownCount: attr.nonnegativeInt(),
   })
   .strict();
 
@@ -365,21 +374,6 @@ function projectSubagentSpawned(
   });
 }
 
-function projectSubagentCompleted(
-  event: Extract<Event, { type: "subagent_completed" }>,
-  envelope: SafeEventEnvelope,
-): SafeEvent {
-  return SafeEvent.parse({
-    ...envelope,
-    kind: "subagent_completed",
-    childRunId: event.childRunId,
-    outcome: event.outcome,
-    inputTokens: event.inputTokens,
-    outputTokens: event.outputTokens,
-    ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
-  });
-}
-
 function projectRunCreated(
   event: Extract<Event, { type: "run_created" }>,
   envelope: SafeEventEnvelope,
@@ -436,7 +430,7 @@ export function toSafeEvent(
     case "subagent_spawned":
       return projectSubagentSpawned(event, envelope);
     case "subagent_completed":
-      return projectSubagentCompleted(event, envelope);
+      return SafeEvent.parse({ ...envelope, ...subagentCompletedFields(event) });
     case "run_created":
       return projectRunCreated(event, envelope, pseudonyms);
     default: {

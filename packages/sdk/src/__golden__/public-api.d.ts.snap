@@ -197,6 +197,10 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             budgets: z.ZodPrefault<z.ZodObject<{
                 maxSteps: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 maxCostUsd: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+                unknownCostPolicy: z.ZodDefault<z.ZodEnum<{
+                    allow: "allow";
+                    fail: "fail";
+                }>>;
                 maxWallClockMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 countSuspendedTime: z.ZodDefault<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
                     false: "false";
@@ -1096,7 +1100,22 @@ export declare const RunViewSchema: z.ZodObject<{
     usage: z.ZodObject<{
         inputTokens: z.ZodNumber;
         outputTokens: z.ZodNumber;
-        costMicros: z.ZodNumber;
+        cost: z.ZodObject<{
+            version: z.ZodLiteral<1>;
+            state: z.ZodEnum<{
+                estimated: "estimated";
+                known: "known";
+                partial: "partial";
+                unknown: "unknown";
+            }>;
+            knownMicros: z.ZodNumber;
+            estimatedMicros: z.ZodNumber;
+            partialMicros: z.ZodNumber;
+            knownCount: z.ZodNumber;
+            estimatedCount: z.ZodNumber;
+            partialCount: z.ZodNumber;
+            unknownCount: z.ZodNumber;
+        }, z.core.$strict>;
     }, z.core.$strict>;
     pendingApprovals: z.ZodArray<z.ZodString>;
     recentEvents: z.ZodArray<z.core.$ZodBranded<z.ZodDiscriminatedUnion<readonly [z.ZodObject<{
@@ -1321,7 +1340,20 @@ export declare const RunViewSchema: z.ZodObject<{
         }>;
         inputTokens: z.ZodNumber;
         outputTokens: z.ZodNumber;
-        costMicros: z.ZodOptional<z.ZodNumber>;
+        costVersion: z.ZodNumber;
+        costState: z.ZodEnum<{
+            estimated: "estimated";
+            known: "known";
+            partial: "partial";
+            unknown: "unknown";
+        }>;
+        costKnownMicros: z.ZodNumber;
+        costEstimatedMicros: z.ZodNumber;
+        costPartialMicros: z.ZodNumber;
+        costKnownCount: z.ZodNumber;
+        costEstimatedCount: z.ZodNumber;
+        costPartialCount: z.ZodNumber;
+        costUnknownCount: z.ZodNumber;
         runId: z.ZodString;
         seq: z.ZodNumber;
         ts: z.ZodNumber;

@@ -67,6 +67,7 @@ describe("RoutingModelGateway", () => {
       outputTokens: 3,
       cacheReadTokens: 4,
       cacheWriteTokens: 1,
+      cost: { version: 1, state: "unknown" },
     });
   });
 

@@ -234,7 +234,22 @@ describe("InProcessExecutor", () => {
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeDefined();
-    expect(result.usage).toEqual({ inputTokens: 4, outputTokens: 2, costMicros: 0 });
+    expect(result.usage).toEqual({
+      inputTokens: 4,
+      outputTokens: 2,
+      costMicros: 0,
+      cost: {
+        version: 1,
+        state: "unknown",
+        knownMicros: 0,
+        estimatedMicros: 0,
+        partialMicros: 0,
+        knownCount: 0,
+        estimatedCount: 0,
+        partialCount: 0,
+        unknownCount: 2,
+      },
+    });
     expect(result.exitCode).toBe(0);
     expect(modelCalls).toBe(2);
     expect(toolCalls).toBe(1);

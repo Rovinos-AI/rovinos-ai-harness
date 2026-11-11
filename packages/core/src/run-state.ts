@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type JsonValue, type RunStatus } from "@rovinos/schemas";
+import {
+  addCostValue,
+  combineCostTotals,
+  EMPTY_COST_TOTAL,
+  HarnessError,
+  type CostTotal,
+  type Event,
+  type JsonValue,
+  type RunStatus,
+} from "@rovinos/schemas";
 import { createPlanReducerState, planReducer, type PlanReducerState } from "@rovinos/context";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
 import { clearToolExecution, inspectInputRound } from "./run-state-tools.js";
@@ -16,6 +25,15 @@ export type InputRequestedEvent = Extract<Event, { type: "input_requested" }>;
 export type InputResolvedEvent = Extract<Event, { type: "input_resolved" }>;
 type CheckpointWrittenEvent = Extract<Event, { type: "checkpoint_written" }>;
 
+function totalAmountMicros(cost: CostTotal): number {
+  const amount =
+    BigInt(cost.knownMicros) + BigInt(cost.estimatedMicros) + BigInt(cost.partialMicros);
+  if (amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new CorruptLogError("Run cost total exceeds safe integer micros.");
+  }
+  return Number(amount);
+}
+
 /** State derived from the append-only events for one run. */
 export interface RunState {
   readonly status: RunStatus;
@@ -26,6 +44,7 @@ export interface RunState {
     readonly inputTokens: number;
     readonly outputTokens: number;
     readonly costMicros: number;
+    readonly cost: CostTotal;
   };
   readonly pendingToolCalls: ReadonlyMap<ToolIntentEvent["callId"], ToolIntentEvent>;
   readonly toolExecutionStarted?: ReadonlySet<ToolIntentEvent["callId"]>;
@@ -66,6 +85,7 @@ interface MutableRunState {
     inputTokens: number;
     outputTokens: number;
     costMicros: number;
+    cost: CostTotal;
   };
   pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
   toolExecutionStarted: Set<ToolIntentEvent["callId"]>;
@@ -132,13 +152,15 @@ function applyResponseEvent(
   state: MutableRunState,
   event: Extract<Event, { type: "model_response" }>,
 ): MutableRunState {
+  const cost = addCostValue(state.usage.cost, event.cost);
   return {
     ...state,
     steps: state.steps + 1,
     usage: {
       inputTokens: state.usage.inputTokens + event.inputTokens,
       outputTokens: state.usage.outputTokens + event.outputTokens,
-      costMicros: state.usage.costMicros + (event.costMicros ?? 0),
+      costMicros: totalAmountMicros(cost),
+      cost,
     },
   };
 }
@@ -260,13 +282,15 @@ function applySubagentCompletion(
   state: MutableRunState,
   event: Extract<Event, { type: "subagent_completed" }>,
 ): MutableRunState {
+  const cost = combineCostTotals(state.usage.cost, event.cost);
   return {
     ...state,
     steps: state.steps + (event.steps ?? 0),
     usage: {
       inputTokens: state.usage.inputTokens + event.inputTokens,
       outputTokens: state.usage.outputTokens + event.outputTokens,
-      costMicros: state.usage.costMicros + (event.costMicros ?? 0),
+      costMicros: totalAmountMicros(cost),
+      cost,
     },
   };
 }
@@ -301,12 +325,14 @@ function applyPrimaryEvent(state: MutableRunState, event: Event): MutableRunStat
     return applyResponseEvent(state, event);
   }
   if (event.type === "context_compacted") {
+    const cost = addCostValue(state.usage.cost, event.cost);
     return {
       ...state,
       usage: {
         inputTokens: state.usage.inputTokens + (event.inputTokens ?? 0),
         outputTokens: state.usage.outputTokens + (event.outputTokens ?? 0),
-        costMicros: state.usage.costMicros + (event.costMicros ?? 0),
+        costMicros: totalAmountMicros(cost),
+        cost,
       },
     };
   }
@@ -358,7 +384,7 @@ export function foldRunState(events: Iterable<Event>): RunState {
     nextSeq: 1,
     planState: createPlanReducerState(),
     steps: 0,
-    usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, costMicros: 0, cost: EMPTY_COST_TOTAL },
     pendingToolCalls: new Map(),
     toolExecutionStarted: new Set(),
     toolExecutionAttempts: new Map(),

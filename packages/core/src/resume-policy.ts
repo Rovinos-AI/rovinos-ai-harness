@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id, RunResumePolicySchema } from "@rovinos/schemas";
+import type { CostTotal, Id, RunResumePolicySchema } from "@rovinos/schemas";
 import type { InputRequestedEvent, RunState, ToolIntentEvent } from "./run-state.js";
 import type { ModelToolCall, ToolExecutionResult, ToolPort } from "./ports.js";
 import type { z } from "zod";
@@ -14,7 +14,7 @@ export interface ToolResumeCompletion {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly steps?: number;
-  readonly costMicros?: number;
+  readonly cost: CostTotal;
 }
 
 /** Result of reconciling a dangling intent with tool-specific durable state. */

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { JsonValue as JsonValueSchema, type Event, type Id } from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import { ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import type { ModelToolCall, ToolPort } from "../ports.js";
@@ -67,7 +68,7 @@ function resultDecision(
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             steps: usage.steps,
-            ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+            cost: usage.cost,
           },
         }
       : {}),
@@ -87,6 +88,7 @@ function missingChild(childRunId?: Id): ToolResumeDecision {
             inputTokens: 0,
             outputTokens: 0,
             steps: 0,
+            cost: EMPTY_COST_TOTAL,
           },
         }),
   };
@@ -150,6 +152,7 @@ function missingBudgetDecision(childRunId: Id): ToolResumeDecision {
       inputTokens: 0,
       outputTokens: 0,
       steps: 0,
+      cost: EMPTY_COST_TOTAL,
     },
   };
 }

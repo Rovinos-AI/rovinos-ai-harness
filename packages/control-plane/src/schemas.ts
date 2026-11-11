@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
+  CostTotalSchema,
   Id,
   InputAnswerRequestSchema,
   InputAnswerResponseSchema,
@@ -191,7 +192,7 @@ export const getRunOutputSchema = z
       .object({
         inputTokens: z.number().int().nonnegative(),
         outputTokens: z.number().int().nonnegative(),
-        costMicros: z.number().int().nonnegative(),
+        cost: CostTotalSchema,
       })
       .strict(),
     lastCheckpoint: z
