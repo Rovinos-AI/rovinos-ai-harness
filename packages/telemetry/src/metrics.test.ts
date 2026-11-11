@@ -6,12 +6,16 @@ import {
   TELEMETRY_DROP_REASONS,
   TELEMETRY_METRIC_STRING_ATTRIBUTES,
   HOST_APP_REJECTED_REASONS,
+  APPROVAL_DECISIONS,
+  RUN_COMPLETION_OUTCOMES,
+  TOOL_CALL_OUTCOMES,
   POLICY_DECISIONS,
   MCP_INPUT_REQUEST_OUTCOMES,
   WORKER_JOB_OUTCOMES,
   RATE_LIMIT_BACKENDS,
   RATE_LIMIT_KEY_KINDS,
   METRIC_ALLOWLIST,
+  METRIC_ATTRIBUTE_BOUNDS,
   countHostAppRejected,
   countHostAppSpansAccepted,
   countModelUsage,
@@ -31,6 +35,12 @@ import {
   selectTelemetryMeterProvider,
   type TelemetryDropReason,
 } from "./metrics.js";
+import {
+  countCompletedRun,
+  countToolCall,
+  recordApprovalWait,
+  recordModelLatency,
+} from "./metrics-api.js";
 
 const meter = metrics.getMeter("@rovinos/telemetry");
 const counter = meter.createCounter("harness.telemetry.dropped");
@@ -278,6 +288,9 @@ describe("countDroppedTelemetry", () => {
       "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
       "harness.rate_limit.denied.key_kind": RATE_LIMIT_KEY_KINDS,
       "harness.rate_limit.degraded.backend": RATE_LIMIT_BACKENDS,
+      "harness.run.completed.outcome": RUN_COMPLETION_OUTCOMES,
+      "harness.approval.wait_ms.decision": APPROVAL_DECISIONS,
+      "harness.tool.calls.outcome": TOOL_CALL_OUTCOMES,
     });
     expect(
       TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.telemetry.dropped.reason"].length,
@@ -309,8 +322,65 @@ describe("countDroppedTelemetry", () => {
     expect(METRIC_ALLOWLIST["harness.worker.queue_lag_ms"]).toEqual([]);
   });
 
+  it("records run, approval, model, and tool metrics with bounded attributes", () => {
+    for (const outcome of RUN_COMPLETION_OUTCOMES) {
+      countCompletedRun(outcome);
+    }
+    for (const decision of APPROVAL_DECISIONS) {
+      recordApprovalWait(25, decision);
+    }
+    recordModelLatency(50, "sample", "model-a");
+    for (const outcome of TOOL_CALL_OUTCOMES) {
+      countToolCall(outcome);
+    }
+    recordModelLatency(Number.NaN, "sample", "model-a");
+    recordApprovalWait(-1, "approve");
+
+    expect(createCounter).toHaveBeenCalledWith("harness.run.completed");
+    expect(add.mock.calls.slice(0, RUN_COMPLETION_OUTCOMES.length)).toEqual(
+      RUN_COMPLETION_OUTCOMES.map((outcome) => [1, { "harness.run.completed.outcome": outcome }]),
+    );
+    expect(createHistogram).toHaveBeenCalledWith("harness.approval.wait_ms");
+    expect(createHistogram).toHaveBeenCalledWith("harness.model.latency_ms");
+    expect(record.mock.calls).toEqual([
+      ...APPROVAL_DECISIONS.map((decision) => [
+        25,
+        { "harness.approval.wait_ms.decision": decision },
+      ]),
+      [50, { "harness.model.provider": "sample", "harness.model.name": "model-a" }],
+    ]);
+    expect(createCounter).toHaveBeenCalledWith("harness.tool.calls");
+    expect(add.mock.calls.slice(RUN_COMPLETION_OUTCOMES.length)).toEqual(
+      TOOL_CALL_OUTCOMES.map((outcome) => [1, { "harness.tool.calls.outcome": outcome }]),
+    );
+    expect(METRIC_ALLOWLIST["harness.approval.wait_ms"]).toEqual([
+      "harness.approval.wait_ms.decision",
+    ]);
+    expect(METRIC_ALLOWLIST["harness.model.latency_ms"]).toEqual([
+      "harness.model.provider",
+      "harness.model.name",
+    ]);
+  });
+
   it("has an instrument for every allowlist entry and no stale entries", () => {
     expect([...createdMetricNames].sort()).toEqual(Object.keys(METRIC_ALLOWLIST).sort());
+  });
+
+  it("declares boundedness for every allowlisted metric attribute", () => {
+    expect(Object.keys(METRIC_ATTRIBUTE_BOUNDS).sort()).toEqual(
+      Object.keys(METRIC_ALLOWLIST).sort(),
+    );
+    for (const [name, attributes] of Object.entries(METRIC_ALLOWLIST)) {
+      const bounds = Object.entries(METRIC_ATTRIBUTE_BOUNDS).find(
+        ([metricName]) => metricName === name,
+      )?.[1];
+      expect(bounds).toBeDefined();
+      expect(Object.keys(bounds ?? {}).sort()).toEqual([...attributes].sort());
+    }
+    expect(METRIC_ATTRIBUTE_BOUNDS["harness.model.latency_ms"]).toEqual({
+      "harness.model.provider": { kind: "config", source: "models.providers" },
+      "harness.model.name": { kind: "config", source: "models.providers" },
+    });
   });
 
   it("enumerates every metric instrument through an allowlisted creation path", () => {
@@ -344,6 +414,16 @@ describe("countDroppedTelemetry", () => {
     }
     for (const outcome of WORKER_JOB_OUTCOMES) {
       countWorkerJob(outcome);
+    }
+    for (const outcome of RUN_COMPLETION_OUTCOMES) {
+      countCompletedRun(outcome);
+    }
+    for (const decision of APPROVAL_DECISIONS) {
+      recordApprovalWait(1, decision);
+    }
+    recordModelLatency(1, "sample", "model");
+    for (const outcome of TOOL_CALL_OUTCOMES) {
+      countToolCall(outcome);
     }
     for (const keyKind of RATE_LIMIT_KEY_KINDS) {
       countRateLimitDenied(keyKind);
