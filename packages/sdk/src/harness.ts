@@ -8,6 +8,7 @@ import { projectSafeEvents, readEvents } from "./event-views.js";
 import { getRunContent as readRunContent, streamRunContent } from "./content-access.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
 import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
+import { projectRunViewUsage } from "./run-view-usage.js";
 import {
   ExtensionHarnessAccess,
   type ExtensionHarnessAccessOptions,
@@ -205,7 +206,7 @@ class HarnessClient extends ExtensionHarnessAccess implements Harness {
           lastSeq: lastEvent.seq,
           lastTs: lastEvent.ts,
           steps: state.steps,
-          usage: state.usage,
+          usage: projectRunViewUsage(state.usage),
           pendingApprovals: Array.from(state.pendingApprovals.keys()),
           recentEvents: await projectSafeEvents(
             this.runtime,

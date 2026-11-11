@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { RunConfigSchema } from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL, RunConfigSchema } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { BudgetTracker } from "../budgets.js";
 import {
@@ -13,7 +13,7 @@ const parentState = (overrides: Partial<RunState> = {}): RunState => ({
   status: "running",
   nextSeq: 2,
   steps: 0,
-  usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
+  usage: { inputTokens: 0, outputTokens: 0, costMicros: 0, cost: EMPTY_COST_TOTAL },
   pendingToolCalls: new Map(),
   toolExecutionAttempts: new Map(),
   pendingApprovals: new Map(),
@@ -39,7 +39,12 @@ describe("deriveChildBudgets", () => {
       name: "caps larger role budgets to the parent remainder",
       state: parentState({
         steps: 8,
-        usage: { inputTokens: 0, outputTokens: 0, costMicros: 8 },
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          costMicros: 8,
+          cost: { ...EMPTY_COST_TOTAL, knownMicros: 8, knownCount: 1 },
+        },
       }),
       role: { maxSteps: 20, maxCostUsd: 0.00002, maxWallClockMs: 2_000 },
       now: 900,
@@ -65,7 +70,14 @@ describe("deriveChildBudgets", () => {
   it("throws budget_exceeded when cost or the wall-clock deadline is exhausted", () => {
     expect(() =>
       deriveChildBudgets(
-        parentState({ usage: { inputTokens: 0, outputTokens: 0, costMicros: 10 } }),
+        parentState({
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            costMicros: 10,
+            cost: { ...EMPTY_COST_TOTAL, knownMicros: 10, knownCount: 1 },
+          },
+        }),
         parentBudgets,
         undefined,
         100,

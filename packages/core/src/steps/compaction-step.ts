@@ -4,11 +4,14 @@ import {
   JsonValue,
   ModelRefSchema,
   ModelRequestSchema,
+  costValueFromUsage,
+  type CostValue,
   type Event,
   type Id,
   type ModelRef,
   type ModelUsage,
   type Part,
+  type RunConfig,
 } from "@rovinos/schemas";
 import {
   eventsToTranscript,
@@ -162,7 +165,8 @@ export interface CompactionStepOptions {
   readonly sanitizeSummary: (text: string) => Promise<string>;
   readonly keepRecentGroups?: number;
   readonly signal?: AbortSignal;
-  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
+  readonly usageUpdatesForCost?: (cost: CostValue) => readonly UsageLedgerDelta[];
+  readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
 }
 
 function sourceGroups(
@@ -246,10 +250,11 @@ export async function compactionStep(options: CompactionStepOptions): Promise<Ev
   }
   return options.recorder.withStepSpan(COMPACTION_SPAN, {}, async () => {
     const tokenizedSummary = await options.sanitizeSummary(summary.text);
+    const cost = costValueFromUsage(summary.usage);
     return options.recorder.record(
       {
         type: "context_compacted",
-        v: 1,
+        v: 2,
         fromSeq: source.fromSeq,
         toSeq: source.toSeq,
         strategy: options.strategy.id,
@@ -257,9 +262,13 @@ export async function compactionStep(options: CompactionStepOptions): Promise<Ev
         summary: JsonValue.parse(tokenizedSummary),
         inputTokens: summary.usage.inputTokens,
         outputTokens: summary.usage.outputTokens,
-        ...(summary.usage.costMicros === undefined ? {} : { costMicros: summary.usage.costMicros }),
+        cost,
+        ...(options.unknownCostPolicy === "allow" &&
+        (cost.state === "unknown" || cost.state === "partial")
+          ? { costWarningCode: "budget_cost_unknown_allowed" }
+          : {}),
       },
-      options.usageUpdatesForCost?.(summary.usage.costMicros),
+      options.usageUpdatesForCost?.(cost),
     );
   });
 }
@@ -285,7 +294,8 @@ export async function compactBeforeModelCall(options: {
   readonly deadlineTs?: number;
   readonly modelRef: ModelRef;
   readonly goal: JsonValue;
-  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
+  readonly usageUpdatesForCost?: (cost: CostValue) => readonly UsageLedgerDelta[];
+  readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
 }): Promise<void> {
   const compaction = options.compaction;
   if (compaction === undefined) {
@@ -296,6 +306,9 @@ export async function compactBeforeModelCall(options: {
     new ModelPortSummarizer(options.model, options.ids, options.modelRef, {
       runId: options.runId,
       signal: options.signal,
+      ...(options.unknownCostPolicy === undefined
+        ? {}
+        : { unknownCostPolicy: options.unknownCostPolicy }),
       ...(options.deadlineTs === undefined ? {} : { deadlineTs: options.deadlineTs }),
     });
   const event = await compactionStep({

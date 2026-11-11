@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id } from "@rovinos/schemas";
+import {
+  EMPTY_COST_TOTAL,
+  HarnessError,
+  type CostTotal,
+  type Event,
+  type Id,
+} from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
 import type { IdGenerator } from "./ports.js";
 import { CorruptLogError, foldRunState, isTerminalRunState } from "./run-state.js";
@@ -234,7 +240,7 @@ async function completeCancelledChild(options: {
     inputTokens: childState.usage.inputTokens,
     outputTokens: childState.usage.outputTokens,
     steps: childState.steps,
-    costMicros: childState.usage.costMicros,
+    cost: childState.usage.cost,
   });
 }
 
@@ -251,7 +257,7 @@ async function appendCancelledChild(options: {
     inputTokens: 0,
     outputTokens: 0,
     steps: 0,
-    costMicros: 0,
+    cost: EMPTY_COST_TOTAL,
   });
 }
 
@@ -265,7 +271,7 @@ async function appendChildCompletion(options: {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly steps: number;
-  readonly costMicros: number;
+  readonly cost: CostTotal;
 }): Promise<void> {
   const { store, parentRunId, childRunId, clock, ids } = options;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -284,13 +290,13 @@ async function appendChildCompletion(options: {
       await recorder.withStepSpan(RUN_SPAN, {}, () =>
         recorder.record({
           type: "subagent_completed",
-          v: 1,
+          v: 2,
           childRunId,
           outcome: options.outcome,
           inputTokens: options.inputTokens,
           outputTokens: options.outputTokens,
           steps: options.steps,
-          costMicros: options.costMicros,
+          cost: options.cost,
         }),
       );
       return;

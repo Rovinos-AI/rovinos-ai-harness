@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event, Id, type JsonValue as JsonValueType } from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL, Event, Id, type JsonValue as JsonValueType } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { finalizeChild } from "./result.js";
 
@@ -32,12 +32,16 @@ function response(
     ...envelope,
     seq,
     type: "model_response",
+    v: 2,
     requestId: runId,
     provider: "test",
     model: "test",
     inputTokens: usage.inputTokens ?? 0,
     outputTokens: usage.outputTokens ?? 0,
-    ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+    cost:
+      usage.costMicros === undefined
+        ? { version: 1, state: "unknown" }
+        : { version: 1, state: "estimated", amountMicros: usage.costMicros },
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: enforcement.schemaValid ?? true,
@@ -88,7 +92,17 @@ describe("finalizeChild", () => {
       childRunId,
       status: "completed",
       value: { email: "<EMAIL_1>" },
-      usage: { inputTokens: 7, outputTokens: 10, steps: 2, costMicros: 15 },
+      usage: {
+        inputTokens: 7,
+        outputTokens: 10,
+        steps: 2,
+        cost: {
+          ...EMPTY_COST_TOTAL,
+          state: "estimated",
+          estimatedMicros: 15,
+          estimatedCount: 2,
+        },
+      },
     });
     expect(JSON.stringify(result)).not.toContain("alice@example.test");
   });
@@ -105,7 +119,12 @@ describe("finalizeChild", () => {
       childRunId,
       status: "completed",
       value: { text: "plain answer" },
-      usage: { inputTokens: 1, outputTokens: 2, steps: 1 },
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        steps: 1,
+        cost: { ...EMPTY_COST_TOTAL, state: "unknown", unknownCount: 1 },
+      },
     });
   });
 
@@ -165,12 +184,13 @@ describe("finalizeChild", () => {
       ...envelope,
       seq: 2,
       type: "subagent_completed",
+      v: 2,
       childRunId,
       outcome: "completed",
       inputTokens: 7,
       outputTokens: 8,
       steps: 2,
-      costMicros: 9,
+      cost: { ...EMPTY_COST_TOTAL, state: "estimated", estimatedMicros: 9, estimatedCount: 1 },
     });
     const invalid = response(
       1,
@@ -188,7 +208,12 @@ describe("finalizeChild", () => {
       }),
     ).toMatchObject({
       status: "failed",
-      usage: { inputTokens: 9, outputTokens: 11, steps: 3, costMicros: 13 },
+      usage: {
+        inputTokens: 9,
+        outputTokens: 11,
+        steps: 3,
+        cost: { ...EMPTY_COST_TOTAL, state: "estimated", estimatedMicros: 13, estimatedCount: 2 },
+      },
     });
   });
 
@@ -197,12 +222,13 @@ describe("finalizeChild", () => {
       ...envelope,
       seq: 2,
       type: "subagent_completed",
+      v: 2,
       childRunId: Id.parse("22222222222222222222222222"),
       outcome: "completed",
       inputTokens: 7,
       outputTokens: 8,
       steps: 2,
-      costMicros: 9,
+      cost: { ...EMPTY_COST_TOTAL, state: "estimated", estimatedMicros: 9, estimatedCount: 1 },
     });
     const childResult = finalizeChild({
       childRunId,
@@ -217,6 +243,7 @@ describe("finalizeChild", () => {
       ...envelope,
       seq: 1,
       type: "subagent_completed",
+      v: 2,
       childRunId,
       outcome: "completed",
       ...childResult.usage,
@@ -232,7 +259,7 @@ describe("finalizeChild", () => {
       inputTokens: 9,
       outputTokens: 11,
       steps: 3,
-      costMicros: 13,
+      cost: { ...EMPTY_COST_TOTAL, state: "estimated", estimatedMicros: 13, estimatedCount: 2 },
     });
     expect(rootResult.usage).toEqual(childResult.usage);
   });
@@ -268,7 +295,7 @@ describe("finalizeChild", () => {
       childRunId,
       status: "cancelled",
       errorCode: "run_cancelled",
-      usage: { inputTokens: 0, outputTokens: 0, steps: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, steps: 0, cost: EMPTY_COST_TOTAL },
     });
   });
 });

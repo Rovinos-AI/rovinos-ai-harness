@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Event, Id, type Event as EventValue } from "@rovinos/schemas";
+import {
+  addCostValue,
+  Code,
+  EMPTY_COST_TOTAL,
+  Event,
+  Id,
+  type Event as EventValue,
+} from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { diffRuns, normalizeRun } from "./diff.js";
 
@@ -77,7 +84,10 @@ function modelResponse(
     model: "synthetic",
     inputTokens: 1,
     outputTokens: 1,
-    ...(costMicros === undefined ? {} : { costMicros }),
+    cost:
+      costMicros === undefined
+        ? { version: 1, state: "unknown" }
+        : { version: 1, state: "known", amountMicros: costMicros },
     finishReason: "stop",
     latencyMs,
     schemaValid: true,
@@ -101,7 +111,11 @@ function subagentCompleted(costMicros: number): EventValue {
     outcome: "completed",
     inputTokens: 1,
     outputTokens: 1,
-    costMicros,
+    cost: addCostValue(EMPTY_COST_TOTAL, {
+      version: 1,
+      state: "known",
+      amountMicros: costMicros,
+    }),
   });
 }
 
@@ -192,6 +206,7 @@ function contentEvent(
     strategy: "synthetic",
     strategyVersion: "v1",
     summary: { canary },
+    cost: { version: 1, state: "unknown" },
   });
 }
 
@@ -295,9 +310,9 @@ describe("diffRuns", () => {
   const noiseCases: readonly [string, number, number, boolean, "noise" | "behavioral"][] = [
     ["latencyMs", 10, 20, false, "noise"],
     ["waitMs", 10, 20, false, "noise"],
-    ["costMicros", 10, 20, false, "behavioral"],
+    ["costKnownMicros", 10, 20, false, "behavioral"],
     ["repairAttempts", 0, 1, false, "behavioral"],
-    ["costMicros", 10, 20, true, "noise"],
+    ["costKnownMicros", 10, 20, true, "noise"],
     ["repairAttempts", 0, 1, true, "noise"],
   ];
 
@@ -308,7 +323,7 @@ describe("diffRuns", () => {
         if (field === "waitMs") {
           return approvalResolved(value, "synthetic");
         }
-        if (field === "costMicros") {
+        if (field === "costKnownMicros") {
           return subagentCompleted(value);
         }
         return modelResponse(

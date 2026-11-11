@@ -59,6 +59,7 @@ function trialEvents(taskId: string): readonly Event[] {
       model: "synthetic",
       inputTokens: 1,
       outputTokens: 1,
+      cost: { version: 1, state: "known", amountMicros: 1 },
       finishReason: "stop",
       latencyMs: 1,
       schemaValid: true,

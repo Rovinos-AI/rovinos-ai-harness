@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModelRef, ModelUsage } from "@rovinos/schemas";
+import {
+  combineCostValues,
+  costValueFromUsage,
+  type ModelRef,
+  type ModelUsage,
+} from "@rovinos/schemas";
 import { countModelUsage, setActiveSpanAttribute } from "@rovinos/telemetry";
 
 function aggregateOptionalTokens(
@@ -7,6 +12,26 @@ function aggregateOptionalTokens(
   next: number | undefined,
 ): number | undefined {
   return previous === undefined && next === undefined ? undefined : (previous ?? 0) + (next ?? 0);
+}
+
+function aggregateUsageCompleteness(
+  previous: ModelUsage | undefined,
+  next: ModelUsage,
+): ModelUsage["usageComplete"] {
+  if (previous?.usageComplete === false || next.usageComplete === false) {
+    return false;
+  }
+  if (previous?.usageComplete === true || next.usageComplete === true) {
+    return true;
+  }
+  return undefined;
+}
+
+function aggregateCost(previous: ModelUsage | undefined, next: ModelUsage) {
+  if (previous === undefined) {
+    return costValueFromUsage(next);
+  }
+  return combineCostValues(costValueFromUsage(previous), costValueFromUsage(next));
 }
 
 /**
@@ -25,11 +50,16 @@ export function aggregateModelUsage(
     previous?.cacheWriteTokens,
     next.cacheWriteTokens,
   );
+  const usageComplete = aggregateUsageCompleteness(previous, next);
+  const cost = aggregateCost(previous, next);
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
     ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
     ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+    ...(usageComplete === undefined ? {} : { usageComplete }),
+    ...(cost.state === "unknown" ? {} : { costMicros: cost.amountMicros }),
+    cost,
   };
 }
 

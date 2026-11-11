@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { UsageLedgerDelta } from "@rovinos/store";
+import type { CostValue } from "@rovinos/schemas";
 import type { BudgetViolation } from "./budgets.js";
 import type { RunLoopExecutionOptions } from "./loop.js";
 
 /** Quota callbacks shared by every model-call path in a run. */
 export function modelQuotaHooks(options: RunLoopExecutionOptions): {
   readonly checkQuota?: () => Promise<BudgetViolation | undefined>;
-  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
+  readonly usageUpdatesForCost?: (cost: CostValue) => readonly UsageLedgerDelta[];
 } {
   const service = options.quotaService;
   if (service === undefined) {
@@ -15,6 +16,6 @@ export function modelQuotaHooks(options: RunLoopExecutionOptions): {
   const identity = options.quotaIdentity ?? {};
   return {
     checkQuota: () => service.checkBeforeModelCall(identity),
-    usageUpdatesForCost: (costMicros) => service.usageUpdatesForCost(identity, costMicros),
+    usageUpdatesForCost: (cost) => service.usageUpdatesForCost(identity, cost),
   };
 }

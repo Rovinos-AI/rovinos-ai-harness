@@ -11,7 +11,7 @@ export const EVENT_SCHEMA_VERSIONS = {
   run_input: 1,
   run_status_changed: 1,
   model_request: 3,
-  model_response: 1,
+  model_response: 2,
   tool_intent: 1,
   tool_execution_started: 1,
   tool_result: 2,
@@ -21,11 +21,11 @@ export const EVENT_SCHEMA_VERSIONS = {
   input_resolved: 1,
   app_content: 1,
   checkpoint_written: 1,
-  context_compacted: 1,
+  context_compacted: 2,
   pii_action: 1,
   budget_exceeded: 1,
-  subagent_spawned: 1,
-  subagent_completed: 1,
+  subagent_spawned: 2,
+  subagent_completed: 2,
 } satisfies Record<EventType, number>;
 
 /** A pure transformation from one event payload version to the next. */
@@ -50,6 +50,18 @@ export const UPCASTERS: EventUpcasterMap = {
   },
   approval_resolved: {
     1: approvalResolvedV1ToV2,
+  },
+  model_response: {
+    1: costPayloadV1ToV2,
+  },
+  subagent_spawned: {
+    1: subagentSpawnedV1ToV2,
+  },
+  context_compacted: {
+    1: costPayloadV1ToV2,
+  },
+  subagent_completed: {
+    1: subagentCompletedV1ToV2,
   },
   tool_result: {
     1: toolResultV1ToV2,
@@ -94,6 +106,77 @@ function toolResultV1ToV2(payload: unknown): unknown {
   return {
     ...payload,
     result: { format: "legacy-json", version: 1, value: payload.result },
+  };
+}
+
+/** Recasts legacy integer costs as estimates and missing costs as explicitly unknown. */
+function costPayloadV1ToV2(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+  const { costMicros, ...remaining } = payload;
+  if (Object.hasOwn(payload, "cost")) {
+    return remaining;
+  }
+  return {
+    ...remaining,
+    cost: legacyCostValue(costMicros),
+  };
+}
+
+function legacyCostValue(costMicros: unknown): unknown {
+  return typeof costMicros === "number" && Number.isSafeInteger(costMicros) && costMicros >= 0
+    ? { version: 1, state: "estimated", amountMicros: costMicros }
+    : { version: 1, state: "unknown" };
+}
+
+/** Recasts a legacy child total into the complete run-total representation. */
+function subagentCompletedV1ToV2(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+  const { costMicros, ...remaining } = payload;
+  if (Object.hasOwn(payload, "cost")) {
+    return remaining;
+  }
+  const cost =
+    typeof costMicros === "number" && Number.isSafeInteger(costMicros) && costMicros >= 0
+      ? {
+          version: 1,
+          state: "estimated",
+          knownMicros: 0,
+          estimatedMicros: costMicros,
+          partialMicros: 0,
+          knownCount: 0,
+          estimatedCount: 1,
+          partialCount: 0,
+          unknownCount: 0,
+        }
+      : {
+          version: 1,
+          state: "unknown",
+          knownMicros: 0,
+          estimatedMicros: 0,
+          partialMicros: 0,
+          knownCount: 0,
+          estimatedCount: 0,
+          partialCount: 0,
+          unknownCount: 1,
+        };
+  return { ...remaining, cost };
+}
+
+/** Adds the fail-closed unknown-cost policy to legacy child budget limits. */
+function subagentSpawnedV1ToV2(payload: unknown): unknown {
+  if (!isRecord(payload) || !isRecord(payload.budgetLimits)) {
+    return payload;
+  }
+  if (Object.hasOwn(payload.budgetLimits, "unknownCostPolicy")) {
+    return payload;
+  }
+  return {
+    ...payload,
+    budgetLimits: { ...payload.budgetLimits, unknownCostPolicy: "fail" },
   };
 }
 

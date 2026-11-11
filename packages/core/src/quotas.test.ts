@@ -59,12 +59,15 @@ describe("QuotaService", () => {
         maxRunsStarted: 3,
       },
     ]);
-    expect(service.usageUpdatesForCost(identity, 7)).toEqual([
+    expect(
+      service.usageUpdatesForCost(identity, { version: 1, state: "known", amountMicros: 7 }),
+    ).toEqual([
       {
         quotaId: "team",
         period: "day",
         periodStart: Date.UTC(2026, 9, 20),
         costMicros: 7,
+        unknownCostCount: 0,
         runsStarted: 0,
       },
       {
@@ -72,6 +75,7 @@ describe("QuotaService", () => {
         period: "month",
         periodStart: Date.UTC(2026, 9, 1),
         costMicros: 7,
+        unknownCostCount: 0,
         runsStarted: 0,
       },
     ]);
@@ -95,6 +99,7 @@ describe("QuotaService", () => {
         period: "hour",
         periodStart: Date.UTC(2026, 9, 20, 14),
         costMicros: 0,
+        unknownCostCount: 0,
         runsStarted: 3,
       },
     ]);
@@ -110,6 +115,7 @@ describe("QuotaService", () => {
         period: "month",
         periodStart: Date.UTC(2026, 9, 1),
         costMicros: 20,
+        unknownCostCount: 0,
         runsStarted: 0,
       },
     ]);
@@ -126,6 +132,7 @@ describe("QuotaService", () => {
         period: "day",
         periodStart: Date.UTC(2026, 9, 20),
         costMicros: 10,
+        unknownCostCount: 0,
         runsStarted: 0,
       },
     ]);
@@ -152,13 +159,34 @@ describe("QuotaService", () => {
     service.recordRejection("unconfigured");
   });
 
-  it("does not account missing or zero model cost and rejects invalid cost values", () => {
+  it("accounts incomplete cost separately and ignores verified zero cost", () => {
     const { store } = storeWith();
     const service = new QuotaService(dailyAndHourly, store, clock);
 
-    expect(service.usageUpdatesForCost(identity, undefined)).toEqual([]);
-    expect(service.usageUpdatesForCost(identity, 0)).toEqual([]);
-    expect(() => service.usageUpdatesForCost(identity, -1)).toThrow(RangeError);
+    expect(service.usageUpdatesForCost(identity, { version: 1, state: "unknown" })).toEqual([
+      {
+        quotaId: "team",
+        period: "day",
+        periodStart: Date.UTC(2026, 9, 20),
+        costMicros: 0,
+        unknownCostCount: 1,
+        runsStarted: 0,
+      },
+      {
+        quotaId: "team",
+        period: "month",
+        periodStart: Date.UTC(2026, 9, 1),
+        costMicros: 0,
+        unknownCostCount: 1,
+        runsStarted: 0,
+      },
+    ]);
+    expect(
+      service.usageUpdatesForCost(identity, { version: 1, state: "known", amountMicros: 0 }),
+    ).toEqual([]);
+    expect(
+      service.usageUpdatesForCost(identity, { version: 1, state: "estimated", amountMicros: 1 }),
+    ).toHaveLength(2);
     expect(() => service.startUsageUpdates(identity)).not.toThrow();
   });
 });

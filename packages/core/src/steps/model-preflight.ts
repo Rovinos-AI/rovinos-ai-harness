@@ -32,7 +32,7 @@ export async function recordBudgetFailureAndCheckpoint(
       v: 1,
       from: "running",
       to: "failed",
-      reason: "budget_exceeded",
+      reason: violation.code ?? "budget_exceeded",
     },
   ]);
   events.push(...recorded);

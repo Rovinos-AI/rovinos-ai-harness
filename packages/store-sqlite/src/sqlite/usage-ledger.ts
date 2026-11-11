@@ -14,6 +14,7 @@ interface UsageLedgerRowRecord {
   readonly period: UsageLedgerPeriod;
   readonly period_start: number;
   readonly cost_micros: number;
+  readonly unknown_cost_count: number;
   readonly runs_started: number;
 }
 
@@ -54,6 +55,7 @@ export function readSqliteUsageLedger(
                 period: row.period,
                 periodStart: row.period_start,
                 costMicros: row.cost_micros,
+                unknownCostCount: row.unknown_cost_count,
                 runsStarted: row.runs_started,
               }),
             ];

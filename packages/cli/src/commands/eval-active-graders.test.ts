@@ -281,6 +281,17 @@ it("records and replays voted judges with configured pricing and stops schedulin
     inputTokens: 8,
     outputTokens: 6,
     costMicros: 6_000_004,
+    cost: {
+      version: 1,
+      state: "known",
+      knownMicros: 6_000_004,
+      estimatedMicros: 0,
+      partialMicros: 0,
+      knownCount: 2,
+      estimatedCount: 0,
+      partialCount: 0,
+      unknownCount: 0,
+    },
   });
   expect((await report(output)).trials[0]?.costMicros).toBe(6_000_004);
   const cassette = parseJson(

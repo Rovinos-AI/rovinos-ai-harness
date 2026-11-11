@@ -350,7 +350,7 @@ describe("provider-safe MCP tool aliases", () => {
         expect(followup.usage).toEqual(
           profile.kind === "anthropic"
             ? { inputTokens: 1, outputTokens: 1 }
-            : { inputTokens: 0, outputTokens: 0 },
+            : { inputTokens: 0, outputTokens: 0, usageComplete: false },
         );
 
         const serializedToolResult = JSON.stringify(execution.result);

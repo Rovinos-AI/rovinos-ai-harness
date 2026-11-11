@@ -141,7 +141,7 @@ describe("ModelGateway", () => {
     expect(call?.[1].signal).not.toBe(signal);
     expect(completion).toEqual({
       parts: [{ type: "text", text: "answer" }],
-      usage: { inputTokens: 2, outputTokens: 3 },
+      usage: { inputTokens: 2, outputTokens: 3, cost: { version: 1, state: "unknown" } },
       finishReason: "stop",
       provider: "sample",
       model: "model-a",
@@ -710,8 +710,13 @@ describe("ModelGateway", () => {
     const first = await gateway.complete(request, { runId: request.requestId, signal });
     const second = await gateway.complete(request, { runId: request.requestId, signal });
 
-    expect(first.usage).toEqual({ inputTokens: 2, outputTokens: 3 });
-    expect(second.usage).toEqual({ inputTokens: 2, outputTokens: 3 });
+    expect(first.usage).toEqual({
+      inputTokens: 2,
+      outputTokens: 3,
+      costMicros: 99,
+      cost: { version: 1, state: "known", amountMicros: 99 },
+    });
+    expect(second.usage).toEqual(first.usage);
     expect(pricingMissing).toHaveBeenCalledExactlyOnceWith("sample", "model-a");
   });
 
@@ -746,6 +751,7 @@ describe("ModelGateway", () => {
       outputTokens: 0,
       cacheReadTokens: 2_000,
       costMicros: 1,
+      cost: { version: 1, state: "partial", amountMicros: 1 },
     });
     expect(second.usage).toEqual(first.usage);
     expect(pricingCacheMissing).toHaveBeenCalledExactlyOnceWith("sample", "model-a");
@@ -1676,8 +1682,12 @@ describe("ModelGateway", () => {
       },
     );
 
-    expect(completion.usage).toEqual({ inputTokens: 3, outputTokens: 4 });
-    expect(completion.usage).not.toHaveProperty("costMicros");
+    expect(completion.usage).toEqual({
+      inputTokens: 3,
+      outputTokens: 4,
+      costMicros: 7,
+      cost: { version: 1, state: "partial", amountMicros: 7 },
+    });
   });
 
   it("stops after the configured number of repair calls and reports final issue paths", async () => {
