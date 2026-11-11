@@ -1392,9 +1392,7 @@ describe("runLoop", () => {
       code: "tool_profile_unsupported",
     });
     await expect(
-      runLoop(
-        options(Object.assign(new FakeToolPort(), { supportsToolProfiles: true as const })),
-      ),
+      runLoop(options(Object.assign(new FakeToolPort(), { supportsToolProfiles: true as const }))),
     ).rejects.toMatchObject({ code: "tool_profile_unsupported" });
   });
 
