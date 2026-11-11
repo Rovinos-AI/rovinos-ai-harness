@@ -42,6 +42,7 @@
     "check:links": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/docs/check-links.ts",
     "check:mermaid": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/docs/check-mermaid.ts",
     "gen:collector": "yarn build && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-collector-allowlist.ts",
+    "validate:datadog": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/datadog/validate-dashboard.ts",
     "gen:pii-corpus": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-pii-corpus.ts",
     "check:pii-corpus": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-pii-corpus.ts --check",
     "pii:report": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/pii-report.ts",

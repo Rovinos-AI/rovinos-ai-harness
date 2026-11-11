@@ -23,6 +23,10 @@ import {
 } from "@rovinos/schemas";
 import { SeqConflictError, type EventStore, type UsageLedgerDelta } from "@rovinos/store";
 import {
+  countCompletedRun,
+  countToolCall,
+  recordApprovalWait,
+  recordModelLatency,
   sentinelTripQueue,
   setActiveSpanAttribute,
   type SpanDefinition,
@@ -334,9 +338,23 @@ export class RunRecorder {
       throw error;
     }
 
-    return newEvents.map((event, index) =>
+    const events = newEvents.map((event, index) =>
       EventSchema.parse({ ...event, seq: expectedSeq + index }),
     );
+    for (const event of events) {
+      if (event.type === "run_status_changed") {
+        if (event.to === "completed" || event.to === "failed" || event.to === "cancelled") {
+          countCompletedRun(event.to);
+        }
+      } else if (event.type === "model_response") {
+        recordModelLatency(event.latencyMs, event.provider, event.model);
+      } else if (event.type === "approval_resolved") {
+        recordApprovalWait(event.waitMs, event.decision);
+      } else if (event.type === "tool_result") {
+        countToolCall(event.outcome);
+      }
+    }
+    return events;
   }
 
   private async appendWithSnapshot(

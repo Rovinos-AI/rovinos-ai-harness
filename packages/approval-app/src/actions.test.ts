@@ -398,6 +398,8 @@ describe("approval actions", () => {
         actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent,
       ).toBe("This approval has already been resolved.");
     });
+    expect([...actions.querySelectorAll("button")].every((control) => control.disabled)).toBe(true);
+    expect(bridge.callTool).toHaveBeenCalledOnce();
     expect(recordCalls).toEqual([{ name: "ui.error", attrs: { code: "resolve_failed" } }]);
   });
 
@@ -416,14 +418,14 @@ describe("approval actions", () => {
   it("records each resolve failure when a retry also fails", async () => {
     const { actions, bridge, recordCalls } = setup();
     bridge.callTool
-      .mockResolvedValueOnce(toolResponse({ ok: false, code: "approval_already_resolved" }))
-      .mockResolvedValueOnce(toolResponse({ ok: false, code: "approval_already_resolved" }));
+      .mockResolvedValueOnce(toolResponse({ ok: false, code: "approval_resolution_conflict" }))
+      .mockResolvedValueOnce(toolResponse({ ok: false, code: "approval_resolution_conflict" }));
     const approve = actions.querySelector<HTMLButtonElement>("button");
     approve?.click();
     await vi.waitFor(() => {
       expect(
         actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent,
-      ).toBe("This approval has already been resolved.");
+      ).toBe("The approval could not be resolved. Try again.");
     });
     approve?.click();
     await vi.waitFor(() => {
