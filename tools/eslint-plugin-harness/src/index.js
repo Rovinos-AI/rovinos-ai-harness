@@ -185,6 +185,53 @@ const isGuardedFactoryCall = (ancestors, factory) => {
   );
 };
 
+/**
+ * @param {Node[]} ancestors
+ * @param {(name: string) => boolean} predicate
+ * @returns {boolean}
+ */
+const isTopLevelFunctionNamed = (ancestors, predicate) => {
+  const functions = ancestors.filter(
+    (ancestor) =>
+      ancestor.type === AST_NODE_TYPES.FunctionDeclaration ||
+      ancestor.type === AST_NODE_TYPES.FunctionExpression ||
+      ancestor.type === AST_NODE_TYPES.ArrowFunctionExpression,
+  );
+  const enclosingFunction = functions.at(-1);
+  const functionName =
+  enclosingFunction?.type === AST_NODE_TYPES.FunctionDeclaration
+    ? identifierName(enclosingFunction.id)
+    : undefined;
+  return (
+  functions.length === 1 &&
+  ancestors[0]?.type === AST_NODE_TYPES.Program &&
+  functionName !== undefined &&
+  predicate(functionName)
+  );
+};
+
+/**
+ * @param {Node} node
+ * @param {Node[]} ancestors
+ * @returns {boolean}
+ */
+const isGuardedRegistryCounterCall = (node, ancestors) => {
+  const assignment = ancestors.at(-1);
+  const target =
+  assignment?.type === AST_NODE_TYPES.AssignmentExpression ? assignment.left : undefined;
+  return (
+  isTopLevelFunctionNamed(
+    ancestors,
+    (name) => name.startsWith("get") && name.endsWith("Counter"),
+  ) &&
+  assignment?.type === AST_NODE_TYPES.AssignmentExpression &&
+  assignment.operator === "??=" &&
+    assignment.right === node &&
+    target?.type === AST_NODE_TYPES.Identifier &&
+    target.name.endsWith("Counter")
+  );
+};
+
 /** @type {HarnessRule["create"]} */
 const createSchemaInferredTypes = (context) => {
   const schemaNames = new Set();
@@ -284,18 +331,19 @@ const createMetricRegistryOnly = (context) => {
       if (typeof property !== "string" || !instrumentFactories.has(property)) {
         return;
       }
-      if (
+      const guardedRegistryCounterCall =
         isRegistry &&
         node.callee.type === AST_NODE_TYPES.Identifier &&
-        property === "createCounter"
-      ) {
-        return;
-      }
+        property === "createCounter" &&
+        isGuardedRegistryCounterCall(node, context.sourceCode.getAncestors(node));
       if (!isRegistry) {
         context.report({ node, messageId: "forbidden" });
         return;
       }
-      if (!isGuardedFactoryCall(context.sourceCode.getAncestors(node), property)) {
+      if (
+        !guardedRegistryCounterCall &&
+        !isGuardedFactoryCall(context.sourceCode.getAncestors(node), property)
+      ) {
         context.report({ node, messageId: "forbidden" });
         return;
       }

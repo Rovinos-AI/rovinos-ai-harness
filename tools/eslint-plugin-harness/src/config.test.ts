@@ -133,6 +133,10 @@ ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
+      code: 'function getCounter() { testCounter ??= createCounter<NoMetricAttributes>("harness.test.count"); return testCounter; }',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
       code: 'function createCounter() { return meter.createCounter<McpInputRequestAttributes>("harness.mcp.input_requests"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
@@ -173,6 +177,21 @@ ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only
     },
     {
       code: 'meter.createCounter<{ readonly freeText: string }>("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'createCounter<NoMetricAttributes>("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'function buildCounter() { testCounter ??= createCounter<NoMetricAttributes>("harness.test.count"); return testCounter; }',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'function getCounter() { return createCounter<NoMetricAttributes>("harness.test.count"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
       errors: [{ messageId: "forbidden" }],
     },

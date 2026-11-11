@@ -44,5 +44,5 @@ no queue row and does not reserve a slot. A run already in `running` can reclaim
 its own job. A matching job that would exceed the limit stays queued without
 using an attempt; non-matching jobs can still be claimed.
 
-Quota rejections increment `harness.quota.rejections` with the configured quota
-code as the only attribute. Principal identities are not included in metrics.
+Quota rejections increment `harness.quota.rejections` with `harness.quota.code`
+as the only attribute. Principal identities are not included in metrics.

@@ -8,8 +8,6 @@ import {
   type Context,
 } from "@opentelemetry/api";
 import { Code, type Code as CodeType, type ModelUsage } from "@rovinos/schemas";
-import { CardinalityGuard } from "./cardinality.js";
-import { createLogger } from "./logger.js";
 import { isValidModelUsage } from "./metric-validation.js";
 import type {
   HostAppRejectedAttributes,
@@ -32,6 +30,7 @@ import type {
   WorkerJobOutcome,
 } from "./metric-attributes.js";
 import { safelyRecordMetric } from "./metric-safety.js";
+import { createMetricCardinalityGuard } from "./metrics-cardinality.js";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
 type RegisteredMetricAttributes =
@@ -99,17 +98,12 @@ let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
 let modelLatencyHistogram: Histogram<ModelUsageAttributes> | undefined;
 let approvalWaitHistogram: Histogram<ApprovalWaitAttributes> | undefined;
 let telemetryMeterProvider: MeterProvider | undefined;
-const metricCardinalityLogger = createLogger({ level: "warn" });
 let metricCardinalityLimit = 100;
 let metricCardinalityGuard = createCardinalityGuard(metricCardinalityLimit);
 
-function createCardinalityGuard(maxSeries: number): CardinalityGuard {
-  return new CardinalityGuard({
-    maxSeries,
-    onDrop: () => {
-      countDroppedTelemetry("cardinality");
-    },
-    logger: metricCardinalityLogger,
+function createCardinalityGuard(maxSeries: number) {
+  return createMetricCardinalityGuard(maxSeries, () => {
+    countDroppedTelemetry("cardinality");
   });
 }
 
