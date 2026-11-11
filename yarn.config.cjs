@@ -8,6 +8,7 @@ const nodeTypesRange = rootManifest.devDependencies["@types/node"];
 const publishedWorkspaceIdents = new Set([
   "@rovinos/cli",
   "@rovinos/sdk",
+  "@rovinos/rate-limit-redis",
   "@rovinos/store-postgres",
   "@rovinos/store-sqlite",
 ]);

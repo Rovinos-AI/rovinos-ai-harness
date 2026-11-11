@@ -5,5 +5,5 @@
     "customConditions": ["source"],
     "noEmit": true
   },
-  "include": ["basic.ts"]
+  "include": ["basic.ts", "extensions.ts"]
 }

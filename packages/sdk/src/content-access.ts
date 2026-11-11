@@ -12,12 +12,13 @@ import {
   RunContentStreamEntrySchema,
   RunIdInputSchema,
   SdkError,
+  StreamRunContentOptionsSchema,
   WatchOptionsSchema,
   type ContentAuthorizer,
   type GetRunContentOptions,
   type RunContent,
   type RunContentStreamEntry,
-  type StreamRunContentOptionsSchema,
+  type StreamRunContentOptions,
 } from "./types.js";
 
 const contentAuthorizationDecisionSchema = z.boolean();
@@ -46,6 +47,31 @@ export function getRunContent(input: {
       return RunContentSchema.parse(contentEntries(events));
     })(),
   );
+}
+
+/** Validates SDK stream options and constructs the separately authorized content stream. */
+export function streamRunContent(input: {
+  readonly runtime: Runtime;
+  readonly tracker: LifecycleTracker;
+  readonly runId: string;
+  readonly options: StreamRunContentOptions;
+  readonly piiEnabled: boolean;
+  readonly contentAuthorizer: ContentAuthorizer | undefined;
+  readonly assertOpen: () => void;
+  readonly assertAvailable: (runId: Id) => void;
+}): AsyncIterable<RunContentStreamEntry> {
+  input.assertOpen();
+  const runId = RunIdInputSchema.parse({ runId: input.runId }).runId;
+  input.assertAvailable(runId);
+  return streamRunContentEvents({
+    runtime: input.runtime,
+    tracker: input.tracker,
+    runId,
+    options: StreamRunContentOptionsSchema.parse(input.options),
+    piiEnabled: input.piiEnabled,
+    contentAuthorizer: input.contentAuthorizer,
+    assertOpen: input.assertOpen,
+  });
 }
 
 /** Streams separately authorized content from durable event-log entries. */

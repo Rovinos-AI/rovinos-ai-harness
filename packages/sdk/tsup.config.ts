@@ -53,6 +53,7 @@ export default defineConfig({
     "ajv",
     "ajv-formats",
     "better-sqlite3",
+    "@rovinos/rate-limit-redis",
     "openai",
     "parse5",
     "pg",
