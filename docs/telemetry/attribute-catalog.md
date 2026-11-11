@@ -85,6 +85,8 @@ Owner task: `25.3`.
 | `harness.model.output_tokens` | integer | Optional | `@rovinos/core` |
 | `harness.model.repair_attempts` | integer | Optional | `@rovinos/core` |
 | `harness.run.id` | Id | Required | `@rovinos/core` |
+| `harness.tool.definition_bytes` | integer | Required | `@rovinos/core` |
+| `harness.tool.definition_count` | integer | Required | `@rovinos/core` |
 
 Owner task: `4.1`.
 

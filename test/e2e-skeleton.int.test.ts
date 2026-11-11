@@ -3002,6 +3002,7 @@ describe("SDK", () => {
       keys: { currentKeyId: KEY_ID, keys: [{ id: KEY_ID, secret: KEY_REF }] },
       pii: PiiConfigSchema.parse({ defaultAction: "tokenize", detokenize: [] }),
       policy: { file: policyPath },
+      toolProfiles: { account_action: ["sdk_human.confirm_action"] },
       servers: [
         {
           id: "sdk_human",
@@ -3041,7 +3042,10 @@ describe("SDK", () => {
     });
     let runId: string;
     try {
-      ({ runId } = await harness.startRun({ goal: "Complete the synthetic account action." }));
+      ({ runId } = await harness.startRun({
+        goal: "Complete the synthetic account action.",
+        toolProfile: "account_action",
+      }));
       let suspended = false;
       for await (const event of harness.watch(runId, { fromSeq: 0 })) {
         if (event.kind === "run_status" && event.to === "suspended") {

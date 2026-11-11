@@ -109,6 +109,8 @@ export interface RuntimeRunOptions {
   readonly parentRunId?: Id;
   readonly rootSpanParent?: Context;
   readonly role?: Code;
+  /** Optional configured MCP tool profile selected for this run. */
+  readonly toolProfile?: Code;
   readonly requestedBy?: Principal;
   readonly evalMetadata?: EvalRunMetadata;
   readonly onStarted?: () => void;
@@ -198,7 +200,11 @@ export function createRuntimeContinuation(
   return (
     previousRunId: Id,
     input: RunInput,
-    runOptions?: { readonly requestedBy?: Principal; readonly signal?: AbortSignal },
+    runOptions?: {
+      readonly requestedBy?: Principal;
+      readonly signal?: AbortSignal;
+      readonly toolProfile?: Code;
+    },
   ) => {
     const runId = ids.next();
     let resolveStarted: () => void = () => undefined;
@@ -246,6 +252,7 @@ export function createRuntimeContinuation(
         scopes,
         onStarted: resolveStarted,
         ...(runOptions?.requestedBy === undefined ? {} : { requestedBy: runOptions.requestedBy }),
+        ...(runOptions?.toolProfile === undefined ? {} : { toolProfile: runOptions.toolProfile }),
         quotaService,
         quotaIdentity: identity,
       });

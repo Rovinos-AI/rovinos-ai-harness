@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { foldRunState, type Runtime } from "@rovinos/core";
 import { JsonValue as JsonValueSchema, RunInputSchema, type Id } from "@rovinos/schemas";
@@ -7,6 +6,7 @@ import type { SafeEvent } from "@rovinos/telemetry";
 import { projectSafeEvents, readEvents } from "./event-views.js";
 import { getRunContent as readRunContent, streamRunContent } from "./content-access.js";
 import { answerPendingInput, resolvePendingApproval } from "./pending-requests.js";
+import { idempotencyKeyHash } from "./idempotency.js";
 import { LifecycleTracker, watchRunEvents } from "./lifecycle.js";
 import { projectRunViewUsage } from "./run-view-usage.js";
 import {
@@ -73,10 +73,7 @@ class HarnessClient extends ExtensionHarnessAccess implements Harness {
       const keyHash =
         input.idempotencyKey === undefined
           ? undefined
-          : createHash("sha256")
-              .update("harness/sdk/idempotency/v1\0")
-              .update(input.idempotencyKey)
-              .digest("hex");
+          : idempotencyKeyHash(input.idempotencyKey, input.toolProfile);
       const existingStart = keyHash === undefined ? undefined : this.idempotencyKeys.get(keyHash);
       if (existingStart !== undefined) {
         return await this.existingRunResult(await existingStart);
@@ -130,6 +127,7 @@ class HarnessClient extends ExtensionHarnessAccess implements Harness {
     const { input, runInput, keyHash, candidateRunId, managed } = options;
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
+      ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
       ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
       signal: managed.controller.signal,
@@ -174,6 +172,7 @@ class HarnessClient extends ExtensionHarnessAccess implements Harness {
     try {
       const execution = this.runtime.continueRun(parsedRunId, runInput, {
         signal: managed.controller.signal,
+        ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
       });
       this.trackExecution(managed, execution.runId, execution.completion);
       const result = await execution.completion;

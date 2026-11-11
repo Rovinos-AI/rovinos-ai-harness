@@ -11,6 +11,7 @@ export { McpProtocolError } from "./errors.js";
 export {
   McpToolPort,
   McpCatalogChangedError,
+  McpToolProfileError,
   type McpToolCall,
   type McpToolCallContext,
   type McpCatalogPinOptions,

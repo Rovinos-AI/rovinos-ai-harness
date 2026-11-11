@@ -54,6 +54,8 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly toolCatalogVersion?: Sha256Hex;
   /** Per-tool fingerprints used to validate future dispatch and resume. */
   readonly toolCatalogFingerprints?: Readonly<Record<string, Sha256Hex>>;
+  /** Optional configured MCP tool profile selected for this run. */
+  readonly toolProfile?: Code;
   readonly policy?: PolicyPort;
   readonly context: ContextPort;
   readonly ids: IdGenerator;
@@ -98,6 +100,14 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly rootSpanLinks?: readonly Link[];
 }
 
+class ToolProfileUnsupportedError extends HarnessError {
+  readonly code = "tool_profile_unsupported";
+
+  constructor() {
+    super("The active tool port does not support configured MCP tool profiles.");
+  }
+}
+
 /** Execution options shared by new runs and resumptions. */
 export type RunLoopExecutionOptions = Omit<RunLoopOptions, "configHash" | "policyVersion">;
 
@@ -130,7 +140,15 @@ class RunAbortedError extends HarnessError {
  * @returns The final folded state and all events created by this invocation.
  */
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
-  const tool = await options.tool.pinForRun?.();
+  if (
+    options.toolProfile !== undefined &&
+    (options.tool.supportsToolProfiles !== true || options.tool.pinForRun === undefined)
+  ) {
+    throw new ToolProfileUnsupportedError();
+  }
+  const tool = await options.tool.pinForRun?.(
+    options.toolProfile === undefined ? undefined : { toolProfile: options.toolProfile },
+  );
   const toolCatalogVersion = tool?.catalogVersion?.();
   const toolCatalogFingerprints = tool?.catalogFingerprints?.();
   const runOptions =
