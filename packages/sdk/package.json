@@ -53,6 +53,14 @@
     "better-sqlite3": "13.0.3",
     "pg": "8.23.1"
   },
+  "peerDependencies": {
+    "@rovinos/rate-limit-redis": "*"
+  },
+  "peerDependenciesMeta": {
+    "@rovinos/rate-limit-redis": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@rovinos/config": "workspace:^",
     "@rovinos/core": "workspace:^",

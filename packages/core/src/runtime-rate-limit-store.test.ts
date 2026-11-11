@@ -14,10 +14,57 @@ describe("openConfiguredRateLimitStore", () => {
     await expect(store.take(key, limit)).resolves.toMatchObject({ allowed: true });
   });
 
-  it("rejects Redis until its shared backend is implemented", async () => {
+  it("requires a secret resolver for Redis", async () => {
     await expect(
-      openConfiguredRateLimitStore({ rateLimits: { backend: "redis", onUnavailable: "deny" } }),
-    ).rejects.toMatchObject({ code: "rate_limit_redis_backend_unavailable" });
+      openConfiguredRateLimitStore({
+        rateLimits: {
+          backend: "redis",
+          onUnavailable: "local",
+          redis: {
+            url: SecretRefSchema.parse("env:HARNESS_REDIS_URL"),
+            keyPrefix: Code.parse("harness"),
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(StoreUnavailableError);
+  });
+
+  it("opens Redis through the optional adapter without leaking the resolved URL", async () => {
+    const url = "redis://redis.example.invalid:6379/0";
+    const store = await openConfiguredRateLimitStore(
+      {
+        rateLimits: {
+          backend: "redis",
+          onUnavailable: "deny",
+          redis: {
+            url: SecretRefSchema.parse("env:HARNESS_REDIS_URL"),
+            keyPrefix: Code.parse("harness"),
+          },
+        },
+      },
+      { secretResolver: { resolve: () => Promise.resolve({ reveal: () => url }) } },
+    );
+
+    expect(store).toHaveProperty("close", expect.any(Function));
+  });
+
+  it("rejects invalid Redis URLs without exposing the URL", async () => {
+    const url = "synthetic-secret-not-a-redis-url";
+    await expect(
+      openConfiguredRateLimitStore(
+        {
+          rateLimits: {
+            backend: "redis",
+            onUnavailable: "local",
+            redis: {
+              url: SecretRefSchema.parse("env:HARNESS_REDIS_URL"),
+              keyPrefix: Code.parse("harness"),
+            },
+          },
+        },
+        { secretResolver: { resolve: () => Promise.resolve({ reveal: () => url }) } },
+      ),
+    ).rejects.toMatchObject({ code: "rate_limit_redis_config_invalid" });
   });
 
   it("requires a Postgres event-store configuration for the Postgres backend", async () => {

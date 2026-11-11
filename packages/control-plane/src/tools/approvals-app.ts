@@ -150,6 +150,7 @@ async function handleGetApprovalRequest(
     context,
     approvalId: request.approvalId,
     scope: "approve",
+    includeResolved: true,
   });
   if (!pending.success) {
     return {
@@ -190,6 +191,7 @@ async function findAccessiblePendingApproval(input: {
   readonly context: ServerContext;
   readonly approvalId: Id;
   readonly scope: ApprovalAppScope;
+  readonly includeResolved?: boolean;
 }): Promise<PendingApprovalAccess> {
   const found = await findApprovalRequest(input.options.store, input.approvalId);
   if (found === undefined) {
@@ -199,7 +201,7 @@ async function findAccessiblePendingApproval(input: {
   if (!access.allowed) {
     return { success: false, tokenId: access.tokenId, code: "approval_not_found" };
   }
-  if (found.resolved) {
+  if (found.resolved && input.includeResolved !== true) {
     return {
       success: false,
       tokenId: access.tokenId,
@@ -207,7 +209,7 @@ async function findAccessiblePendingApproval(input: {
     };
   }
   const run = await readRunState(input.options.store, found.runId);
-  if (run?.state.pendingApprovals.has(input.approvalId) !== true) {
+  if (run === undefined || (!found.resolved && !run.state.pendingApprovals.has(input.approvalId))) {
     return { success: false, tokenId: access.tokenId, code: "approval_not_found" };
   }
   return { success: true, found, tokenId: access.tokenId, principal: access.principal };
@@ -242,7 +244,8 @@ async function handleResolveRequest(
     },
   });
   if (gate.status === "input_required") {
-    return gate.result;
+    // The Apps bridge cannot resume an elicitation-backed resolve request.
+    return resolveFailure(options, tokenId, "human_confirmation_unavailable");
   }
   if (gate.status === "denied") {
     return resolveFailure(options, tokenId, gate.code);

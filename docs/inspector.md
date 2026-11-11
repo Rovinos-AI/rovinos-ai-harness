@@ -35,6 +35,23 @@ Avoid placing token values directly in command history or checked-in configurati
 `controlPlane.auth.tokens[].secret` with a `SecretRef` and expose its corresponding value only in the
 local environment used to launch the Inspector.
 
+## Browser Apps verification
+
+The integration test `test/inspector-apps.int.test.ts` runs the pinned Inspector 2.13.0 web client
+against the harness over loopback HTTP using the 2026-07-28 protocol era and an approve-scoped
+synthetic token. It covers rendered approval details, read-only approval lookup and resource reads,
+an already-resolved approval, canary/network checks, and that approve/deny calls fail closed with
+`human_confirmation_unavailable` without recording a decision. Inspector does not provide a
+verifiable per-call app-origin assertion or relay confirmation for these calls. Resolving approvals
+therefore requires a host that forwards a verifiable app-origin signal or supports confirmation;
+this follow-up is tracked in [#768](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/768).
+Run it with
+`yarn test:integration test/inspector-apps.int.test.ts`; CI executes it in the `integration` job with
+Chromium. Inspector credentials use the memory secret store and an isolated home directory.
+
+This is browser-host coverage of the harness control-plane, not an upstream protocol conformance
+claim or a test of model-selected outbound MCP calls.
+
 ## Advisory MCP conformance lanes
 
 The separate GitHub Actions `conformance-advisory` job runs the official

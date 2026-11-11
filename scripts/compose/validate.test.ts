@@ -137,12 +137,13 @@ describe("compose security evaluator", () => {
     ).toEqual([]);
   }, 20_000);
 
-  it("permits the collector and the test-only published database network", () => {
+  it("permits the collector and test-only published backend networks", () => {
     expect(
       evaluateComposeSecurity(
         config({
           "otel-collector": { networks: ["egress"] },
           postgres: service({ networks: ["test-host"] }),
+          valkey: service({ networks: ["test-host"] }),
         }),
         "test",
       ),

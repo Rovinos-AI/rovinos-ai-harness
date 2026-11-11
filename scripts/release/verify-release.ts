@@ -10,6 +10,7 @@ export const publishedPackageNames: readonly string[] = [
   "@rovinos/cli",
   "@rovinos/store-sqlite",
   "@rovinos/store-postgres",
+  "@rovinos/rate-limit-redis",
 ];
 const publishedPackageNameSet: ReadonlySet<string> = new Set(publishedPackageNames);
 

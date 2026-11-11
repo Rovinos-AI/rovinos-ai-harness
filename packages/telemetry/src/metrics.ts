@@ -13,6 +13,7 @@ import type {
   HostAppRejectedAttributes,
   HostAppRejectedReason,
   METRIC_ALLOWLIST,
+  ApprovalWaitAttributes,
   McpInputRequestAttributes,
   McpInputRequestOutcome,
   ModelUsageAttributes,
@@ -21,8 +22,10 @@ import type {
   QuotaRejectionAttributes,
   RateLimitBackend,
   RateLimitKeyKind,
+  RunCompletedAttributes,
   TelemetryDropAttributes,
   TelemetryDropReason,
+  ToolCallAttributes,
   WorkerJobAttributes,
   WorkerJobOutcome,
 } from "./metric-attributes.js";
@@ -31,22 +34,29 @@ import { safelyRecordMetric } from "./metric-safety.js";
 type NoMetricAttributes = Readonly<Record<string, never>>;
 export {
   HOST_APP_REJECTED_REASONS,
+  APPROVAL_DECISIONS,
   METRIC_ALLOWLIST,
   MCP_INPUT_REQUEST_OUTCOMES,
   POLICY_DECISIONS,
   RATE_LIMIT_BACKENDS,
   RATE_LIMIT_KEY_KINDS,
+  RUN_COMPLETION_OUTCOMES,
+  METRIC_ATTRIBUTE_BOUNDS,
   TELEMETRY_DROP_REASONS,
   TELEMETRY_METRIC_STRING_ATTRIBUTES,
+  TOOL_CALL_OUTCOMES,
   WORKER_JOB_OUTCOMES,
 } from "./metric-attributes.js";
 export type {
+  ApprovalDecision,
   HostAppRejectedReason,
   McpInputRequestOutcome,
   PolicyDecision,
   RateLimitBackend,
   RateLimitKeyKind,
+  RunCompletionOutcome,
   TelemetryDropReason,
+  ToolCallOutcome,
   WorkerJobOutcome,
 } from "./metric-attributes.js";
 
@@ -66,9 +76,13 @@ let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
 let mcpInputRequestsCounter: Counter<McpInputRequestAttributes> | undefined;
 let workerJobsCounter: Counter<WorkerJobAttributes> | undefined;
+let runCompletedCounter: Counter<RunCompletedAttributes> | undefined;
+let toolCallsCounter: Counter<ToolCallAttributes> | undefined;
 let rateLimitDeniedCounter: Counter<QuotaRejectionAttributes> | undefined;
 let rateLimitDegradedCounter: Counter<QuotaRejectionAttributes> | undefined;
 let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
+let modelLatencyHistogram: Histogram<ModelUsageAttributes> | undefined;
+let approvalWaitHistogram: Histogram<ApprovalWaitAttributes> | undefined;
 let telemetryMeterProvider: MeterProvider | undefined;
 
 function getTelemetryMeter(): Meter {
@@ -99,9 +113,13 @@ export function selectTelemetryMeterProvider(provider: MeterProvider | undefined
   quotaRejectionsCounter = undefined;
   mcpInputRequestsCounter = undefined;
   workerJobsCounter = undefined;
+  runCompletedCounter = undefined;
+  toolCallsCounter = undefined;
   rateLimitDeniedCounter = undefined;
   rateLimitDegradedCounter = undefined;
   workerQueueLagHistogram = undefined;
+  modelLatencyHistogram = undefined;
+  approvalWaitHistogram = undefined;
 }
 
 function createCounter<TAttributes extends Attributes>(
@@ -281,6 +299,39 @@ export function countRateLimitDegraded(backend: RateLimitBackend): void {
 function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
   workerQueueLagHistogram ??= createMetricHistogram("harness.worker.queue_lag_ms");
   return workerQueueLagHistogram;
+}
+
+/** Returns the registry-owned model-latency histogram. */
+export function getModelLatencyHistogram(): Histogram<ModelUsageAttributes> {
+  modelLatencyHistogram ??= getTelemetryMeter().createHistogram<ModelUsageAttributes>(
+    "harness.model.latency_ms",
+  );
+  return modelLatencyHistogram;
+}
+
+/** Returns the registry-owned approval-wait histogram. */
+export function getApprovalWaitHistogram(): Histogram<ApprovalWaitAttributes> {
+  approvalWaitHistogram ??= getTelemetryMeter().createHistogram<ApprovalWaitAttributes>(
+    "harness.approval.wait_ms",
+  );
+  return approvalWaitHistogram;
+}
+
+/** Returns the registry-owned completed-run counter. */
+export function getRunCompletedCounter(): Counter<RunCompletedAttributes> {
+  runCompletedCounter ??= createCounter<RunCompletedAttributes>(
+    "harness.run.completed",
+    (meter, name) => meter.createCounter<RunCompletedAttributes>(name),
+  );
+  return runCompletedCounter;
+}
+
+/** Returns the registry-owned tool-call counter. */
+export function getToolCallsCounter(): Counter<ToolCallAttributes> {
+  toolCallsCounter ??= createCounter<ToolCallAttributes>("harness.tool.calls", (meter, name) =>
+    meter.createCounter<ToolCallAttributes>(name),
+  );
+  return toolCallsCounter;
 }
 
 /** Counts a telemetry drop using its bounded reason code. */

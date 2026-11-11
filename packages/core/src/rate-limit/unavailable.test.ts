@@ -20,8 +20,8 @@ describe("UnavailableRateLimitStore", () => {
 
   it("fails closed when configured to deny", async () => {
     const replicas = [
-      new UnavailableRateLimitStore(failingStore, "postgres", "deny"),
-      new UnavailableRateLimitStore(failingStore, "postgres", "deny"),
+      new UnavailableRateLimitStore(failingStore, "redis", "deny"),
+      new UnavailableRateLimitStore(failingStore, "redis", "deny"),
     ];
 
     await Promise.all(

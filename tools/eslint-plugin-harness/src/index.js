@@ -18,6 +18,9 @@ const allowedMetricAttributeTypes = new Set([
   "QuotaRejectionAttributes",
   "WorkerJobAttributes",
   "McpInputRequestAttributes",
+  "RunCompletedAttributes",
+  "ApprovalWaitAttributes",
+  "ToolCallAttributes",
 ]);
 
 /** @type {(filename: string) => string | undefined} */

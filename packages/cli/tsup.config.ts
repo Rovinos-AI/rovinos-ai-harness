@@ -25,6 +25,7 @@ const external = [
   "ajv",
   "ajv-formats",
   "better-sqlite3",
+  "@rovinos/rate-limit-redis",
   "commander",
   "openai",
   "parse5",
