@@ -219,6 +219,8 @@ async function recordInSpan(recorder: RunRecorder, partial: EventPartial): Promi
       "harness.context.strategy_version": "v3",
       "harness.context.estimated_tokens": 0,
       "harness.context.message_count": 0,
+      "harness.tool.definition_count": 0,
+      "harness.tool.definition_bytes": 0,
     },
     () => recorder.record(partial),
   );
@@ -445,6 +447,8 @@ describe("RunRecorder", () => {
           "harness.context.strategy_version": "v3",
           "harness.context.estimated_tokens": 0,
           "harness.context.message_count": 0,
+          "harness.tool.definition_count": 0,
+          "harness.tool.definition_bytes": 0,
           "harness.private.value": "sensitive",
         },
         () => recorder.record(runCreated()),
@@ -487,6 +491,8 @@ describe("RunRecorder", () => {
           "harness.context.strategy_version": "v3",
           "harness.context.estimated_tokens": 0,
           "harness.context.message_count": 0,
+          "harness.tool.definition_count": 0,
+          "harness.tool.definition_bytes": 0,
         },
         () => {
           throw new LeaseLostError(3);
