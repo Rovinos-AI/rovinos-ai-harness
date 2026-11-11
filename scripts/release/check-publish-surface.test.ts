@@ -8,6 +8,11 @@ const publishableManifest = {
   engines: { node: ">=26" },
   repository: { url: "git+https://github.com/Rovinos-AI/rovinos-ai-harness.git" },
 };
+const extensionsManifest = {
+  ...publishableManifest,
+  name: "@rovinos/extensions",
+  peerDependencies: { "@rovinos/sdk": ">=0.3.0 <0.4.0" },
+};
 
 describe("publish surface checks", () => {
   it("rejects an unpublished workspace dependency", () => {
@@ -64,6 +69,27 @@ describe("publish surface checks", () => {
         ],
       ),
     ).toEqual([]);
+  });
+
+  it("accepts the extensions package and its opt-in testing entry with a bounded SDK peer", () => {
+    expect(
+      inspectPackedPackage(extensionsManifest, [
+        { path: "package/package.json", size: 256 },
+        { path: "package/dist/index.js", size: 128 },
+        { path: "package/dist/index.d.ts", size: 64 },
+        { path: "package/dist/testing.js", size: 128 },
+        { path: "package/dist/testing.js.map", size: 64 },
+        { path: "package/dist/testing.d.ts", size: 64 },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("rejects an extensions package without its compatible SDK peer range", () => {
+    expect(
+      inspectPackedPackage({ ...extensionsManifest, peerDependencies: { "@rovinos/sdk": "*" } }, [
+        { path: "package/dist/index.js", size: 32 },
+      ]),
+    ).toContain("publish_extensions_sdk_peer_invalid");
   });
 
   it("allows the optional Redis adapter peer on the SDK", () => {

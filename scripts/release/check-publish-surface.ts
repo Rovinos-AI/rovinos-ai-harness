@@ -11,6 +11,7 @@ import { z } from "zod";
 export const execFileAsync = promisify(execFile);
 const publishedNames = new Set([
   "@rovinos/sdk",
+  "@rovinos/extensions",
   "@rovinos/cli",
   "@rovinos/store-sqlite",
   "@rovinos/store-postgres",
@@ -18,6 +19,7 @@ const publishedNames = new Set([
 ]);
 const sizeBudgets = new Map([
   ["@rovinos/sdk", 30_000_000],
+  ["@rovinos/extensions", 1_000_000],
   ["@rovinos/cli", 40_000_000],
   ["@rovinos/store-sqlite", 10_000_000],
   ["@rovinos/store-postgres", 10_000_000],
@@ -72,7 +74,42 @@ function inspectPackageManifest(manifest: PackageManifest): string[] {
   ) {
     violations.push("publish_adapter_dependencies_invalid");
   }
+  if (
+    manifest.name === "@rovinos/extensions" &&
+    manifest.peerDependencies?.["@rovinos/sdk"] !== ">=0.3.0 <0.4.0"
+  ) {
+    violations.push("publish_extensions_sdk_peer_invalid");
+  }
   return violations;
+}
+
+function isAllowedSdkPeer(
+  manifest: PackageManifest,
+  dependency: { readonly name: string; readonly group: string },
+): boolean {
+  if (dependency.name !== "@rovinos/sdk" || dependency.group !== "peerDependencies") {
+    return false;
+  }
+  return adapterDrivers.has(manifest.name) || manifest.name === "@rovinos/extensions";
+}
+
+function isAllowedRedisAdapterPeer(
+  manifest: PackageManifest,
+  dependency: { readonly name: string; readonly group: string },
+): boolean {
+  return (
+    ["@rovinos/sdk", "@rovinos/cli"].includes(manifest.name) &&
+    dependency.name === "@rovinos/rate-limit-redis" &&
+    dependency.group === "peerDependencies" &&
+    manifest.peerDependenciesMeta?.["@rovinos/rate-limit-redis"]?.optional === true
+  );
+}
+
+function isAllowedRuntimePeer(
+  manifest: PackageManifest,
+  dependency: { readonly name: string; readonly group: string },
+): boolean {
+  return isAllowedSdkPeer(manifest, dependency) || isAllowedRedisAdapterPeer(manifest, dependency);
 }
 
 function inspectRuntimeDependencies(manifest: PackageManifest): string[] {
@@ -92,23 +129,18 @@ function inspectRuntimeDependencies(manifest: PackageManifest): string[] {
     })),
   ];
   for (const dependency of dependencies) {
-    const optionalSdkPeer =
-      adapterDrivers.has(manifest.name) &&
-      dependency.name === "@rovinos/sdk" &&
-      dependency.group === "peerDependencies";
-    const optionalRedisAdapterPeer =
-      ["@rovinos/sdk", "@rovinos/cli"].includes(manifest.name) &&
-      dependency.name === "@rovinos/rate-limit-redis" &&
-      dependency.group === "peerDependencies" &&
-      manifest.peerDependenciesMeta?.["@rovinos/rate-limit-redis"]?.optional === true;
-    if (dependency.name.startsWith("@rovinos/") && !optionalSdkPeer && !optionalRedisAdapterPeer) {
+    if (dependency.name.startsWith("@rovinos/") && !isAllowedRuntimePeer(manifest, dependency)) {
       violations.push("publish_internal_dependency");
     }
   }
   return violations;
 }
 
-function inspectPackageFiles(files: readonly PackedFile[], sizeBudget: number): string[] {
+function inspectPackageFiles(
+  files: readonly PackedFile[],
+  sizeBudget: number,
+  packageName: string,
+): string[] {
   const violations: string[] = [];
   if (files.length === 0) {
     violations.push("publish_package_empty");
@@ -124,7 +156,10 @@ function inspectPackageFiles(files: readonly PackedFile[], sizeBudget: number): 
     if (/(?:^|\/)[^/]*\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(path)) {
       violations.push("publish_test_file");
     }
-    if (/(?:^|\/)testing(?:\/|\.|$)/u.test(path)) {
+    const publishedTestingEntry =
+      packageName === "@rovinos/extensions" &&
+      ["dist/testing.js", "dist/testing.js.map", "dist/testing.d.ts"].includes(path);
+    if (/(?:^|\/)testing(?:\/|\.|$)/u.test(path) && !publishedTestingEntry) {
       violations.push("publish_testing_helper");
     }
   }
@@ -145,7 +180,7 @@ export function inspectPackedPackage(
     ...new Set([
       ...inspectPackageManifest(manifest),
       ...inspectRuntimeDependencies(manifest),
-      ...inspectPackageFiles(files, sizeBudget),
+      ...inspectPackageFiles(files, sizeBudget, expectedName),
     ]),
   ];
 }
@@ -238,11 +273,13 @@ async function bundledImportViolation(
       ...source.matchAll(/(?:from\s*["']|import\s*\(\s*["'])(@rovinos\/[^"']+)/gu),
     ].map((match) => match[1]);
     if (
-      internalImports.some(
-        (name) =>
-          name !== "@rovinos/rate-limit-redis" ||
-          !["@rovinos/sdk", "@rovinos/cli"].includes(packageName),
-      )
+      internalImports.some((name) => {
+        const sdkPeer = packageName === "@rovinos/extensions" && name === "@rovinos/sdk";
+        const redisPeer =
+          name === "@rovinos/rate-limit-redis" &&
+          ["@rovinos/sdk", "@rovinos/cli"].includes(packageName);
+        return !sdkPeer && !redisPeer;
+      })
     ) {
       return true;
     }

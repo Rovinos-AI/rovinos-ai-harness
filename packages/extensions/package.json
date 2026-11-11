@@ -1,0 +1,43 @@
+{
+  "name": "@rovinos/extensions",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rovinos-AI/rovinos-ai-harness.git",
+    "directory": "packages/extensions"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup"
+  },
+  "peerDependencies": {
+    "@rovinos/sdk": ">=0.3.0 <0.4.0"
+  },
+  "devDependencies": {
+    "@rovinos/sdk": "workspace:^",
+    "@types/node": "26.6.6",
+    "tsup": "9.0.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12",
+    "zod": "4.6.7"
+  }
+}

@@ -76,6 +76,7 @@
     "sandbox",
     "core"
   ],
+  "extensions": ["sdk"],
   "cli": [
     "eval",
     "schemas",
