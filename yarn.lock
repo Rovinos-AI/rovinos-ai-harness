@@ -1829,6 +1829,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@ioredis/commands@npm:2.0.0":
+  version: 2.0.0
+  resolution: "@ioredis/commands@npm:2.0.0"
+  checksum: 10c0/2fb5edb9782790c24a375cc78bd69d45ac6c268d7d7ed8e534f2d4ecc28707bde9882a04eecd68be369ae784801bf93fa267b9a76f86418b252a08f341934e35
+  languageName: node
+  linkType: hard
+
 "@isaacs/fs-minipass@npm:^4.0.0":
   version: 4.0.1
   resolution: "@isaacs/fs-minipass@npm:4.0.1"
@@ -3007,6 +3014,11 @@ __metadata:
     vitest: "npm:4.1.12"
     yaml: "npm:2.9.1"
     zod: "npm:4.6.7"
+  peerDependencies:
+    "@rovinos/rate-limit-redis": "*"
+  peerDependenciesMeta:
+    "@rovinos/rate-limit-redis":
+      optional: true
   bin:
     harness: ./dist/bin.js
   languageName: unknown
@@ -3066,6 +3078,7 @@ __metadata:
     "@rovinos/models": "workspace:^"
     "@rovinos/pii": "workspace:^"
     "@rovinos/policy": "workspace:^"
+    "@rovinos/rate-limit-redis": "workspace:^"
     "@rovinos/sandbox": "workspace:^"
     "@rovinos/schemas": "workspace:^"
     "@rovinos/store": "workspace:^"
@@ -3212,6 +3225,26 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@rovinos/rate-limit-redis@workspace:^, @rovinos/rate-limit-redis@workspace:packages/rate-limit-redis":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/rate-limit-redis@workspace:packages/rate-limit-redis"
+  dependencies:
+    "@rovinos/schemas": "workspace:^"
+    "@rovinos/store": "workspace:^"
+    "@types/node": "npm:26.6.6"
+    ioredis: "npm:6.0.0"
+    tsup: "npm:9.0.0"
+    typescript: "npm:5.9.3"
+    vitest: "npm:4.1.12"
+    zod: "npm:4.6.7"
+  peerDependencies:
+    "@rovinos/sdk": "*"
+  peerDependenciesMeta:
+    "@rovinos/sdk":
+      optional: true
+  languageName: unknown
+  linkType: soft
+
 "@rovinos/replay@workspace:^, @rovinos/replay@workspace:packages/replay":
   version: 0.0.0-use.local
   resolution: "@rovinos/replay@workspace:packages/replay"
@@ -3305,10 +3338,15 @@ __metadata:
     vitest: "npm:4.1.12"
     yaml: "npm:2.9.1"
     zod: "npm:4.6.7"
+  peerDependencies:
+    "@rovinos/rate-limit-redis": "*"
   dependenciesMeta:
     better-sqlite3:
       optional: true
     pg:
+      optional: true
+  peerDependenciesMeta:
+    "@rovinos/rate-limit-redis":
       optional: true
   languageName: unknown
   linkType: soft
@@ -4777,6 +4815,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"cluster-key-slot@npm:1.1.1":
+  version: 1.1.1
+  resolution: "cluster-key-slot@npm:1.1.1"
+  checksum: 10c0/079b1ae86b20e2d53308a877b08de5e830722a45c07810569d0dab4955bed569da33ac9f79998289d014adf02cca7223a0647cb0ee6548a12ab3c4f9beac1377
+  languageName: node
+  linkType: hard
+
 "code-excerpt@npm:^4.0.0":
   version: 4.0.0
   resolution: "code-excerpt@npm:4.0.0"
@@ -5129,7 +5174,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"debug@npm:4, debug@npm:^4.0.0, debug@npm:^4.3.1, debug@npm:^4.3.2, debug@npm:^4.3.4, debug@npm:^4.4.0, debug@npm:^4.4.1, debug@npm:^4.4.3":
+"debug@npm:4, debug@npm:4.4.3, debug@npm:^4.0.0, debug@npm:^4.3.1, debug@npm:^4.3.2, debug@npm:^4.3.4, debug@npm:^4.4.0, debug@npm:^4.4.1, debug@npm:^4.4.3":
   version: 4.4.3
   resolution: "debug@npm:4.4.3"
   dependencies:
@@ -5216,6 +5261,13 @@ __metadata:
     has-property-descriptors: "npm:^1.0.0"
     object-keys: "npm:^1.1.1"
   checksum: 10c0/88a152319ffe1396ccc6ded510a3896e77efac7a1bfbaa174a7b00414a1747377e0bb525d303794a47cf30e805c2ec84e575758512c6e44a993076d29fd4e6c3
+  languageName: node
+  linkType: hard
+
+"denque@npm:2.1.0":
+  version: 2.1.0
+  resolution: "denque@npm:2.1.0"
+  checksum: 10c0/f9ef81aa0af9c6c614a727cb3bd13c5d7db2af1abf9e6352045b86e85873e629690f6222f4edd49d10e4ccf8f078bbeec0794fafaf61b659c0589d0c511ec363
   languageName: node
   linkType: hard
 
@@ -6882,6 +6934,20 @@ __metadata:
     hasown: "npm:^2.0.2"
     side-channel: "npm:^1.1.0"
   checksum: 10c0/03966f5e259b009a9bf1a78d60da920df198af4318ec004f57b8aef1dd3fe377fbc8cce63a96e8c810010302654de89f9e19de1cd8ad0061d15be28a695465c7
+  languageName: node
+  linkType: hard
+
+"ioredis@npm:6.0.0":
+  version: 6.0.0
+  resolution: "ioredis@npm:6.0.0"
+  dependencies:
+    "@ioredis/commands": "npm:2.0.0"
+    cluster-key-slot: "npm:1.1.1"
+    debug: "npm:4.4.3"
+    denque: "npm:2.1.0"
+    redis-errors: "npm:1.2.0"
+    standard-as-callback: "npm:2.1.0"
+  checksum: 10c0/6f74e1d298440c0d814e6bf9b3acdb0991d4c1862d3fa64c3828668bcc306823f7845710abdc5eab7986a35d86ec8c86c4bb9c9c7d727636d385ecb2cd40abd7
   languageName: node
   linkType: hard
 
@@ -9286,6 +9352,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"redis-errors@npm:1.2.0":
+  version: 1.2.0
+  resolution: "redis-errors@npm:1.2.0"
+  checksum: 10c0/5b316736e9f532d91a35bff631335137a4f974927bb2fb42bf8c2f18879173a211787db8ac4c3fde8f75ed6233eb0888e55d52510b5620e30d69d7d719c8b8a7
+  languageName: node
+  linkType: hard
+
 "refa@npm:^0.12.0, refa@npm:^0.12.1":
   version: 0.12.1
   resolution: "refa@npm:0.12.1"
@@ -10054,6 +10127,13 @@ __metadata:
   version: 0.0.2
   resolution: "stackback@npm:0.0.2"
   checksum: 10c0/89a1416668f950236dd5ac9f9a6b2588e1b9b62b1b6ad8dff1bfc5d1a15dbf0aafc9b52d2226d00c28dffff212da464eaeebfc6b7578b9d180cef3e3782c5983
+  languageName: node
+  linkType: hard
+
+"standard-as-callback@npm:2.1.0":
+  version: 2.1.0
+  resolution: "standard-as-callback@npm:2.1.0"
+  checksum: 10c0/012677236e3d3fdc5689d29e64ea8a599331c4babe86956bf92fc5e127d53f85411c5536ee0079c52c43beb0026b5ce7aa1d834dd35dd026e82a15d1bcaead1f
   languageName: node
   linkType: hard
 

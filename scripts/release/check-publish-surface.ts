@@ -14,18 +14,21 @@ const publishedNames = new Set([
   "@rovinos/cli",
   "@rovinos/store-sqlite",
   "@rovinos/store-postgres",
+  "@rovinos/rate-limit-redis",
 ]);
 const sizeBudgets = new Map([
   ["@rovinos/sdk", 30_000_000],
   ["@rovinos/cli", 40_000_000],
   ["@rovinos/store-sqlite", 10_000_000],
   ["@rovinos/store-postgres", 10_000_000],
+  ["@rovinos/rate-limit-redis", 10_000_000],
 ]);
 // npm rejects provenance unless repository.url matches the GitHub repository that ran the workflow.
 const repositoryUrl = "git+https://github.com/Rovinos-AI/rovinos-ai-harness.git";
 const adapterDrivers = new Map([
   ["@rovinos/store-sqlite", "better-sqlite3"],
   ["@rovinos/store-postgres", "pg"],
+  ["@rovinos/rate-limit-redis", "ioredis"],
 ]);
 
 const packageManifestSchema = z.looseObject({
@@ -36,6 +39,9 @@ const packageManifestSchema = z.looseObject({
   dependencies: z.record(z.string(), z.string()).optional(),
   optionalDependencies: z.record(z.string(), z.string()).optional(),
   peerDependencies: z.record(z.string(), z.string()).optional(),
+  peerDependenciesMeta: z
+    .record(z.string(), z.looseObject({ optional: z.boolean().optional() }))
+    .optional(),
 });
 type PackageManifest = z.infer<typeof packageManifestSchema>;
 
@@ -90,7 +96,12 @@ function inspectRuntimeDependencies(manifest: PackageManifest): string[] {
       adapterDrivers.has(manifest.name) &&
       dependency.name === "@rovinos/sdk" &&
       dependency.group === "peerDependencies";
-    if (dependency.name.startsWith("@rovinos/") && !optionalSdkPeer) {
+    const optionalRedisAdapterPeer =
+      ["@rovinos/sdk", "@rovinos/cli"].includes(manifest.name) &&
+      dependency.name === "@rovinos/rate-limit-redis" &&
+      dependency.group === "peerDependencies" &&
+      manifest.peerDependenciesMeta?.["@rovinos/rate-limit-redis"]?.optional === true;
+    if (dependency.name.startsWith("@rovinos/") && !optionalSdkPeer && !optionalRedisAdapterPeer) {
       violations.push("publish_internal_dependency");
     }
   }
@@ -205,6 +216,7 @@ async function packFiles(workspaceDirectory: string): Promise<PackedFile[]> {
 async function bundledImportViolation(
   packageDirectory: string,
   files: readonly PackedFile[],
+  packageName: string,
 ): Promise<boolean> {
   for (const file of files) {
     const relativePath = file.path.replace(/^package\//u, "");
@@ -222,7 +234,16 @@ async function bundledImportViolation(
       return true;
     }
     const source = await readFile(resolvedFilePath, "utf8");
-    if (/from\s*["']@rovinos\/|import\s*\(\s*["']@rovinos\//u.test(source)) {
+    const internalImports = [
+      ...source.matchAll(/(?:from\s*["']|import\s*\(\s*["'])(@rovinos\/[^"']+)/gu),
+    ].map((match) => match[1]);
+    if (
+      internalImports.some(
+        (name) =>
+          name !== "@rovinos/rate-limit-redis" ||
+          !["@rovinos/sdk", "@rovinos/cli"].includes(packageName),
+      )
+    ) {
       return true;
     }
   }
@@ -241,7 +262,7 @@ async function main(): Promise<void> {
     }
     const files = await packFiles(packageDirectory);
     violations.push(...inspectPackedPackage(manifest, files));
-    if (await bundledImportViolation(packageDirectory, files)) {
+    if (await bundledImportViolation(packageDirectory, files, name)) {
       violations.push("publish_internal_import");
     }
   }

@@ -17,6 +17,26 @@ describe("RateLimitsConfigSchema", () => {
     });
   });
 
+  it("requires a secret reference for Redis and defaults its key prefix", () => {
+    expect(
+      RateLimitsConfigSchema.parse({
+        backend: "redis",
+        redis: { url: "env:HARNESS_REDIS_URL" },
+      }),
+    ).toEqual({
+      backend: "redis",
+      onUnavailable: "local",
+      redis: { url: "env:HARNESS_REDIS_URL", keyPrefix: "harness" },
+    });
+    expect(() =>
+      RateLimitsConfigSchema.parse({
+        backend: "memory",
+        redis: { url: "env:HARNESS_REDIS_URL" },
+      }),
+    ).toThrow();
+    expect(() => RateLimitsConfigSchema.parse({ backend: "redis" })).toThrow();
+  });
+
   it("rejects unknown options and backend names", () => {
     expect(() => RateLimitsConfigSchema.parse({ backend: "redis", extra: true })).toThrow();
     expect(() => RateLimitsConfigSchema.parse({ backend: "unknown" })).toThrow();

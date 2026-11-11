@@ -2,7 +2,7 @@
 
 ## npm publish surface
 
-The npm scope is `@rovinos`. Only the SDK, CLI, and two store adapters are publishable:
+The npm scope is `@rovinos`. The SDK, CLI, two store adapters, and optional Redis rate-limit adapter are publishable:
 
 | Package | Purpose |
 | --- | --- |
@@ -10,11 +10,14 @@ The npm scope is `@rovinos`. Only the SDK, CLI, and two store adapters are publi
 | `@rovinos/cli` | Bundled `harness` executable |
 | `@rovinos/store-sqlite` | Optional SQLite adapter; installs `better-sqlite3` |
 | `@rovinos/store-postgres` | Optional Postgres adapter; installs `pg` |
+| `@rovinos/rate-limit-redis` | Optional Redis/Valkey rate-limit adapter; installs `ioredis` |
 
 All other workspace packages stay private. The SDK and CLI have no internal workspace runtime
 dependencies. They ship ESM bundles, a single declaration entry, and source maps. Third-party
-runtime dependencies remain external. The SDK keeps both database drivers optional; adapter
-packages install only their own driver and declare the SDK as an optional peer dependency.
+runtime dependencies remain external. The SDK and CLI keep their database drivers optional and
+declare the Redis adapter as an optional peer, so deployments that do not configure Redis do not
+install a Redis client. Adapter packages install only their own driver and declare the SDK as an
+optional peer dependency.
 
 Every published package requires Node.js 26 or later. The publish-surface check uses
 `yarn pack --dry-run` and rejects internal package dependencies, test or `testing` files, and
@@ -61,10 +64,10 @@ Before the first release, configure the GitHub Actions trusted publisher for eac
 the [npm trusted publishing guide](https://docs.npmjs.com/guides/trusted-publishers)), using
 repository `Rovinos-AI/rovinos-ai-harness` and workflow `.github/workflows/release.yml`.
 **Verified:** npm requires the package to exist before its trusted publisher can be configured.
-Maintainers must therefore publish a one-time `0.0.0` placeholder for each package with a
-short-lived npm token, then configure the trusted publisher and remove that token. Do this manually;
-the release workflow never accepts or stores an npm token. Ensure the first release uses a version
-newer than the placeholder.
+For a newly added package, maintainers must first publish a one-time `0.0.0` placeholder with a
+short-lived npm token, then configure the trusted publisher for that package and remove the token.
+Do this manually; the release workflow never accepts or stores an npm token. Ensure the first
+release uses a version newer than the placeholder.
 
 Releases are blocked if any CI gate fails, release metadata is inconsistent, a packed package
 contains an unresolved `workspace:` dependency, the community-file check with `RELEASE=1` fails, or

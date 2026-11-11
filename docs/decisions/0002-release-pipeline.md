@@ -13,8 +13,8 @@ selected by ADR 0001 are public.
 ## Decision
 
 - Use Changesets with one **fixed** group: `@rovinos/sdk`, `@rovinos/cli`,
-  `@rovinos/store-sqlite`, and `@rovinos/store-postgres`. Other workspace packages remain private
-  and are ignored by Changesets.
+  `@rovinos/store-sqlite`, `@rovinos/store-postgres`, and `@rovinos/rate-limit-redis`. Other
+  workspace packages remain private and are ignored by Changesets.
 - Publish from a tag-triggered GitHub Actions workflow that calls the full reusable CI workflow on
   the tagged tree before release verification. Use npm trusted publishing with OIDC and provenance;
   no npm token is stored in GitHub or used by the workflow.
