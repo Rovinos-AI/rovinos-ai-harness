@@ -179,7 +179,7 @@ function handleResolveResult(
   if (!response.success || !response.data.ok) {
     const code = response.success ? response.data.code : undefined;
     reportError(context, "resolve_failed", errorMessage(code, options.locale?.()));
-    setBusy(context, false);
+    setBusy(context, code === "approval_already_resolved");
     return;
   }
   options.telemetry.record("ui.decision", { decision }, decisionDurationMs);

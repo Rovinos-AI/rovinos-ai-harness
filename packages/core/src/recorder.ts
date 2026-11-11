@@ -251,7 +251,6 @@ export class RunRecorder {
     const spanAttrs: Record<string, unknown> = {
       ...attrs,
       "harness.run.id": this.runId,
-      "harness.event.seq": undefined,
     };
     if (definition.name === "harness.run") {
       spanAttrs["harness.segment.id"] = this.segmentId;

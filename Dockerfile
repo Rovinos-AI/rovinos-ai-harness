@@ -23,7 +23,12 @@ COPY --from=manifests /manifests/ ./
 RUN mise exec -- yarn install --immutable
 COPY . .
 RUN mise exec -- yarn build
-RUN mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store-sqlite --production \
+ARG WITH_REDIS_RATE_LIMIT=0
+RUN if [ "$WITH_REDIS_RATE_LIMIT" = "1" ]; then \
+      mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store-sqlite @rovinos/rate-limit-redis --production; \
+    else \
+      mise exec -- yarn workspaces focus @rovinos/cli @rovinos/core @rovinos/store-sqlite --production; \
+    fi \
     && mkdir -p /out/dist /out/packages \
     && cp -a node_modules /out/node_modules \
     && for package in packages/*/; do \

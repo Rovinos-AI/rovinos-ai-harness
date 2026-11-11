@@ -2,7 +2,15 @@
   "$schema": "https://unpkg.com/@changesets/config@4.0.1/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [["@rovinos/sdk", "@rovinos/cli", "@rovinos/store-sqlite", "@rovinos/store-postgres"]],
+  "fixed": [
+    [
+      "@rovinos/sdk",
+      "@rovinos/cli",
+      "@rovinos/store-sqlite",
+      "@rovinos/store-postgres",
+      "@rovinos/rate-limit-redis"
+    ]
+  ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",

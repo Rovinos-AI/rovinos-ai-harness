@@ -7,6 +7,50 @@
  */
 export { createHarness } from "./create-harness.js";
 export {
+  ExtensionCapabilitySchema,
+  ExtensionCapabilityStatusSchema,
+  ExtensionDefinitionSchema,
+  ExtensionError,
+  ExtensionGrantSchema,
+  ExtensionGrantRevocationSchema,
+  ExtensionManifestSchema,
+  ExtensionRegistrationSchema,
+  ExtensionRegistrationStatusSchema,
+  SDK_VERSION,
+} from "./extensions.js";
+export type {
+  ExtensionCapability,
+  ExtensionCapabilityStatus,
+  ExtensionContributions,
+  ExtensionDefinition,
+  ExtensionGrant,
+  ExtensionGrantRevocation,
+  ExtensionManifest,
+  ExtensionRegistration,
+  ExtensionRegistrationStatus,
+  ExtensionToolDefinition,
+  ToolInvocationContext,
+} from "./extensions.js";
+/** Closed error codes exposed by SDK extension validation and execution. */
+export type { ExtensionErrorCode } from "./extensions.js";
+export {
+  Code as CodeSchema,
+  Id as IdSchema,
+  JsonValue as JsonValueSchema,
+  ModelRefSchema,
+  ModelRequestSchema,
+  ModelUsageSchema,
+  PartSchema,
+} from "@rovinos/schemas";
+export type { Code, Id, JsonValue, ModelRequest, ModelUsage, Part } from "@rovinos/schemas";
+export { ProviderDeltaSchema, ProviderResultSchema } from "@rovinos/models";
+export type {
+  ProviderAdapter,
+  ProviderContext,
+  ProviderDelta,
+  ProviderResult,
+} from "@rovinos/models";
+export {
   inspectMcpServer,
   registerMcpServer,
   selectMcpTools,
@@ -24,6 +68,7 @@ export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
 export {
   SdkError,
+  CreateHarnessOptionsSchema,
   type ApprovalDecision,
   type AnswerInputOptions,
   type CancelRunResult,
@@ -32,6 +77,7 @@ export {
   type ContentAuthorizer,
   type ContinueRunOptions,
   type CreateHarnessOptions,
+  type CreateHarnessOptionsInput,
   type GetRunContentOptions,
   type Harness,
   type HarnessOverrides,
@@ -52,5 +98,9 @@ export {
   StreamRunContentOptionsSchema,
   type StreamRunContentOptions,
   type WatchOptions,
+  type WithExtensionRegistrations,
 } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
+
+/** Defines a typed extension tool contribution using its input and output schemas. */
+export { defineTool } from "./extensions.js";

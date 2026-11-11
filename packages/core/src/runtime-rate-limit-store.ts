@@ -15,7 +15,10 @@ interface RateLimitStoreOptions {
 
 class RateLimitConfigError extends HarnessError {
   override readonly code:
-    "rate_limit_postgres_requires_postgres_store" | "rate_limit_redis_backend_unavailable";
+    | "rate_limit_postgres_requires_postgres_store"
+    | "rate_limit_redis_backend_unavailable"
+    | "rate_limit_redis_adapter_unavailable"
+    | "rate_limit_redis_config_invalid";
 
   constructor(code: RateLimitConfigError["code"]) {
     super(code);
@@ -23,7 +26,7 @@ class RateLimitConfigError extends HarnessError {
   }
 }
 
-/** Opens a rate-limit backend using the runtime's shared Postgres connection. */
+/** Opens a configured request-rate backend. */
 export async function openConfiguredRateLimitStore(
   config: {
     readonly rateLimits?: RateLimitsConfig;
@@ -36,7 +39,35 @@ export async function openConfiguredRateLimitStore(
     return new InMemoryRateLimitStore(options.clock);
   }
   if (rateLimits.backend === "redis") {
-    throw new RateLimitConfigError("rate_limit_redis_backend_unavailable");
+    const redisConfig = rateLimits.redis;
+    if (redisConfig === undefined || options.secretResolver === undefined) {
+      throw new StoreUnavailableError();
+    }
+    let url: string;
+    try {
+      url = (await options.secretResolver.resolve(redisConfig.url)).reveal();
+    } catch {
+      throw new StoreUnavailableError();
+    }
+    const redisModule = await loadRedisRateLimitAdapter();
+    let redisRateLimitStore: RateLimitStore;
+    try {
+      redisRateLimitStore = new redisModule.RedisRateLimitStore(url, {
+        keyPrefix: redisConfig.keyPrefix,
+        ...(redisConfig.tls === undefined ? {} : { tls: redisConfig.tls }),
+      });
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new RateLimitConfigError("rate_limit_redis_config_invalid");
+      }
+      throw error;
+    }
+    return new UnavailableRateLimitStore(
+      redisRateLimitStore,
+      "redis",
+      rateLimits.onUnavailable,
+      options.clock,
+    );
   }
   const storeConfig = config.store;
   if (storeConfig?.dialect !== "postgres") {
@@ -48,6 +79,14 @@ export async function openConfiguredRateLimitStore(
   );
   const shared = new PostgresRateLimitStore(connectionString);
   return new UnavailableRateLimitStore(shared, "postgres", rateLimits.onUnavailable, options.clock);
+}
+
+async function loadRedisRateLimitAdapter() {
+  try {
+    return await import("@rovinos/rate-limit-redis");
+  } catch {
+    throw new RateLimitConfigError("rate_limit_redis_adapter_unavailable");
+  }
 }
 
 async function resolvePostgresConnectionString(
