@@ -35,8 +35,8 @@ function readWorkflow(): z.infer<typeof workflowSchema> {
 
 function publishedPackages(): string[] {
   const source = readFileSync(resolve(root, "yarn.config.cjs"), "utf8");
-  const publishedSet = source.match(
-    /const publishedWorkspaceIdents = new Set\(\[([\s\S]*?)\n\]\);/u,
+  const publishedSet = /const publishedWorkspaceIdents = new Set\(\[([\s\S]*?)\n\]\);/u.exec(
+    source,
   )?.[1];
   if (publishedSet === undefined) {
     throw new Error("published_workspace_idents_missing");
@@ -139,7 +139,7 @@ describe("release workflow", () => {
       workflow.jobs.publish?.steps?.find(
         (step) => step.name === "Pack and publish npm packages with provenance",
       )?.run ?? "";
-    const packageLoop = publishScript.match(/for package in ([^;]+); do/u)?.[1];
+    const packageLoop = /for package in ([^;]+); do/u.exec(publishScript)?.[1];
     const packages = packageLoop?.trim().split(/\s+/u) ?? [];
     const caseBranches = [...publishScript.matchAll(/^\s*([a-z0-9-]+)\)\s*$/gmu)].map(
       (match) => match[1],
