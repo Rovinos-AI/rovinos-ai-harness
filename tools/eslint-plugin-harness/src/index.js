@@ -21,6 +21,7 @@ const allowedMetricAttributeTypes = new Set([
   "RunCompletedAttributes",
   "ApprovalWaitAttributes",
   "ToolCallAttributes",
+  "TAttributes",
 ]);
 
 /** @type {(filename: string) => string | undefined} */
@@ -154,6 +155,36 @@ const memberPropertyName = (node) =>
     ? propertyName(node.property, node.computed)
     : undefined;
 
+const metricInstrumentHelpers = new Map([
+  ["createCounter", "createCounter"],
+  ["createHistogram", "createMetricHistogram"],
+]);
+
+/**
+ * @param {Node[]} ancestors
+ * @param {string} factory
+ * @returns {boolean}
+ */
+const isGuardedFactoryCall = (ancestors, factory) => {
+  const expectedHelper = metricInstrumentHelpers.get(factory);
+  if (expectedHelper === undefined) {
+    return false;
+  }
+  const functions = ancestors.filter(
+    (ancestor) =>
+      ancestor.type === AST_NODE_TYPES.FunctionDeclaration ||
+      ancestor.type === AST_NODE_TYPES.FunctionExpression ||
+      ancestor.type === AST_NODE_TYPES.ArrowFunctionExpression,
+  );
+  const enclosingFunction = functions.at(-1);
+  return (
+    functions.length === 1 &&
+    ancestors[0]?.type === AST_NODE_TYPES.Program &&
+    enclosingFunction?.type === AST_NODE_TYPES.FunctionDeclaration &&
+    enclosingFunction.id?.name === expectedHelper
+  );
+};
+
 /** @type {HarnessRule["create"]} */
 const createSchemaInferredTypes = (context) => {
   const schemaNames = new Set();
@@ -253,7 +284,18 @@ const createMetricRegistryOnly = (context) => {
       if (typeof property !== "string" || !instrumentFactories.has(property)) {
         return;
       }
+      if (
+        isRegistry &&
+        node.callee.type === AST_NODE_TYPES.Identifier &&
+        property === "createCounter"
+      ) {
+        return;
+      }
       if (!isRegistry) {
+        context.report({ node, messageId: "forbidden" });
+        return;
+      }
+      if (!isGuardedFactoryCall(context.sourceCode.getAncestors(node), property)) {
         context.report({ node, messageId: "forbidden" });
         return;
       }

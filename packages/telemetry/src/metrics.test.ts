@@ -175,7 +175,7 @@ describe("countDroppedTelemetry", () => {
     countQuotaRejection("team");
 
     expect(createCounter).toHaveBeenCalledWith("harness.quota.rejections");
-    expect(add).toHaveBeenCalledWith(1, { "harness.quota.id": "team" });
+    expect(add).toHaveBeenCalledWith(1, { "harness.quota.code": "team" });
     expectAddCallsAreAllowlisted("harness.quota.rejections");
   });
 
@@ -288,7 +288,7 @@ describe("countDroppedTelemetry", () => {
       "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
       "harness.rate_limit.denied.key_kind": RATE_LIMIT_KEY_KINDS,
       "harness.rate_limit.degraded.backend": RATE_LIMIT_BACKENDS,
-      "harness.run.completed.outcome": RUN_COMPLETION_OUTCOMES,
+      "harness.execution.outcome": RUN_COMPLETION_OUTCOMES,
       "harness.approval.wait_ms.decision": APPROVAL_DECISIONS,
       "harness.tool.calls.outcome": TOOL_CALL_OUTCOMES,
     });
@@ -338,7 +338,7 @@ describe("countDroppedTelemetry", () => {
 
     expect(createCounter).toHaveBeenCalledWith("harness.run.completed");
     expect(add.mock.calls.slice(0, RUN_COMPLETION_OUTCOMES.length)).toEqual(
-      RUN_COMPLETION_OUTCOMES.map((outcome) => [1, { "harness.run.completed.outcome": outcome }]),
+      RUN_COMPLETION_OUTCOMES.map((outcome) => [1, { "harness.execution.outcome": outcome }]),
     );
     expect(createHistogram).toHaveBeenCalledWith("harness.approval.wait_ms");
     expect(createHistogram).toHaveBeenCalledWith("harness.model.latency_ms");

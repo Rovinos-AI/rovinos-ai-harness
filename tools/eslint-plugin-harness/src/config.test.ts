@@ -93,47 +93,47 @@ ruleTester.run("schema-inferred-types", harnessPlugin.rules["schema-inferred-typ
 ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only"], {
   valid: [
     {
-      code: 'meter.createCounter<NoMetricAttributes>("harness.test.count");',
+      code: 'function createCounter() { return meter.createCounter<NoMetricAttributes>("harness.test.count"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<TelemetryDropAttributes>("harness.telemetry.dropped");',
+      code: 'function createCounter() { return meter.createCounter<TelemetryDropAttributes>("harness.telemetry.dropped"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<HostAppRejectedAttributes>("harness.host.app_rejected");',
+      code: 'function createCounter() { return meter.createCounter<HostAppRejectedAttributes>("harness.host.app_rejected"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<PolicyDecisionAttributes>("harness.policy.decisions");',
+      code: 'function createCounter() { return meter.createCounter<PolicyDecisionAttributes>("harness.policy.decisions"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<ModelUsageAttributes>("harness.model.tokens");',
+      code: 'function createCounter() { return meter.createCounter<ModelUsageAttributes>("harness.model.tokens"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<QuotaRejectionAttributes>("harness.quota.rejections");',
+      code: 'function createCounter() { return meter.createCounter<QuotaRejectionAttributes>("harness.quota.rejections"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<WorkerJobAttributes>("harness.worker.jobs");',
+      code: 'function createCounter() { return meter.createCounter<WorkerJobAttributes>("harness.worker.jobs"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<RunCompletedAttributes>("harness.run.completed");',
+      code: 'function createCounter() { return meter.createCounter<RunCompletedAttributes>("harness.run.completed"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createHistogram<ApprovalWaitAttributes>("harness.approval.wait_ms");',
+      code: 'function createMetricHistogram() { return meter.createHistogram<ApprovalWaitAttributes>("harness.approval.wait_ms"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<ToolCallAttributes>("harness.tool.calls");',
+      code: 'function createCounter() { return meter.createCounter<ToolCallAttributes>("harness.tool.calls"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
-      code: 'meter.createCounter<McpInputRequestAttributes>("harness.mcp.input_requests");',
+      code: 'function createCounter() { return meter.createCounter<McpInputRequestAttributes>("harness.mcp.input_requests"); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
@@ -158,6 +158,16 @@ ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only
     },
     {
       code: 'meter.createCounter("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'function getCounter() { return meter.createCounter<NoMetricAttributes>("harness.test.count"); }',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'function createCounter() { function nested() { return meter.createCounter<NoMetricAttributes>("harness.test.count"); } return nested(); }',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
       errors: [{ messageId: "forbidden" }],
     },
