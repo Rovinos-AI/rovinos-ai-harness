@@ -3314,6 +3314,7 @@ __metadata:
     "@opentelemetry/semantic-conventions": "npm:1.44.0"
     "@rovinos/config": "workspace:^"
     "@rovinos/core": "workspace:^"
+    "@rovinos/mcp": "workspace:^"
     "@rovinos/models": "workspace:^"
     "@rovinos/schemas": "workspace:^"
     "@rovinos/store": "workspace:^"
