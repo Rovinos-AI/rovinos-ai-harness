@@ -46,6 +46,7 @@ function modelResponseWithParts(seq: number, content: Part[]): Event {
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" } as const,
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: true,
@@ -101,6 +102,7 @@ function compactedSummary(seq: number, fromSeq: number, toSeq: number): Event {
     strategy: "summary",
     strategyVersion: "v1",
     summary: "summary",
+    cost: { version: 1, state: "unknown" } as const,
   };
 }
 

@@ -5,6 +5,8 @@ import {
   ModelUsageSchema,
   type ModelRequest,
   type ModelUsage,
+  combineCostValues,
+  costValueFromUsage,
   type ModelRoutingConfigSchema,
 } from "@rovinos/schemas";
 import { setActiveSpanAttribute } from "@rovinos/telemetry";
@@ -88,12 +90,10 @@ function aggregateUsage(previous: ModelUsage | undefined, next: ModelUsage | und
   if (next === undefined) {
     return previous;
   }
-  let costMicros: number | undefined;
-  if (previous === undefined) {
-    costMicros = next.costMicros;
-  } else if (previous.costMicros !== undefined && next.costMicros !== undefined) {
-    costMicros = previous.costMicros + next.costMicros;
-  }
+  const cost =
+    previous === undefined
+      ? costValueFromUsage(next)
+      : combineCostValues(costValueFromUsage(previous), costValueFromUsage(next));
   const cacheReadTokens = aggregateOptionalUsageCount(
     previous?.cacheReadTokens,
     next.cacheReadTokens,
@@ -107,7 +107,8 @@ function aggregateUsage(previous: ModelUsage | undefined, next: ModelUsage | und
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
     ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
     ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
-    ...(costMicros === undefined ? {} : { costMicros }),
+    ...(cost.state === "unknown" ? {} : { costMicros: cost.amountMicros }),
+    cost,
   };
 }
 

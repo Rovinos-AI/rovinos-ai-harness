@@ -11,6 +11,7 @@ export interface BudgetViolation {
   readonly budget: BudgetKind;
   readonly limit: number;
   readonly observed: number;
+  readonly code?: "budget_cost_unknown" | "quota_cost_unknown";
 }
 
 /** Result of checking the configured budgets against folded run state. */
@@ -112,6 +113,18 @@ export class BudgetTracker {
 
     if (this.budgets.maxCostUsd !== undefined) {
       const limit = this.budgets.maxCostUsd * 1_000_000;
+      if (
+        this.budgets.unknownCostPolicy === "fail" &&
+        (state.usage.cost.unknownCount > 0 || state.usage.cost.partialCount > 0)
+      ) {
+        return {
+          ok: false,
+          budget: "cost",
+          limit,
+          observed: state.usage.costMicros,
+          code: "budget_cost_unknown",
+        };
+      }
       if (state.usage.costMicros > limit) {
         return { ok: false, budget: "cost", limit, observed: state.usage.costMicros };
       }

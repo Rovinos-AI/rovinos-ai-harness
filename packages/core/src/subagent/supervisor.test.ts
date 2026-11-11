@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { ensureTracingFallback } from "@rovinos/telemetry";
-import { FakeClock, Id, JsonValue, RunConfigSchema } from "@rovinos/schemas";
+import { EMPTY_COST_TOTAL, FakeClock, Id, JsonValue, RunConfigSchema } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
@@ -26,6 +26,23 @@ const childRunId = Id.parse("22222222222222222222222222");
 const grandchildRunId = Id.parse("44444444444444444444444444");
 const segmentId = Id.parse("33333333333333333333333333");
 const hash = "a".repeat(64);
+
+function costTotal(amountMicros?: number) {
+  return amountMicros === undefined
+    ? { ...EMPTY_COST_TOTAL, state: "unknown" as const, unknownCount: 1 }
+    : {
+        ...EMPTY_COST_TOTAL,
+        state: "estimated" as const,
+        estimatedMicros: amountMicros,
+        estimatedCount: 1,
+      };
+}
+
+function costValue(amountMicros?: number) {
+  return amountMicros === undefined
+    ? { version: 1 as const, state: "unknown" as const }
+    : { version: 1 as const, state: "estimated" as const, amountMicros };
+}
 
 const role: ResolvedRole = {
   id: "worker",
@@ -196,7 +213,7 @@ describe("SubagentSupervisor", () => {
             childRunId: request.runId,
             status: "completed",
             value: null,
-            usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+            usage: { inputTokens: 2, outputTokens: 3, cost: costTotal(4) },
           };
         },
         {
@@ -250,7 +267,7 @@ describe("SubagentSupervisor", () => {
       childRunId,
       status: "completed",
       value: null,
-      usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+      usage: { inputTokens: 2, outputTokens: 3, cost: costTotal(4) },
     });
     expect(childRequest).toMatchObject({
       runId: childRunId,
@@ -316,7 +333,7 @@ describe("SubagentSupervisor", () => {
       Promise.resolve({
         childRunId,
         status: "completed" as const,
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       }),
     );
     const supervisor = new SubagentSupervisor(
@@ -427,6 +444,7 @@ describe("SubagentSupervisor", () => {
           outcome: "completed",
           inputTokens: 0,
           outputTokens: 0,
+          cost: EMPTY_COST_TOTAL,
         },
       ],
       2,
@@ -477,13 +495,13 @@ describe("SubagentSupervisor", () => {
           },
           {
             type: "subagent_completed",
-            v: 1,
+            v: 2,
             childRunId,
             outcome: "completed",
             inputTokens: 1,
             outputTokens: 1,
             steps: 2,
-            costMicros: 2,
+            cost: costTotal(2),
           },
         ])
         .then((events) => {
@@ -512,13 +530,13 @@ describe("SubagentSupervisor", () => {
           { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
           {
             type: "model_response",
-            v: 1,
+            v: 2,
             requestId: parentCallId,
             provider: "test",
             model: "worker",
             inputTokens: 1,
             outputTokens: 1,
-            costMicros: 2,
+            cost: costValue(2),
             finishReason: "stop",
             latencyMs: 1,
             schemaValid: true,
@@ -562,7 +580,7 @@ describe("SubagentSupervisor", () => {
       childRunId,
       status: "completed",
       value: { text: "cached answer" },
-      usage: { inputTokens: 1, outputTokens: 1 },
+      usage: { inputTokens: 1, outputTokens: 1, cost: costTotal(2) },
     });
     expect(runChild).not.toHaveBeenCalled();
   });
@@ -586,13 +604,13 @@ describe("SubagentSupervisor", () => {
           },
           {
             type: "subagent_completed",
-            v: 1,
+            v: 2,
             childRunId,
             outcome: "cancelled",
             inputTokens: 0,
             outputTokens: 0,
             steps: 0,
-            costMicros: 0,
+            cost: EMPTY_COST_TOTAL,
           },
         ])
         .then((events) => {
@@ -662,7 +680,7 @@ describe("SubagentSupervisor", () => {
       childRunId,
       status: "completed",
       value: null,
-      usage: { inputTokens: 0, outputTokens: 0, steps: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, steps: 0, cost: EMPTY_COST_TOTAL },
     });
     await expect(spawn).resolves.toMatchObject({ status: "completed" });
   });
@@ -737,7 +755,7 @@ describe("SubagentSupervisor", () => {
       childRunId,
       status: "completed",
       value: null,
-      usage: { inputTokens: 0, outputTokens: 0, steps: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, steps: 0, cost: EMPTY_COST_TOTAL },
     });
     await expect(both).resolves.toMatchObject({ code: "subagent_limit" });
     expect(admittedBudgets).toMatchObject({ maxSteps: 10, maxCostUsd: 0.00001 });
@@ -769,7 +787,7 @@ describe("SubagentSupervisor", () => {
       return {
         childRunId: request.runId,
         status: "suspended",
-        usage: { inputTokens: 0, outputTokens: 0, steps: 1, costMicros: 5 },
+        usage: { inputTokens: 0, outputTokens: 0, steps: 1, cost: costTotal(5) },
       };
     };
     const supervisor = new SubagentSupervisor(
@@ -832,7 +850,7 @@ describe("SubagentSupervisor", () => {
           return Promise.resolve({
             childRunId: request.runId,
             status: "suspended",
-            usage: { inputTokens: 0, outputTokens: 0, steps: 1, costMicros: 1 },
+            usage: { inputTokens: 0, outputTokens: 0, steps: 1, cost: costTotal(1) },
           });
         },
         {
@@ -886,7 +904,7 @@ describe("SubagentSupervisor", () => {
               inputTokens: 1,
               outputTokens: 1,
               steps: 5,
-              costMicros: 5,
+              cost: costTotal(5),
             },
           });
         },
@@ -996,7 +1014,7 @@ describe("SubagentSupervisor", () => {
           {
             runId: request.runId,
             type: "model_response",
-            v: 1,
+            v: 2,
             ts: 2,
             traceId: "a".repeat(32),
             spanId: "b".repeat(16),
@@ -1006,7 +1024,7 @@ describe("SubagentSupervisor", () => {
             model: "test",
             inputTokens: 3,
             outputTokens: 5,
-            costMicros: 7,
+            cost: costValue(7),
             finishReason: "stop",
             latencyMs: 1,
             schemaValid: true,
@@ -1045,7 +1063,7 @@ describe("SubagentSupervisor", () => {
       inputTokens: 3,
       outputTokens: 5,
       steps: 1,
-      costMicros: 7,
+      cost: costTotal(7),
     });
   });
 
@@ -1079,6 +1097,7 @@ describe("SubagentSupervisor", () => {
       inputTokens: 0,
       outputTokens: 0,
       steps: 0,
+      cost: EMPTY_COST_TOTAL,
     });
   });
 
@@ -1095,7 +1114,7 @@ describe("SubagentSupervisor", () => {
               {
                 runId: parentRunId,
                 type: "subagent_completed",
-                v: 1,
+                v: 2,
                 ts: 2,
                 traceId: "a".repeat(32),
                 spanId: "b".repeat(16),
@@ -1105,7 +1124,7 @@ describe("SubagentSupervisor", () => {
                 inputTokens: 3,
                 outputTokens: 5,
                 steps: 2,
-                costMicros: 7,
+                cost: costTotal(7),
               },
             ],
             1,
@@ -1156,7 +1175,7 @@ describe("SubagentSupervisor", () => {
         childRunId: request.runId,
         status: "completed",
         value: { text: "done" },
-        usage: { inputTokens: 3, outputTokens: 5, costMicros: 7 },
+        usage: { inputTokens: 3, outputTokens: 5, cost: costTotal(7) },
       });
     };
     const firstSupervisor = new SubagentSupervisor(
@@ -1306,7 +1325,7 @@ describe("SubagentSupervisor", () => {
         childRunId: request.runId,
         status: "completed",
         value: { text: "grandchild answer" },
-        usage: { inputTokens: 7, outputTokens: 8, costMicros: 9 },
+        usage: { inputTokens: 7, outputTokens: 8, cost: costTotal(9) },
       });
     };
     const childRunner: SubagentRunner = async (request) => {
@@ -1335,13 +1354,13 @@ describe("SubagentSupervisor", () => {
       await childRecorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
         childRecorder.record({
           type: "model_response",
-          v: 1,
+          v: 2,
           requestId: parentCallId,
           provider: "test",
           model: "worker",
           inputTokens: 2,
           outputTokens: 3,
-          costMicros: 4,
+          cost: costValue(4),
           finishReason: "stop",
           latencyMs: 1,
           schemaValid: true,
@@ -1429,11 +1448,11 @@ describe("SubagentSupervisor", () => {
       rootEvents.push(event);
     }
 
-    expect(aggregateSubagentUsage(rootEvents)).toEqual({
+    expect(aggregateSubagentUsage(rootEvents)).toMatchObject({
       inputTokens: 9,
       outputTokens: 11,
       steps: 1,
-      costMicros: 13,
+      cost: { state: "estimated", estimatedMicros: 13 },
     });
     expect(grandchildBudgets).toEqual([{ maxSteps: 2, maxCostUsd: 0.000026, deadlineTs: 1_001 }]);
   });
@@ -1445,7 +1464,7 @@ describe("SubagentSupervisor", () => {
       Promise.resolve({
         childRunId,
         status: "completed" as const,
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       }),
     );
     const supervisor = new SubagentSupervisor(supervisorOptions(runChild, { store }));

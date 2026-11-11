@@ -5,7 +5,6 @@
     "src/types.ts:ApprovalDecisionSchema",
     "src/types.ts:CancelRunResultSchema",
     "src/types.ts:ContinueRunOptionsSchema",
-    "src/types.ts:CreateHarnessOptionsSchema",
     "src/types.ts:GetRunContentOptionsSchema",
     "src/types.ts:HarnessOverridesSchema",
     "src/types.ts:ListRunsFilterSchema",

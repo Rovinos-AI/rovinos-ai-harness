@@ -61,6 +61,7 @@ function events(): Event[] {
       model: "fixture",
       inputTokens: 1,
       outputTokens: 1,
+      cost: { version: 1, state: "unknown" },
       finishReason: "stop",
       latencyMs: 1,
       schemaValid: true,

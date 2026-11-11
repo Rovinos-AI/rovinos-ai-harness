@@ -758,6 +758,7 @@ describe("BedrockAdapter", () => {
       cacheReadTokens: 5,
       cacheWriteTokens: 3,
       costMicros: 340,
+      cost: { version: 1, state: "estimated", amountMicros: 340 },
     });
   });
 

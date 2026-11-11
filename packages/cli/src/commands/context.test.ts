@@ -34,6 +34,9 @@ function event(seq: number, payload: Record<string, unknown>) {
     traceId: "a".repeat(32),
     spanId: "b".repeat(16),
     segmentId: runId,
+    ...(payload.type === "model_response" || payload.type === "context_compacted"
+      ? { cost: { version: 1, state: "unknown" } }
+      : {}),
     ...payload,
   });
 }
@@ -46,6 +49,7 @@ function response(seq: number, content: unknown[]) {
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" },
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: true,

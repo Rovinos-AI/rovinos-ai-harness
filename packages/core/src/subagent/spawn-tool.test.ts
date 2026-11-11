@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
+  EMPTY_COST_TOTAL,
   FakeClock,
   Id,
   ModelsConfigSchema,
@@ -126,7 +127,7 @@ async function createSpawnTool(
         childRunId: request.runId,
         status: "completed",
         value: { input: request.input },
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       });
     });
   const supervisor = new SubagentSupervisor({
@@ -295,7 +296,7 @@ describe("agent.spawn tool", () => {
         childRunId,
         status: "completed",
         value: { input: { goal: "tokenized goal", inputs: { ref: "<EMAIL_1>" } } },
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       },
     });
     expect(seen).toHaveLength(1);
@@ -320,7 +321,7 @@ describe("agent.spawn tool", () => {
         childRunId: request.runId,
         status: "cancelled",
         errorCode: "run_cancelled",
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       }),
     );
 
@@ -340,7 +341,7 @@ describe("agent.spawn tool", () => {
         childRunId: request.runId,
         status: "failed",
         errorCode: "failure reason with spaces",
-        usage: { inputTokens: 1, outputTokens: 2 },
+        usage: { inputTokens: 1, outputTokens: 2, cost: EMPTY_COST_TOTAL },
       }),
     );
 

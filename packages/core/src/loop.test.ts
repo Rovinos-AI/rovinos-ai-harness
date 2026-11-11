@@ -20,6 +20,7 @@ import {
 } from "@opentelemetry/api";
 import {
   FakeClock,
+  EMPTY_COST_TOTAL,
   Code,
   Event,
   Id,
@@ -503,7 +504,7 @@ function normalizeEvents(events: readonly Event[]): JsonValueType {
         model: event.model,
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
-        ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
+        cost: event.cost,
         finishReason: event.finishReason,
         latencyMs: event.latencyMs,
         schemaValid: event.schemaValid,
@@ -1586,7 +1587,11 @@ describe("runLoop", () => {
     );
 
     expect(result.status).toBe("completed");
-    expect(result.state.usage).toEqual({ inputTokens: 11, outputTokens: 12, costMicros: 44 });
+    expect(result.state.usage).toMatchObject({
+      inputTokens: 11,
+      outputTokens: 12,
+      costMicros: 44,
+    });
     expect(summarize).toHaveBeenCalledOnce();
     expect(compactedIndex).toBeGreaterThan(-1);
     expect(compactedIndex).toBeLessThan(secondRequestIndex);
@@ -1649,7 +1654,7 @@ describe("runLoop", () => {
     expect(result.status).toBe("failed");
     expect(model.requests).toHaveLength(1);
     expect(summarize).toHaveBeenCalledOnce();
-    expect(result.state.usage).toEqual({ inputTokens: 7, outputTokens: 7, costMicros: 13 });
+    expect(result.state.usage).toMatchObject({ inputTokens: 7, outputTokens: 7, costMicros: 13 });
     expect(result.events).toContainEqual(
       expect.objectContaining({ type: "budget_exceeded", budget: "cost", observed: 13 }),
     );
@@ -2052,7 +2057,7 @@ describe("runLoop", () => {
     expect(result.approvalIds).toEqual([]);
     expect(result.state.status).toBe("completed");
     expect(result.state.steps).toBe(1);
-    expect(result.state.usage).toEqual({ inputTokens: 3, outputTokens: 5, costMicros: 12 });
+    expect(result.state.usage).toMatchObject({ inputTokens: 3, outputTokens: 5, costMicros: 12 });
     expect(result.events.map(({ type }) => type)).toEqual([
       "run_created",
       "run_input",
@@ -3015,7 +3020,7 @@ describe("runLoop", () => {
 
     expect(result.state.status).toBe("failed");
     expect(result.events.find(({ type }) => type === "model_response")).toMatchObject({
-      costMicros: 2,
+      cost: { version: 1, state: "known", amountMicros: 2 },
     });
     expect(result.events.at(-2)).toMatchObject({
       type: "budget_exceeded",
@@ -3070,7 +3075,7 @@ describe("runLoop", () => {
       reason: "final_answer",
     });
     expect(result.events.find(({ type }) => type === "model_response")).toMatchObject({
-      costMicros: 2,
+      cost: { version: 1, state: "known", amountMicros: 2 },
     });
   });
 
@@ -3179,6 +3184,7 @@ describe("runLoop", () => {
             inputTokens: 2,
             outputTokens: 3,
             steps: 1,
+            cost: EMPTY_COST_TOTAL,
           },
         },
       ];

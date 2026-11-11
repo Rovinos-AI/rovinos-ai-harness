@@ -1,0 +1,18 @@
+{
+  "runId": "00000000000000000000000001",
+  "seq": 4,
+  "ts": 10,
+  "type": "subagent_spawned",
+  "v": 1,
+  "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "spanId": "bbbbbbbbbbbbbbbb",
+  "segmentId": "00000000000000000000000001",
+  "childRunId": "00000000000000000000000002",
+  "role": "synthetic_role",
+  "budgetLimits": {
+    "maxSteps": 20,
+    "maxCostUsd": 0.1,
+    "maxWallClockMs": 1000,
+    "countSuspendedTime": false
+  }
+}

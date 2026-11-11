@@ -104,11 +104,12 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
       period: UsageLedgerPeriod;
       period_start: number;
       cost_micros: number;
+      unknown_cost_count: number;
       runs_started: number;
     }
   >;
   private readonly upsertUsageLedger: Database.Statement<
-    [Code, UsageLedgerPeriod, number, number, number],
+    [Code, UsageLedgerPeriod, number, number, number, number],
     { quota_id: Code }
   >;
   private readonly snapshotKeep: number;
@@ -181,10 +182,10 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
       "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT ?",
     );
     this.readUsageLedgerQuery = this.db.prepare(
-      "SELECT quota_id, period, period_start, cost_micros, runs_started FROM usage_ledger WHERE quota_id = ? AND period = ? AND period_start = ?",
+      "SELECT quota_id, period, period_start, cost_micros, unknown_cost_count, runs_started FROM usage_ledger WHERE quota_id = ? AND period = ? AND period_start = ?",
     );
     this.upsertUsageLedger = this.db.prepare(
-      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, runs_started) VALUES (?, ?, ?, ?, ?) ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + excluded.cost_micros, runs_started = usage_ledger.runs_started + excluded.runs_started",
+      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, unknown_cost_count, runs_started) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + excluded.cost_micros, unknown_cost_count = usage_ledger.unknown_cost_count + excluded.unknown_cost_count, runs_started = usage_ledger.runs_started + excluded.runs_started",
     );
   }
 

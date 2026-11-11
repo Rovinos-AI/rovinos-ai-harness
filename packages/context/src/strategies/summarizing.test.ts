@@ -28,6 +28,7 @@ const events: Event[] = [
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" } as const,
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: true,

@@ -23,12 +23,13 @@ beforeAll(() => {
 function modelResponse(): EventPartial {
   return {
     type: "model_response",
-    v: 1,
+    v: 2,
     requestId: "22222222222222222222222222",
     provider: "test",
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
+    cost: { version: 1, state: "unknown" },
     finishReason: "stop",
     latencyMs: 0,
     schemaValid: true,
@@ -132,7 +133,7 @@ describe("compactionStep", () => {
       summary: "summary <EMAIL_1>",
       inputTokens: 8,
       outputTokens: 2,
-      costMicros: 13,
+      cost: { version: 1, state: "known", amountMicros: 13 },
     });
     expect(summarized).toHaveLength(1);
     expect(summarized[0]?.goal).toBe("goal");

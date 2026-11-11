@@ -2,6 +2,7 @@
 import { Code, JsonPointerSchema } from "@rovinos/schemas";
 import type {
   Event,
+  CostTotal,
   Id,
   JsonValue,
   Message,
@@ -36,6 +37,8 @@ export type ModelRequest = SharedModelRequest;
 export interface RunContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** Policy for model-call costs that cannot be fully calculated. */
+  readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
   /** Count-only output progress emitted by the active model request. */
   readonly onProgress?: (progress: ModelProgress) => void;
   /** Durable MRTR handler installed by the core tool step. */
@@ -63,7 +66,7 @@ export interface RunContext {
     readonly inputTokens: number;
     readonly outputTokens: number;
     readonly steps?: number;
-    readonly costMicros?: number;
+    readonly cost: CostTotal;
   }) => Promise<void>;
   /** Structured-output contract used only for the child's final result call. */
   readonly outputSchema?: z.ZodType;

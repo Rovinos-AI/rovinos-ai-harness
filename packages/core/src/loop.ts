@@ -18,7 +18,7 @@ import type { Clock, RunRecorder } from "./recorder.js";
 import { withRunStartup } from "./run-startup.js";
 import { type ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
-import { preflightModelBudget } from "./steps/model-preflight.js";
+import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { suspendedOutcome } from "./steps/suspended-outcome.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type {
@@ -35,13 +35,14 @@ import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import type { Tokenizer } from "@rovinos/pii";
 import type { AuditingVaultResolver } from "@rovinos/vault";
 import type { HumanInputChannel } from "./human-input/channels.js";
-import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
+import type { CompactionRuntimeOptions } from "./steps/compaction-step.js";
 import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-output.js";
 import type { ValueTransform } from "@rovinos/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
 import { modelQuotaHooks } from "./model-quota-hooks.js";
 import { runToolCalls } from "./steps/tool-call-runner.js";
+import { prepareLoopIteration } from "./steps/loop-preparation.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
@@ -238,39 +239,17 @@ async function runLoopSteps(
   }
   const quotaHooks = modelQuotaHooks(options);
   for (;;) {
-    await drainSentinelTrips(options.recorder, events);
-    const aborted = await suspendIfShutdown(options, events, execution);
-    if (aborted !== undefined) {
-      return aborted;
-    }
-    const preflight = await preflightModelBudget({
-      budgetTracker: execution.budgetTracker,
-      checkpointer: execution.checkpointer,
+    const preparedIteration = await prepareLoopIteration({
+      options,
       events,
-      budgets: options.budgets,
-      now: options.clock.now(),
-      recorder: options.recorder,
-      ...quotaHooks,
+      execution,
+      quotaHooks,
+      drainSentinelTrips,
+      suspendIfShutdown,
     });
-    if (preflight.event !== undefined) {
-      return preflight.event;
+    if (preparedIteration.event !== undefined) {
+      return preparedIteration.event;
     }
-    await compactBeforeModelCall({
-      recorder: options.recorder,
-      events,
-      compaction: options.compaction,
-      model: options.model,
-      ids: options.ids,
-      runId: execution.runId,
-      signal: options.signal,
-      modelRef: {
-        provider: options.provider ?? "unknown",
-        model: options.modelName ?? "unknown",
-      },
-      goal: options.goal,
-      deadlineTs: preflight.deadlineTs,
-      ...quotaHooks,
-    });
     const prepared = await prepareModelStep(options, events, execution);
     if (prepared.event !== undefined) {
       return prepared.event;
@@ -289,6 +268,7 @@ async function runLoopSteps(
         ...(options.role === undefined ? {} : { role: options.role }),
         ...(options.provider === undefined ? {} : { provider: options.provider }),
         ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+        unknownCostPolicy: options.budgets.unknownCostPolicy,
         ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
         ...quotaHooks,
       },
@@ -313,6 +293,19 @@ async function finishModelStep(
   execution: RunLoopExecution,
   modelResult: ModelStepResult,
 ): Promise<Event | undefined> {
+  const costBudget = execution.budgetTracker.checkWithOpenChildren(events, options.clock.now());
+  if (
+    !costBudget.ok &&
+    (costBudget.code === "budget_cost_unknown" ||
+      (modelResult.outcome === "response" && modelResult.preparedCalls.length > 0))
+  ) {
+    return recordBudgetFailureAndCheckpoint(
+      options.recorder,
+      events,
+      costBudget,
+      execution.checkpointer,
+    );
+  }
   const stepState = await checkpointAfterStep(execution.checkpointer, events);
   if (stepState.status === "suspended" || modelResult.outcome === "aborted") {
     return suspendedOutcome(events);

@@ -44,7 +44,7 @@ function runCreated(
   return {
     runId: id,
     ts,
-    v: 1,
+    v: 2,
     traceId,
     spanId,
     segmentId: id,
@@ -77,7 +77,7 @@ function modelResponse(id: typeof runId, ts: number, costMicros: number): NewEve
   return {
     runId: id,
     ts,
-    v: 1,
+    v: 2,
     traceId,
     spanId,
     segmentId: id,
@@ -87,7 +87,7 @@ function modelResponse(id: typeof runId, ts: number, costMicros: number): NewEve
     model: "test",
     inputTokens: 1,
     outputTokens: 1,
-    costMicros,
+    cost: { version: 1, state: "known", amountMicros: costMicros },
     finishReason: "stop",
     latencyMs: 1,
     schemaValid: true,
@@ -185,7 +185,14 @@ describe("InMemoryEventStore", () => {
       ],
     });
     await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
-      { quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 },
+      {
+        quotaId: "daily",
+        period: "day",
+        periodStart: 0,
+        costMicros: 500,
+        unknownCostCount: 0,
+        runsStarted: 0,
+      },
     ]);
     await expect(
       store.appendWithUsage(runId, [modelResponse(runId, 12, 200)], 1, {
@@ -197,7 +204,14 @@ describe("InMemoryEventStore", () => {
 
     await expect(store.head(runId)).resolves.toBe(2);
     await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
-      { quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 },
+      {
+        quotaId: "daily",
+        period: "day",
+        periodStart: 0,
+        costMicros: 500,
+        unknownCostCount: 0,
+        runsStarted: 0,
+      },
     ]);
     await store.close();
   });
@@ -227,7 +241,14 @@ describe("InMemoryEventStore", () => {
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
     expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
     await expect(store.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
-      { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
+      {
+        quotaId: "hourly",
+        period: "hour",
+        periodStart: 3_600_000,
+        costMicros: 0,
+        unknownCostCount: 0,
+        runsStarted: 5,
+      },
     ]);
     await store.close();
   });

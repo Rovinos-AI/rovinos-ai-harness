@@ -6,14 +6,25 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./create-harness.js";
+export { ExtensionCapabilitySchema, ExtensionCapabilityStatusSchema, ExtensionDefinitionSchema, ExtensionError, ExtensionGrantSchema, ExtensionGrantRevocationSchema, ExtensionManifestSchema, ExtensionRegistrationSchema, ExtensionRegistrationStatusSchema, SDK_VERSION, } from "./extensions.js";
+export type { ExtensionCapability, ExtensionCapabilityStatus, ExtensionContributions, ExtensionDefinition, ExtensionGrant, ExtensionGrantRevocation, ExtensionManifest, ExtensionRegistration, ExtensionRegistrationStatus, ExtensionToolDefinition, ToolInvocationContext, } from "./extensions.js";
+/** Closed error codes exposed by SDK extension validation and execution. */
+export type { ExtensionErrorCode } from "./extensions.js";
+export { Code as CodeSchema, Id as IdSchema, JsonValue as JsonValueSchema, ModelRefSchema, ModelRequestSchema, ModelUsageSchema, PartSchema, } from "@rovinos/schemas";
+export type { Code, Id, JsonValue, ModelRequest, ModelUsage, Part } from "@rovinos/schemas";
+export { ProviderDeltaSchema, ProviderResultSchema } from "@rovinos/models";
+export type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult, } from "@rovinos/models";
 export { inspectMcpServer, registerMcpServer, selectMcpTools, McpCatalogInspectionSchema, InspectMcpServerOptionsSchema, McpToolSelectionSchema, type InspectMcpServerOptions, type McpCatalogInspection, type McpServerConfig, type McpToolSelection, type McpToolSelectionResult, } from "./mcp-onboarding.js";
 export { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
-export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, } from "./types.js";
+export { SdkError, CreateHarnessOptionsSchema, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type CreateHarnessOptionsInput, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, type WithExtensionRegistrations, } from "./types.js";
 export type { SafeEvent } from "@rovinos/telemetry";
+/** Defines a typed extension tool contribution using its input and output schemas. */
+export { defineTool } from "./extensions.js";
 
 import { type Runtime } from "@rovinos/core";
+import { type ExtensionHarnessAccessOptions } from "./extension-harness-access.js";
 import { type Harness, type ContentAuthorizer } from "./types.js";
 /** Creates the internal SDK client around a validated runtime. */
 export declare function createHarnessClient(input: {
@@ -22,7 +33,7 @@ export declare function createHarnessClient(input: {
     readonly correlationEnabled: boolean;
     readonly shutdownGraceMs: number;
     readonly contentAuthorizer: ContentAuthorizer | undefined;
-}): Harness;
+} & ExtensionHarnessAccessOptions): Harness;
 
 import { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
 import { ServerConfigSchema, type SecretRef } from "@rovinos/schemas";
@@ -118,6 +129,7 @@ export declare function selectMcpTools(config: z.input<typeof HarnessConfigSchem
 import { HarnessError, Id } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
+import type { ExtensionGrantRevocation, ExtensionRegistration, ExtensionRegistrationStatus } from "./extensions.js";
 /** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
 export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_tools_failed" | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
@@ -185,6 +197,10 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             budgets: z.ZodPrefault<z.ZodObject<{
                 maxSteps: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 maxCostUsd: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+                unknownCostPolicy: z.ZodDefault<z.ZodEnum<{
+                    allow: "allow";
+                    fail: "fail";
+                }>>;
                 maxWallClockMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 countSuspendedTime: z.ZodDefault<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
                     false: "false";
@@ -749,6 +765,102 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         processLike: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ShutdownProcessLike, import("@rovinos/core").ShutdownProcessLike>>;
         flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
     }, z.core.$strict>>;
+    extensions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        namespace: z.ZodString;
+        definition: z.ZodObject<{
+            manifest: z.ZodObject<{
+                id: z.ZodString;
+                version: z.ZodString;
+                sdkRange: z.ZodString;
+                schemaVersion: z.ZodLiteral<1>;
+                capabilities: z.ZodObject<{
+                    required: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                    optional: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            configSchema: z.ZodCustom<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>, z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
+            createContributions: z.ZodCustom<(config: unknown) => import("./extension-contracts.js").ExtensionContributions, (config: unknown) => import("./extension-contracts.js").ExtensionContributions>;
+        }, z.core.$strict>;
+        config: z.ZodOptional<z.ZodCustom<z.core.util.JSONType, z.core.util.JSONType>>;
+        grants: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            kind: z.ZodLiteral<"tools.contribute">;
+            names: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            kind: z.ZodLiteral<"providers.contribute">;
+            providers: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            kind: z.ZodLiteral<"events.observe">;
+            kinds: z.ZodArray<z.ZodEnum<{
+                approval_wait: "approval_wait";
+                budget_exceeded: "budget_exceeded";
+                checkpoint: "checkpoint";
+                input_wait: "input_wait";
+                model_call: "model_call";
+                pii_action: "pii_action";
+                policy_decision: "policy_decision";
+                run_created: "run_created";
+                run_status: "run_status";
+                subagent_completed: "subagent_completed";
+                subagent_spawned: "subagent_spawned";
+                tool_call: "tool_call";
+            }>>;
+        }, z.core.$strict>, z.ZodObject<{
+            kind: z.ZodLiteral<"content.read">;
+            bindings: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>], "kind">>;
+        toolTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>>;
     contentAuthorizer: z.ZodOptional<z.ZodCustom<ContentAuthorizer, ContentAuthorizer>>;
 }, z.core.$strict>, z.ZodObject<{
     configPath: z.ZodString;
@@ -779,10 +891,114 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         processLike: z.ZodOptional<z.ZodCustom<import("@rovinos/core").ShutdownProcessLike, import("@rovinos/core").ShutdownProcessLike>>;
         flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
     }, z.core.$strict>>;
+    extensions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        namespace: z.ZodString;
+        definition: z.ZodObject<{
+            manifest: z.ZodObject<{
+                id: z.ZodString;
+                version: z.ZodString;
+                sdkRange: z.ZodString;
+                schemaVersion: z.ZodLiteral<1>;
+                capabilities: z.ZodObject<{
+                    required: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                    optional: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        kind: z.ZodLiteral<"tools.contribute">;
+                        names: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"providers.contribute">;
+                        providers: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"events.observe">;
+                        kinds: z.ZodArray<z.ZodEnum<{
+                            approval_wait: "approval_wait";
+                            budget_exceeded: "budget_exceeded";
+                            checkpoint: "checkpoint";
+                            input_wait: "input_wait";
+                            model_call: "model_call";
+                            pii_action: "pii_action";
+                            policy_decision: "policy_decision";
+                            run_created: "run_created";
+                            run_status: "run_status";
+                            subagent_completed: "subagent_completed";
+                            subagent_spawned: "subagent_spawned";
+                            tool_call: "tool_call";
+                        }>>;
+                    }, z.core.$strict>, z.ZodObject<{
+                        kind: z.ZodLiteral<"content.read">;
+                        bindings: z.ZodArray<z.ZodString>;
+                    }, z.core.$strict>], "kind">>;
+                }, z.core.$strict>;
+            }, z.core.$strict>;
+            configSchema: z.ZodCustom<z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>, z.ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
+            createContributions: z.ZodCustom<(config: unknown) => import("./extension-contracts.js").ExtensionContributions, (config: unknown) => import("./extension-contracts.js").ExtensionContributions>;
+        }, z.core.$strict>;
+        config: z.ZodOptional<z.ZodCustom<z.core.util.JSONType, z.core.util.JSONType>>;
+        grants: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            kind: z.ZodLiteral<"tools.contribute">;
+            names: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            kind: z.ZodLiteral<"providers.contribute">;
+            providers: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            kind: z.ZodLiteral<"events.observe">;
+            kinds: z.ZodArray<z.ZodEnum<{
+                approval_wait: "approval_wait";
+                budget_exceeded: "budget_exceeded";
+                checkpoint: "checkpoint";
+                input_wait: "input_wait";
+                model_call: "model_call";
+                pii_action: "pii_action";
+                policy_decision: "policy_decision";
+                run_created: "run_created";
+                run_status: "run_status";
+                subagent_completed: "subagent_completed";
+                subagent_spawned: "subagent_spawned";
+                tool_call: "tool_call";
+            }>>;
+        }, z.core.$strict>, z.ZodObject<{
+            kind: z.ZodLiteral<"content.read">;
+            bindings: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>], "kind">>;
+        toolTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>>;
     contentAuthorizer: z.ZodOptional<z.ZodCustom<ContentAuthorizer, ContentAuthorizer>>;
 }, z.core.$strict>]>;
 /** Validated options accepted by {@link createHarness}. */
-export type CreateHarnessOptions = z.input<typeof CreateHarnessOptionsSchema>;
+export type CreateHarnessOptionsInput = z.input<typeof CreateHarnessOptionsSchema>;
+/** Preserves literal extension registration types in harness construction options. */
+export type WithExtensionRegistrations<Options, Registrations extends readonly ExtensionRegistration[]> = Options extends {
+    readonly extensions?: unknown;
+} ? Omit<Options, "extensions"> & {
+    readonly extensions?: Registrations;
+} : Options;
+/** Options passed to {@link createHarness}, with optional literal registrations preserved. */
+export type CreateHarnessOptions<Registrations extends readonly ExtensionRegistration[] = readonly ExtensionRegistration[]> = WithExtensionRegistrations<CreateHarnessOptionsInput, Registrations>;
 /** Branded ULID accepted by public run and approval operations. */
 export type RunId = z.infer<typeof Id>;
 /** Input for starting a run. */
@@ -887,7 +1103,22 @@ export declare const RunViewSchema: z.ZodObject<{
     usage: z.ZodObject<{
         inputTokens: z.ZodNumber;
         outputTokens: z.ZodNumber;
-        costMicros: z.ZodNumber;
+        cost: z.ZodObject<{
+            version: z.ZodLiteral<1>;
+            state: z.ZodEnum<{
+                estimated: "estimated";
+                known: "known";
+                partial: "partial";
+                unknown: "unknown";
+            }>;
+            knownMicros: z.ZodNumber;
+            estimatedMicros: z.ZodNumber;
+            partialMicros: z.ZodNumber;
+            knownCount: z.ZodNumber;
+            estimatedCount: z.ZodNumber;
+            partialCount: z.ZodNumber;
+            unknownCount: z.ZodNumber;
+        }, z.core.$strict>;
     }, z.core.$strict>;
     pendingApprovals: z.ZodArray<z.ZodString>;
     recentEvents: z.ZodArray<z.core.$ZodBranded<z.ZodDiscriminatedUnion<readonly [z.ZodObject<{
@@ -1112,7 +1343,20 @@ export declare const RunViewSchema: z.ZodObject<{
         }>;
         inputTokens: z.ZodNumber;
         outputTokens: z.ZodNumber;
-        costMicros: z.ZodOptional<z.ZodNumber>;
+        costVersion: z.ZodNumber;
+        costState: z.ZodEnum<{
+            estimated: "estimated";
+            known: "known";
+            partial: "partial";
+            unknown: "unknown";
+        }>;
+        costKnownMicros: z.ZodNumber;
+        costEstimatedMicros: z.ZodNumber;
+        costPartialMicros: z.ZodNumber;
+        costKnownCount: z.ZodNumber;
+        costEstimatedCount: z.ZodNumber;
+        costPartialCount: z.ZodNumber;
+        costUnknownCount: z.ZodNumber;
         runId: z.ZodString;
         seq: z.ZodNumber;
         ts: z.ZodNumber;
@@ -1291,6 +1535,10 @@ export declare const CancelRunResultSchema: z.ZodEnum<{
 export type CancelRunResult = z.infer<typeof CancelRunResultSchema>;
 /** Public stable SDK operations. */
 export interface Harness {
+    /** Return non-sensitive capability status for registered extensions. */
+    getExtensionStatus(): readonly ExtensionRegistrationStatus[];
+    /** Revoke one tool or provider destination grant for future mediated operations. */
+    revokeExtensionGrant(request: ExtensionGrantRevocation): boolean;
     /**
      * Start a detached run and return after its initial events are durable.
      *

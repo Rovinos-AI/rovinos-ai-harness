@@ -52,6 +52,7 @@ interface UsageLedgerDeltaLike {
   readonly period: "hour" | "day" | "month";
   readonly periodStart: number;
   readonly costMicros: number;
+  readonly unknownCostCount?: number;
   readonly runsStarted: number;
   readonly maxRunsStarted?: number;
 }
@@ -61,6 +62,7 @@ interface UsageLedgerRowLike {
   readonly period: "hour" | "day" | "month";
   readonly periodStart: number;
   readonly costMicros: number;
+  readonly unknownCostCount: number;
   readonly runsStarted: number;
 }
 
