@@ -85,8 +85,8 @@ possible use; they do not mean a call has been authorized. Reports include accep
 counts, alias-mapping availability, and a catalog fingerprint only when discovery completed. A
 partial or untested catalog has a status but no fingerprint. Failures include a safe `nextAction` code.
 Default output contains metadata only; it does not include schemas, descriptions, protocol captures,
-credentials, or service URLs. Use the existing [MCP Inspector guide](inspector.md) for a separate
-interactive diagnosis workflow.
+credentials, or service URLs. Use the [MCP Inspector developer guide](inspector.md) for a separate
+diagnosis workflow covering the web client, TUI, CLI, and experimental `mcpdo`.
 
 Example `--json` report:
 
