@@ -199,14 +199,14 @@ const isTopLevelFunctionNamed = (ancestors, predicate) => {
   );
   const enclosingFunction = functions.at(-1);
   const functionName =
-  enclosingFunction?.type === AST_NODE_TYPES.FunctionDeclaration
-    ? identifierName(enclosingFunction.id)
-    : undefined;
+    enclosingFunction?.type === AST_NODE_TYPES.FunctionDeclaration
+      ? identifierName(enclosingFunction.id)
+      : undefined;
   return (
-  functions.length === 1 &&
-  ancestors[0]?.type === AST_NODE_TYPES.Program &&
-  functionName !== undefined &&
-  predicate(functionName)
+    functions.length === 1 &&
+    ancestors[0]?.type === AST_NODE_TYPES.Program &&
+    functionName !== undefined &&
+    predicate(functionName)
   );
 };
 
@@ -218,14 +218,14 @@ const isTopLevelFunctionNamed = (ancestors, predicate) => {
 const isGuardedRegistryCounterCall = (node, ancestors) => {
   const assignment = ancestors.at(-1);
   const target =
-  assignment?.type === AST_NODE_TYPES.AssignmentExpression ? assignment.left : undefined;
+    assignment?.type === AST_NODE_TYPES.AssignmentExpression ? assignment.left : undefined;
   return (
-  isTopLevelFunctionNamed(
-    ancestors,
-    (name) => name.startsWith("get") && name.endsWith("Counter"),
-  ) &&
-  assignment?.type === AST_NODE_TYPES.AssignmentExpression &&
-  assignment.operator === "??=" &&
+    isTopLevelFunctionNamed(
+      ancestors,
+      (name) => name.startsWith("get") && name.endsWith("Counter"),
+    ) &&
+    assignment?.type === AST_NODE_TYPES.AssignmentExpression &&
+    assignment.operator === "??=" &&
     assignment.right === node &&
     target?.type === AST_NODE_TYPES.Identifier &&
     target.name.endsWith("Counter")
