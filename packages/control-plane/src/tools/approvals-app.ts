@@ -209,10 +209,7 @@ async function findAccessiblePendingApproval(input: {
     };
   }
   const run = await readRunState(input.options.store, found.runId);
-  if (
-    run === undefined ||
-    (!found.resolved && !run.state.pendingApprovals.has(input.approvalId))
-  ) {
+  if (run === undefined || (!found.resolved && !run.state.pendingApprovals.has(input.approvalId))) {
     return { success: false, tokenId: access.tokenId, code: "approval_not_found" };
   }
   return { success: true, found, tokenId: access.tokenId, principal: access.principal };
