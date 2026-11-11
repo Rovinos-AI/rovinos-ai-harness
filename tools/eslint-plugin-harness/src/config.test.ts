@@ -196,6 +196,11 @@ ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only
       errors: [{ messageId: "forbidden" }],
     },
     {
+      code: 'export default function () { return createCounter<NoMetricAttributes>("harness.test.count"); }',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
       code: "const counterFactory = meter.createCounter;",
       filename: resolve(rootDirectory, "packages/core/src/metrics.ts"),
       errors: [{ messageId: "forbidden" }],

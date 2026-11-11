@@ -199,7 +199,7 @@ const isTopLevelFunctionNamed = (ancestors, predicate) => {
   );
   const enclosingFunction = functions.at(-1);
   const functionName =
-    enclosingFunction?.type === AST_NODE_TYPES.FunctionDeclaration
+    enclosingFunction?.type === AST_NODE_TYPES.FunctionDeclaration && enclosingFunction.id !== null
       ? identifierName(enclosingFunction.id)
       : undefined;
   return (
