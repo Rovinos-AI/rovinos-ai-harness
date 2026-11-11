@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EvalReportSchema } from "./schema.js";
+import type { CostTotal } from "@rovinos/schemas";
 import type { EvalTrialMetrics, MetricSummary } from "./schema.js";
 
 function compareText(left: string, right: string): number {
@@ -29,6 +30,13 @@ function formatSummary(summary: MetricSummary): string {
   return [summary.mean, summary.median, summary.p95].map(formatNumber).join(" / ");
 }
 
+function formatCostTotal(cost: CostTotal | undefined): string {
+  if (cost === undefined) {
+    return "unknown";
+  }
+  return `${cost.state}: known ${String(cost.knownMicros)}, estimated ${String(cost.estimatedMicros)}, partial ${String(cost.partialMicros)}, unknown ${String(cost.unknownCount)}`;
+}
+
 function failureCodes(trial: EvalTrialMetrics): string[] {
   return [
     ...new Set(trial.graders.filter(({ pass }) => !pass).flatMap(({ codes }) => codes)),
@@ -51,12 +59,12 @@ export function renderMarkdownReport(report: unknown): string {
     lines.push(
       `## Variant \`${variantId}\``,
       "",
-      "| Task | Trials | Passes | Pass rate | pass@k | Cost mean / median / p95 (µUSD) | Tokens mean / median / p95 | Steps mean / median / p95 | Latency mean / median / p95 (ms) |",
-      "| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
+      "| Task | Trials | Passes | Pass rate | pass@k | Reported cost mean / median / p95 (µUSD) | Cost completeness | Tokens mean / median / p95 | Steps mean / median / p95 | Latency mean / median / p95 (ms) |",
+      "| --- | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: |",
     );
     for (const aggregate of parsed.aggregates.filter((item) => item.variantId === variantId)) {
       lines.push(
-        `| ${aggregate.taskId} | ${String(aggregate.n)} | ${String(aggregate.passes)} | ${(aggregate.passRate * 100).toFixed(1)}% | ${aggregate.passAtK.map(({ k, rate }) => `${String(k)}: ${(rate * 100).toFixed(1)}%`).join(", ")} | ${formatSummary(aggregate.costMicros)} | ${formatSummary(aggregate.totalTokens)} | ${formatSummary(aggregate.steps)} | ${formatSummary(aggregate.latencyMs)} |`,
+        `| ${aggregate.taskId} | ${String(aggregate.n)} | ${String(aggregate.passes)} | ${(aggregate.passRate * 100).toFixed(1)}% | ${aggregate.passAtK.map(({ k, rate }) => `${String(k)}: ${(rate * 100).toFixed(1)}%`).join(", ")} | ${formatSummary(aggregate.costMicros)} | ${formatCostTotal(aggregate.cost)} | ${formatSummary(aggregate.totalTokens)} | ${formatSummary(aggregate.steps)} | ${formatSummary(aggregate.latencyMs)} |`,
       );
     }
     lines.push("");

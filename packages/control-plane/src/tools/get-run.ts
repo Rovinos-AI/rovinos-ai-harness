@@ -53,7 +53,11 @@ export async function getRun(
     lastSeq: lastEvent.seq,
     lastTs: lastEvent.ts,
     steps: run.state.steps,
-    usage: run.state.usage,
+    usage: {
+      inputTokens: run.state.usage.inputTokens,
+      outputTokens: run.state.usage.outputTokens,
+      cost: run.state.usage.cost,
+    },
     ...(run.state.lastCheckpoint === undefined ? {} : { lastCheckpoint: run.state.lastCheckpoint }),
     pendingApprovals,
     pendingInputs: run.state.pendingInputs.size,

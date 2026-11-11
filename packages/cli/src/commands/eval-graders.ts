@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { combineCostTotals } from "@rovinos/schemas";
 import type { Event } from "@rovinos/schemas";
 import type {
   EvalGradeRecord,
@@ -123,6 +124,8 @@ async function finishTrial(context: TrialGrading, grades: EvalGradeRecord[]): Pr
       inputTokens: total.inputTokens + (grade.usage?.inputTokens ?? 0),
       outputTokens: total.outputTokens + (grade.usage?.outputTokens ?? 0),
       costMicros: total.costMicros + (grade.usage?.costMicros ?? 0),
+      cost:
+        grade.usage === undefined ? total.cost : combineCostTotals(total.cost, grade.usage.cost),
     }),
     capabilities.result.usage,
   );

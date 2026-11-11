@@ -139,18 +139,18 @@ export function toolRunContext(
       inputTokens,
       outputTokens,
       steps,
-      costMicros,
+      cost,
     }) => {
       events.push(
         await recorder.record({
           type: "subagent_completed",
-          v: 1,
+          v: 2,
           childRunId,
           outcome,
           inputTokens,
           outputTokens,
           ...(steps === undefined ? {} : { steps }),
-          ...(costMicros === undefined ? {} : { costMicros }),
+          cost,
         }),
       );
     },

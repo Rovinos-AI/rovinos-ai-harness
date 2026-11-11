@@ -429,7 +429,22 @@ describe("DockerExecutor", () => {
 
     expect(result.status).toBe("completed");
     expect(result.runId).toBeDefined();
-    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2, costMicros: 0 });
+    expect(result.usage).toEqual({
+      inputTokens: 3,
+      outputTokens: 2,
+      costMicros: 0,
+      cost: {
+        version: 1,
+        state: "unknown",
+        knownMicros: 0,
+        estimatedMicros: 0,
+        partialMicros: 0,
+        knownCount: 0,
+        estimatedCount: 0,
+        partialCount: 0,
+        unknownCount: 1,
+      },
+    });
     expect(result.exitCode).toBe(0);
     expect(result.durationMs).toBeGreaterThan(0);
     expect(events.some((event) => event.type === "run_created")).toBe(true);

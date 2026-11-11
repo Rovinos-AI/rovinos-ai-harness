@@ -75,7 +75,7 @@ function responseEvent(
     runId,
     seq,
     ts: seq,
-    v: 1,
+    v: 2,
     traceId,
     spanId,
     segmentId,
@@ -91,7 +91,10 @@ function responseEvent(
     ...(cacheUsage.cacheWriteTokens === undefined
       ? {}
       : { cacheWriteTokens: cacheUsage.cacheWriteTokens }),
-    ...(costMicros === undefined ? {} : { costMicros }),
+    cost:
+      costMicros === undefined
+        ? { version: 1, state: "unknown" }
+        : { version: 1, state: "estimated", amountMicros: costMicros },
     finishReason: "stop",
     latencyMs: 5,
     schemaValid: true,

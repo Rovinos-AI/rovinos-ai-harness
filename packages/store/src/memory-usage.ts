@@ -21,11 +21,13 @@ export function stageMemoryUsageUpdates(options: {
         period: delta.period,
         periodStart: delta.periodStart,
         costMicros: 0,
+        unknownCostCount: 0,
         runsStarted: 0,
       };
     const next = UsageLedgerRowSchema.parse({
       ...previous,
       costMicros: previous.costMicros + delta.costMicros,
+      unknownCostCount: previous.unknownCostCount + (delta.unknownCostCount ?? 0),
       runsStarted: previous.runsStarted + delta.runsStarted,
     });
     if (delta.maxRunsStarted !== undefined && next.runsStarted > delta.maxRunsStarted) {

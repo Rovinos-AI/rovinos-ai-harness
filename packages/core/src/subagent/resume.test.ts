@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EventSchema, Id, RunConfigSchema, type Event } from "@rovinos/schemas";
+import {
+  addCostValue,
+  EMPTY_COST_TOTAL,
+  EventSchema,
+  Id,
+  RunConfigSchema,
+  type Event,
+} from "@rovinos/schemas";
 import { InMemoryEventStore } from "@rovinos/store";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelToolCall, ToolPort } from "../ports.js";
@@ -154,6 +161,7 @@ async function seed(
       inputTokens: 0,
       outputTokens: 0,
       steps: 0,
+      cost: EMPTY_COST_TOTAL,
     });
     await store.append(parentRunId, [completion], events.length);
     events.push(completion);
@@ -204,6 +212,7 @@ function appendTerminalChild(store: InMemoryEventStore): Promise<void> {
           model: "test",
           inputTokens: 2,
           outputTokens: 3,
+          cost: { version: 1, state: "unknown" },
           finishReason: "stop",
           latencyMs: 0,
           schemaValid: true,
@@ -298,7 +307,11 @@ describe("recoverSubagentSpawn", () => {
         childRunId,
         status: "completed",
         value: { text: "resumed" },
-        usage: { inputTokens: 2, outputTokens: 3 },
+        usage: {
+          inputTokens: 2,
+          outputTokens: 3,
+          cost: addCostValue(EMPTY_COST_TOTAL, { version: 1, state: "unknown" }),
+        },
       };
     });
 
@@ -354,7 +367,7 @@ describe("recoverSubagentSpawn", () => {
         childRunId,
         status: "completed",
         value: { text: "recovered" },
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       };
     });
 
@@ -374,7 +387,7 @@ describe("recoverSubagentSpawn", () => {
       Promise.resolve({
         childRunId,
         status: "suspended",
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: { inputTokens: 0, outputTokens: 0, cost: EMPTY_COST_TOTAL },
       });
 
     await expect(

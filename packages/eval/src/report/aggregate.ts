@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
+import { addCostValue, combineCostTotals, EMPTY_COST_TOTAL } from "@rovinos/schemas";
 import { EvalTrialMetricsSchema } from "./schema.js";
 import type { EvalAggregate, EvalTrialMetrics } from "./schema.js";
 
@@ -88,6 +89,14 @@ export function aggregateEvalMetrics(input: readonly EvalTrialMetrics[]): EvalAg
         rate: passAtK(n, passes, index + 1),
       })),
       costMicros: summarize(group.map(({ costMicros }) => costMicros)),
+      cost: group.reduce(
+        (total, trial) =>
+          combineCostTotals(
+            total,
+            trial.cost ?? addCostValue(EMPTY_COST_TOTAL, { version: 1, state: "unknown" }),
+          ),
+        EMPTY_COST_TOTAL,
+      ),
       inputTokens: summarize(group.map(({ inputTokens }) => inputTokens)),
       outputTokens: summarize(group.map(({ outputTokens }) => outputTokens)),
       totalTokens: summarize(

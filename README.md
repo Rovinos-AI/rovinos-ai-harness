@@ -792,6 +792,7 @@ Reports hold scores, counts, codes, and costs only, never transcripts. Trajector
 | `harness inputs list/show/answer/decline` | Answer human-input requests from the terminal |
 | `harness approvals list/show/approve/deny/sweep` | Terminal approval workflow; `--reveal` is explicit and audited |
 | `harness serve --stdio / --http` | Run the control-plane MCP server |
+| [MCP Inspector guide](docs/inspector.md) | Inspect `harness serve` with the web client, TUI, CLI, or experimental `mcpdo` |
 | `harness servers check/login/logout` | MCP server diagnostics without calling tools; OAuth login and logout |
 | `harness context` | Inspect or compare context strategies for a stored run, read-only |
 | `harness replay` | Replay a run or trace, diff, golden compare |

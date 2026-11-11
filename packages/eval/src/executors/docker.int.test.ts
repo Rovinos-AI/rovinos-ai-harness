@@ -80,7 +80,22 @@ describe.skipIf(!dockerAvailable)("@docker DockerExecutor", () => {
     expect(result.workspaceDir).toBe(join(root, "run", "workspace"));
     expect(result.status).toBe("completed");
     expect(result.exitCode).toBe(0);
-    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2, costMicros: 0 });
+    expect(result.usage).toEqual({
+      inputTokens: 3,
+      outputTokens: 2,
+      costMicros: 0,
+      cost: {
+        version: 1,
+        state: "unknown",
+        knownMicros: 0,
+        estimatedMicros: 0,
+        partialMicros: 0,
+        knownCount: 0,
+        estimatedCount: 0,
+        partialCount: 0,
+        unknownCount: 1,
+      },
+    });
     expect(calls).toBe(1);
     expect(events.some((event) => event.type === "model_response")).toBe(true);
   });

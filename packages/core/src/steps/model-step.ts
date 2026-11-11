@@ -2,14 +2,17 @@
 import {
   APP_TELEMETRY_TOOL_NAME,
   Code,
+  costValueFromUsage,
   HarnessError,
   JsonValue as JsonValueSchema,
   ModelRequestSchema,
   ModelUsageSchema,
   type Event,
+  type CostValue,
   type Id,
   type Message,
   type ModelRequest,
+  type RunConfig,
   type ToolSpec,
 } from "@rovinos/schemas";
 import {
@@ -30,6 +33,7 @@ import {
   toolRunContext,
   type PreparedToolCall,
 } from "./prepare-tool.js";
+import { requestCompletion } from "./model-completion.js";
 
 class ModelStepEventMissingError extends HarnessError {
   readonly code = "model_step_event_missing";
@@ -60,7 +64,8 @@ export interface ModelStepOptions {
   /** Omits a run-failure status event when a model request is nested in a tool. */
   readonly failureMode?: "tool";
   readonly valueTransform?: ValueTransform;
-  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
+  readonly usageUpdatesForCost?: (cost: CostValue) => readonly UsageLedgerDelta[];
+  readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
   readonly includeTools?: boolean;
   readonly contextMetadata: {
     readonly strategyId: Code;
@@ -153,30 +158,6 @@ function requestParts(
   };
 }
 
-function completeUnlessShutdown(
-  completion: Promise<ModelCompletion>,
-  signal: AbortSignal,
-): Promise<ModelCompletion | undefined> {
-  let onAbort: (() => void) | undefined;
-  const shutdown = new Promise<undefined>((resolve) => {
-    onAbort = (): void => {
-      if (signal.reason === "shutdown") {
-        resolve(undefined);
-      }
-    };
-    if (signal.aborted) {
-      onAbort();
-    } else {
-      signal.addEventListener("abort", onAbort, { once: true });
-    }
-  });
-  return Promise.race([completion, shutdown]).finally(() => {
-    if (onAbort !== undefined) {
-      signal.removeEventListener("abort", onAbort);
-    }
-  });
-}
-
 /**
  * Records a model request, performs the provider call, and records its outcome.
  *
@@ -201,37 +182,25 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       const requestEvent = await options.recorder.record(requestPartial);
       recorded.push(requestEvent);
 
-      const runContext = piiActionRunContext(modelRunContext(options), options.recorder, recorded);
-      let completion: ModelCompletion;
-      try {
-        const response = await completeUnlessShutdown(
-          options.model.complete(modelRequest, runContext),
-          options.signal,
-        );
-        if (response === undefined) {
-          result = { outcome: "aborted", events: recorded };
-          return requestEvent;
-        }
-        completion = response;
-      } catch (error) {
-        if (options.signal.aborted && options.signal.reason === "shutdown") {
-          result = { outcome: "aborted", events: recorded };
-          return requestEvent;
-        }
-        const failure = await recordModelFailure({
-          options,
-          requestId,
-          error,
-          span,
-          recorded,
-        });
-        result = failure.result;
-        return failure.event ?? requestEvent;
+      const completionOutcome = await requestCompletion({
+        completion: options.model.complete(
+          modelRequest,
+          piiActionRunContext(modelRunContext(options), options.recorder, recorded),
+        ),
+        signal: options.signal,
+        recorded,
+        requestEvent,
+        recordFailure: (error) => recordModelFailure({ options, requestId, error, span, recorded }),
+      });
+      if ("result" in completionOutcome) {
+        result = completionOutcome.result;
+        return completionOutcome.event;
       }
 
       if (requestEvent.type !== "model_request") {
         throw new ModelStepEventMissingError();
       }
+      let completion = completionOutcome.completion;
       const prepared = await prepareCompletion(
         completion,
         options.tool,
@@ -240,9 +209,18 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       );
       completion = prepared.completion;
       const structuredValue = tokenizedStructuredValue(completion);
+      const cost = costValueFromUsage(completion.usage);
       const response = await options.recorder.record(
-        responsePayload(requestId, completion, structuredValue),
-        options.usageUpdatesForCost?.(completion.usage.costMicros),
+        responsePayload(
+          requestId,
+          completion,
+          structuredValue,
+          options.unknownCostPolicy === "allow" &&
+            (cost.state === "unknown" || cost.state === "partial")
+            ? "budget_cost_unknown_allowed"
+            : undefined,
+        ),
+        options.usageUpdatesForCost?.(cost),
       );
       recorded.push(response);
       result = {
@@ -281,13 +259,13 @@ async function recordModelFailure({
       const response = await options.recorder.record(
         {
           type: "model_response",
-          v: 1,
+          v: 2,
           requestId,
           provider: options.provider ?? "unknown",
           model: options.modelName ?? "unknown",
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
-          ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+          cost: costValueFromUsage(usage),
           finishReason: "invalid_output",
           latencyMs: readFailureCount(error, "latencyMs"),
           schemaValid: false,
@@ -296,7 +274,7 @@ async function recordModelFailure({
           content: [],
           providerBlobs: null,
         },
-        options.usageUpdatesForCost?.(usage.costMicros),
+        options.usageUpdatesForCost?.(costValueFromUsage(usage)),
       );
       recorded.push(response);
     }
@@ -327,10 +305,11 @@ function responsePayload(
   requestId: Id,
   completion: ModelCompletion,
   structuredValue: ModelCompletion["providerBlobs"] | undefined,
+  costWarningCode: Code | undefined,
 ): EventPartial {
   return {
     type: "model_response",
-    v: 1,
+    v: 2,
     requestId,
     provider: completion.provider,
     model: completion.model,
@@ -342,9 +321,8 @@ function responsePayload(
     ...(completion.usage.cacheWriteTokens === undefined
       ? {}
       : { cacheWriteTokens: completion.usage.cacheWriteTokens }),
-    ...(completion.usage.costMicros === undefined
-      ? {}
-      : { costMicros: completion.usage.costMicros }),
+    cost: costValueFromUsage(completion.usage),
+    ...(costWarningCode === undefined ? {} : { costWarningCode }),
     finishReason: completion.finishReason,
     latencyMs: completion.latencyMs,
     schemaValid: completion.schemaValid,

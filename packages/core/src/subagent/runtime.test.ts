@@ -232,17 +232,17 @@ describe("production subagent runtime", () => {
           inputTokens,
           outputTokens,
           steps,
-          costMicros,
+          cost,
         }) => {
           await parentRecorder.record({
             type: "subagent_completed",
-            v: 1,
+            v: 2,
             childRunId,
             outcome,
             inputTokens,
             outputTokens,
             ...(steps === undefined ? {} : { steps }),
-            ...(costMicros === undefined ? {} : { costMicros }),
+            cost,
           });
         },
       };
@@ -694,7 +694,21 @@ describe("production subagent runtime", () => {
       result: {
         status: "completed",
         value: { email: token },
-        usage: { inputTokens: 6, outputTokens: 9, costMicros: 14 },
+        usage: {
+          inputTokens: 6,
+          outputTokens: 9,
+          cost: {
+            version: 1,
+            state: "known",
+            knownMicros: 14,
+            estimatedMicros: 0,
+            partialMicros: 0,
+            knownCount: 2,
+            estimatedCount: 0,
+            partialCount: 0,
+            unknownCount: 0,
+          },
+        },
       },
     });
     expect(modelRequests).toHaveLength(2);
@@ -708,7 +722,17 @@ describe("production subagent runtime", () => {
       outcome: "completed",
       inputTokens: 6,
       outputTokens: 9,
-      costMicros: 14,
+      cost: {
+        version: 1,
+        state: "known",
+        knownMicros: 14,
+        estimatedMicros: 0,
+        partialMicros: 0,
+        knownCount: 2,
+        estimatedCount: 0,
+        partialCount: 0,
+        unknownCount: 0,
+      },
     });
     expect(JSON.stringify(parentEvents)).not.toContain("alice@example.test");
     expect(JSON.stringify(spawnResult)).not.toContain("alice@example.test");
@@ -777,7 +801,7 @@ describe("production subagent runtime", () => {
       outcome: "failed",
       inputTokens: 14,
       outputTokens: 19,
-      costMicros: 22,
+      cost: { version: 1, state: "known", knownMicros: 22 },
     });
     expect(JSON.stringify(finalParentEvents)).not.toContain("alice@example.test");
   });

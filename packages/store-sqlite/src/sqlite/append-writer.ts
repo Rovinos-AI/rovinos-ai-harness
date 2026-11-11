@@ -38,6 +38,7 @@ interface AppendCommands {
     period: UsageLedgerDelta["period"],
     periodStart: number,
     costMicros: number,
+    unknownCostCount: number,
     runsStarted: number,
   ): void;
   updateRun(nextSeq: number, status: RunStatus, lastTs: number, runId: Id): void;
@@ -105,6 +106,7 @@ function applyUsageUpdates(
       delta.period,
       delta.periodStart,
       delta.costMicros,
+      delta.unknownCostCount ?? 0,
       delta.runsStarted,
     );
   }

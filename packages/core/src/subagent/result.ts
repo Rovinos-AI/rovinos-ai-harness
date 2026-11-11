@@ -1,5 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, JsonValue, safeParseJson, type Event } from "@rovinos/schemas";
+import {
+  addCostValue,
+  combineCostTotals,
+  CostTotalSchema,
+  EMPTY_COST_TOTAL,
+  Code,
+  Id,
+  JsonValue,
+  safeParseJson,
+  type CostTotal,
+  type Event,
+} from "@rovinos/schemas";
 import { z } from "zod";
 
 const SubagentUsageSchema = z
@@ -7,7 +18,7 @@ const SubagentUsageSchema = z
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     steps: z.number().int().nonnegative().optional(),
-    costMicros: z.number().int().nonnegative().optional(),
+    cost: CostTotalSchema,
   })
   .strict();
 
@@ -35,29 +46,28 @@ export function aggregateSubagentUsage(events: readonly Event[]): {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly steps: number;
-  readonly costMicros?: number;
+  readonly cost: CostTotal;
 } {
   let inputTokens = 0;
   let outputTokens = 0;
   let steps = 0;
-  let costMicros = 0;
-  let hasCost = false;
+  let cost = EMPTY_COST_TOTAL;
   for (const event of events) {
     if (event.type === "model_response" || event.type === "subagent_completed") {
       inputTokens += event.inputTokens;
       outputTokens += event.outputTokens;
       steps += event.type === "model_response" ? 1 : (event.steps ?? 0);
-      if (event.costMicros !== undefined) {
-        costMicros += event.costMicros;
-        hasCost = true;
-      }
+      cost =
+        event.type === "model_response"
+          ? addCostValue(cost, event.cost)
+          : combineCostTotals(cost, event.cost);
     }
   }
   return {
     inputTokens,
     outputTokens,
     steps,
-    ...(hasCost ? { costMicros } : {}),
+    cost,
   };
 }
 

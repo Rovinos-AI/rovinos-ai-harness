@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { Code, Id, JsonValue, ModelRefSchema } from "@rovinos/schemas";
+import {
+  addCostValue,
+  Code,
+  CostTotalSchema,
+  EMPTY_COST_TOTAL,
+  Id,
+  JsonValue,
+  ModelRefSchema,
+} from "@rovinos/schemas";
+import type { CostTotal } from "@rovinos/schemas";
 import { z } from "zod";
 import { EvalSuiteSchema, EvalTaskSchema } from "./schema.js";
 import type { EvalSuite } from "./schema.js";
@@ -150,14 +159,43 @@ export const InputCountsSchema = z
 /** Inferred counts of input resolutions recorded during a trial. */
 export type InputCounts = z.infer<typeof InputCountsSchema>;
 
-/** Metadata-only aggregate usage from a single trial. */
+const unknownTrialCost: CostTotal = addCostValue(EMPTY_COST_TOTAL, {
+  version: 1,
+  state: "unknown",
+});
+
+function costTotalFromUsage(
+  inputTokens: number,
+  outputTokens: number,
+  costMicros: number,
+  cost: CostTotal | undefined,
+): CostTotal {
+  if (cost !== undefined) {
+    return cost;
+  }
+  if (costMicros > 0) {
+    return addCostValue(EMPTY_COST_TOTAL, {
+      version: 1,
+      state: "known",
+      amountMicros: costMicros,
+    });
+  }
+  return inputTokens === 0 && outputTokens === 0 ? EMPTY_COST_TOTAL : unknownTrialCost;
+}
+
+/** Metadata-only aggregate usage from a single trial, retaining cost completeness. */
 export const TrialUsageSchema = z
   .object({
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
-    costMicros: z.number().int().nonnegative(),
+    costMicros: z.number().int().nonnegative().default(0),
+    cost: CostTotalSchema.optional(),
   })
-  .strict();
+  .strict()
+  .transform(({ cost, ...usage }) => ({
+    ...usage,
+    cost: costTotalFromUsage(usage.inputTokens, usage.outputTokens, usage.costMicros, cost),
+  }));
 
 /** Metadata-only runtime counters collected from one trial's event log. */
 export const TrialExecutionMetricsSchema = z

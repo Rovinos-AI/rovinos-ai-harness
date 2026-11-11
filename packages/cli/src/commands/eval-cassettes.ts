@@ -56,7 +56,10 @@ export async function recordCassettes(
     const taskEvents = eventsByTrial.get(trialIdentity(record)) ?? [];
     const responses = new Map(
       taskEvents
-        .filter((event) => event.type === "model_response")
+        .filter(
+          (event): event is Extract<Event, { type: "model_response" }> =>
+            event.type === "model_response",
+        )
         .map((event) => [event.requestId, event]),
     );
     const path = join(suiteDirectory, "cassettes", record.taskId, `${record.variantId}.json`);
@@ -86,7 +89,7 @@ export async function recordCassettes(
             ...(response.cacheWriteTokens === undefined
               ? {}
               : { cacheWriteTokens: response.cacheWriteTokens }),
-            ...(response.costMicros === undefined ? {} : { costMicros: response.costMicros }),
+            cost: response.cost,
           },
           finishReason: response.finishReason,
           latencyMs: response.latencyMs,
