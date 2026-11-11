@@ -493,6 +493,36 @@ describe("@rovinos/sdk", () => {
     expect(first.runId).toBe(second.runId);
   });
 
+  it("includes the selected profile in idempotent start identity", async () => {
+    const store = new InMemoryEventStore();
+    const harness = await createHarness({
+      config: HarnessConfigSchema.parse({
+        toolProfiles: { focused: [], empty: [] },
+      }),
+      overrides: {
+        store,
+        clock: new FakeClock(10_000),
+        ids: new SequentialIdGenerator(),
+        transientVault: true,
+        model: fakeModel(),
+      },
+    });
+    harnesses.push(harness);
+
+    const first = await harness.startRun({
+      goal: "Synthetic profiled task",
+      idempotencyKey: "same-profile-key",
+      toolProfile: "focused",
+    });
+    const second = await harness.startRun({
+      goal: "Synthetic profiled task",
+      idempotencyKey: "same-profile-key",
+      toolProfile: "empty",
+    });
+
+    expect(second.runId).not.toBe(first.runId);
+  });
+
   it("waits for a concurrent instance's initial append before returning", async () => {
     const store = new DelayedAppendStore();
     const { harness: firstHarness } = await createTestHarness({ store });

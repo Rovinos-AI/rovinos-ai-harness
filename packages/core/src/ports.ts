@@ -140,6 +140,8 @@ export interface ToolExecutionResult extends Pick<
 
 /** Tool executor used by the run loop. */
 export interface ToolPort {
+  /** Declares support for applying operator-configured MCP tool profiles during run pinning. */
+  readonly supportsToolProfiles?: true;
   /** Stable fingerprint for the tool catalog currently exposed by this port. */
   catalogVersion?(): Sha256Hex | undefined;
   /** Per-tool fingerprints for validating execution against the exposed catalog. */
@@ -149,6 +151,7 @@ export interface ToolPort {
     readonly expectedVersion?: Sha256Hex;
     readonly expectedToolFingerprints?: Readonly<Record<string, Sha256Hex>>;
     readonly resumed?: boolean;
+    readonly toolProfile?: Code;
   }): Promise<ToolPort>;
   /** Returns custom durable recovery behavior for a tool's dangling intent. */
   resumeStrategy?(toolId: Code): ToolResumeStrategy | undefined;

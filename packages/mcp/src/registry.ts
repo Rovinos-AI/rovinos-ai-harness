@@ -321,6 +321,20 @@ export class ToolRegistry {
     return registry;
   }
 
+  /** Builds an ordered view containing only registered tool IDs. */
+  retainToolIds(toolIds: ReadonlySet<Code>): ToolRegistry {
+    const registry = new ToolRegistry([]);
+    for (const tool of this.#tools) {
+      if (toolIds.has(tool.spec.toolId)) {
+        registry.#tools.push(tool);
+        registry.#byId.set(tool.spec.toolId, tool);
+      }
+    }
+    registry.#rejected.push(...this.#rejected);
+    registry.#catalogVersion = catalogFingerprint(registry.#tools);
+    return registry;
+  }
+
   #register(config: ServerConfig, tool: McpTool): void {
     if (config.toolAllowlist !== undefined && !config.toolAllowlist.includes(tool.name)) {
       this.#reject(config, tool, "tool_not_allowlisted");

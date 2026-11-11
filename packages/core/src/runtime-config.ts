@@ -25,6 +25,7 @@ import {
   type ElicitationConfig,
   type VaultConfig,
   type TelemetryConfig,
+  type ToolProfilesConfig,
   type RateLimitsConfig,
   type RateLimitStore,
 } from "@rovinos/schemas";
@@ -123,6 +124,8 @@ export interface RuntimeConfig {
   readonly keys?: KeysConfig | undefined;
   readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
   readonly servers?: ServersConfig;
+  /** Named MCP tool subsets; selected only when a new run requests the profile. */
+  readonly toolProfiles?: ToolProfilesConfig;
   readonly elicitation?: ElicitationConfig;
   readonly controlPlane?: ControlPlaneConfig | undefined;
   readonly rateLimits?: RateLimitsConfig;
@@ -172,6 +175,7 @@ export interface Runtime {
     goal: JsonValue,
     options?: {
       readonly role?: Code;
+      readonly toolProfile?: Code;
       readonly requestedBy?: Principal;
       readonly replayOf?: Id;
       readonly parentRunId?: Id;
@@ -190,6 +194,7 @@ export interface Runtime {
       readonly parentRunId?: Id;
       readonly rootSpanParent?: Context;
       readonly requestedBy?: Principal;
+      readonly toolProfile?: Code;
       readonly onProgress?: NonNullable<RunContext["onProgress"]>;
       readonly evalMetadata?: EvalRunMetadata;
       readonly signal?: AbortSignal;
@@ -199,7 +204,11 @@ export interface Runtime {
   continueRun(
     runId: Id,
     input: RunInput,
-    options?: { readonly requestedBy?: Principal; readonly signal?: AbortSignal },
+    options?: {
+      readonly requestedBy?: Principal;
+      readonly signal?: AbortSignal;
+      readonly toolProfile?: Code;
+    },
   ): RuntimeRunHandle;
   resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */

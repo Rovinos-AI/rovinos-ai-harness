@@ -1279,7 +1279,10 @@ describe("runLoop", () => {
       catalogFingerprints: () => ({ "mcp_test.echo": toolFingerprint }),
     });
     const pinForRun = vi.fn(() => Promise.resolve(pinnedTool));
-    const tool: ToolPort = Object.assign(new FakeToolPort(), { pinForRun });
+    const tool: ToolPort = Object.assign(new FakeToolPort(), {
+      pinForRun,
+      supportsToolProfiles: true as const,
+    });
     const result = await runLoop({
       recorder: new RunRecorder(store, runId, segmentId, 0, clock),
       clock,
@@ -1292,15 +1295,106 @@ describe("runLoop", () => {
       budgets: defaultBudgets,
       configHash,
       policyVersion: "test.policy",
+      toolProfile: Code.parse("focused"),
     });
 
-    expect(pinForRun).toHaveBeenCalledOnce();
+    expect(pinForRun).toHaveBeenCalledExactlyOnceWith({ toolProfile: "focused" });
     expect(result.events[0]).toMatchObject({
       type: "run_created",
       v: 3,
       toolCatalogVersion: catalogVersion,
       toolCatalogFingerprints: { "mcp_test.echo": toolFingerprint },
     });
+  });
+
+  it("keeps exposed tools subject to approval after selecting a profile", async () => {
+    const clock = new FakeClock(100);
+    const startingSpanIndex = tracerProvider.spans.length;
+    const selectedTool = new FakeToolPort(
+      new Map([
+        [
+          "mcp_test.echo",
+          {
+            idempotent: false,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const pinForRun = vi.fn(() => Promise.resolve(selectedTool));
+    const tool = Object.assign(new FakeToolPort(), {
+      pinForRun,
+      supportsToolProfiles: true as const,
+    });
+    const policy: PolicyPort = {
+      version: "test.policy",
+      decide: () => ({
+        decision: "ask",
+        ruleId: "review_rule",
+        reason: "human_review",
+        editable: [],
+      }),
+    };
+    const model = new FakeModelPort([
+      completion([{ callId: modelCallId, toolId: "mcp_test.echo", args: {} }]),
+    ]);
+
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "profile approval",
+      signal: new AbortController().signal,
+      budgets: defaultBudgets,
+      configHash,
+      policyVersion: "test.policy",
+      policy,
+      toolProfile: Code.parse("focused"),
+    });
+
+    expect(model.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toEqual([
+      "mcp_test.echo",
+    ]);
+    expect(result.status).toBe("suspended");
+    expect(result.state.pendingApprovals.size).toBe(1);
+    expect(selectedTool.calls).toEqual([]);
+    const advertisedTools = model.requests[0]?.request.tools ?? [];
+    const modelSpan = tracerProvider.spans
+      .slice(startingSpanIndex)
+      .find(({ name }) => name === "harness.model_call");
+    expect(modelSpan?.attributes).toMatchObject({
+      "harness.tool.definition_count": 1,
+      "harness.tool.definition_bytes": Buffer.byteLength(JSON.stringify(advertisedTools), "utf8"),
+    });
+  });
+
+  it("fails closed when the tool port cannot apply a requested profile", async () => {
+    const clock = new FakeClock(100);
+    const options = (tool: ToolPort) => ({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([completion()]),
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "unsupported profile",
+      signal: new AbortController().signal,
+      budgets: defaultBudgets,
+      configHash,
+      policyVersion: "test.policy",
+      toolProfile: Code.parse("focused"),
+    });
+
+    await expect(runLoop(options(new FakeToolPort()))).rejects.toMatchObject({
+      code: "tool_profile_unsupported",
+    });
+    await expect(
+      runLoop(options(Object.assign(new FakeToolPort(), { supportsToolProfiles: true as const }))),
+    ).rejects.toMatchObject({ code: "tool_profile_unsupported" });
   });
 
   it("records cancellation when the startup guard rejects a new run", async () => {
@@ -2555,28 +2649,48 @@ describe("runLoop", () => {
     expect(await store.head(runId)).toBe(recordedTypes.length);
   });
 
-  it("rejects unknown tools absent from the model request without executing them", async () => {
+  it("rejects model guesses for tools hidden by the selected profile", async () => {
     const clock = new FakeClock(100);
-    const tool = new FakeToolPort();
+    const selectedTool = new FakeToolPort(
+      new Map([
+        [
+          "mcp_test.visible",
+          {
+            idempotent: false,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const tool = Object.assign(new FakeToolPort(), {
+      supportsToolProfiles: true as const,
+      pinForRun: vi.fn(() => Promise.resolve(selectedTool)),
+    });
+    const model = new FakeModelPort([
+      completion([{ callId: modelCallId, toolId: "mcp_test.hidden", args: {} }]),
+      completion(),
+    ]);
     const result = await runLoop({
       recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
       clock,
-      model: new FakeModelPort([
-        completion([{ callId: modelCallId, toolId: "unknown_tool", args: {} }]),
-        completion(),
-      ]),
+      model,
       tool,
       context: new NaiveContext(),
       ids: new SequentialIdGenerator(),
-      goal: "unknown tool goal",
+      goal: "hidden tool guess",
       configHash,
       budgets: defaultBudgets,
       policyVersion: "test.policy",
       signal: new AbortController().signal,
+      toolProfile: Code.parse("focused"),
     });
 
     expect(result.state.status).toBe("completed");
-    expect(tool.calls).toEqual([]);
+    expect(model.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toEqual([
+      "mcp_test.visible",
+    ]);
+    expect(selectedTool.calls).toEqual([]);
     expect(result.events).toContainEqual(
       expect.objectContaining({
         type: "tool_intent",

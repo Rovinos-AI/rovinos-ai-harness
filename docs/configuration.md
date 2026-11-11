@@ -14,6 +14,54 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 `run.budgets.maxSteps` defaults to `200`, and `run.budgets.maxWallClockMs` defaults to `3600000`. Both must be positive integers. `run.budgets.maxCostUsd` is optional and must be a positive number when supplied. Reported model costs are accumulated as integer micro-dollars; responses without cost metadata do not count toward the cost budget. `run.budgets.countSuspendedTime` defaults to `false`; suspended intervals between `suspended` and `running` status events are excluded from the wall-clock budget unless it is set to `true`. The run start time and usage are recovered from the event log, so budgets do not reset on resume.
 
+## MCP tool profiles
+
+`toolProfiles` optionally names subsets of the normalized MCP tool IDs already present in the
+configured server catalog. Each profile may contain up to 1,000 unique IDs, and a configuration may
+contain up to 128 profiles. For example:
+
+```yaml
+toolProfiles:
+  inspect:
+    - files.read
+    - issues.list
+  no_mcp_tools: []
+```
+
+Select one for a new SDK run with `toolProfile: "inspect"`; `continueRun` also accepts this option.
+IDs must match the normalized server prefix and tool name exactly—native aliases are not accepted.
+The server `toolAllowlist` is applied first, so a profile cannot add a tool that is not in the
+authorized catalog. Selecting an unknown profile or one that references an unavailable or
+unauthorized tool fails the run startup. An empty profile exposes no MCP tools. Omitting
+`toolProfile` preserves the configured MCP catalog. Other configured tool sources, such as built-in
+and sandbox tools, are managed by their own configuration and are unaffected by these MCP profiles.
+
+Profiles limit model exposure only. Every exposed tool call continues through the normal argument
+validation, execution policy, and approval flow. A new profile configuration affects new runs;
+already pinned runs keep their original MCP catalog, and resume uses the per-tool fingerprints
+recorded when that run was created. If a pinned MCP tool has changed or disappeared, it is not
+re-enabled by a profile edit.
+
+Each model-call span records the number and UTF-8 byte size of the model-visible serialized tool
+definitions (`harness.tool.definition_count` and `harness.tool.definition_bytes`). Provider-reported
+input tokens are recorded separately; byte size is a deterministic prompt-size diagnostic, not a
+provider-independent token count or a guarantee of selection quality.
+
+A local synthetic micro-benchmark measured `ToolRegistry.retainToolIds` over 100 in-memory selections
+after constructing catalogs of simple 221-byte tool definitions. Each profile retained 10% of the
+catalog; the byte counts below are JSON-serialized `ToolSpec` arrays. The run used Node 26.12.0 on
+Linux x86_64 (AMD EPYC 7763).
+
+| Catalog tools | Selected tools | Full bytes | Selected bytes | Filter p50 | Filter p95 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 10 | 1 | 2,221 | 223 | 0.021 ms | 0.084 ms |
+| 100 | 10 | 22,201 | 2,221 | 0.218 ms | 0.297 ms |
+| 1,000 | 100 | 222,001 | 22,201 | 0.969 ms | 1.976 ms |
+
+This micro-benchmark covers registry filtering only; it excludes server discovery, model-provider
+serialization, and inference latency. These measurements are not performance budgets; fixed-runner
+catalog benchmarks are tracked with [performance budgets and soak tests](https://github.com/Rovinos-AI/rovinos-ai-harness/issues/238).
+
 Top-level quotas apply cost, concurrency, and run-rate limits across matching
 principals or roles. See [Quotas](quotas.md) for configuration and enforcement
 details.
