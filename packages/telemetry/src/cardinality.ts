@@ -56,7 +56,9 @@ export interface CardinalityGuardOptions {
 }
 
 function combinationKey(attributes: Attributes): string {
-  return JSON.stringify(Object.entries(attributes).sort(([left], [right]) => left.localeCompare(right)));
+  return JSON.stringify(
+    Object.entries(attributes).sort(([left], [right]) => left.localeCompare(right)),
+  );
 }
 
 /**
@@ -74,7 +76,7 @@ export class CardinalityGuard {
   constructor(options: CardinalityGuardOptions) {
     this.#maxSeries =
       Number.isSafeInteger(options.maxSeries) && (options.maxSeries ?? 0) > 0
-        ? options.maxSeries ?? DEFAULT_MAX_SERIES
+        ? (options.maxSeries ?? DEFAULT_MAX_SERIES)
         : DEFAULT_MAX_SERIES;
     this.#onDrop = options.onDrop;
     this.#logger = options.logger;

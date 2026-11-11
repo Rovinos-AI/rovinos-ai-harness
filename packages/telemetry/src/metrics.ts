@@ -225,12 +225,16 @@ function getPiiDetectorDegradedCounter(): Counter<NoMetricAttributes> {
 }
 
 function getHostAppSpansAcceptedCounter(): Counter<NoMetricAttributes> {
-  hostAppSpansAcceptedCounter ??= createCounter<NoMetricAttributes>("harness.host.app_spans_accepted");
+  hostAppSpansAcceptedCounter ??= createCounter<NoMetricAttributes>(
+    "harness.host.app_spans_accepted",
+  );
   return hostAppSpansAcceptedCounter;
 }
 
 function getSkippedShortValuesCounter(): Counter<NoMetricAttributes> {
-  skippedShortValuesCounter ??= createCounter<NoMetricAttributes>("harness.sentinel.short_values_skipped");
+  skippedShortValuesCounter ??= createCounter<NoMetricAttributes>(
+    "harness.sentinel.short_values_skipped",
+  );
   return skippedShortValuesCounter;
 }
 
@@ -255,7 +259,9 @@ function getModelCacheReadCounter(): Counter<ModelUsageAttributes> {
 }
 
 function getModelCacheWriteCounter(): Counter<ModelUsageAttributes> {
-  modelCacheWriteCounter ??= createCounter<ModelUsageAttributes>("harness.model.cache_write_tokens");
+  modelCacheWriteCounter ??= createCounter<ModelUsageAttributes>(
+    "harness.model.cache_write_tokens",
+  );
   return modelCacheWriteCounter;
 }
 
@@ -270,7 +276,9 @@ function getQuotaRejectionsCounter(): Counter<QuotaRejectionAttributes> {
 }
 
 function getMcpInputRequestsCounter(): Counter<McpInputRequestAttributes> {
-  mcpInputRequestsCounter ??= createCounter<McpInputRequestAttributes>("harness.mcp.input_requests");
+  mcpInputRequestsCounter ??= createCounter<McpInputRequestAttributes>(
+    "harness.mcp.input_requests",
+  );
   return mcpInputRequestsCounter;
 }
 
@@ -292,7 +300,9 @@ function getRateLimitDeniedCounter(): Counter<QuotaRejectionAttributes> {
 }
 
 function getRateLimitDegradedCounter(): Counter<QuotaRejectionAttributes> {
-  rateLimitDegradedCounter ??= createCounter<QuotaRejectionAttributes>("harness.rate_limit.degraded");
+  rateLimitDegradedCounter ??= createCounter<QuotaRejectionAttributes>(
+    "harness.rate_limit.degraded",
+  );
   return rateLimitDegradedCounter;
 }
 
@@ -311,7 +321,9 @@ export function countRateLimitDegraded(backend: RateLimitBackend): void {
 }
 
 function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
-  workerQueueLagHistogram ??= createMetricHistogram<NoMetricAttributes>("harness.worker.queue_lag_ms");
+  workerQueueLagHistogram ??= createMetricHistogram<NoMetricAttributes>(
+    "harness.worker.queue_lag_ms",
+  );
   return workerQueueLagHistogram;
 }
 
@@ -323,7 +335,9 @@ export function getModelLatencyHistogram(): Histogram<ModelUsageAttributes> {
 
 /** Returns the registry-owned approval-wait histogram. */
 export function getApprovalWaitHistogram(): Histogram<ApprovalWaitAttributes> {
-  approvalWaitHistogram ??= createMetricHistogram<ApprovalWaitAttributes>("harness.approval.wait_ms");
+  approvalWaitHistogram ??= createMetricHistogram<ApprovalWaitAttributes>(
+    "harness.approval.wait_ms",
+  );
   return approvalWaitHistogram;
 }
 

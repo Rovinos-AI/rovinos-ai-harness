@@ -49,7 +49,11 @@ describe("CardinalityGuard", () => {
   });
 
   it("isolates series limits between metrics and canonicalizes attribute order", () => {
-    const guard = new CardinalityGuard({ maxSeries: 1, onDrop: vi.fn(), logger: { warn: vi.fn() } });
+    const guard = new CardinalityGuard({
+      maxSeries: 1,
+      onDrop: vi.fn(),
+      logger: { warn: vi.fn() },
+    });
     const metric = Code.parse("harness.model.tokens");
 
     expect(guard.admit(metric, { provider: "first", model: "sample" })).toBe(true);
