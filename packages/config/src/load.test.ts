@@ -553,6 +553,7 @@ store: {}`,
         sinks: [],
         unsafe: { allowContentSinks: false },
       },
+      toolProfiles: {},
       sandbox: {},
       elicitation: {
         channels: [],
