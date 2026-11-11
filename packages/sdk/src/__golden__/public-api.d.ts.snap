@@ -6,6 +6,7 @@
  * @returns Programmatic run, metadata, approval, and subscription operations.
  */
 export { createHarness } from "./create-harness.js";
+<<<<<<< HEAD
 export { ExtensionCapabilitySchema, ExtensionCapabilityStatusSchema, ExtensionDefinitionSchema, ExtensionError, ExtensionGrantSchema, ExtensionGrantRevocationSchema, ExtensionManifestSchema, ExtensionRegistrationSchema, ExtensionRegistrationStatusSchema, SDK_VERSION, } from "./extensions.js";
 export type { ExtensionCapability, ExtensionCapabilityStatus, ExtensionContributions, ExtensionDefinition, ExtensionGrant, ExtensionGrantRevocation, ExtensionManifest, ExtensionRegistration, ExtensionRegistrationStatus, ExtensionToolDefinition, ToolInvocationContext, } from "./extensions.js";
 /** Closed error codes exposed by SDK extension validation and execution. */
@@ -17,6 +18,13 @@ export type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult, }
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
 export { SdkError, CreateHarnessOptionsSchema, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type CreateHarnessOptionsInput, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, type WithExtensionRegistrations, } from "./types.js";
+=======
+export { inspectMcpServer, registerMcpServer, selectMcpTools, McpCatalogInspectionSchema, InspectMcpServerOptionsSchema, McpToolSelectionSchema, type InspectMcpServerOptions, type McpCatalogInspection, type McpServerConfig, type McpToolSelection, type McpToolSelectionResult, } from "./mcp-onboarding.js";
+export { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
+export { Principal as PrincipalSchema } from "@rovinos/schemas";
+export type { Principal } from "@rovinos/schemas";
+export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, } from "./types.js";
+>>>>>>> origin/main
 export type { SafeEvent } from "@rovinos/telemetry";
 /** Defines a typed extension tool contribution using its input and output schemas. */
 export { defineTool } from "./extensions.js";
@@ -33,10 +41,106 @@ export declare function createHarnessClient(input: {
     readonly contentAuthorizer: ContentAuthorizer | undefined;
 } & ExtensionHarnessAccessOptions): Harness;
 
+import { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
+import { ServerConfigSchema, type SecretRef } from "@rovinos/schemas";
+import { z } from "zod";
+/** Complete, validated view of one discovered MCP server catalog. */
+export declare const McpCatalogInspectionSchema: z.ZodObject<{
+    serverId: z.ZodString;
+    catalogVersion: z.ZodString;
+    protocolEra: z.ZodOptional<z.ZodEnum<{
+        legacy: "legacy";
+        modern: "modern";
+    }>>;
+    tools: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        toolId: z.ZodString;
+        description: z.ZodString;
+        inputSchema: z.ZodJSONSchema;
+        exposed: z.ZodBoolean;
+    }, z.core.$strict>>;
+    rejectedTools: z.ZodArray<z.ZodObject<{
+        reason: z.ZodString;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+/** Inferred catalog inspection returned by {@link inspectMcpServer}. */
+export type McpCatalogInspection = z.infer<typeof McpCatalogInspectionSchema>;
+/** Typed MCP server configuration accepted by {@link registerMcpServer}. */
+export type McpServerConfig = z.input<typeof ServerConfigSchema>;
+/** Dependencies needed to resolve references during a read-only server inspection. */
+export declare const InspectMcpServerOptionsSchema: z.ZodObject<{
+    resolveSecret: z.ZodCustom<(ref: SecretRef, signal?: AbortSignal) => Promise<string>, (ref: SecretRef, signal?: AbortSignal) => Promise<string>>;
+    signal: z.ZodOptional<z.ZodCustom<AbortSignal, AbortSignal>>;
+    env: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodOptional<z.ZodString>>>;
+}, z.core.$strict>;
+/** Inferred options accepted by {@link inspectMcpServer}. */
+export type InspectMcpServerOptions = z.infer<typeof InspectMcpServerOptionsSchema>;
+/** Exact tools selected for model exposure; execution still follows configured policy. */
+export declare const McpToolSelectionSchema: z.ZodObject<{
+    serverId: z.ZodString;
+    catalogVersion: z.ZodString;
+    tools: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        toolId: z.ZodString;
+    }, z.core.$strict>>;
+    authorization: z.ZodLiteral<"policy_unchanged">;
+}, z.core.$strict>;
+/** Inferred explicit tool exposure preview returned by {@link selectMcpTools}. */
+export type McpToolSelection = z.infer<typeof McpToolSelectionSchema>;
+/** Configuration and exact exposure preview returned by {@link selectMcpTools}. */
+export interface McpToolSelectionResult {
+    readonly config: HarnessConfig;
+    readonly selection: McpToolSelection;
+}
+/**
+ * Adds a validated MCP server to a configuration without changing a running harness.
+ *
+ * A server is registered with an empty tool allowlist by default. Supply an explicit allowlist
+ * only when those tools should be exposed to the model; policy remains a separate authorization
+ * decision.
+ *
+ * @param config - Existing harness configuration.
+ * @param server - New MCP server configuration, containing secret references rather than values.
+ * @returns A validated configuration with the server registered.
+ * @throws SdkError when the configuration is invalid or the server id already exists.
+ */
+export declare function registerMcpServer(config: z.input<typeof HarnessConfigSchema>, server: McpServerConfig): HarnessConfig;
+/**
+ * Connects to one configured server and returns its validated candidate catalog.
+ *
+ * Discovery is read-only and does not execute tools. The returned descriptions and schemas are
+ * untrusted server content. Selection is based on server-native tool names; allowlist policy is
+ * reported separately from the harness policy that authorizes execution.
+ *
+ * @param server - Validated or typed MCP server configuration.
+ * @param options - Secret-reference resolver and optional cancellation/environment adapters.
+ * @returns A sanitized, schema-validated catalog and its fingerprint.
+ * @throws SdkError with a closed code when connection or catalog validation fails.
+ */
+export declare function inspectMcpServer(server: McpServerConfig, options: InspectMcpServerOptions): Promise<McpCatalogInspection>;
+/**
+ * Selects discovered server-native tool names for model exposure without changing execution policy.
+ *
+ * Newly registered servers default to no exposed tools. Selection must come from the inspected
+ * catalog; every selected call still passes through the configured allow/ask/deny policy.
+ *
+ * @param config - Existing harness configuration.
+ * @param inspection - The catalog inspection used to review the available tools.
+ * @param toolNames - Exact server-native names to expose; an empty list exposes none.
+ * @returns The updated validated configuration and an exact selection preview.
+ * @throws SdkError when the server or any selected tool is not in the reviewed catalog.
+ */
+export declare function selectMcpTools(config: z.input<typeof HarnessConfigSchema>, inspection: McpCatalogInspection, toolNames: readonly string[]): McpToolSelectionResult;
+
 import { HarnessError, Id } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
+<<<<<<< HEAD
 import type { ExtensionGrantRevocation, ExtensionRegistration, ExtensionRegistrationStatus } from "./extensions.js";
+=======
+/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
+export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_tools_failed" | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
+>>>>>>> origin/main
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
 export declare const HarnessOverridesSchema: z.ZodObject<{
     store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
@@ -1447,7 +1551,7 @@ export interface Harness {
 }
 /** Coded SDK failure that does not include untrusted input values. */
 export declare class SdkError extends HarnessError {
-    readonly code: "sdk_closed" | "sdk_content_access_denied" | "sdk_content_unavailable" | "sdk_input_ambiguous" | "sdk_input_unavailable" | "sdk_run_not_found";
+    readonly code: SdkMcpConnectionErrorCode | "sdk_mcp_catalog_invalid" | "sdk_mcp_config_invalid" | "sdk_mcp_inspection_failed" | "sdk_mcp_inspection_options_invalid" | "sdk_mcp_selection_invalid" | "sdk_mcp_server_exists" | "sdk_mcp_server_not_found" | "sdk_mcp_tool_not_found" | "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_content_access_denied" | "sdk_input_unavailable" | "sdk_input_ambiguous";
     /** Creates a stable SDK error with a closed code. */
     constructor(code: SdkError["code"]);
 }
