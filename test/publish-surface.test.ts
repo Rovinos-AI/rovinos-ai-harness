@@ -227,14 +227,18 @@ describe("published package smoke test", () => {
     );
 
     const smokeFile = join(projectDirectory, "sdk-smoke.mjs");
+    const mcpFixture = fileURLToPath(
+      new URL("./fixtures/sdk-mcp-onboarding-server.mjs", import.meta.url),
+    );
     await writeFile(
       smokeFile,
       [
-        'import { createHarness } from "@rovinos/sdk";',
+        'import { createHarness, inspectMcpServer, registerMcpServer, selectMcpTools } from "@rovinos/sdk";',
         'import { SqliteEventStore } from "@rovinos/store-sqlite";',
         'import "@rovinos/cli/programmatic";',
         'import "@rovinos/store-postgres";',
         'import { readFile } from "node:fs/promises";',
+        'import { join } from "node:path";',
         'const cliEntry = import.meta.resolve("@rovinos/cli/programmatic");',
         'const approvalHtml = await readFile(new URL("./assets/approval.html", cliEntry), "utf8");',
         'if (!approvalHtml.includes("<!doctype html")) throw new Error("approval_asset_missing");',
@@ -242,11 +246,46 @@ describe("published package smoke test", () => {
         'await readFile(new URL("./migrations/sqlite/0001_init.sql", sqliteEntry), "utf8");',
         'const postgresEntry = import.meta.resolve("@rovinos/store-postgres");',
         'await readFile(new URL("./migrations/postgres/0001_init.sql", postgresEntry), "utf8");',
+        `const counterPath = ${JSON.stringify(join(projectDirectory, "mcp-calls.txt"))};`,
+        "const registered = registerMcpServer({}, {",
+        '  id: "fixture",',
+        '  transport: { kind: "stdio", command: process.execPath, args: [',
+        `    ${JSON.stringify(mcpFixture)}, counterPath`,
+        "  ] },",
+        "});",
+        'if (registered.servers[0]?.toolAllowlist?.length !== 0) throw new Error("mcp_tools_exposed_by_default");',
+        "const inspection = await inspectMcpServer(registered.servers[0], {",
+        '  resolveSecret: async () => { throw new Error("unexpected_secret_resolution"); },',
+        "});",
+        'if (inspection.tools.length !== 2) throw new Error("mcp_catalog_incomplete");',
+        'const selected = selectMcpTools(registered, inspection, ["echo"]);',
+        'if (selected.selection.tools.map((tool) => tool.name).join(",") !== "echo") throw new Error("mcp_selection_mismatch");',
+        "const selectedTool = selected.selection.tools[0];",
+        'if (selectedTool === undefined) throw new Error("mcp_selection_empty");',
+        "let modelCalls = 0;",
+        "let policyCalls = 0;",
+        "const model = {",
+        "  async complete(request) {",
+        "    const exposedToolIds = request.tools?.map((tool) => tool.toolId) ?? [];",
+        '    if (!exposedToolIds.includes(selectedTool.toolId) || exposedToolIds.includes("fixture.unselected")) throw new Error("mcp_unselected_tool_exposed");',
+        "    modelCalls += 1;",
+        "    return {",
+        "      parts: modelCalls === 1",
+        '        ? [{ type: "tool_call", callId: "00000000000000000000000001", toolId: selectedTool.toolId, args: { value: "synthetic value" } }]',
+        '        : [{ type: "text", text: "synthetic completion" }],',
+        "      usage: { inputTokens: 2, outputTokens: 3 },",
+        '      finishReason: modelCalls === 1 ? "tool_calls" : "stop",',
+        '      provider: "test", model: "test_model", latencyMs: 0, schemaValid: true,',
+        "      repairAttempts: 0, fallbackDepth: 0, providerBlobs: null,",
+        "    };",
+        "  },",
+        "};",
         "const harness = await createHarness({",
-        "  config: {},",
+        "  config: selected.config,",
         "  overrides: {",
         `    store: new SqliteEventStore(${JSON.stringify(join(projectDirectory, "events.sqlite"))}),`,
-        '    model: { complete: async () => ({ parts: [{ type: "text", text: "synthetic completion" }], usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop", provider: "test", model: "test-model", latencyMs: 0, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }) },',
+        "    model,",
+        '    policy: { version: "test", decide() { policyCalls += 1; return { decision: "allow", ruleId: "test_allow", reason: "explicit_allow", editable: [] }; } },',
         "    transientVault: true,",
         `    dataDir: ${JSON.stringify(join(projectDirectory, "runtime-data"))},`,
         "  },",
@@ -254,14 +293,16 @@ describe("published package smoke test", () => {
         "try {",
         '  const started = await harness.startRun({ goal: "synthetic smoke test" });',
         '  let status = "pending";',
-        '  for (let attempt = 0; attempt < 300 && status !== "completed"; attempt += 1) {',
+        '  for (let attempt = 0; attempt < 1200 && status !== "completed"; attempt += 1) {',
         "    status = (await harness.getRun(started.runId)).status;",
         '    if (status !== "completed") await new Promise((resolve) => setTimeout(resolve, 10));',
         "  }",
-        '  if (status !== "completed") throw new Error("sdk_smoke_failed");',
+        '  const recentTypes = (await harness.getRun(started.runId)).recentEvents.map((event) => event.type).join(",");',
+        '  if (status !== "completed" || modelCalls !== 2 || policyCalls !== 1) throw new Error(`sdk_mcp_smoke_failed:${status}:${modelCalls}:${policyCalls}:${recentTypes}`);',
         "} finally {",
         "  await harness.close();",
         "}",
+        'if (await readFile(counterPath, "utf8") !== "echo\\n") throw new Error("mcp_tool_not_executed");',
       ].join("\n"),
     );
     await withCommandDiagnostics("corepack yarn node sdk-smoke.mjs", () =>
@@ -273,8 +314,11 @@ describe("published package smoke test", () => {
     );
 
     const sdkDocs = await readFile(join(repositoryRoot, "docs", "sdk.md"), "utf8");
-    const examples = typescriptExamplesInSection(sdkDocs, "Approvals and human input");
-    expect(examples).toHaveLength(2);
+    const examples = [
+      ...typescriptExamplesInSection(sdkDocs, "Approvals and human input"),
+      ...typescriptExamplesInSection(sdkDocs, "MCP server onboarding"),
+    ];
+    expect(examples).toHaveLength(3);
     const compiledDirectory = join(projectDirectory, "compiled");
     await mkdir(compiledDirectory);
     const exampleFiles = await Promise.all(

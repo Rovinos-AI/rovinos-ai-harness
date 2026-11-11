@@ -95,6 +95,12 @@
       "expires": "2027-01-19"
     },
     {
+      "package": "@modelcontextprotocol/inspector",
+      "version": "2.14.0",
+      "reason": "Apache-2.0 with MIT-licensed contributions during MCP relicensing; docs are CC-BY-4.0; dev-only conformance CLI.",
+      "expires": "2027-01-19"
+    },
+    {
       "package": "spawndamnit",
       "version": "3.0.1",
       "reason": "MIT license text in LICENSE; the package is a transitive dependency of Changesets CLI.",
