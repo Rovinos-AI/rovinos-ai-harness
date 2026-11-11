@@ -49,6 +49,7 @@ export async function createConfiguredMcpToolPort(
     },
     {
       offloadBinaryResults: overrides.workspace !== undefined,
+      ...(config.toolProfiles === undefined ? {} : { toolProfiles: config.toolProfiles }),
       ...(config.elicitation === undefined
         ? {}
         : {

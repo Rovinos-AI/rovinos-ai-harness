@@ -191,6 +191,7 @@ export {
   type StoreConfig,
   type StoreRetentionConfig,
 } from "./config/store.js";
+export { ToolProfilesConfigSchema, type ToolProfilesConfig } from "./config/tool-profiles.js";
 export { VaultConfigSchema, type VaultConfig } from "./config/vault.js";
 export { DeploymentConfigSchema, type DeploymentConfig } from "./config/deployment.js";
 export {
