@@ -23,15 +23,23 @@ export const GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS =
 /** Span names admitted through the semantic-convention registry path. */
 export const SEMCONV_SPAN_NAMES = ["mcp.client.call"] as const;
 
-/** Semantic-convention attribute names admitted by semantic-convention span definitions. */
-export const SEMCONV_ATTRIBUTE_NAMES = [
-  MCP_METHOD_NAME,
+/** MCP attributes admitted by MCP semantic-convention span definitions. */
+export const MCP_ATTRIBUTE_NAMES = [MCP_METHOD_NAME] as const;
+
+/** GenAI attributes mapped only onto the registered model-call span. */
+export const GEN_AI_ATTRIBUTE_NAMES = [
   GEN_AI_PROVIDER_NAME,
   GEN_AI_REQUEST_MODEL,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+] as const;
+
+/** Semantic-convention attribute names admitted by registered definitions. */
+export const SEMCONV_ATTRIBUTE_NAMES = [
+  ...MCP_ATTRIBUTE_NAMES,
+  ...GEN_AI_ATTRIBUTE_NAMES,
 ] as const;
 
 /** Stability migration setting used by the telemetry SDK bootstrap. */

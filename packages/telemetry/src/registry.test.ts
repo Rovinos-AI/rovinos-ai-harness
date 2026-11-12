@@ -188,6 +188,13 @@ describe("span registry", () => {
         testOwnerTask,
       ]);
     }).toThrow("span_attr_name_invalid");
+    expect(() =>
+      Reflect.apply(defineSemconvSpan, undefined, [
+        "mcp.client.call",
+        { "gen_ai.provider.name": attr.code() },
+        testOwnerTask,
+      ]),
+    ).toThrow("span_attr_name_invalid");
 
     const definition = defineSemconvSpan(
       "mcp.client.call",
@@ -200,7 +207,7 @@ describe("span registry", () => {
 
   it("allows only explicitly approved semantic-convention attributes on harness spans", () => {
     const definition = defineSpan(
-      "harness.test.genai",
+      "harness.model_call",
       {
         "gen_ai.provider.name": attr.code(),
         "gen_ai.usage.input_tokens": attr.nonnegativeInt(),
@@ -217,6 +224,13 @@ describe("span registry", () => {
       defineSpan(
         "harness.test.unknown_semconv",
         { "gen_ai.unknown.attribute": attr.code() },
+        testOwnerTask,
+      ),
+    ).toThrow("span_attr_name_invalid");
+    expect(() =>
+      defineSpan(
+        "harness.test.mcp_semconv",
+        { "mcp.method.name": attr.code() },
         testOwnerTask,
       ),
     ).toThrow("span_attr_name_invalid");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { logs, SeverityNumber, trace } from "@opentelemetry/api";
 
-import { Id } from "@rovinos/schemas";
+import { Code, Id } from "@rovinos/schemas";
 import {
   attr,
   createTelemetrySdk,
@@ -19,6 +19,7 @@ import {
   VaultRunView,
   type TelemetrySdkOptions,
 } from "@rovinos/telemetry";
+import { MODEL_CALL_SPAN } from "@rovinos/core";
 import {
   __registerUnsafeSpanForTests,
   completeExportSuccessfully,
@@ -26,19 +27,6 @@ import {
 import { z } from "zod";
 
 const UNSAFE_SPAN_NAME = "harness.canary.unsafe";
-const canaryGenAiSpan = defineSpan(
-  "harness.canary.genai",
-  {
-    "harness.run.id": attr.id(),
-    [GEN_AI_PROVIDER_NAME]: attr.code(),
-    [GEN_AI_REQUEST_MODEL]: attr.code(),
-    [GEN_AI_USAGE_INPUT_TOKENS]: attr.nonnegativeInt(),
-    [GEN_AI_USAGE_OUTPUT_TOKENS]: attr.nonnegativeInt(),
-    [GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS]: attr.nonnegativeInt(),
-    [GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS]: attr.nonnegativeInt(),
-  },
-  { taskId: "11.8", packageName: "@rovinos/telemetry" },
-);
 const canaryLog = defineLogRecord("harness.canary.pipeline", {
   "harness.run.id": attr.id(),
   "harness.error.code": attr.code(),
@@ -164,21 +152,34 @@ export async function emitCanaryGenAiSpan(
   runId: Id,
   canary: string,
 ): Promise<void> {
-  const span = canaryGenAiSpan.start({
+  const attributes = {
     "harness.run.id": runId,
+    "harness.event.seq": 999,
+    "harness.context.strategy": Code.parse("canary"),
+    "harness.context.strategy_version": Code.parse("v1"),
+    "harness.context.estimated_tokens": 0,
+    "harness.context.message_count": 0,
+    "harness.tool.definition_count": 0,
+    "harness.tool.definition_bytes": 0,
     [GEN_AI_PROVIDER_NAME]: "synthetic",
     [GEN_AI_REQUEST_MODEL]: "synthetic_model",
     [GEN_AI_USAGE_INPUT_TOKENS]: 3,
     [GEN_AI_USAGE_OUTPUT_TOKENS]: 2,
     [GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS]: 1,
     [GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS]: 1,
-  });
-  span.setAttribute("gen_ai.prompt", canary);
-  span.setAttribute("gen_ai.input.messages", canary);
-  span.setAttribute("gen_ai.output.messages", canary);
-  span.setAttribute("gen_ai.tool.call.arguments", canary);
-  span.setAttribute("gen_ai.tool.call.result", canary);
+  };
+  const span = MODEL_CALL_SPAN.start(attributes);
   span.end();
+  const contentSpan = MODEL_CALL_SPAN.start({
+    ...attributes,
+    "harness.event.seq": 1_000,
+  });
+  contentSpan.setAttribute("gen_ai.prompt", canary);
+  contentSpan.setAttribute("gen_ai.input.messages", canary);
+  contentSpan.setAttribute("gen_ai.output.messages", canary);
+  contentSpan.setAttribute("gen_ai.tool.call.arguments", canary);
+  contentSpan.setAttribute("gen_ai.tool.call.result", canary);
+  contentSpan.end();
   await telemetry.sdk.forceFlush();
 }
 

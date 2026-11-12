@@ -25,7 +25,7 @@ const provider = new TracerProvider({
   spanProcessors: [new SimpleSpanProcessor({ exporter })],
 });
 const modelCall = defineSpan(
-  "harness.test.genai_usage",
+  "harness.model_call",
   {
     [GEN_AI_PROVIDER_NAME]: attr.optional(attr.code()),
     [GEN_AI_REQUEST_MODEL]: attr.optional(attr.code()),

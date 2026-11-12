@@ -95,7 +95,10 @@ describe("canary release gate", () => {
     await current.exerciseTelemetry();
     await current.exerciseKeysRotatedLog();
 
-    const genAiSpan = current.captured.spans.find(({ name }) => name === "harness.canary.genai");
+    const genAiSpan = current.captured.spans.find(
+      ({ name, attributes }) =>
+        name === "harness.model_call" && attributes["harness.event.seq"] === 999,
+    );
     expect(genAiSpan?.attributes).toMatchObject({
       "gen_ai.provider.name": "synthetic",
       "gen_ai.request.model": "synthetic_model",
