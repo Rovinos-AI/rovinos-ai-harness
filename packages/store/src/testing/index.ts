@@ -17,3 +17,5 @@ export type {
   RateLimitStoreFactory,
   RateLimitStoreFactoryCreator,
 } from "./rate-limit-conformance.js";
+export { runSpendReservationConformance } from "./spend-reservation-conformance.js";
+export type { SpendReservationStoreFactory } from "./spend-reservation-conformance.js";

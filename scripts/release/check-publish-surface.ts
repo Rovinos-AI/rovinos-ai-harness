@@ -12,6 +12,7 @@ export const execFileAsync = promisify(execFile);
 const publishedNames = new Set([
   "@rovinos/sdk",
   "@rovinos/extensions",
+  "@rovinos/extension-retrieval",
   "@rovinos/cli",
   "@rovinos/store-sqlite",
   "@rovinos/store-postgres",
@@ -20,6 +21,7 @@ const publishedNames = new Set([
 const sizeBudgets = new Map([
   ["@rovinos/sdk", 30_000_000],
   ["@rovinos/extensions", 1_000_000],
+  ["@rovinos/extension-retrieval", 1_000_000],
   ["@rovinos/cli", 40_000_000],
   ["@rovinos/store-sqlite", 10_000_000],
   ["@rovinos/store-postgres", 10_000_000],
@@ -55,6 +57,24 @@ export interface PackedFile {
   readonly size: number;
 }
 
+function inspectPeerDependencies(manifest: PackageManifest): string[] {
+  const violations: string[] = [];
+  const peers = manifest.peerDependencies ?? {};
+  if (
+    manifest.name === "@rovinos/extensions" &&
+    !["workspace:^", "^0.2.0", ">=0.3.0 <0.4.0"].includes(peers["@rovinos/sdk"] ?? "")
+  ) {
+    violations.push("publish_extensions_sdk_peer_invalid");
+  }
+  if (
+    manifest.name === "@rovinos/extension-retrieval" &&
+    (peers["@rovinos/sdk"] === undefined || peers["@rovinos/extensions"] === undefined)
+  ) {
+    violations.push("publish_retrieval_peers_invalid");
+  }
+  return violations;
+}
+
 function inspectPackageManifest(manifest: PackageManifest): string[] {
   const violations: string[] = [];
   if (manifest.private === true) {
@@ -74,12 +94,7 @@ function inspectPackageManifest(manifest: PackageManifest): string[] {
   ) {
     violations.push("publish_adapter_dependencies_invalid");
   }
-  if (
-    manifest.name === "@rovinos/extensions" &&
-    manifest.peerDependencies?.["@rovinos/sdk"] !== ">=0.3.0 <0.4.0"
-  ) {
-    violations.push("publish_extensions_sdk_peer_invalid");
-  }
+  violations.push(...inspectPeerDependencies(manifest));
   return violations;
 }
 
@@ -90,7 +105,11 @@ function isAllowedSdkPeer(
   if (dependency.name !== "@rovinos/sdk" || dependency.group !== "peerDependencies") {
     return false;
   }
-  return adapterDrivers.has(manifest.name) || manifest.name === "@rovinos/extensions";
+  return (
+    adapterDrivers.has(manifest.name) ||
+    manifest.name === "@rovinos/extensions" ||
+    manifest.name === "@rovinos/extension-retrieval"
+  );
 }
 
 function isAllowedRedisAdapterPeer(
@@ -109,7 +128,13 @@ function isAllowedRuntimePeer(
   manifest: PackageManifest,
   dependency: { readonly name: string; readonly group: string },
 ): boolean {
-  return isAllowedSdkPeer(manifest, dependency) || isAllowedRedisAdapterPeer(manifest, dependency);
+  return (
+    isAllowedSdkPeer(manifest, dependency) ||
+    isAllowedRedisAdapterPeer(manifest, dependency) ||
+    (manifest.name === "@rovinos/extension-retrieval" &&
+      dependency.name === "@rovinos/extensions" &&
+      dependency.group === "peerDependencies")
+  );
 }
 
 function inspectRuntimeDependencies(manifest: PackageManifest): string[] {
@@ -274,7 +299,10 @@ async function bundledImportViolation(
     ].map((match) => match[1]);
     if (
       internalImports.some((name) => {
-        const sdkPeer = packageName === "@rovinos/extensions" && name === "@rovinos/sdk";
+        const sdkPeer =
+          (packageName === "@rovinos/extensions" && name === "@rovinos/sdk") ||
+          (packageName === "@rovinos/extension-retrieval" &&
+            ["@rovinos/sdk", "@rovinos/extensions"].includes(name ?? ""));
         const redisPeer =
           name === "@rovinos/rate-limit-redis" &&
           ["@rovinos/sdk", "@rovinos/cli"].includes(packageName);

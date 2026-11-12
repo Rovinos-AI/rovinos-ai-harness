@@ -1,5 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code } from "@rovinos/schemas";
+import {
+  HarnessError,
+  SpendReservationErrorCodeSchema,
+  type Code,
+  type SpendReservationErrorCode as SpendReservationErrorCodeType,
+} from "@rovinos/schemas";
+
+/** Raised when a spend-reservation transaction cannot satisfy its contract. */
+export class SpendReservationError extends HarnessError {
+  /** Stable failure code from the closed spend-reservation error set. */
+  readonly code: SpendReservationErrorCodeType;
+
+  /** Create a spend-reservation error without exposing transaction details. */
+  constructor(code: SpendReservationErrorCodeType) {
+    const parsedCode = SpendReservationErrorCodeSchema.parse(code);
+    super(spendReservationErrorMessage(parsedCode));
+    this.code = parsedCode;
+  }
+}
+
+function spendReservationErrorMessage(code: SpendReservationErrorCodeType): string {
+  switch (code) {
+    case "spend_reservation_invalid":
+      return "Spend reservation input is invalid";
+    case "spend_reservation_conflict":
+      return "Spend reservation conflicts with an existing attempt";
+    case "spend_reservation_not_found":
+      return "Spend reservation was not found";
+    case "spend_reservation_transition_invalid":
+      return "Spend reservation transition is invalid";
+    case "spend_reservation_quota_exceeded":
+      return "Spend quota limit exceeded";
+    case "spend_reservation_pricing_missing":
+      return "Spend reservation pricing is missing";
+    case "spend_reservation_estimate_missing":
+      return "Spend reservation estimate is missing";
+    case "spend_reservation_usage_incomplete":
+      return "Spend reservation usage is incomplete";
+    case "spend_reservation_uncertain":
+      return "Spend reservation remains uncertain";
+  }
+}
 
 /** Raised when the caller's expected sequence number is stale. */
 export class SeqConflictError extends HarnessError {
@@ -140,6 +181,7 @@ export class StoreMigrationError extends HarnessError {
 export function isPreservedStoreError(
   error: unknown,
 ): error is
+  | SpendReservationError
   | SeqConflictError
   | RunExecutionLeaseLostError
   | UsageLimitExceededError
@@ -150,6 +192,7 @@ export function isPreservedStoreError(
   | StoreMigrationError
   | StoreReadOnlyError {
   return (
+    error instanceof SpendReservationError ||
     error instanceof SeqConflictError ||
     error instanceof RunExecutionLeaseLostError ||
     error instanceof UsageLimitExceededError ||

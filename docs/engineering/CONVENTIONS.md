@@ -79,6 +79,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `replay` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `eval` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `extensions` | `sdk` |
+| `extension-retrieval` | `sdk`, `extensions` |
 | `cli` | `eval`, `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config`, `control-plane`, `host`, `replay` |
 | `sdk` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config` |
 <!-- END GENERATED: agents-index -->
