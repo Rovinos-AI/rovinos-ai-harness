@@ -6,6 +6,7 @@ export {
   KeyNotFoundError,
   RunExecutionLeaseLostError,
   SeqConflictError,
+  SpendReservationError,
   StoreEncryptionMismatchError,
   StoreMigrationError,
   StoreReadOnlyError,
@@ -69,6 +70,7 @@ export {
   type WatchOptions,
   type WatchRunsOptions,
 } from "./types.js";
+export type { SpendReservationErrorCode, SpendReservationStore } from "./spend-reservation.js";
 export {
   purgeExpiredRuns,
   type PurgeExpiredRunsOptions,
