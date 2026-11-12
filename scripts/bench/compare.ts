@@ -11,6 +11,7 @@ import {
   type BudgetViolation,
 } from "./contracts.js";
 
+/** Evaluates a current result against absolute and optional previous-run budgets. */
 export function compareBenchmarkResults(
   budgets: BenchmarkBudgets,
   current: BenchmarkResult,
@@ -20,6 +21,7 @@ export function compareBenchmarkResults(
   return evaluateBudgets(budgets, current, baseline, allowMissingBaseline);
 }
 
+/** Formats configured metrics and all associated budget violations as a table. */
 export function formatComparison(
   budgets: BenchmarkBudgets,
   result: BenchmarkResult,
@@ -52,7 +54,8 @@ export function formatComparison(
       ];
     });
   const widths = rows.reduce(
-    (currentWidths, row) => row.map((cell, index) => Math.max(currentWidths[index] ?? 0, cell.length)),
+    (currentWidths, row) =>
+      row.map((cell, index) => Math.max(currentWidths[index] ?? 0, cell.length)),
     ["metric".length, "current".length, "previous".length, "status".length],
   );
   const render = (row: readonly string[]): string =>
@@ -99,25 +102,23 @@ function parseArgs(args: readonly string[]): CliOptions {
   };
 }
 
-async function loadJson<Schema extends typeof BenchmarkBudgetsSchema | typeof BenchmarkResultSchema>(
-  path: string,
-  schema: Schema,
-): Promise<Schema extends typeof BenchmarkBudgetsSchema ? BenchmarkBudgets : BenchmarkResult> {
+async function loadBudgets(path: string): Promise<BenchmarkBudgets> {
   const text = await readFile(path, "utf8");
-  return parseJson(schema, text) as Schema extends typeof BenchmarkBudgetsSchema
-    ? BenchmarkBudgets
-    : BenchmarkResult;
+  return parseJson(BenchmarkBudgetsSchema, text);
+}
+
+async function loadResult(path: string): Promise<BenchmarkResult> {
+  const text = await readFile(path, "utf8");
+  return parseJson(BenchmarkResultSchema, text);
 }
 
 async function main(args: readonly string[]): Promise<number> {
   try {
     const options = parseArgs(args);
     const [budgets, result, baseline] = await Promise.all([
-      loadJson(options.budgets, BenchmarkBudgetsSchema),
-      loadJson(options.result, BenchmarkResultSchema),
-      options.baseline === undefined
-        ? Promise.resolve(undefined)
-        : loadJson(options.baseline, BenchmarkResultSchema),
+      loadBudgets(options.budgets),
+      loadResult(options.result),
+      options.baseline === undefined ? Promise.resolve(undefined) : loadResult(options.baseline),
     ]);
     const violations = compareBenchmarkResults(
       budgets,
@@ -127,7 +128,9 @@ async function main(args: readonly string[]): Promise<number> {
     );
     process.stdout.write(`${formatComparison(budgets, result, baseline, violations)}\n`);
     if (violations.length > 0) {
-      process.stderr.write(`Performance budgets failed (${String(violations.length)} violation(s)).\n`);
+      process.stderr.write(
+        `Performance budgets failed (${String(violations.length)} violation(s)).\n`,
+      );
       return 1;
     }
     if (baseline === undefined && budgets.relative.length > 0) {
@@ -141,7 +144,7 @@ async function main(args: readonly string[]): Promise<number> {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).then((status) => {
+  void main(process.argv.slice(2)).then((status) => {
     process.exitCode = status;
   });
 }

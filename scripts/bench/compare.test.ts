@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import {
-  BenchmarkBudgetsSchema,
-  BenchmarkResultSchema,
-} from "./contracts.js";
+import { BenchmarkBudgetsSchema, BenchmarkResultSchema } from "./contracts.js";
 import { compareBenchmarkResults, formatComparison } from "./compare.js";
 
 const budgets = BenchmarkBudgetsSchema.parse({
@@ -20,9 +17,7 @@ const budgets = BenchmarkBudgetsSchema.parse({
     { metric: "store.append", direction: "min", limit: 100, unit: "events/s" },
     { metric: "fold.duration", direction: "max", limit: 100, unit: "ms" },
   ],
-  relative: [
-    { metric: "store.append", direction: "min", maxRegression: 0.2, unit: "events/s" },
-  ],
+  relative: [{ metric: "store.append", direction: "min", maxRegression: 0.2, unit: "events/s" }],
 });
 
 function result(metrics: readonly { name: string; value: number; unit: "events/s" | "ms" }[]) {

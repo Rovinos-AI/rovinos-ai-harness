@@ -31,7 +31,7 @@ export const BenchmarkResultSchema = z
         z
           .object({
             name: BenchmarkMetricNameSchema,
-            value: z.number().finite().nonnegative(),
+            value: z.number().nonnegative(),
             unit: BenchmarkUnitSchema,
             sampleCount: z.number().int().positive(),
           })
@@ -42,7 +42,11 @@ export const BenchmarkResultSchema = z
         const names = new Set<string>();
         metrics.forEach(({ name }, index) => {
           if (names.has(name)) {
-            context.addIssue({ code: "custom", path: [index, "name"], message: "duplicate_metric" });
+            context.addIssue({
+              code: "custom",
+              path: [index, "name"],
+              message: "duplicate_metric",
+            });
           }
           names.add(name);
         });
@@ -50,13 +54,15 @@ export const BenchmarkResultSchema = z
   })
   .strict();
 
+/** A validated aggregate benchmark result and its environment description. */
 export type BenchmarkResult = z.infer<typeof BenchmarkResultSchema>;
 
+/** Absolute performance limit for one benchmark metric. */
 const AbsoluteBudgetSchema = z
   .object({
     metric: BenchmarkMetricNameSchema,
     direction: z.enum(["max", "min"]),
-    limit: z.number().finite().nonnegative(),
+    limit: z.number().nonnegative(),
     unit: BenchmarkUnitSchema,
   })
   .strict();
@@ -93,8 +99,10 @@ export const BenchmarkBudgetsSchema = z
   })
   .strict();
 
+/** A validated budget configuration for nightly measurements. */
 export type BenchmarkBudgets = z.infer<typeof BenchmarkBudgetsSchema>;
 
+/** A single failed absolute or relative performance check. */
 export interface BudgetViolation {
   readonly metric: string;
   readonly code:
@@ -111,113 +119,134 @@ export interface BudgetViolation {
   readonly unit?: string;
 }
 
+interface EvaluationContext {
+  readonly currentMetrics: ReadonlyMap<string, BenchmarkResult["metrics"][number]>;
+  readonly baselineMetrics: ReadonlyMap<string, BenchmarkResult["metrics"][number]>;
+  readonly environmentMatches: boolean;
+  readonly sampleMatches: boolean;
+  readonly minimumSamples: number;
+  readonly allowMissingBaseline: boolean;
+}
+
+function sampleMatches(result: BenchmarkResult, budgets: BenchmarkBudgets): boolean {
+  return (
+    result.sample.profile === budgets.sample.profile &&
+    result.sample.durationMs === budgets.sample.durationMs &&
+    result.sample.warmupMs === budgets.sample.warmupMs
+  );
+}
+
+function checkAbsoluteBudget(
+  budget: BenchmarkBudgets["absolute"][number],
+  context: EvaluationContext,
+): BudgetViolation[] {
+  const metric = context.currentMetrics.get(budget.metric);
+  if (metric === undefined) {
+    return [{ metric: budget.metric, code: "result_missing" }];
+  }
+  if (metric.unit !== budget.unit) {
+    return [{ metric: budget.metric, code: "unit_mismatch", unit: metric.unit }];
+  }
+  const violations: BudgetViolation[] = [];
+  if (metric.sampleCount < context.minimumSamples) {
+    violations.push({
+      metric: budget.metric,
+      code: "sample_count_low",
+      actual: metric.sampleCount,
+      limit: context.minimumSamples,
+      unit: "samples",
+    });
+  }
+  const exceeded =
+    budget.direction === "max" ? metric.value > budget.limit : metric.value < budget.limit;
+  if (exceeded) {
+    violations.push({
+      metric: budget.metric,
+      code: "absolute_exceeded",
+      actual: metric.value,
+      limit: budget.limit,
+      unit: budget.unit,
+    });
+  }
+  return violations;
+}
+
+function checkRelativeBudget(
+  budget: BenchmarkBudgets["relative"][number],
+  context: EvaluationContext,
+): BudgetViolation[] {
+  const metric = context.currentMetrics.get(budget.metric);
+  const baselineMetric = context.baselineMetrics.get(budget.metric);
+  if (metric === undefined) {
+    return [{ metric: budget.metric, code: "result_missing" }];
+  }
+  if (
+    metric.unit !== budget.unit ||
+    (baselineMetric !== undefined && baselineMetric.unit !== budget.unit)
+  ) {
+    return [{ metric: budget.metric, code: "unit_mismatch", unit: metric.unit }];
+  }
+  if (context.baselineMetrics.size === 0) {
+    return context.allowMissingBaseline
+      ? []
+      : [{ metric: budget.metric, code: "baseline_missing" }];
+  }
+  if (!context.environmentMatches || !context.sampleMatches) {
+    return [];
+  }
+  if (baselineMetric === undefined) {
+    return [{ metric: budget.metric, code: "baseline_missing" }];
+  }
+  const limit =
+    budget.direction === "max"
+      ? baselineMetric.value * (1 + budget.maxRegression)
+      : baselineMetric.value * (1 - budget.maxRegression);
+  const regressed = budget.direction === "max" ? metric.value > limit : metric.value < limit;
+  return regressed
+    ? [
+        {
+          metric: budget.metric,
+          code: "relative_regression",
+          actual: metric.value,
+          limit,
+          unit: budget.unit,
+        },
+      ]
+    : [];
+}
+
+/** Evaluates absolute limits, metadata compatibility, and relative regressions. */
 export function evaluateBudgets(
   budgets: BenchmarkBudgets,
   current: BenchmarkResult,
   baseline?: BenchmarkResult,
   allowMissingBaseline = false,
 ): BudgetViolation[] {
-  const currentMetrics = new Map(current.metrics.map((metric) => [metric.name, metric]));
-  const baselineMetrics = new Map(baseline?.metrics.map((metric) => [metric.name, metric]) ?? []);
+  const environmentMatches =
+    current.environment.runner === budgets.environment.runner &&
+    (baseline === undefined || baseline.environment.runner === budgets.environment.runner);
+  const samplesMatch =
+    sampleMatches(current, budgets) && (baseline === undefined || sampleMatches(baseline, budgets));
+  const context: EvaluationContext = {
+    currentMetrics: new Map(current.metrics.map((metric) => [metric.name, metric])),
+    baselineMetrics: new Map(baseline?.metrics.map((metric) => [metric.name, metric]) ?? []),
+    environmentMatches,
+    sampleMatches: samplesMatch,
+    minimumSamples: budgets.sample.minimumSamples,
+    allowMissingBaseline,
+  };
   const violations: BudgetViolation[] = [];
-  const currentEnvironmentMatches = current.environment.runner === budgets.environment.runner;
-  const baselineEnvironmentMatches =
-    baseline === undefined || baseline.environment.runner === budgets.environment.runner;
-  const currentSampleMatches =
-    current.sample.profile === budgets.sample.profile &&
-    current.sample.durationMs === budgets.sample.durationMs &&
-    current.sample.warmupMs === budgets.sample.warmupMs;
-  const baselineSampleMatches =
-    baseline === undefined ||
-    (baseline.sample.profile === budgets.sample.profile &&
-      baseline.sample.durationMs === budgets.sample.durationMs &&
-      baseline.sample.warmupMs === budgets.sample.warmupMs);
-
-  if (!currentEnvironmentMatches || !baselineEnvironmentMatches) {
+  if (!environmentMatches) {
     violations.push({ metric: "environment.runner", code: "environment_mismatch" });
   }
-  if (!currentSampleMatches || !baselineSampleMatches) {
+  if (!samplesMatch) {
     violations.push({ metric: "sample.configuration", code: "sample_mismatch" });
   }
-
   for (const budget of budgets.absolute) {
-    const metric = currentMetrics.get(budget.metric);
-    if (metric === undefined) {
-      violations.push({ metric: budget.metric, code: "result_missing" });
-    } else if (metric.unit !== budget.unit) {
-      violations.push({ metric: budget.metric, code: "unit_mismatch", unit: metric.unit });
-    } else {
-      if (metric.sampleCount < budgets.sample.minimumSamples) {
-        violations.push({
-          metric: budget.metric,
-          code: "sample_count_low",
-          actual: metric.sampleCount,
-          limit: budgets.sample.minimumSamples,
-          unit: "samples",
-        });
-      }
-      if (
-        budget.direction === "max"
-          ? metric.value > budget.limit
-          : metric.value < budget.limit
-      ) {
-        violations.push({
-          metric: budget.metric,
-          code: "absolute_exceeded",
-          actual: metric.value,
-          limit: budget.limit,
-          unit: budget.unit,
-        });
-      }
-    }
+    violations.push(...checkAbsoluteBudget(budget, context));
   }
-
   for (const budget of budgets.relative) {
-    const metric = currentMetrics.get(budget.metric);
-    const baselineMetric = baselineMetrics.get(budget.metric);
-    if (metric === undefined) {
-      violations.push({ metric: budget.metric, code: "result_missing" });
-      continue;
-    }
-    if (metric.unit !== budget.unit || (baselineMetric !== undefined && baselineMetric.unit !== budget.unit)) {
-      violations.push({ metric: budget.metric, code: "unit_mismatch", unit: metric.unit });
-      continue;
-    }
-    if (baseline === undefined) {
-      if (!allowMissingBaseline) {
-        violations.push({ metric: budget.metric, code: "baseline_missing" });
-      }
-      continue;
-    }
-    if (
-      !currentEnvironmentMatches ||
-      !baselineEnvironmentMatches ||
-      !currentSampleMatches ||
-      !baselineSampleMatches
-    ) {
-      continue;
-    }
-    if (baselineMetric === undefined) {
-      violations.push({ metric: budget.metric, code: "baseline_missing" });
-      continue;
-    }
-    const regressed =
-      budget.direction === "max"
-        ? metric.value > baselineMetric.value * (1 + budget.maxRegression)
-        : metric.value < baselineMetric.value * (1 - budget.maxRegression);
-    if (regressed) {
-      violations.push({
-        metric: budget.metric,
-        code: "relative_regression",
-        actual: metric.value,
-        limit:
-          budget.direction === "max"
-            ? baselineMetric.value * (1 + budget.maxRegression)
-            : baselineMetric.value * (1 - budget.maxRegression),
-        unit: budget.unit,
-      });
-    }
+    violations.push(...checkRelativeBudget(budget, context));
   }
-
   return violations;
 }

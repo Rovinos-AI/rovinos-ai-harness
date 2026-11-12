@@ -36,7 +36,7 @@ async function main(args: readonly string[]): Promise<number> {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).then((status) => {
+  void main(process.argv.slice(2)).then((status) => {
     process.exitCode = status;
   });
 }
