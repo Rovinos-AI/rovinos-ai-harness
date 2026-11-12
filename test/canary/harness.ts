@@ -29,6 +29,7 @@ import {
   captureWithoutSentinel,
   createCanaryTelemetry,
   emitCanaryBadLog,
+  emitCanaryGenAiSpan,
   emitCanaryKeysRotated,
   emitCanaryUnsafeSpan,
   type CanaryTelemetry,
@@ -302,6 +303,7 @@ export class CanaryHarness {
   async exerciseTelemetry(): Promise<void> {
     const runId = this.requireRunId();
     await emitCanaryBadLog(this.telemetry, runId, this.canaries.email.value);
+    await emitCanaryGenAiSpan(this.telemetry, runId, this.canaries.email.value);
     await emitCanaryUnsafeSpan(this.telemetry, runId, this.canaries.phone.value);
     await this.telemetry.sdk.forceFlush();
   }

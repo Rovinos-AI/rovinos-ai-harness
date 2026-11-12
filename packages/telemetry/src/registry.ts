@@ -21,7 +21,7 @@ import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
 import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 import { getTracer } from "./tracer.js";
-import { SEMCONV_ATTRIBUTE_NAMES, SEMCONV_SPAN_NAMES } from "./semconv.js";
+import { GEN_AI_ATTRIBUTE_NAMES, MCP_ATTRIBUTE_NAMES, SEMCONV_SPAN_NAMES } from "./semconv.js";
 import { env } from "node:process";
 
 /** Attribute-schema shape accepted by registered span definitions. */
@@ -70,7 +70,8 @@ export interface SpanDefinition<
 
 const spanNamePattern = /^harness\.[a-z0-9_.]{1,56}$/u;
 const semconvSpanNames = new Set<string>(SEMCONV_SPAN_NAMES);
-const semconvAttributeNames = new Set<string>(SEMCONV_ATTRIBUTE_NAMES);
+const mcpAttributeNames = new Set<string>(MCP_ATTRIBUTE_NAMES);
+const genAiAttributeNames = new Set<string>(GEN_AI_ATTRIBUTE_NAMES);
 const definitions = new Map<string, SpanDefinition<SpanDefinitionShape>>();
 const activeSpanDefinitions = new WeakMap<Span, SpanDefinition<SpanDefinitionShape>>();
 const tracingProbeKey = createContextKey("harness.telemetry.context-probe");
@@ -173,7 +174,7 @@ export function safeRecordError(span: Span, error: unknown): void {
  * Registers a span name and its allowlisted attribute shape.
  *
  * @param name - Harness span name matching `harness.<lowercase_name>`.
- * @param shape - Attribute schemas created only with the `attr` helpers.
+ * @param shape - Attribute schemas created only with `attr` helpers; the model-call span may also use the approved GenAI names.
  * @param ownerTask - Task and package that owns this span definition.
  * @returns The registered span definition.
  * @throws SpanRegistryError when the name is invalid, duplicated, or has an unsafe attribute.
@@ -239,7 +240,9 @@ function registerSpan<const Shape extends SpanShape>(
   if (
     Object.keys(shapeSnapshot).some(
       (key) =>
-        !spanNamePattern.test(key) && !(semanticConvention && semconvAttributeNames.has(key)),
+        !spanNamePattern.test(key) &&
+        !(semanticConvention && mcpAttributeNames.has(key)) &&
+        !(name === "harness.model_call" && genAiAttributeNames.has(key)),
     )
   ) {
     throw new SpanRegistryError("span_attr_name_invalid");
