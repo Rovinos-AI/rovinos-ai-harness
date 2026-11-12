@@ -354,9 +354,12 @@ describe("replayRun", () => {
       ],
       askPolicy,
       "synthetic retrieval replay",
-      fakeTool(() => {
-        retrievalCalls += 1;
-      }, { reference: "recorded synthetic retrieval result" }),
+      fakeTool(
+        () => {
+          retrievalCalls += 1;
+        },
+        { reference: "recorded synthetic retrieval result" },
+      ),
     );
     expect(retrievalCalls).toBe(1);
     const replay = await replayRun(original, {

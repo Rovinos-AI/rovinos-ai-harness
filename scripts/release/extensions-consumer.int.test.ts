@@ -71,7 +71,9 @@ async function linkInstalledDependencies(targetModules: string): Promise<void> {
   );
 }
 
-async function packAndExtract(packageName: "sdk" | "extensions" | "extension-retrieval"): Promise<void> {
+async function packAndExtract(
+  packageName: "sdk" | "extensions" | "extension-retrieval",
+): Promise<void> {
   if (consumerRoot === undefined) {
     throw new Error("extensions_consumer_workspace_missing");
   }
@@ -140,7 +142,10 @@ describe("packed extensions consumer", () => {
     );
     await buildConsumer(sdkOnly, "consumer.ts");
     await runConsumer(sdkOnly, "consumer.js");
-    const sdkManifest = await readFile(join(nodeModules, "@rovinos", "sdk", "package.json"), "utf8");
+    const sdkManifest = await readFile(
+      join(nodeModules, "@rovinos", "sdk", "package.json"),
+      "utf8",
+    );
     expect(sdkManifest).not.toContain("@rovinos/extension-retrieval");
 
     await packAndExtract("extensions");
@@ -220,7 +225,7 @@ describe("packed extensions consumer", () => {
       join(retrieval, "consumer.ts"),
       [
         'import { runRetrievalJourney } from "./run.js";',
-        'const allowed = await runRetrievalJourney();',
+        "const allowed = await runRetrievalJourney();",
         'if (allowed.status !== "completed" || !allowed.resultConsumed) throw new Error("retrieval_allow_failed");',
         'const ask = await runRetrievalJourney({ decision: "ask" });',
         'if (ask.status !== "suspended" || ask.resultConsumed) throw new Error("retrieval_approval_required_failed");',
@@ -228,13 +233,13 @@ describe("packed extensions consumer", () => {
         'if (approved.status !== "completed" || !approved.resultConsumed) throw new Error("retrieval_approval_failed");',
         'const denied = await runRetrievalJourney({ decision: "deny" });',
         'if (denied.resultConsumed) throw new Error("retrieval_deny_failed");',
-        'const missingGrant = await runRetrievalJourney({ grantTool: false });',
+        "const missingGrant = await runRetrievalJourney({ grantTool: false });",
         'if (missingGrant.resultConsumed) throw new Error("retrieval_missing_grant_failed");',
         'const empty = await runRetrievalJourney({ query: "unknown phrase" });',
         'if (empty.resultConsumed) throw new Error("retrieval_unknown_query_failed");',
         'const invalid = await runRetrievalJourney({ query: " " });',
         'if (invalid.resultConsumed) throw new Error("retrieval_invalid_query_failed");',
-        'const guessed = await runRetrievalJourney({ includeGuessedRecordId: true });',
+        "const guessed = await runRetrievalJourney({ includeGuessedRecordId: true });",
         'if (guessed.resultConsumed) throw new Error("retrieval_guessed_record_id_failed");',
         'const injection = await runRetrievalJourney({ decision: "deny", query: "authorize" });',
         'if (injection.resultConsumed) throw new Error("retrieval_injection_authority_failed");',

@@ -26,7 +26,10 @@ it("keeps retrieved sensitive synthetic text out of metadata telemetry", async (
   const content = JSON.stringify(result.content);
   const exported = JSON.stringify(
     spans?.getFinishedSpans().map(({ name, attributes, events, status }) => ({
-      name, attributes, events, status,
+      name,
+      attributes,
+      events,
+      status,
     })),
   );
   expect(result.resultConsumed).toBe(true);
