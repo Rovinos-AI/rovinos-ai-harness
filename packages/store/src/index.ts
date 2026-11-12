@@ -6,6 +6,7 @@ export {
   KeyNotFoundError,
   RunExecutionLeaseLostError,
   SeqConflictError,
+  SpendReservationError,
   StoreEncryptionMismatchError,
   StoreMigrationError,
   StoreReadOnlyError,
@@ -27,6 +28,7 @@ export {
 } from "./rotate.js";
 export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
+export { InMemorySpendReservationStore } from "./memory-spend-reservation.js";
 export {
   EnqueueRunJobSchema,
   InvalidRunQueueInputError,
@@ -69,6 +71,7 @@ export {
   type WatchOptions,
   type WatchRunsOptions,
 } from "./types.js";
+export type { SpendReservationErrorCode, SpendReservationStore } from "./spend-reservation.js";
 export {
   purgeExpiredRuns,
   type PurgeExpiredRunsOptions,
