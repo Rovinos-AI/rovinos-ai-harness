@@ -52,19 +52,29 @@ it("lints each package in its own batch and the rest of the repository with pack
   }
 });
 
-it("splits the SDK and cross-package tests into individual lintable files", () => {
+it("splits the SDK, examples, and cross-package tests into individual lintable files", () => {
   const root = createRoot(["sdk"]);
   mkdirSync(join(root, "packages", "sdk", "src"));
+  mkdirSync(join(root, "examples", "retrieval"), { recursive: true });
   mkdirSync(join(root, "test", "fixtures"), { recursive: true });
   writeFileSync(join(root, "packages", "sdk", "src", "index.ts"), "export {};\n");
+  writeFileSync(join(root, "examples", "retrieval", "run.ts"), "export {};\n");
   writeFileSync(join(root, "test", "fixtures", "sample.ts"), "export {};\n");
   writeFileSync(join(root, "test", "fixtures", "ignored.json"), "{}\n");
 
   const batches = lintBatches(root);
   const targets = batches.map((batch) => batch.at(-1));
 
-  expect(targets).toEqual(["packages/sdk/src/index.ts", "scripts", "test/fixtures/sample.ts", "."]);
-  expect(batches.at(-1)).toEqual(expect.arrayContaining(["--ignore-pattern", "test/**"]));
+  expect(targets).toEqual([
+    "packages/sdk/src/index.ts",
+    "scripts",
+    "examples/retrieval/run.ts",
+    "test/fixtures/sample.ts",
+    ".",
+  ]);
+  expect(batches.at(-1)).toEqual(
+    expect.arrayContaining(["--ignore-pattern", "examples/**", "--ignore-pattern", "test/**"]),
+  );
 });
 
 it("passes extra arguments such as --fix to every batch", () => {

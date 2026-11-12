@@ -7,6 +7,10 @@ it only in applications that define extensions:
 npm install @rovinos/sdk @rovinos/extensions zod
 ```
 
+For a bounded reference retrieval extension over an explicitly supplied corpus, install the
+separate optional `@rovinos/extension-retrieval` package as well. It depends on both public packages
+as peers and does not add a retrieval backend to the SDK.
+
 An extension definition describes its identity, configuration schema, and contributions. The SDK
 validates the definition and its registration; the helper does not add a separate contract or
 runtime.
