@@ -13,7 +13,7 @@ export interface KustoManagementClient {
 export function splitKustoCommands(schema: string): string[] {
   return schema
     .replace(/^\/\/ SPDX-License-Identifier: Apache-2\.0\r?\n/u, "")
-    .split(/\r?\n\s*\r?\n/u)
+    .split(/\n\s*\n/u)
     .map((command) => command.trim())
     .filter((command) => command.length > 0);
 }
@@ -94,7 +94,8 @@ async function main(): Promise<void> {
     throw new Error("explicit_apply_flag_required");
   }
   const database = process.env.ADX_DATABASE;
-  const clusterUri = process.env.ADX_CLUSTER_URI ?? (emulator ? "http://127.0.0.1:8080" : undefined);
+  const clusterUri =
+    process.env.ADX_CLUSTER_URI ?? (emulator ? "http://127.0.0.1:8080" : undefined);
   if (database === undefined || database.length === 0 || clusterUri === undefined) {
     throw new Error("kusto_configuration_missing");
   }

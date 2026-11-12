@@ -24,8 +24,9 @@ describe("Kusto schema applier", () => {
   it("executes commands in order against the selected database", async () => {
     const calls: { database: string | null; command: string }[] = [];
     const client = {
-      executeMgmt: vi.fn(async (database: string | null, command: string) => {
+      executeMgmt: vi.fn((database: string | null, command: string): Promise<void> => {
         calls.push({ database, command });
+        return Promise.resolve();
       }),
     };
 
@@ -55,8 +56,8 @@ describe("Kusto schema applier", () => {
 
   it("defines exporter tables, JSON mappings, and retention for every table", async () => {
     const schema = await readFile(resolve(root, "infra/kusto/schema.kql"), "utf8");
-    const tables = [...schema.matchAll(/\.create-merge table ([A-Za-z0-9_]+)/gu)].map(
-      (match) => match[1],
+    const tables = [...schema.matchAll(/\.create-merge table (\w+)/gu)].map(
+      (match) => match[1] ?? "",
     );
 
     expect(tables).toEqual(["HarnessTraces", "HarnessLogs", "HarnessMetrics"]);

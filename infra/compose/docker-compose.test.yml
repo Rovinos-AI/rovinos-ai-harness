@@ -185,9 +185,9 @@ services:
   kusto-test-client:
     image: node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
     working_dir: /workspace
-    command: ["node", "--experimental-strip-types", "test/kusto-schema-runner.ts", "--run"]
+    command:
+      ["node", "--experimental-strip-types", "scripts/kusto/emulator-contract-runner.ts", "--run"]
     volumes:
-      - ../../test:/workspace/test:ro
       - ../../scripts/kusto:/workspace/scripts/kusto:ro
       - ../../infra/kusto:/workspace/infra/kusto:ro
       - ../../node_modules:/workspace/node_modules:ro
