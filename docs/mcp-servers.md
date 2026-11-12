@@ -46,6 +46,12 @@ The outbound client does not host MCP Apps. App-only tools are excluded from
 tool discovery, and setting `apps: true` is rejected rather than advertising
 unsupported capabilities.
 
+Standalone outbound MCP resource discovery/read and prompt list/get are not
+implemented. Resource blocks embedded in `tools/call` results use the existing
+tool-result handling path. See the
+[governed resource and prompt design](mcp-outbound-content.md) for the current
+client/server capability matrix and proposed security boundaries.
+
 ## Stdio transport
 
 | Field | Type | Default | Description |
