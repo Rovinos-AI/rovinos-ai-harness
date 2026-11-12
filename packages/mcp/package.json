@@ -12,6 +12,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./tool-result": {
+      "source": "./src/tool-result.ts",
+      "types": "./dist/tool-result.d.ts",
+      "default": "./dist/tool-result.js"
     }
   },
   "scripts": {
