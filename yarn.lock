@@ -3143,7 +3143,7 @@ __metadata:
     tsup: "npm:9.0.0"
     typescript: "npm:5.9.3"
     vitest: "npm:4.1.12"
-    zod: "npm:^4.6.7"
+    zod: "npm:4.6.7"
   peerDependencies:
     "@rovinos/extensions": "workspace:^"
     "@rovinos/sdk": "workspace:^"
