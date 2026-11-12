@@ -30,6 +30,7 @@ import {
   type SnapshotRow,
   type StoreKeyRotation,
 } from "@rovinos/store/adapter-internal";
+import type { SpendReservationStore } from "@rovinos/store";
 import { integer, eventFromRow, storeError, type EventRow } from "./helpers.js";
 import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
@@ -48,6 +49,7 @@ import { watchPostgresRuns } from "./watch-runs.js";
 import { countPostgresRowsByKey, reencryptPostgresBatch } from "./rotation.js";
 import { PostgresEventWriter } from "./writer.js";
 import { queryPostgresUsageLedger, readPostgresUsageLedger } from "./usage-ledger.js";
+import { PostgresSpendReservation } from "./spend-reservation.js";
 
 const connectionStringSchema = z
   .url()
@@ -70,7 +72,7 @@ const optionsSchema = snapshotStoreOptionsSchema
 export type PostgresEventStoreOptions = z.input<typeof optionsSchema>;
 
 /** Durable Postgres implementation of the append-only event store. */
-export class PostgresEventStore implements EventStore, StoreKeyRotation {
+export class PostgresEventStore implements EventStore, SpendReservationStore, StoreKeyRotation {
   private readonly pool: Pool;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -81,6 +83,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   private readonly writer: PostgresEventWriter;
   private readonly idempotencyContext: PostgresIdempotencyContext;
   private readonly subscriptions: PostgresSubscriptions;
+  private readonly spendReservations: PostgresSpendReservation;
   private initialized: Promise<void> | undefined;
 
   /**
@@ -140,6 +143,15 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
       parsedOptions.data.schema,
       () => this.ensureInitialized(),
     );
+    this.spendReservations = new PostgresSpendReservation({
+      pool: this.pool,
+      codec: this.codec,
+      ensureInitialized: () => this.ensureInitialized(),
+      assertWritable: () => {
+        this.assertWritable();
+      },
+      clock: this.clock,
+    });
   }
 
   private ensureInitialized(): Promise<void> {
@@ -194,6 +206,41 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     ...args: Parameters<EventStore["appendWithUsage"]>
   ): Promise<{ nextSeq: number }> {
     return this.writer.appendWithUsage(...args);
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.reserveSpend} */
+  reserveSpend(
+    ...args: Parameters<SpendReservationStore["reserveSpend"]>
+  ): ReturnType<SpendReservationStore["reserveSpend"]> {
+    return this.spendReservations.reserveSpend(...args);
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.markSpendDispatching} */
+  markSpendDispatching(
+    ...args: Parameters<SpendReservationStore["markSpendDispatching"]>
+  ): ReturnType<SpendReservationStore["markSpendDispatching"]> {
+    return this.spendReservations.markSpendDispatching(...args);
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.releaseSpend} */
+  releaseSpend(
+    ...args: Parameters<SpendReservationStore["releaseSpend"]>
+  ): ReturnType<SpendReservationStore["releaseSpend"]> {
+    return this.spendReservations.releaseSpend(...args);
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.settleSpend} */
+  settleSpend(
+    ...args: Parameters<SpendReservationStore["settleSpend"]>
+  ): ReturnType<SpendReservationStore["settleSpend"]> {
+    return this.spendReservations.settleSpend(...args);
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.markSpendUncertain} */
+  markSpendUncertain(
+    ...args: Parameters<SpendReservationStore["markSpendUncertain"]>
+  ): ReturnType<SpendReservationStore["markSpendUncertain"]> {
+    return this.spendReservations.markSpendUncertain(...args);
   }
 
   /** {@inheritDoc @rovinos/store!types.EventStore.readUsageLedger} */

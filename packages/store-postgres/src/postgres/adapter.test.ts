@@ -331,6 +331,9 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   if (query.startsWith("INSERT INTO usage_ledger")) {
     return { rows: [{ quota_id: text(values[0]) }] };
   }
+  if (query.startsWith("SELECT quota_id FROM usage_ledger")) {
+    return { rows: [{ quota_id: text(values[0]) }] };
+  }
   if (query.startsWith("SELECT metadata_value FROM store_metadata")) {
     return {
       rows: fakePg.encryptionValue === "" ? [] : [{ metadata_value: fakePg.encryptionValue }],

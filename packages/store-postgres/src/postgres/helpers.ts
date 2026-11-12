@@ -303,7 +303,93 @@ export interface AppendTransactionOptions {
   encodedSnapshot?: EncodedSnapshot;
   snapshotKeep?: number;
   usageUpdates?: readonly UsageLedgerDelta[];
+  quotaPeriodsToLock?: readonly QuotaPeriodKey[];
+  beforeQuotaLock?: (client: PoolClient) => Promise<void>;
+  beforeRunLock?: (client: PoolClient) => Promise<{ readonly skipNextSeq: number } | undefined>;
   leaseOwner?: Id;
+}
+
+interface QuotaPeriodKey {
+  readonly quotaId: UsageLedgerDelta["quotaId"];
+  readonly period: UsageLedgerDelta["period"];
+  readonly periodStart: number;
+}
+
+function isRetryableTransactionError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  return error.code === "40001" || error.code === "40P01";
+}
+
+/** Run one bounded whole-transaction retry for Postgres serialization conflicts. */
+export async function runPostgresTransaction<T>(
+  client: PoolClient,
+  work: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    let transactionStarted = false;
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      transactionStarted = true;
+      const result = await work(client);
+      await client.query("COMMIT");
+      transactionStarted = false;
+      return result;
+    } catch (error) {
+      if (transactionStarted) {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
+      if (attempt < 2 && isRetryableTransactionError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/** Lock quota-period ledger rows in a deterministic order, creating empty rows as needed. */
+export async function lockPostgresQuotaPeriods(
+  client: PoolClient,
+  periods: readonly QuotaPeriodKey[],
+): Promise<void> {
+  const keys = new Map<string, QuotaPeriodKey>();
+  for (const period of periods) {
+    keys.set(`${period.quotaId}\u0000${period.period}\u0000${period.periodStart.toString()}`, period);
+  }
+  const sorted = [...keys.values()].sort((left, right) => {
+    const quotaComparison = compare(left.quotaId, right.quotaId);
+    if (quotaComparison !== 0) {
+      return quotaComparison;
+    }
+    const periodComparison = compare(left.period, right.period);
+    return periodComparison === 0
+      ? left.periodStart - right.periodStart
+      : periodComparison;
+  });
+  for (const period of sorted) {
+    await client.query(
+      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, unknown_cost_count, runs_started) VALUES ($1, $2, $3, 0, 0, 0) ON CONFLICT (quota_id, period, period_start) DO NOTHING",
+      [period.quotaId, period.period, period.periodStart],
+    );
+    const result = await client.query(
+      "SELECT quota_id FROM usage_ledger WHERE quota_id = $1 AND period = $2 AND period_start = $3 FOR UPDATE",
+      [period.quotaId, period.period, period.periodStart],
+    );
+    if (result.rows.length !== 1) {
+      throw new StoreUnavailableError();
+    }
+  }
+}
+
+function compare(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
 }
 
 /** Append a batch atomically while holding the run's sequence row lock. */
@@ -322,57 +408,60 @@ export async function appendTransaction(
   } = options;
   const { first, last } = appendBoundaryEvents(encoded);
 
-  let transactionStarted = false;
   let actualSeq = 0;
   try {
-    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    transactionStarted = true;
-    await client.query(
-      "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES ($1, $2, 'pending', 0, $2) ON CONFLICT (run_id) DO NOTHING",
-      [runId, first.ts],
-    );
-    const runResult = await client.query<RunRow>(
-      "SELECT next_seq, status FROM runs WHERE run_id = $1 FOR UPDATE",
-      [runId],
-    );
-    const run = runResult.rows[0];
-    if (run === undefined) {
-      throw new StoreUnavailableError();
-    }
-    actualSeq = integer(run.next_seq);
-    if (actualSeq !== expectedSeq) {
-      throw new SeqConflictError(expectedSeq, actualSeq);
-    }
-    await assertExecutionLease(client, runId, leaseOwner);
-    if (actualSeq === 0 && first.type !== "run_created") {
-      throw new InvalidEventError([[0, "type"]]);
-    }
-
-    const status = nextStatus(run.status, encoded);
-    await insertPostgresEventBatches(client, encoded, {
-      runId,
-      expectedSeq,
-      status,
-      lastTs: last.ts,
-    });
-    await applyUsageUpdates(client, usageUpdates ?? []);
-    if (encodedSnapshot !== undefined) {
-      await insertSnapshot(client, encodedSnapshot);
+    return await runPostgresTransaction(client, async (transactionClient) => {
+      await options.beforeQuotaLock?.(transactionClient);
+      await lockPostgresQuotaPeriods(transactionClient, [
+        ...(usageUpdates ?? []),
+        ...(options.quotaPeriodsToLock ?? []),
+      ]);
+      const preAppend = await options.beforeRunLock?.(transactionClient);
+      if (preAppend !== undefined) {
+        return preAppend.skipNextSeq;
+      }
       await client.query(
-        "DELETE FROM snapshots WHERE run_id = $1 AND snapshot_id NOT IN (SELECT snapshot_id FROM snapshots WHERE run_id = $1 ORDER BY at_seq DESC, snapshot_id DESC LIMIT $2)",
-        [runId, snapshotKeep],
+        "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES ($1, $2, 'pending', 0, $2) ON CONFLICT (run_id) DO NOTHING",
+        [runId, first.ts],
       );
-    }
+      const runResult = await client.query<RunRow>(
+        "SELECT next_seq, status FROM runs WHERE run_id = $1 FOR UPDATE",
+        [runId],
+      );
+      const run = runResult.rows[0];
+      if (run === undefined) {
+        throw new StoreUnavailableError();
+      }
+      actualSeq = integer(run.next_seq);
+      if (actualSeq !== expectedSeq) {
+        throw new SeqConflictError(expectedSeq, actualSeq);
+      }
+      await assertExecutionLease(client, runId, leaseOwner);
+      if (actualSeq === 0 && first.type !== "run_created") {
+        throw new InvalidEventError([[0, "type"]]);
+      }
 
-    const finalSeq = last.seq.toString();
-    await client.query("SELECT pg_notify($1, $2)", ["harness_events", `${runId}:${finalSeq}`]);
-    await client.query("COMMIT");
-    transactionStarted = false;
-    return expectedSeq + encoded.length;
+      const status = nextStatus(run.status, encoded);
+      await insertPostgresEventBatches(client, encoded, {
+        runId,
+        expectedSeq,
+        status,
+        lastTs: last.ts,
+      });
+      await applyUsageUpdates(client, usageUpdates ?? []);
+      if (encodedSnapshot !== undefined) {
+        await insertSnapshot(client, encodedSnapshot);
+        await client.query(
+          "DELETE FROM snapshots WHERE run_id = $1 AND snapshot_id NOT IN (SELECT snapshot_id FROM snapshots WHERE run_id = $1 ORDER BY at_seq DESC, snapshot_id DESC LIMIT $2)",
+          [runId, snapshotKeep],
+        );
+      }
+
+      const finalSeq = last.seq.toString();
+      await client.query("SELECT pg_notify($1, $2)", ["harness_events", `${runId}:${finalSeq}`]);
+      return expectedSeq + encoded.length;
+    });
   } catch (error) {
-    if (transactionStarted) {
-      await client.query("ROLLBACK").catch(() => undefined);
-    }
     throw storeError(error, expectedSeq, actualSeq, true);
   }
 }

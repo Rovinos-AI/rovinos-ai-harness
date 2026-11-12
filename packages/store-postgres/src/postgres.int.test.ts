@@ -2,9 +2,20 @@
 import { Pool, type Notification, type PoolClient } from "pg";
 import { randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { Code, Id, type KeyProvider, type NewEvent } from "@rovinos/schemas";
+import {
+  Code,
+  Id,
+  type KeyProvider,
+  type NewEvent,
+  type SpendReservationInput,
+} from "@rovinos/schemas";
 import { afterAll, expect, it, vi } from "vitest";
-import { AesGcmContentCodec, JsonContentCodec, type ContentCodec } from "@rovinos/store";
+import {
+  AesGcmContentCodec,
+  JsonContentCodec,
+  StoreUnavailableError,
+  type ContentCodec,
+} from "@rovinos/store";
 import { migrate } from "@rovinos/store/adapter-internal";
 import { PostgresEventStore } from "./postgres/adapter.js";
 import { openPostgresEventStore } from "./postgres/open.js";
@@ -15,8 +26,13 @@ import {
   createEventBuilders,
   runConcurrencyConformance,
   runEventStoreConformance,
+  runSpendReservationConformance,
 } from "@rovinos/store/testing";
-import type { EventStoreFactory, MultiEventStoreFactoryCreator } from "@rovinos/store/testing";
+import type {
+  EventStoreFactory,
+  MultiEventStoreFactoryCreator,
+  SpendReservationStoreFactory,
+} from "@rovinos/store/testing";
 
 // Derived from the migration files so adding a migration does not break these assertions.
 const postgresMigrationVersions = (await readdir(postgresMigrationDirectory()))
@@ -106,6 +122,72 @@ function postgresFactory(codec: ContentCodec): EventStoreFactory {
 const plaintextPostgresFactory = postgresFactory(new JsonContentCodec());
 const encryptedPostgresFactory = postgresFactory(contentCodec);
 
+function spendQuota(
+  quotaId: string,
+  limitMicros: number,
+): SpendReservationInput["quotaPeriods"][number] {
+  return {
+    quotaId: Code.parse(quotaId),
+    period: "day",
+    periodStart: Date.UTC(2026, 10, 12),
+    limitMicros,
+  };
+}
+
+function spendInput(
+  runId: Id,
+  attemptId: Id,
+  quotaPeriods: SpendReservationInput["quotaPeriods"],
+  estimatedMicros = 600,
+): SpendReservationInput {
+  return {
+    runId,
+    attemptId,
+    quotaPeriods,
+    estimatedMicros,
+    pricingRevision: Code.parse("price.v1"),
+  };
+}
+
+function spendRequest(runId: Id, attemptId: Id): Extract<NewEvent, { type: "model_request" }> {
+  return { ...schemaIds.modelRequest(runId), requestId: attemptId };
+}
+
+const postgresSpendReservationFactory: SpendReservationStoreFactory = async () => {
+  const { admin, schema } = await createSchema();
+  const store = new PostgresEventStore(connectionString, { schema }, new JsonContentCodec());
+  stores.add(store);
+  return {
+    store,
+    async cleanup() {
+      try {
+        await closeStore(store);
+      } finally {
+        await dropSchema(admin, schema);
+      }
+    },
+  };
+};
+
+async function withPostgresStorePair<T>(
+  work: (first: PostgresEventStore, second: PostgresEventStore) => Promise<T>,
+): Promise<T> {
+  const { admin, schema } = await createSchema();
+  const first = new PostgresEventStore(connectionString, { schema, poolSize: 2 });
+  const second = new PostgresEventStore(connectionString, { schema, poolSize: 2 });
+  stores.add(first);
+  stores.add(second);
+  try {
+    return await work(first, second);
+  } finally {
+    try {
+      await Promise.all([closeStore(first), closeStore(second)]);
+    } finally {
+      await dropSchema(admin, schema);
+    }
+  }
+}
+
 const postgresMultiFactory: MultiEventStoreFactoryCreator = async () => {
   const { admin, schema } = await createSchema();
   const factoryStores = new Set<PostgresEventStore>();
@@ -153,6 +235,7 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
   supportsFileReopen: false,
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
+runSpendReservationConformance("PostgresEventStore", postgresSpendReservationFactory);
 
 it.each(Array.from({ length: 200 }, (_, index) => index))(
   "catches immediate subscription writes with a cold Postgres listener (%i)",
@@ -898,5 +981,83 @@ it("drops the per-test schema after cleanup", async () => {
     if (adminPools.has(admin)) {
       await dropSchema(admin, schema);
     }
+  }
+});
+
+it("keeps reservations within quota across two independent Postgres clients", async () => {
+  await withPostgresStorePair(async (first, second) => {
+    const runA = schemaIds.nextRunId();
+    const runB = schemaIds.nextRunId();
+    const attemptA = schemaIds.nextRunId();
+    const attemptB = schemaIds.nextRunId();
+    await first.append(runA, [schemaIds.runCreated(runA)], 0);
+    await first.append(runB, [schemaIds.runCreated(runB)], 0);
+    const quotaPeriods = [spendQuota("quota.shared", 1_000)];
+
+    const results = await Promise.allSettled([
+      first.reserveSpend(spendInput(runA, attemptA, quotaPeriods), spendRequest(runA, attemptA), 1),
+      second.reserveSpend(
+        spendInput(runB, attemptB, quotaPeriods),
+        spendRequest(runB, attemptB),
+        1,
+      ),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "spend_reservation_quota_exceeded" },
+    });
+  });
+});
+
+it("locks cross-quota reservation rows in stable order for reversed inputs", async () => {
+  await withPostgresStorePair(async (first, second) => {
+    const runA = schemaIds.nextRunId();
+    const runB = schemaIds.nextRunId();
+    const attemptA = schemaIds.nextRunId();
+    const attemptB = schemaIds.nextRunId();
+    const quotaA = spendQuota("quota.a", 100);
+    const quotaB = spendQuota("quota.b", 100);
+    await first.append(runA, [schemaIds.runCreated(runA)], 0);
+    await first.append(runB, [schemaIds.runCreated(runB)], 0);
+
+    const results = await Promise.allSettled([
+      first.reserveSpend(
+        spendInput(runA, attemptA, [quotaA, quotaB], 60),
+        spendRequest(runA, attemptA),
+        1,
+      ),
+      second.reserveSpend(
+        spendInput(runB, attemptB, [quotaB, quotaA], 60),
+        spendRequest(runB, attemptB),
+        1,
+      ),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "spend_reservation_quota_exceeded" },
+    });
+  });
+});
+
+it("rejects reservation when the Postgres backend is unavailable", async () => {
+  const store = new PostgresEventStore("postgresql://harness@127.0.0.1:1/harness", {
+    poolSize: 1,
+  });
+  const runId = schemaIds.nextRunId();
+  const attemptId = schemaIds.nextRunId();
+  try {
+    await expect(
+      store.reserveSpend(
+        spendInput(runId, attemptId, [spendQuota("quota.unavailable", 1_000)]),
+        spendRequest(runId, attemptId),
+        1,
+      ),
+    ).rejects.toBeInstanceOf(StoreUnavailableError);
+  } finally {
+    await store.close();
   }
 });
