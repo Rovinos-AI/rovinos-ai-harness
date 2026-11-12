@@ -156,6 +156,55 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+  kusto-emulator:
+    image: mcr.microsoft.com/azuredataexplorer/kustainer-linux:latest
+    environment:
+      ACCEPT_EULA: "Y"
+    expose:
+      - "8080"
+    cpus: 2
+    mem_limit: 4g
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+      - /kusto/tmp:size=2g,noexec,nosuid,nodev
+      - /kustodata:size=1g,noexec,nosuid,nodev
+      - /root/Kusto:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--output", "/dev/null", "http://127.0.0.1:8080"]
+      interval: 2s
+      timeout: 3s
+      start_period: 60s
+      retries: 60
+    networks:
+      - internal
+  kusto-test-client:
+    image: node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
+    working_dir: /workspace
+    command: ["node", "--experimental-strip-types", "test/kusto-schema-runner.ts", "--run"]
+    volumes:
+      - ../../test:/workspace/test:ro
+      - ../../scripts/kusto:/workspace/scripts/kusto:ro
+      - ../../infra/kusto:/workspace/infra/kusto:ro
+      - ../../node_modules:/workspace/node_modules:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "--version"]
+    depends_on:
+      kusto-emulator:
+        condition: service_healthy
+    networks:
+      - internal
 networks:
   internal:
     internal: true

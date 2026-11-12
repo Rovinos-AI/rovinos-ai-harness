@@ -114,6 +114,7 @@
     "@types/spdx-expression-parse": "4.0.0",
     "@vitest/coverage-v8": "4.1.12",
     "@vitest/eslint-plugin": "1.6.28",
+    "azure-kusto-data": "7.2.0",
     "better-sqlite3": "13.0.3",
     "commander": "15.0.0",
     "cspell": "10.4.0",
