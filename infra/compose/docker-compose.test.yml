@@ -157,7 +157,9 @@ services:
       timeout: 3s
       retries: 30
   kusto-emulator:
-    image: mcr.microsoft.com/azuredataexplorer/kustainer-linux:latest
+    profiles:
+      - kusto-contract
+    image: mcr.microsoft.com/azuredataexplorer/kustainer-linux:2026.11.12.1414-2645-507a50c-master@sha256:41a19f305682ccee256dd8f7290ddd93219d74e492ba3c476402edd07c33c70e
     environment:
       ACCEPT_EULA: "Y"
     expose:
@@ -187,6 +189,9 @@ services:
       - kusto-contract
     image: node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
     working_dir: /workspace
+    environment:
+      KUSTO_CLUSTER_URI: http://kusto-emulator:8080
+      KUSTO_DATABASE: NetDefaultDB
     command:
       ["node", "--experimental-strip-types", "scripts/kusto/emulator-contract-runner.ts", "--run"]
     volumes:
@@ -207,8 +212,6 @@ services:
         condition: service_healthy
     networks:
       - internal
-    extra_hosts:
-      - "kusto-emulator=${KUSTO_EMULATOR_IP:-host-gateway}"
 networks:
   internal:
     internal: true

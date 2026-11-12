@@ -38,22 +38,25 @@ node --experimental-strip-types scripts/kusto/apply-schema.ts --apply
 The exporter profile itself uses managed ingestion, which requires streaming
 ingestion enabled on a real cluster. The Microsoft
 [Kusto emulator installation guide](https://learn.microsoft.com/en-us/azure/data-explorer/kusto-emulator-install)
-documents the `kustainer-linux` image, the `latest` or `stable` tags, port 8080,
-and the required `ACCEPT_EULA=Y` setting. The test Compose service accepts the
-EULA, exposes port 8080 only on the internal test network, and does not publish
-the port to the host. The emulator does not support
+documents the `kustainer-linux` image, port 8080, and the required
+`ACCEPT_EULA=Y` setting. The test Compose service pins
+`2026.11.12.1414-2645-507a50c-master` by digest, accepts the EULA, exposes port
+8080 only on the internal test network, and does not publish the port to the
+host. The emulator does not support
 Microsoft Entra authentication, managed/streaming ingestion, or the queued
 ingestion endpoint. The contract test therefore uses named JSON mappings and
 inline ingestion; it verifies schema application and row shape, not the live
 collector-to-cluster exporter path.
 The test client uses the Compose service address `http://kusto-emulator:8080`
-and the emulator's `NetDefaultDB` catalog; the one-off client is profile-gated so
-the general integration stack does not start it without its test configuration.
+and the emulator's `NetDefaultDB` catalog. The emulator and one-off client use
+the `kusto-contract` profile, so the general integration stack does not start
+the resource-intensive emulator.
 
 Create a database before applying the schema. For manual local use, start the
 emulator with a loopback-only port mapping, for example
 `docker run -e ACCEPT_EULA=Y -p 127.0.0.1:8080:8080
-mcr.microsoft.com/azuredataexplorer/kustainer-linux:latest`, then run:
+mcr.microsoft.com/azuredataexplorer/kustainer-linux:2026.11.12.1414-2645-507a50c-master@sha256:41a19f305682ccee256dd8f7290ddd93219d74e492ba3c476402edd07c33c70e`,
+then run:
 
 ```sh
 ADX_CLUSTER_URI=http://127.0.0.1:8080 \
