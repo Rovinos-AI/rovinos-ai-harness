@@ -173,7 +173,7 @@ export function safeRecordError(span: Span, error: unknown): void {
  * Registers a span name and its allowlisted attribute shape.
  *
  * @param name - Harness span name matching `harness.<lowercase_name>`.
- * @param shape - Attribute schemas created only with the `attr` helpers.
+ * @param shape - Attribute schemas created only with `attr` helpers, using harness names or explicitly allowlisted semantic-convention names.
  * @param ownerTask - Task and package that owns this span definition.
  * @returns The registered span definition.
  * @throws SpanRegistryError when the name is invalid, duplicated, or has an unsafe attribute.
@@ -239,7 +239,7 @@ function registerSpan<const Shape extends SpanShape>(
   if (
     Object.keys(shapeSnapshot).some(
       (key) =>
-        !spanNamePattern.test(key) && !(semanticConvention && semconvAttributeNames.has(key)),
+        !spanNamePattern.test(key) && !semconvAttributeNames.has(key),
     )
   ) {
     throw new SpanRegistryError("span_attr_name_invalid");

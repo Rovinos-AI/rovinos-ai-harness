@@ -95,6 +95,17 @@ describe("canary release gate", () => {
     await current.exerciseTelemetry();
     await current.exerciseKeysRotatedLog();
 
+    const genAiSpan = current.captured.spans.find(({ name }) => name === "harness.canary.genai");
+    expect(genAiSpan?.attributes).toMatchObject({
+      "gen_ai.provider.name": "synthetic",
+      "gen_ai.request.model": "synthetic_model",
+      "gen_ai.usage.input_tokens": 3,
+      "gen_ai.usage.output_tokens": 2,
+      "gen_ai.usage.cache_read.input_tokens": 1,
+      "gen_ai.usage.cache_creation.input_tokens": 1,
+    });
+    expect(JSON.stringify(genAiSpan?.attributes)).not.toContain(current.canaries.email.value);
+
     expect(current.captured.toolBoundary.join("\n")).toContain(current.canaries.phone.value);
     expect(current.captured.toolBoundary.join("\n")).toContain(current.canaries.card.value);
     expect(current.captured.toolErrors.join("\n")).toContain(current.canaries.card.value);

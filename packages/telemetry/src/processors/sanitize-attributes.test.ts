@@ -22,19 +22,29 @@ describe("sanitizeAttributes", () => {
         "harness.test.code": attr.code(),
         "harness.test.count": attr.nonnegativeInt(),
         "harness.user.pseudonym": attr.optional(attr.pseudonym()),
+        "gen_ai.provider.name": attr.code(),
       },
     };
     const source = {
       "harness.test.code": "safe_code",
       "harness.test.count": -1,
       "harness.unregistered": true,
+      "gen_ai.provider.name": "provider_a",
+      "gen_ai.unknown.attribute": "not_allowed",
     };
 
     const sanitized = sanitizeAttributes(definition, source);
 
-    expect(sanitized).toEqual({ "harness.test.code": "safe_code" });
+    expect(sanitized).toEqual({
+      "harness.test.code": "safe_code",
+      "gen_ai.provider.name": "provider_a",
+    });
     expect(sanitized).not.toBe(source);
-    expect(metricMocks.record.mock.calls).toEqual([["invalid_attr"], ["unregistered_attr"]]);
+    expect(metricMocks.record.mock.calls).toEqual([
+      ["invalid_attr"],
+      ["unregistered_attr"],
+      ["unregistered_attr"],
+    ]);
   });
 
   it("denies sensitive attributes before validating their registered schemas", () => {
@@ -52,6 +62,10 @@ describe("sanitizeAttributes", () => {
       "gen_ai.input",
       "gen_ai.output",
       "gen_ai.system_instructions",
+      "gen_ai.tool.call.arguments",
+      "gen_ai.tool.call.result",
+      "gen_ai.tool.definitions",
+      "gen_ai.tool.description",
     ];
     const definition = {
       shape: Object.fromEntries(deniedNames.map((name) => [name, attr.code()])),

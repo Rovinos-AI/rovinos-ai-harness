@@ -7,6 +7,12 @@ import {
   createTelemetrySdk,
   defineSpan,
   defineLogRecord,
+  GEN_AI_PROVIDER_NAME,
+  GEN_AI_REQUEST_MODEL,
+  GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+  GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+  GEN_AI_USAGE_INPUT_TOKENS,
+  GEN_AI_USAGE_OUTPUT_TOKENS,
   emitKeysRotated,
   SentinelGate,
   type VaultRunReader,
@@ -20,6 +26,19 @@ import {
 import { z } from "zod";
 
 const UNSAFE_SPAN_NAME = "harness.canary.unsafe";
+const canaryGenAiSpan = defineSpan(
+  "harness.canary.genai",
+  {
+    "harness.run.id": attr.id(),
+    [GEN_AI_PROVIDER_NAME]: attr.code(),
+    [GEN_AI_REQUEST_MODEL]: attr.code(),
+    [GEN_AI_USAGE_INPUT_TOKENS]: attr.nonnegativeInt(),
+    [GEN_AI_USAGE_OUTPUT_TOKENS]: attr.nonnegativeInt(),
+    [GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS]: attr.nonnegativeInt(),
+    [GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS]: attr.nonnegativeInt(),
+  },
+  { taskId: "11.8", packageName: "@rovinos/telemetry" },
+);
 const canaryLog = defineLogRecord("harness.canary.pipeline", {
   "harness.run.id": attr.id(),
   "harness.error.code": attr.code(),
@@ -135,6 +154,30 @@ export async function emitCanaryUnsafeSpan(
     .startSpan(UNSAFE_SPAN_NAME, {
       attributes: { "harness.run.id": runId, "harness.canary.value": canary },
     });
+  span.end();
+  await telemetry.sdk.forceFlush();
+}
+
+/** Exercise mapped GenAI metadata and ensure content-bearing convention fields are dropped. */
+export async function emitCanaryGenAiSpan(
+  telemetry: CanaryTelemetry,
+  runId: Id,
+  canary: string,
+): Promise<void> {
+  const span = canaryGenAiSpan.start({
+    "harness.run.id": runId,
+    [GEN_AI_PROVIDER_NAME]: "synthetic",
+    [GEN_AI_REQUEST_MODEL]: "synthetic_model",
+    [GEN_AI_USAGE_INPUT_TOKENS]: 3,
+    [GEN_AI_USAGE_OUTPUT_TOKENS]: 2,
+    [GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS]: 1,
+    [GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS]: 1,
+  });
+  span.setAttribute("gen_ai.prompt", canary);
+  span.setAttribute("gen_ai.input.messages", canary);
+  span.setAttribute("gen_ai.output.messages", canary);
+  span.setAttribute("gen_ai.tool.call.arguments", canary);
+  span.setAttribute("gen_ai.tool.call.result", canary);
   span.end();
   await telemetry.sdk.forceFlush();
 }

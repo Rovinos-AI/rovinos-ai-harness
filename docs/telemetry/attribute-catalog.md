@@ -71,6 +71,12 @@ Owner task: `25.3`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `gen_ai.provider.name` | Code | Optional | `@rovinos/core` |
+| `gen_ai.request.model` | Code | Optional | `@rovinos/core` |
+| `gen_ai.usage.cache_creation.input_tokens` | integer | Optional | `@rovinos/core` |
+| `gen_ai.usage.cache_read.input_tokens` | integer | Optional | `@rovinos/core` |
+| `gen_ai.usage.input_tokens` | integer | Optional | `@rovinos/core` |
+| `gen_ai.usage.output_tokens` | integer | Optional | `@rovinos/core` |
 | `harness.context.estimated_tokens` | integer | Required | `@rovinos/core` |
 | `harness.context.message_count` | integer | Required | `@rovinos/core` |
 | `harness.context.strategy` | Code | Required | `@rovinos/core` |

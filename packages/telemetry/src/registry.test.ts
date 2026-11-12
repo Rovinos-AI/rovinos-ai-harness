@@ -198,6 +198,30 @@ describe("span registry", () => {
     expect(definition.ownerTask).toEqual(testOwnerTask);
   });
 
+  it("allows only explicitly approved semantic-convention attributes on harness spans", () => {
+    const definition = defineSpan(
+      "harness.test.genai",
+      {
+        "gen_ai.provider.name": attr.code(),
+        "gen_ai.usage.input_tokens": attr.nonnegativeInt(),
+      },
+      testOwnerTask,
+    );
+    const span = definition.start({
+      "gen_ai.provider.name": "provider_a",
+      "gen_ai.usage.input_tokens": 0,
+    });
+    expect(span.spanContext().traceId).toMatch(/^[0-9a-f]{32}$/u);
+    span.end();
+    expect(() =>
+      defineSpan(
+        "harness.test.unknown_semconv",
+        { "gen_ai.unknown.attribute": attr.code() },
+        testOwnerTask,
+      ),
+    ).toThrow("span_attr_name_invalid");
+  });
+
   it("rejects an unconstrained attribute, including an optional wrapper", () => {
     expect(() =>
       defineSpan("harness.test.unsafe", { "harness.test.text": z.string() }, testOwnerTask),
