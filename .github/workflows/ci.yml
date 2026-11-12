@@ -85,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/release/verify-release.ts --dry-run
-          for package in sdk cli store-sqlite store-postgres rate-limit-redis; do
+          for package in sdk extensions cli store-sqlite store-postgres rate-limit-redis; do
             (cd "packages/$package" && yarn pack --dry-run)
           done
       - name: Validate Compose security profiles

@@ -3133,6 +3133,21 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@rovinos/extensions@workspace:^, @rovinos/extensions@workspace:packages/extensions":
+  version: 0.0.0-use.local
+  resolution: "@rovinos/extensions@workspace:packages/extensions"
+  dependencies:
+    "@rovinos/sdk": "workspace:^"
+    "@types/node": "npm:26.6.6"
+    tsup: "npm:9.0.0"
+    typescript: "npm:5.9.3"
+    vitest: "npm:4.1.12"
+    zod: "npm:4.6.7"
+  peerDependencies:
+    "@rovinos/sdk": "workspace:^"
+  languageName: unknown
+  linkType: soft
+
 "@rovinos/host@workspace:^, @rovinos/host@workspace:packages/host":
   version: 0.0.0-use.local
   resolution: "@rovinos/host@workspace:packages/host"
@@ -9844,6 +9859,7 @@ __metadata:
     "@rovinos/core": "workspace:^"
     "@rovinos/eslint-plugin-harness": "workspace:^"
     "@rovinos/eval": "workspace:^"
+    "@rovinos/extensions": "workspace:^"
     "@rovinos/host": "workspace:^"
     "@rovinos/mcp": "workspace:^"
     "@rovinos/models": "workspace:^"
