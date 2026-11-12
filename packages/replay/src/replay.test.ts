@@ -36,7 +36,10 @@ function completion(parts: ModelCompletion["parts"]): ModelCompletion {
   };
 }
 
-function fakeTool(): ToolPort {
+function fakeTool(
+  onExecute: () => void = () => undefined,
+  result: Record<string, boolean | string> = { complete: true },
+): ToolPort {
   return new FakeToolPort(
     new Map([
       [
@@ -44,7 +47,10 @@ function fakeTool(): ToolPort {
         {
           idempotent: true,
           timeoutMs: 1000,
-          execute: () => Promise.resolve({ outcome: "ok", result: { complete: true } }),
+          execute: () => {
+            onExecute();
+            return Promise.resolve({ outcome: "ok", result });
+          },
         },
       ],
     ]),
@@ -73,12 +79,13 @@ async function recordRun(
   script: readonly ModelCompletion[],
   policy?: PolicyPort,
   goal = "synthetic replay goal",
+  tool: ToolPort = fakeTool(),
 ): Promise<ResolvedRun> {
   const store = new InMemoryEventStore();
   const runtime = await createRuntime(runConfig, {
     store,
     model: new FakeModelPort(script),
-    tool: fakeTool(),
+    tool,
     sandboxBackend: { exec: () => Promise.reject(new Error("Unused synthetic sandbox backend")) },
     transientVault: true,
     ...(policy === undefined ? {} : { policy }),
@@ -336,5 +343,31 @@ describe("replayRun", () => {
     expect(
       outcome.events.every((event) => event.type !== "run_created" || event.replayOf !== undefined),
     ).toBe(true);
+  });
+
+  it("replays recorded retrieval results without invoking the current tool registry", async () => {
+    let retrievalCalls = 0;
+    const original = await recordRun(
+      [
+        completion([{ type: "tool_call", ...toolCall() }]),
+        completion([{ type: "text", text: "Recorded synthetic retrieval result consumed." }]),
+      ],
+      askPolicy,
+      "synthetic retrieval replay",
+      fakeTool(() => {
+        retrievalCalls += 1;
+      }, { reference: "recorded synthetic retrieval result" }),
+    );
+    expect(retrievalCalls).toBe(1);
+    const replay = await replayRun(original, {
+      config: runConfig,
+      policy: askPolicy,
+      toolRegistry: fakeTool(() => {
+        retrievalCalls += 1;
+      }),
+    });
+    expect(replay.status).toBe("completed");
+    expect(replay.divergence).toBeUndefined();
+    expect(retrievalCalls).toBe(1);
   });
 });

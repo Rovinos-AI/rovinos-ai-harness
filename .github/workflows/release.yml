@@ -96,7 +96,7 @@ jobs:
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
           version="${tag#v}"
-          for package in rate-limit-redis sdk extensions cli store-sqlite store-postgres; do
+          for package in rate-limit-redis sdk extensions extension-retrieval cli store-sqlite store-postgres; do
             name="@rovinos/$package"
             tarball="$RUNNER_TEMP/$package.tgz"
             (cd "packages/$package" && yarn pack --out "$tarball")
@@ -125,6 +125,12 @@ jobs:
                   "package/dist/index.d.ts"
                   "package/dist/testing.js"
                   "package/dist/testing.d.ts"
+                )
+                ;;
+              extension-retrieval)
+                required_paths=(
+                  "package/dist/index.js"
+                  "package/dist/index.d.ts"
                 )
                 ;;
               cli)
@@ -177,7 +183,7 @@ jobs:
           fi
           notes="$RUNNER_TEMP/release-notes.md"
           : > "$notes"
-          for package in rate-limit-redis sdk extensions cli store-sqlite store-postgres; do
+          for package in rate-limit-redis sdk extensions extension-retrieval cli store-sqlite store-postgres; do
             changelog="packages/$package/CHANGELOG.md"
             if [ ! -f "$changelog" ]; then
               echo "Missing Changesets changelog for @rovinos/$package."
