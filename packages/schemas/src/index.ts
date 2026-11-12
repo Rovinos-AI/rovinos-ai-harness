@@ -154,6 +154,20 @@ export {
   type RateLimitResult,
   type RateLimitStore,
 } from "./rate-limit.js";
+export {
+  SpendReservationErrorCodeSchema,
+  SpendReservationInputSchema,
+  SpendReservationPeriodSchema,
+  SpendReservationQuotaSchema,
+  SpendReservationSchema,
+  SpendReservationSettlementSchema,
+  SpendReservationStateSchema,
+  type SpendReservation,
+  type SpendReservationErrorCode,
+  type SpendReservationInput,
+  type SpendReservationQuota,
+  type SpendReservationSettlement,
+} from "./spend-reservation.js";
 export { isSecretKeyName } from "./secret-key-name.js";
 export {
   DestinationSchema,
