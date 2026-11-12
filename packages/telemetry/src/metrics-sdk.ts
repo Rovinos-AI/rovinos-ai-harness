@@ -11,7 +11,12 @@ import {
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { env } from "node:process";
 import { TelemetryMetricsConfigError } from "./errors.js";
-import { METRIC_ALLOWLIST, selectTelemetryMeterProvider } from "./metrics.js";
+import {
+  METRIC_ALLOWLIST,
+  TELEMETRY_DROP_REASONS,
+  configureMetricCardinality,
+  selectTelemetryMeterProvider,
+} from "./metrics.js";
 import { POLICY_VERSION } from "./generated/policy-version.js";
 
 const EXPORT_INTERVAL_MS = 60_000;
@@ -38,7 +43,9 @@ function metricViews(maxSeries: number) {
     instrumentName,
     meterName: "@rovinos/telemetry",
     attributesProcessors: [createAllowListAttributesProcessor([...attributes])],
-    aggregationCardinalityLimit: maxSeries,
+    // Drop reasons are a fixed enum, so preserve each even when maxSeries is lower.
+    aggregationCardinalityLimit:
+      instrumentName === "harness.telemetry.dropped" ? TELEMETRY_DROP_REASONS.length : maxSeries,
   }));
 }
 
@@ -90,6 +97,7 @@ function createLifecycle(metrics: ActiveMetrics): TelemetryMetricsLifecycle {
       if (active.references > 0) {
         return;
       }
+      configureMetricCardinality();
       if (activeMetrics === active) {
         activeMetrics = undefined;
         selectTelemetryMeterProvider(undefined);
@@ -122,6 +130,7 @@ export function initializeTelemetryMetrics(
     return createLifecycle(activeMetrics);
   }
 
+  configureMetricCardinality(parsedConfig.maxSeries);
   const reader =
     parsedConfig.enabled && parsedConfig.ownership === "harness"
       ? createMetricReader(exporter)

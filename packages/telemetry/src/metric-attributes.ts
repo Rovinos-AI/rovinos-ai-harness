@@ -11,6 +11,7 @@ export const TELEMETRY_DROP_REASONS = [
   "event_stripped",
   "leak_sentinel",
   "processor_error",
+  "cardinality",
   "trip_queue_overflow",
   "trip_append_failed",
   "trip_flush_failed",
@@ -94,7 +95,7 @@ export interface ModelUsageAttributes extends Readonly<Record<string, Code>> {
   readonly "harness.model.name": Code;
 }
 interface QuotaRejectionAttribute extends Readonly<Record<string, Code>> {
-  readonly "harness.quota.id": Code;
+  readonly "harness.quota.code": Code;
 }
 /** Attributes emitted by shared rate-limit denial metrics. */
 export interface RateLimitDeniedAttributes extends Readonly<Record<string, RateLimitKeyKind>> {
@@ -119,7 +120,7 @@ export interface WorkerJobAttributes extends Readonly<Record<string, WorkerJobOu
 }
 /** Attributes emitted by the completed-run counter. */
 export interface RunCompletedAttributes extends Readonly<Record<string, RunCompletionOutcome>> {
-  readonly "harness.run.completed.outcome": RunCompletionOutcome;
+  readonly "harness.execution.outcome": RunCompletionOutcome;
 }
 /** Attributes emitted by the approval-wait histogram. */
 export interface ApprovalWaitAttributes extends Readonly<Record<string, ApprovalDecision>> {
@@ -139,7 +140,7 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
   "harness.rate_limit.denied.key_kind": RATE_LIMIT_KEY_KINDS,
   "harness.rate_limit.degraded.backend": RATE_LIMIT_BACKENDS,
-  "harness.run.completed.outcome": RUN_COMPLETION_OUTCOMES,
+  "harness.execution.outcome": RUN_COMPLETION_OUTCOMES,
   "harness.approval.wait_ms.decision": APPROVAL_DECISIONS,
   "harness.tool.calls.outcome": TOOL_CALL_OUTCOMES,
 } as const satisfies Record<Code, readonly Code[]>;
@@ -153,7 +154,7 @@ export const METRIC_ALLOWLIST = {
   "harness.model.tokens": ["harness.model.provider", "harness.model.name"],
   "harness.model.cost_micros": ["harness.model.provider", "harness.model.name"],
   "harness.policy.decisions": ["harness.policy.decision"],
-  "harness.quota.rejections": ["harness.quota.id"],
+  "harness.quota.rejections": ["harness.quota.code"],
   "harness.pii.blob_hit": [],
   "harness.pii.detector_degraded": [],
   "harness.sentinel.scope_reduced": [],
@@ -165,7 +166,7 @@ export const METRIC_ALLOWLIST = {
   "harness.rate_limit.denied": ["harness.rate_limit.denied.key_kind"],
   "harness.rate_limit.degraded": ["harness.rate_limit.degraded.backend"],
   "harness.worker.queue_lag_ms": [],
-  "harness.run.completed": ["harness.run.completed.outcome"],
+  "harness.run.completed": ["harness.execution.outcome"],
   "harness.model.latency_ms": ["harness.model.provider", "harness.model.name"],
   "harness.approval.wait_ms": ["harness.approval.wait_ms.decision"],
   "harness.tool.calls": ["harness.tool.calls.outcome"],
@@ -197,7 +198,7 @@ export const METRIC_ATTRIBUTE_BOUNDS = {
     "harness.policy.decision": { kind: "enum", values: POLICY_DECISIONS },
   },
   "harness.quota.rejections": {
-    "harness.quota.id": { kind: "config", source: "config.quotas" },
+    "harness.quota.code": { kind: "config", source: "config.quotas" },
   },
   "harness.pii.blob_hit": {},
   "harness.pii.detector_degraded": {},
@@ -221,7 +222,7 @@ export const METRIC_ATTRIBUTE_BOUNDS = {
   },
   "harness.worker.queue_lag_ms": {},
   "harness.run.completed": {
-    "harness.run.completed.outcome": { kind: "enum", values: RUN_COMPLETION_OUTCOMES },
+    "harness.execution.outcome": { kind: "enum", values: RUN_COMPLETION_OUTCOMES },
   },
   "harness.model.latency_ms": {
     "harness.model.provider": { kind: "config", source: "models.providers" },

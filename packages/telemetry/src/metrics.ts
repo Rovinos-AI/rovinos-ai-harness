@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   metrics,
-  type Attributes,
   type Counter,
   type Histogram,
   type Meter,
   type MeterProvider,
+  type Context,
 } from "@opentelemetry/api";
 import { Code, type Code as CodeType, type ModelUsage } from "@rovinos/schemas";
 import { isValidModelUsage } from "./metric-validation.js";
@@ -30,8 +30,22 @@ import type {
   WorkerJobOutcome,
 } from "./metric-attributes.js";
 import { safelyRecordMetric } from "./metric-safety.js";
+import { createMetricCardinalityGuard } from "./metrics-cardinality.js";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
+type RegisteredMetricAttributes =
+  | NoMetricAttributes
+  | TelemetryDropAttributes
+  | HostAppRejectedAttributes
+  | PolicyDecisionAttributes
+  | ModelUsageAttributes
+  | QuotaRejectionAttributes
+  | McpInputRequestAttributes
+  | WorkerJobAttributes
+  | RunCompletedAttributes
+  | ApprovalWaitAttributes
+  | ToolCallAttributes;
+type MetricName = keyof typeof METRIC_ALLOWLIST;
 export {
   HOST_APP_REJECTED_REASONS,
   APPROVAL_DECISIONS,
@@ -84,6 +98,14 @@ let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
 let modelLatencyHistogram: Histogram<ModelUsageAttributes> | undefined;
 let approvalWaitHistogram: Histogram<ApprovalWaitAttributes> | undefined;
 let telemetryMeterProvider: MeterProvider | undefined;
+let metricCardinalityLimit = 100;
+let metricCardinalityGuard = createCardinalityGuard(metricCardinalityLimit);
+
+function createCardinalityGuard(maxSeries: number) {
+  return createMetricCardinalityGuard(maxSeries, () => {
+    countDroppedTelemetry("cardinality");
+  });
+}
 
 function getTelemetryMeter(): Meter {
   return (
@@ -97,6 +119,7 @@ export function selectTelemetryMeterProvider(provider: MeterProvider | undefined
     return;
   }
   telemetryMeterProvider = provider;
+  metricCardinalityGuard = createCardinalityGuard(metricCardinalityLimit);
   droppedCounter = undefined;
   hostAppRejectedCounter = undefined;
   policyDecisionsCounter = undefined;
@@ -122,60 +145,82 @@ export function selectTelemetryMeterProvider(provider: MeterProvider | undefined
   approvalWaitHistogram = undefined;
 }
 
-function createCounter<TAttributes extends Attributes>(
-  name: keyof typeof METRIC_ALLOWLIST,
-  factory: (meter: Meter, name: keyof typeof METRIC_ALLOWLIST) => Counter<TAttributes>,
+function createCounter<TAttributes extends RegisteredMetricAttributes>(
+  name: MetricName,
 ): Counter<TAttributes> {
-  return factory(getTelemetryMeter(), name);
+  const instrument = getTelemetryMeter().createCounter<TAttributes>(name);
+  return {
+    add(value: number, attributes?: TAttributes, context?: Context): void {
+      safelyRecordMetric(() => {
+        if (metricCardinalityGuard.admit(name, attributes ?? {})) {
+          if (attributes === undefined && context === undefined) {
+            instrument.add(value);
+          } else if (context === undefined) {
+            instrument.add(value, attributes);
+          } else {
+            instrument.add(value, attributes, context);
+          }
+        }
+      });
+    },
+  };
 }
 
-function createMetricHistogram(name: keyof typeof METRIC_ALLOWLIST): Histogram<NoMetricAttributes> {
-  return getTelemetryMeter().createHistogram<NoMetricAttributes>(name);
+function createMetricHistogram<TAttributes extends RegisteredMetricAttributes>(
+  name: MetricName,
+): Histogram<TAttributes> {
+  const instrument = getTelemetryMeter().createHistogram<TAttributes>(name);
+  return {
+    record(value: number, attributes?: TAttributes, context?: Context): void {
+      safelyRecordMetric(() => {
+        if (metricCardinalityGuard.admit(name, attributes ?? {})) {
+          if (attributes === undefined && context === undefined) {
+            instrument.record(value);
+          } else if (context === undefined) {
+            instrument.record(value, attributes);
+          } else {
+            instrument.record(value, attributes, context);
+          }
+        }
+      });
+    },
+  };
+}
+
+/** Applies the validated telemetry configuration to the runtime series guard. */
+export function configureMetricCardinality(maxSeries = 100): void {
+  metricCardinalityLimit = maxSeries;
+  metricCardinalityGuard = createCardinalityGuard(maxSeries);
 }
 
 function getDroppedCounter(): Counter<TelemetryDropAttributes> {
-  droppedCounter ??= createCounter<TelemetryDropAttributes>(
-    "harness.telemetry.dropped",
-    (meter, name) => meter.createCounter<TelemetryDropAttributes>(name),
-  );
+  droppedCounter ??= createCounter<TelemetryDropAttributes>("harness.telemetry.dropped");
   return droppedCounter;
 }
 
 function getHostAppRejectedCounter(): Counter<HostAppRejectedAttributes> {
-  hostAppRejectedCounter ??= createCounter<HostAppRejectedAttributes>(
-    "harness.host.app_rejected",
-    (meter, name) => meter.createCounter<HostAppRejectedAttributes>(name),
-  );
+  hostAppRejectedCounter ??= createCounter<HostAppRejectedAttributes>("harness.host.app_rejected");
   return hostAppRejectedCounter;
 }
 
 function getPolicyDecisionsCounter(): Counter<PolicyDecisionAttributes> {
-  policyDecisionsCounter ??= createCounter<PolicyDecisionAttributes>(
-    "harness.policy.decisions",
-    (meter, name) => meter.createCounter<PolicyDecisionAttributes>(name),
-  );
+  policyDecisionsCounter ??= createCounter<PolicyDecisionAttributes>("harness.policy.decisions");
   return policyDecisionsCounter;
 }
 
 function getPiiBlobHitCounter(): Counter<NoMetricAttributes> {
-  piiBlobHitCounter ??= createCounter<NoMetricAttributes>("harness.pii.blob_hit", (meter, name) =>
-    meter.createCounter<NoMetricAttributes>(name),
-  );
+  piiBlobHitCounter ??= createCounter<NoMetricAttributes>("harness.pii.blob_hit");
   return piiBlobHitCounter;
 }
 
 function getPiiDetectorDegradedCounter(): Counter<NoMetricAttributes> {
-  piiDetectorDegradedCounter ??= createCounter<NoMetricAttributes>(
-    "harness.pii.detector_degraded",
-    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
-  );
+  piiDetectorDegradedCounter ??= createCounter<NoMetricAttributes>("harness.pii.detector_degraded");
   return piiDetectorDegradedCounter;
 }
 
 function getHostAppSpansAcceptedCounter(): Counter<NoMetricAttributes> {
   hostAppSpansAcceptedCounter ??= createCounter<NoMetricAttributes>(
     "harness.host.app_spans_accepted",
-    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
   );
   return hostAppSpansAcceptedCounter;
 }
@@ -183,71 +228,50 @@ function getHostAppSpansAcceptedCounter(): Counter<NoMetricAttributes> {
 function getSkippedShortValuesCounter(): Counter<NoMetricAttributes> {
   skippedShortValuesCounter ??= createCounter<NoMetricAttributes>(
     "harness.sentinel.short_values_skipped",
-    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
   );
   return skippedShortValuesCounter;
 }
 
 function getScopeReducedCounter(): Counter<NoMetricAttributes> {
-  scopeReducedCounter ??= createCounter<NoMetricAttributes>(
-    "harness.sentinel.scope_reduced",
-    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
-  );
+  scopeReducedCounter ??= createCounter<NoMetricAttributes>("harness.sentinel.scope_reduced");
   return scopeReducedCounter;
 }
 
 function getModelTokensCounter(): Counter<ModelUsageAttributes> {
-  modelTokensCounter ??= createCounter<ModelUsageAttributes>(
-    "harness.model.tokens",
-    (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
-  );
+  modelTokensCounter ??= createCounter<ModelUsageAttributes>("harness.model.tokens");
   return modelTokensCounter;
 }
 
 function getModelCostCounter(): Counter<ModelUsageAttributes> {
-  modelCostCounter ??= createCounter<ModelUsageAttributes>(
-    "harness.model.cost_micros",
-    (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
-  );
+  modelCostCounter ??= createCounter<ModelUsageAttributes>("harness.model.cost_micros");
   return modelCostCounter;
 }
 
 function getModelCacheReadCounter(): Counter<ModelUsageAttributes> {
-  modelCacheReadCounter ??= createCounter<ModelUsageAttributes>(
-    "harness.model.cache_read_tokens",
-    (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
-  );
+  modelCacheReadCounter ??= createCounter<ModelUsageAttributes>("harness.model.cache_read_tokens");
   return modelCacheReadCounter;
 }
 
 function getModelCacheWriteCounter(): Counter<ModelUsageAttributes> {
   modelCacheWriteCounter ??= createCounter<ModelUsageAttributes>(
     "harness.model.cache_write_tokens",
-    (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
   );
   return modelCacheWriteCounter;
 }
 
 function getMcpDiscoveryFailedCounter(): Counter<NoMetricAttributes> {
-  mcpDiscoveryFailedCounter ??= createCounter<NoMetricAttributes>(
-    "harness.mcp.discovery_failed",
-    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
-  );
+  mcpDiscoveryFailedCounter ??= createCounter<NoMetricAttributes>("harness.mcp.discovery_failed");
   return mcpDiscoveryFailedCounter;
 }
 
 function getQuotaRejectionsCounter(): Counter<QuotaRejectionAttributes> {
-  quotaRejectionsCounter ??= createCounter<QuotaRejectionAttributes>(
-    "harness.quota.rejections",
-    (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
-  );
+  quotaRejectionsCounter ??= createCounter<QuotaRejectionAttributes>("harness.quota.rejections");
   return quotaRejectionsCounter;
 }
 
 function getMcpInputRequestsCounter(): Counter<McpInputRequestAttributes> {
   mcpInputRequestsCounter ??= createCounter<McpInputRequestAttributes>(
     "harness.mcp.input_requests",
-    (meter, name) => meter.createCounter<McpInputRequestAttributes>(name),
   );
   return mcpInputRequestsCounter;
 }
@@ -255,29 +279,23 @@ function getMcpInputRequestsCounter(): Counter<McpInputRequestAttributes> {
 /** Counts one quota rejection using the configured quota's bounded code. */
 export function countQuotaRejection(quotaId: CodeType): void {
   safelyRecordMetric(() => {
-    getQuotaRejectionsCounter().add(1, { "harness.quota.id": Code.parse(quotaId) });
+    getQuotaRejectionsCounter().add(1, { "harness.quota.code": Code.parse(quotaId) });
   });
 }
 
 function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {
-  workerJobsCounter ??= createCounter<WorkerJobAttributes>("harness.worker.jobs", (meter, name) =>
-    meter.createCounter<WorkerJobAttributes>(name),
-  );
+  workerJobsCounter ??= createCounter<WorkerJobAttributes>("harness.worker.jobs");
   return workerJobsCounter;
 }
 
 function getRateLimitDeniedCounter(): Counter<QuotaRejectionAttributes> {
-  rateLimitDeniedCounter ??= createCounter<QuotaRejectionAttributes>(
-    "harness.rate_limit.denied",
-    (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
-  );
+  rateLimitDeniedCounter ??= createCounter<QuotaRejectionAttributes>("harness.rate_limit.denied");
   return rateLimitDeniedCounter;
 }
 
 function getRateLimitDegradedCounter(): Counter<QuotaRejectionAttributes> {
   rateLimitDegradedCounter ??= createCounter<QuotaRejectionAttributes>(
     "harness.rate_limit.degraded",
-    (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
   );
   return rateLimitDegradedCounter;
 }
@@ -297,21 +315,21 @@ export function countRateLimitDegraded(backend: RateLimitBackend): void {
 }
 
 function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
-  workerQueueLagHistogram ??= createMetricHistogram("harness.worker.queue_lag_ms");
+  workerQueueLagHistogram ??= createMetricHistogram<NoMetricAttributes>(
+    "harness.worker.queue_lag_ms",
+  );
   return workerQueueLagHistogram;
 }
 
 /** Returns the registry-owned model-latency histogram. */
 export function getModelLatencyHistogram(): Histogram<ModelUsageAttributes> {
-  modelLatencyHistogram ??= getTelemetryMeter().createHistogram<ModelUsageAttributes>(
-    "harness.model.latency_ms",
-  );
+  modelLatencyHistogram ??= createMetricHistogram<ModelUsageAttributes>("harness.model.latency_ms");
   return modelLatencyHistogram;
 }
 
 /** Returns the registry-owned approval-wait histogram. */
 export function getApprovalWaitHistogram(): Histogram<ApprovalWaitAttributes> {
-  approvalWaitHistogram ??= getTelemetryMeter().createHistogram<ApprovalWaitAttributes>(
+  approvalWaitHistogram ??= createMetricHistogram<ApprovalWaitAttributes>(
     "harness.approval.wait_ms",
   );
   return approvalWaitHistogram;
@@ -319,18 +337,13 @@ export function getApprovalWaitHistogram(): Histogram<ApprovalWaitAttributes> {
 
 /** Returns the registry-owned completed-run counter. */
 export function getRunCompletedCounter(): Counter<RunCompletedAttributes> {
-  runCompletedCounter ??= createCounter<RunCompletedAttributes>(
-    "harness.run.completed",
-    (meter, name) => meter.createCounter<RunCompletedAttributes>(name),
-  );
+  runCompletedCounter ??= createCounter<RunCompletedAttributes>("harness.run.completed");
   return runCompletedCounter;
 }
 
 /** Returns the registry-owned tool-call counter. */
 export function getToolCallsCounter(): Counter<ToolCallAttributes> {
-  toolCallsCounter ??= createCounter<ToolCallAttributes>("harness.tool.calls", (meter, name) =>
-    meter.createCounter<ToolCallAttributes>(name),
-  );
+  toolCallsCounter ??= createCounter<ToolCallAttributes>("harness.tool.calls");
   return toolCallsCounter;
 }
 
