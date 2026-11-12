@@ -3,6 +3,7 @@ import { Code, Id, type NewEvent } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import { SpendReservationError, InMemorySpendReservationStore } from "./index.js";
 import { createEventBuilders } from "./testing/testing.js";
+import { runSpendReservationConformance } from "./testing/index.js";
 
 const builders = createEventBuilders();
 const runId = Id.parse("00000000000000000000000001");
@@ -44,6 +45,11 @@ function response(costMicros: number): NewEvent {
 }
 
 describe("InMemorySpendReservationStore", () => {
+  runSpendReservationConformance("InMemorySpendReservationStore", () => {
+    const store = new InMemorySpendReservationStore();
+    return Promise.resolve({ store, cleanup: () => store.close() });
+  });
+
   it("releases a reservation before dispatch and preserves idempotency", async () => {
     const store = new InMemorySpendReservationStore();
     await store.append(runId, [builders.runCreated(runId)], 0);

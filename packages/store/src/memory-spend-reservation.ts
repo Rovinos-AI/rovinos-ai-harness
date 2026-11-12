@@ -324,8 +324,7 @@ function sameSettlement(
   const leftAmount = left === undefined ? undefined : completeCostAmount(left.cost);
   const rightAmount = completeCostAmount(right.cost);
   return (
-    left !== undefined &&
-    left.attemptId === right.attemptId &&
+    left?.attemptId === right.attemptId &&
     left.runId === right.runId &&
     left.responseHash === right.responseHash &&
     left.cost.state === right.cost.state &&
