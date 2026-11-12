@@ -1,7 +1,7 @@
 # Epic #24: Run service, SDK, and horizontal scaling
 
 **Goal:** turn the harness from a single-process CLI into a service: a stable programmatic SDK, a durable run queue with workers, run creation and live updates over the control plane, multi-replica deployment, quotas across runs, and performance budgets. Read `docs/engineering/CONVENTIONS.md` first, plus epics 2, 7, 12, 18, and 19.
-**Tasks:** 24.1 to 24.8, all size S.
+**Tasks:** 24.1 to 24.10, all size S; 24.23 is a design task.
 
 Shared design for this epic:
 
@@ -260,3 +260,65 @@ Shared design for this epic:
 - [ ] The Redis backend passes the shared `RateLimitStore` conformance suite against Valkey in Azure.
 - [ ] Two replicas sharing Valkey never exceed the configured rate.
 - [ ] Deployments without `rateLimits.backend: "redis"` install and run no Redis client.
+
+---
+
+## 24.23 Strict spend reservations across concurrent runs
+
+**Parent:** #24 Run service and quotas
+**Task Description:** Define the admission and reconciliation contract for reserving estimated model-call spend across matching quotas before dispatch. This is a design task; it does not implement a reservation backend.
+**Expected Inputs:** Matching quota identities and periods, a bounded request-cost estimate, provider usage/cost state, retries, worker and store failures.
+**Expected Output:** This reservation state machine, transaction contract, failure model, conformance-test plan, and bounded implementation follow-ups.
+**Dependencies:** Existing quota ledger (24.7) and the cost-completeness contract (14.25).
+**Items it depends on:** 24.7, 14.25, 7.12.
+
+### Guarantee and non-guarantees
+
+Strict reservation mode admits a model call only when one shared, durable transaction can reserve its bounded estimate for every matching cost quota and UTC period. The estimate uses explicit input/output token ceilings and the configured price revision, rounded up to integer micro-dollars; if those inputs cannot produce a finite estimate, admission fails. In that transaction, the store checks `settled accounted cost + outstanding reservations + new reservation <= limit` and records an idempotent reservation for the model-call attempt. `known` and `estimated` settled costs both consume quota headroom; their cost states remain distinct. Concurrent requests against the same quota are serialized by the backend, so they cannot both consume the same unreserved headroom. The reservation and the existing `model_request` record must be durable before any provider request is sent.
+
+This guarantees only that the harness does not admit a call when its recorded cost and reservations exceed the configured limit. It is not a hard provider-billing cap: provider-side tokenization, hidden usage, price changes, and actual charges can exceed an estimate, and a request may be charged even if its response is lost. If complete usage reports cost above the reservation, reconciliation records the full reported cost; the accounted overrun is `max(0, reported cost - reserved amount)` and later calls are rejected while the quota is exhausted. There is no finite bound on the actual provider charge when the estimate is exceeded or usage is unknown. An overrun cannot undo a provider charge, and harness UTC periods need not match provider billing periods. Existing post-response quota behavior remains unchanged unless strict mode is explicitly enabled. Strict mode is fail-closed: unavailable or non-transactional reservation storage, an unknown price, or an estimate without a finite configured upper bound rejects the call before dispatch. It never falls back to a per-process reservation.
+
+Use integer micro-dollars and round reservation estimates up. Persist the pricing revision and UTC quota periods used to calculate each reservation; a pricing change does not rewrite reservations already in flight. If a cost quota cannot be reserved completely, reject the request without dispatch. This mechanism is separate from shared request-rate limiting (24.9, 24.10).
+
+### Reservation and reconciliation state machine
+
+Each reservation has a unique model-call attempt key and transitions atomically:
+
+| From | To | Condition and effect |
+| --- | --- | --- |
+| absent | `reserved` | Atomically check all matching quotas, record the reservation, and persist the `model_request`; otherwise reject without dispatch. |
+| `reserved` | `dispatching` | Persist immediately before the provider call. From this point, a charge may have occurred. |
+| `reserved` | `released` | Cancellation or failure proves dispatch did not begin; release its amount. |
+| `dispatching` | `settled` | Atomically append the response and usage-ledger update, replace the reservation with its reported cost state, and deduplicate by attempt key. |
+| `dispatching` | `uncertain` | A dispatched call loses its response or reports incomplete/unknown cost. Keep the exposure unresolved; lease expiry alone never releases it. |
+| `uncertain` | `settled` | A late duplicate or authoritative complete usage result reconciles the same attempt exactly once. |
+
+Duplicate settlement for an attempt is idempotent; a conflicting second response is rejected. Retries after a possibly dispatched attempt use a new attempt key and reservation unless the provider's idempotency contract proves that the original request cannot be charged twice. Expired worker leases trigger recovery, not an automatic refund. An uncertain attempt blocks further strict-mode calls for its affected quota period until complete usage is reconciled or an explicitly audited operator resolution is made. Operator resolution is not evidence of provider billing and does not restore a hard-cap guarantee.
+
+The reservation transition, quota headroom check, event append, and corresponding usage-ledger mutation must share one backend transaction where applicable. In particular, response settlement must extend the existing `appendWithUsage` atomicity rather than update the reservation or ledger after the `model_response` commit. A backend must lock all affected quota-period rows in a stable order or provide equivalent serializable isolation; transaction conflicts may be retried only as a whole bounded transaction. Strict mode rejects on transaction failure and does not make an admission decision from a stale or local-only view.
+
+### Conformance and recovery scenarios
+
+The store conformance suite must cover concurrent reservations at the exact remaining limit (only fitting reservations succeed), cross-quota requests, safe pre-dispatch cancellation/release, cancellation after dispatch, duplicate and conflicting responses, crash before and after the dispatching transition, expired leases, delayed/late responses, backend unavailability, missing or partial pricing/usage, price changes with in-flight reservations, and safe-integer/rounding boundaries. Assert that every retry is idempotent, uncertainty is never silently released, recorded overruns block later calls, and recovery preserves the ledger and reservation state after restart. Run the same contract against each durable backend, including two independent clients for shared-backend concurrency.
+
+### Bounded implementation follow-ups
+
+These are proposed scopes for separately assigned implementation tasks after maintainer approval:
+
+1. Define the reservation schemas, store transaction port, typed failures, reference behavior, and backend-neutral conformance suite.
+2. Implement the transaction and recovery contract in the SQLite store, with restart and competing-connection tests.
+3. Implement the same contract in Postgres, with row-locking/serialization and competing-worker integration tests. Do not add a Redis dependency.
+4. Integrate fail-closed admission and atomic response reconciliation in the core model-call path; add the opt-in strict-mode configuration and model-path tests.
+5. Implement worker-death recovery and audited operator resolution for uncertain attempts, with crash/restart tests and user-facing recovery documentation.
+
+Do not change existing event payloads for this design. If implementation later requires an event contract change, use the repository's event-versioning, upcaster, and legacy-fixture rules.
+
+**Tests to write:** Reusable store conformance scenarios above; SQLite and Postgres multi-client races; core integration tests for pre-dispatch rejection, response reconciliation, overrun and uncertain-attempt blocking; crash/restart tests for both sides of the dispatch transition.
+**Acceptance Criteria:**
+
+- [ ] The admission guarantee and its provider-billing uncertainty are explicit.
+- [ ] Reservation, release, and reconciliation transitions are atomic, idempotent, and recoverable.
+- [ ] Fail-closed behavior and the effect of unknown usage, pricing, lease expiry, and backend failure are specified.
+- [ ] Implementation is divided into bounded store-contract, SQLite, Postgres, and runtime-integration tasks.
+
+**Design status:** Draft for maintainer approval; this task does not authorize implementation or claim an enforced provider-billing cap.

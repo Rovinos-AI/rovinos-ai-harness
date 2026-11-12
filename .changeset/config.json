@@ -5,6 +5,7 @@
   "fixed": [
     [
       "@rovinos/sdk",
+      "@rovinos/extensions",
       "@rovinos/cli",
       "@rovinos/store-sqlite",
       "@rovinos/store-postgres",
