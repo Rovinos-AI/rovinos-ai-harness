@@ -27,18 +27,28 @@ export function formatComparison(
   violations: readonly BudgetViolation[] = [],
 ): string {
   const metricByName = new Map(result.metrics.map((metric) => [metric.name, metric]));
-  const violationByName = new Map(violations.map((violation) => [violation.metric, violation]));
-  const rows = [...new Set([...budgets.absolute, ...budgets.relative].map(({ metric }) => metric))]
+  const violationsByName = new Map<string, string[]>();
+  for (const violation of violations) {
+    const metricViolations = violationsByName.get(violation.metric) ?? [];
+    metricViolations.push(violation.code);
+    violationsByName.set(violation.metric, metricViolations);
+  }
+  const rows = [
+    ...new Set([
+      ...budgets.absolute.map(({ metric }) => metric),
+      ...budgets.relative.map(({ metric }) => metric),
+      ...violations.map(({ metric }) => metric),
+    ]),
+  ]
     .sort()
     .map((name) => {
       const metric = metricByName.get(name);
-      const violation = violationByName.get(name);
       const prior = baseline?.metrics.find((entry) => entry.name === name);
       return [
         name,
         metric === undefined ? "missing" : `${metric.value.toFixed(3)} ${metric.unit}`,
         prior === undefined ? "—" : `${prior.value.toFixed(3)} ${prior.unit}`,
-        violation?.code ?? "ok",
+        violationsByName.get(name)?.join(", ") ?? "ok",
       ];
     });
   const widths = rows.reduce(

@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash } from "node:crypto";
 import { cpus, totalmem } from "node:os";
 import { Bench } from "tinybench";
 import { HarnessConfigSchema } from "@rovinos/config";
+import { InMemoryWorkspace, OffloadingToolPort } from "@rovinos/context";
 import { foldRunState, RUN_SPAN } from "@rovinos/core";
 import { Tokenizer } from "@rovinos/pii";
 import { InMemoryEventStore, type EventStore } from "@rovinos/store";
 import { SqliteEventStore, SqliteRunQueue } from "@rovinos/store-sqlite";
 import { PostgresEventStore } from "@rovinos/store-postgres";
+import { normalizedResult } from "@rovinos/mcp";
 import {
   Code,
   Id,
+  JsonValue,
   Principal,
   PiiPolicySchema,
   type Event,
@@ -23,8 +25,8 @@ import {
   selectMcpTools,
 } from "@rovinos/sdk";
 import {
+  AllowlistSpanProcessor,
   SentinelGate,
-  sanitizeSpan,
   TripQueue,
   VaultRunView,
 } from "@rovinos/telemetry";
@@ -279,7 +281,7 @@ async function seedLongLog(
 
 async function storeReadAndResumeBenchmarks(profile: BenchmarkProfile) {
   const count = profile.name === "nightly" ? MAX_LOG_EVENTS : 25;
-  const store = new InMemoryEventStore();
+  const store = new SqliteEventStore(":memory:");
   const runId = makeId(300);
   const nextSeq = await seedLongLog(store, runId, count, true);
   const latest = await store.latestSnapshot(runId);
@@ -400,7 +402,6 @@ async function tokenizerBenchmark(profile: BenchmarkProfile) {
 }
 
 async function allowlistSentinelBenchmark(profile: BenchmarkProfile) {
-  void RUN_SPAN;
   const runId = makeId(600);
   const reader = new StaticVaultReader(new Map([[runId, syntheticVaultValues(100)]]));
   const gate = new SentinelGate(
@@ -411,7 +412,7 @@ async function allowlistSentinelBenchmark(profile: BenchmarkProfile) {
   const collector = createTestSpanCollector();
   const span = collector.provider
     .getTracer("bench")
-    .startSpan("harness.run", {
+    .startSpan(RUN_SPAN.name, {
       attributes: { "harness.run.id": runId, "harness.segment.id": runId },
     });
   span.end();
@@ -419,18 +420,24 @@ async function allowlistSentinelBenchmark(profile: BenchmarkProfile) {
   if (readableSpan === undefined) {
     throw new Error("span_missing");
   }
+  const processor = new AllowlistSpanProcessor(
+    {
+      onStart: () => undefined,
+      onEnd: () => undefined,
+      forceFlush: async () => undefined,
+      shutdown: async () => undefined,
+    },
+    { gate },
+  );
   const result = await measure(
     "telemetry.allowlist_sentinel",
     async () => {
-      const sanitized = sanitizeSpan(readableSpan);
-      if (sanitized === undefined) {
-        throw new Error("span_rejected");
-      }
-      const text = JSON.stringify([sanitized.name, sanitized.attributes, sanitized.resource.attributes]);
-      return gate.check({ runId, text });
+      processor.onEnd(readableSpan);
+      await processor.forceFlush();
     },
     profile,
   );
+  await processor.shutdown();
   await collector.provider.shutdown();
   return metric(
     "telemetry.allowlist_sentinel.spans",
@@ -611,32 +618,45 @@ async function mcpBenchmarks(profile: BenchmarkProfile) {
   const payload = Buffer.alloc(transferBytes, 7);
   const encoded = payload.toString("base64");
   const mixedResult = {
-    format: "mcp-tool-result",
-    version: 1,
     isError: false,
-    parts: [
+    content: [
       { type: "text", text: "synthetic result" },
-      {
-        type: "resource_link",
-        uri: "file://synthetic",
-        name: "synthetic artifact",
-        artifact: {
-          handle: "wf_00000000000000000000000000",
-          mimeType: "application/octet-stream",
-          bytes: transferBytes,
-          sha256: hash,
-        },
-      },
+      { type: "image", mimeType: "application/octet-stream", data: encoded },
     ],
+  } satisfies Parameters<typeof normalizedResult>[0];
+  let offloadId = 40_000;
+  const workspace = new InMemoryWorkspace();
+  const offloader = new OffloadingToolPort(
+    {
+      describe: () => ({ idempotent: true, timeoutMs: 1000 }),
+      execute: async () => {
+        const normalized = normalizedResult(mixedResult, {
+          binaryResults: "allow",
+          maxArtifactBytes: transferBytes,
+        });
+        return {
+          outcome: "ok",
+          result: JsonValue.parse(normalized.value),
+          artifacts: normalized.artifacts,
+        };
+      },
+    },
+    workspace,
+    {},
+    { ids: { next: () => makeId(offloadId++) } },
+  );
+  const offloadCall = {
+    callId: makeId(800),
+    toolId: Code.parse("bench.mixed_result"),
+    args: {},
+  };
+  const offloadContext = {
+    runId: makeId(801),
+    signal: new AbortController().signal,
   };
   const offload = await measure(
     "mcp.mixed_result_offload",
-    () => {
-      const decoded = Buffer.from(encoded, "base64");
-      const checksum = createHash("sha256").update(decoded).digest("hex");
-      const normalized = JSON.stringify(mixedResult);
-      return `${checksum}${normalized}`;
-    },
+    () => offloader.execute(offloadCall, offloadContext),
     profile,
   );
   return [
@@ -703,5 +723,3 @@ export async function runBenchmarks(profile: BenchmarkProfile): Promise<Benchmar
     metrics,
   });
 }
-
-export const benchmarkRunId = makeId;

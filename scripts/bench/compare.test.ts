@@ -4,7 +4,7 @@ import {
   BenchmarkBudgetsSchema,
   BenchmarkResultSchema,
 } from "./contracts.js";
-import { compareBenchmarkResults } from "./compare.js";
+import { compareBenchmarkResults, formatComparison } from "./compare.js";
 
 const budgets = BenchmarkBudgetsSchema.parse({
   schemaVersion: 1,
@@ -76,6 +76,21 @@ describe("compareBenchmarkResults", () => {
     expect(violations.at(-1)).toMatchObject({ limit: 80 });
   });
 
+  it("prints every violation for a metric", () => {
+    const current = result([
+      { name: "store.append", value: 79, unit: "events/s" },
+      { name: "fold.duration", value: 90, unit: "ms" },
+    ]);
+    const baseline = result([{ name: "store.append", value: 100, unit: "events/s" }]);
+    const table = formatComparison(
+      budgets,
+      current,
+      baseline,
+      compareBenchmarkResults(budgets, current, baseline),
+    );
+    expect(table).toContain("absolute_exceeded, relative_regression");
+  });
+
   it("requires a baseline for relative budgets unless explicitly bootstrapping", () => {
     const current = result([
       { name: "store.append", value: 100, unit: "events/s" },
@@ -95,5 +110,49 @@ describe("compareBenchmarkResults", () => {
         result([{ name: "store.append", value: 100, unit: "events/s" }]),
       ),
     ).toContainEqual({ metric: "store.append", code: "result_missing" });
+  });
+
+  it("rejects measurements with fewer samples than the committed minimum", () => {
+    const sparse = BenchmarkResultSchema.parse({
+      ...result([
+        { name: "store.append", value: 100, unit: "events/s" },
+        { name: "fold.duration", value: 1, unit: "ms" },
+      ]),
+      metrics: [
+        { name: "store.append", value: 100, unit: "events/s", sampleCount: 9 },
+        { name: "fold.duration", value: 1, unit: "ms", sampleCount: 10 },
+      ],
+    });
+    expect(
+      compareBenchmarkResults(
+        budgets,
+        sparse,
+        result([{ name: "store.append", value: 100, unit: "events/s" }]),
+      ),
+    ).toContainEqual({
+      metric: "store.append",
+      code: "sample_count_low",
+      actual: 9,
+      limit: 10,
+      unit: "samples",
+    });
+  });
+
+  it("does not compare runs from a different runner environment", () => {
+    const current = result([
+      { name: "store.append", value: 100, unit: "events/s" },
+      { name: "fold.duration", value: 1, unit: "ms" },
+    ]);
+    const mismatched = BenchmarkResultSchema.parse({
+      ...current,
+      environment: { ...current.environment, runner: "local" },
+    });
+    expect(
+      compareBenchmarkResults(
+        budgets,
+        mismatched,
+        result([{ name: "store.append", value: 100, unit: "events/s" }]),
+      ),
+    ).toContainEqual({ metric: "environment.runner", code: "environment_mismatch" });
   });
 });

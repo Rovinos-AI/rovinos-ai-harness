@@ -102,7 +102,10 @@ export interface BudgetViolation {
     | "relative_regression"
     | "result_missing"
     | "baseline_missing"
-    | "unit_mismatch";
+    | "unit_mismatch"
+    | "sample_count_low"
+    | "environment_mismatch"
+    | "sample_mismatch";
   readonly actual?: number;
   readonly limit?: number;
   readonly unit?: string;
@@ -117,6 +120,25 @@ export function evaluateBudgets(
   const currentMetrics = new Map(current.metrics.map((metric) => [metric.name, metric]));
   const baselineMetrics = new Map(baseline?.metrics.map((metric) => [metric.name, metric]) ?? []);
   const violations: BudgetViolation[] = [];
+  const currentEnvironmentMatches = current.environment.runner === budgets.environment.runner;
+  const baselineEnvironmentMatches =
+    baseline === undefined || baseline.environment.runner === budgets.environment.runner;
+  const currentSampleMatches =
+    current.sample.profile === budgets.sample.profile &&
+    current.sample.durationMs === budgets.sample.durationMs &&
+    current.sample.warmupMs === budgets.sample.warmupMs;
+  const baselineSampleMatches =
+    baseline === undefined ||
+    (baseline.sample.profile === budgets.sample.profile &&
+      baseline.sample.durationMs === budgets.sample.durationMs &&
+      baseline.sample.warmupMs === budgets.sample.warmupMs);
+
+  if (!currentEnvironmentMatches || !baselineEnvironmentMatches) {
+    violations.push({ metric: "environment.runner", code: "environment_mismatch" });
+  }
+  if (!currentSampleMatches || !baselineSampleMatches) {
+    violations.push({ metric: "sample.configuration", code: "sample_mismatch" });
+  }
 
   for (const budget of budgets.absolute) {
     const metric = currentMetrics.get(budget.metric);
@@ -124,18 +146,29 @@ export function evaluateBudgets(
       violations.push({ metric: budget.metric, code: "result_missing" });
     } else if (metric.unit !== budget.unit) {
       violations.push({ metric: budget.metric, code: "unit_mismatch", unit: metric.unit });
-    } else if (
-      budget.direction === "max"
-        ? metric.value > budget.limit
-        : metric.value < budget.limit
-    ) {
-      violations.push({
-        metric: budget.metric,
-        code: "absolute_exceeded",
-        actual: metric.value,
-        limit: budget.limit,
-        unit: budget.unit,
-      });
+    } else {
+      if (metric.sampleCount < budgets.sample.minimumSamples) {
+        violations.push({
+          metric: budget.metric,
+          code: "sample_count_low",
+          actual: metric.sampleCount,
+          limit: budgets.sample.minimumSamples,
+          unit: "samples",
+        });
+      }
+      if (
+        budget.direction === "max"
+          ? metric.value > budget.limit
+          : metric.value < budget.limit
+      ) {
+        violations.push({
+          metric: budget.metric,
+          code: "absolute_exceeded",
+          actual: metric.value,
+          limit: budget.limit,
+          unit: budget.unit,
+        });
+      }
     }
   }
 
@@ -154,6 +187,14 @@ export function evaluateBudgets(
       if (!allowMissingBaseline) {
         violations.push({ metric: budget.metric, code: "baseline_missing" });
       }
+      continue;
+    }
+    if (
+      !currentEnvironmentMatches ||
+      !baselineEnvironmentMatches ||
+      !currentSampleMatches ||
+      !baselineSampleMatches
+    ) {
       continue;
     }
     if (baselineMetric === undefined) {
