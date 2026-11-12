@@ -6,7 +6,7 @@ Public programmatic API (`@rovinos/sdk`), the run queue and workers it drives, m
 
 ## Specs and task ids
 
-- [epic-24-run-service-and-scaling.md](./epic-24-run-service-and-scaling.md): tasks 24.1-24.10
+- [epic-24-run-service-and-scaling.md](./epic-24-run-service-and-scaling.md): tasks 24.1-24.10, 24.23
 
 ## Allowed internal imports
 
