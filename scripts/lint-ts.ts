@@ -67,6 +67,9 @@ export function lintBatches(root: string, extraArguments: readonly string[] = []
   const testBatches = rootDirectories.includes("test")
     ? lintableFiles(root, "test").map((file) => [...sharedArguments, ...extraArguments, file])
     : [];
+  const exampleBatches = rootDirectories.includes("examples")
+    ? lintableFiles(root, "examples").map((file) => [...sharedArguments, ...extraArguments, file])
+    : [];
   const rootIgnorePatterns = [
     "packages/**",
     ...rootDirectories.map((directory) => `${directory}/**`),
@@ -74,8 +77,9 @@ export function lintBatches(root: string, extraArguments: readonly string[] = []
   return [
     ...packageBatches,
     ...rootDirectories
-      .filter((directory) => directory !== "test")
+      .filter((directory) => directory !== "test" && directory !== "examples")
       .map((directory) => [...sharedArguments, ...extraArguments, directory]),
+    ...exampleBatches,
     ...testBatches,
     [
       ...sharedArguments,
