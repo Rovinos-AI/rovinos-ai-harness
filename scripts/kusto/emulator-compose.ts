@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from "node:child_process";
+import { isIP } from "node:net";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,11 +8,17 @@ import { fileURLToPath } from "node:url";
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 
-async function compose(projectName: string, args: string[]): Promise<string> {
+async function compose(
+  projectName: string,
+  args: string[],
+  environment: Readonly<Record<string, string>> = {},
+): Promise<string> {
   const { stdout } = await execFileAsync(
     "docker",
     [
       "compose",
+      "--profile",
+      "kusto-contract",
       "--project-name",
       projectName,
       "--file",
@@ -22,6 +29,7 @@ async function compose(projectName: string, args: string[]): Promise<string> {
       cwd: root,
       encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, ...environment },
     },
   );
   return stdout;
@@ -43,7 +51,7 @@ async function emulatorAddress(projectName: string): Promise<string> {
     { cwd: root, encoding: "utf8" },
   );
   const address = stdout.trim();
-  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/u.test(address)) {
+  if (isIP(address) !== 4) {
     throw new TypeError("kusto_emulator_address_missing");
   }
   return address;
@@ -61,14 +69,21 @@ export async function runKustoEmulatorComposeContract(projectName: string): Prom
       "kusto-emulator",
     ]);
     const address = await emulatorAddress(projectName);
-    return await compose(projectName, [
-      "run",
-      "--rm",
-      "--no-deps",
-      "--env",
-      `KUSTO_CLUSTER_URI=http://${address}:8080`,
-      "kusto-test-client",
-    ]);
+    return await compose(
+      projectName,
+      [
+        "run",
+        "--rm",
+        "--no-deps",
+        "--use-aliases",
+        "--env",
+        "KUSTO_CLUSTER_URI=http://kusto-emulator:8080",
+        "--env",
+        "KUSTO_DATABASE=NetDefaultDB",
+        "kusto-test-client",
+      ],
+      { KUSTO_EMULATOR_IP: address },
+    );
   } finally {
     await compose(projectName, ["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
   }

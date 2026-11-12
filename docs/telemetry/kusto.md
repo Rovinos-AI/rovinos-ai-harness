@@ -46,6 +46,9 @@ Microsoft Entra authentication, managed/streaming ingestion, or the queued
 ingestion endpoint. The contract test therefore uses named JSON mappings and
 inline ingestion; it verifies schema application and row shape, not the live
 collector-to-cluster exporter path.
+The test client uses the Compose service address `http://kusto-emulator:8080`
+and the emulator's `NetDefaultDB` catalog; the one-off client is profile-gated so
+the general integration stack does not start it without its test configuration.
 
 Create a database before applying the schema. For manual local use, start the
 emulator with a loopback-only port mapping, for example

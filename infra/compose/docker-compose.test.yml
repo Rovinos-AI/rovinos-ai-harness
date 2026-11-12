@@ -183,6 +183,8 @@ services:
     networks:
       - internal
   kusto-test-client:
+    profiles:
+      - kusto-contract
     image: node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
     working_dir: /workspace
     command:
@@ -205,6 +207,8 @@ services:
         condition: service_healthy
     networks:
       - internal
+    extra_hosts:
+      - "kusto-emulator=${KUSTO_EMULATOR_IP:-host-gateway}"
 networks:
   internal:
     internal: true

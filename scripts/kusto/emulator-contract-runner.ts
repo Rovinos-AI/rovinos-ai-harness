@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
-import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -12,6 +11,26 @@ import {
 import { applySchemaFile, type KustoManagementClient } from "./apply-schema.ts";
 
 const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const emulatorDatabase = "NetDefaultDB";
+
+type ConfigurationErrorCode =
+  | "invalid_arguments"
+  | "cluster_uri_missing"
+  | "cluster_uri_invalid"
+  | "database_missing"
+  | "database_invalid";
+
+type ContractFailureCode =
+  "connect_failed" | "database_create_failed" | "schema_apply_failed" | "fixture_ingest_failed";
+
+interface ContractConfiguration {
+  readonly clusterUri: string;
+  readonly database: string;
+}
+
+type ConfigurationResult =
+  | { readonly configuration: ContractConfiguration; readonly error?: never }
+  | { readonly configuration?: never; readonly error: ConfigurationErrorCode };
 
 interface Fixture {
   readonly table: string;
@@ -35,15 +54,50 @@ function createDatabaseName(): string {
   return `h_${ulid}`;
 }
 
-function createClient(clusterUri: string): Client {
-  const endpoint = new URL(clusterUri);
-  if (endpoint.protocol !== "http:" || isIP(endpoint.hostname) !== 4) {
-    throw new TypeError("kusto_emulator_endpoint_invalid");
+/** Validates the explicit run flag and emulator connection configuration. */
+export function getContractConfiguration(
+  args: readonly string[],
+  environment: Readonly<Record<string, string | undefined>>,
+): ConfigurationResult {
+  if (args.length !== 1 || args[0] !== "--run") {
+    return { error: "invalid_arguments" };
   }
+  const clusterUri = environment.KUSTO_CLUSTER_URI;
+  if (clusterUri === undefined || clusterUri.length === 0) {
+    return { error: "cluster_uri_missing" };
+  }
+  let endpoint: URL;
+  try {
+    endpoint = new URL(clusterUri);
+  } catch {
+    return { error: "cluster_uri_invalid" };
+  }
+  if (
+    endpoint.protocol !== "http:" ||
+    endpoint.hostname !== "kusto-emulator" ||
+    endpoint.port !== "8080" ||
+    endpoint.pathname !== "/" ||
+    endpoint.search.length > 0 ||
+    endpoint.hash.length > 0
+  ) {
+    return { error: "cluster_uri_invalid" };
+  }
+  const database = environment.KUSTO_DATABASE;
+  if (database === undefined || database.length === 0) {
+    return { error: "database_missing" };
+  }
+  if (database !== emulatorDatabase) {
+    return { error: "database_invalid" };
+  }
+  return { configuration: { clusterUri, database } };
+}
+
+function createClient(clusterUri: string, database: string): Client {
+  const endpoint = new URL(clusterUri);
   kustoTrustedEndpoints.addTrustedHosts([new MatchRule(endpoint.hostname, true)], false);
   return new Client(
     new KustoConnectionStringBuilder(
-      `Data Source=${clusterUri};Initial Catalog=NetDefaultDB;AAD Federated Security=False`,
+      `Data Source=${clusterUri};Initial Catalog=${database};AAD Federated Security=False`,
     ),
   );
 }
@@ -142,7 +196,7 @@ async function ingestFixtures(
     );
     const response = await client.executeQuery(database, `${fixture.table} | count`);
     if (databaseCount(response) !== 1) {
-      throw new Error("kusto_fixture_count_mismatch");
+      throw new TypeError("kusto_fixture_count_mismatch");
     }
   }
 }
@@ -151,40 +205,41 @@ async function dropDatabase(client: Client, database: string): Promise<void> {
   await client.executeMgmt(database, `.drop database ${database} ifexists`).catch(() => undefined);
 }
 
-async function runContract(clusterUri: string): Promise<void> {
+async function runContract(clusterUri: string, baseDatabase: string): Promise<void> {
   const database = createDatabaseName();
-  const client = createClient(clusterUri);
+  let client: Client | undefined;
   let databaseCreated = false;
+  let failureCode: ContractFailureCode = "connect_failed";
   try {
+    client = createClient(clusterUri, baseDatabase);
     await client.executeMgmt(null, ".show cluster");
+    failureCode = "database_create_failed";
     await createDatabase(client, database);
     databaseCreated = true;
+    failureCode = "schema_apply_failed";
     await applySchema(client, database);
+    failureCode = "fixture_ingest_failed";
     await ingestFixtures(client, database, createFixtures(new Date().toISOString()));
     process.stdout.write("kusto_emulator_contract_passed\n");
   } catch {
-    process.stderr.write("kusto_emulator_contract_failed\n");
+    process.stderr.write(`kusto_emulator_contract_${failureCode}\n`);
     process.exitCode = 1;
   } finally {
-    if (databaseCreated) {
+    if (client !== undefined && databaseCreated) {
       await dropDatabase(client, database);
     }
-    client.close();
+    client?.close();
   }
 }
 
 async function main(): Promise<void> {
-  const clusterUri = process.env.KUSTO_CLUSTER_URI;
-  if (
-    process.argv.slice(2).length !== 1 ||
-    process.argv[2] !== "--run" ||
-    clusterUri === undefined
-  ) {
-    process.stderr.write("kusto_emulator_contract_configuration_invalid\n");
+  const result = getContractConfiguration(process.argv.slice(2), process.env);
+  if (result.configuration === undefined) {
+    process.stderr.write(`kusto_emulator_contract_${result.error}\n`);
     process.exitCode = 1;
     return;
   }
-  await runContract(clusterUri);
+  await runContract(result.configuration.clusterUri, result.configuration.database);
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
