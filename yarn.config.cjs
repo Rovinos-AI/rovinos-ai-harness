@@ -7,6 +7,7 @@ const nodeVersion = /^node\s*=\s*"([^"]+)"$/m.exec(miseConfig)?.[1];
 const nodeTypesRange = rootManifest.devDependencies["@types/node"];
 const publishedWorkspaceIdents = new Set([
   "@rovinos/cli",
+  "@rovinos/extensions",
   "@rovinos/sdk",
   "@rovinos/rate-limit-redis",
   "@rovinos/store-postgres",
