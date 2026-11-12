@@ -28,6 +28,7 @@ export {
 } from "./rotate.js";
 export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
+export { InMemorySpendReservationStore } from "./memory-spend-reservation.js";
 export {
   EnqueueRunJobSchema,
   InvalidRunQueueInputError,
