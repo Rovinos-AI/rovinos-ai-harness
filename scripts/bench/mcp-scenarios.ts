@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryWorkspace, OffloadingToolPort } from "@rovinos/context";
-import { normalizedResult } from "@rovinos/mcp";
+import { normalizedResult } from "@rovinos/mcp/tool-result";
 import { Code, JsonValue } from "@rovinos/schemas";
 import { McpCatalogInspectionSchema, registerMcpServer, selectMcpTools } from "@rovinos/sdk";
 import { hash, makeId, measure, metric, type BenchmarkProfile } from "./common.js";
