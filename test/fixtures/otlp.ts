@@ -13,62 +13,94 @@ export function createCanary(seed: string): string {
   return `fixture-${createHash("sha256").update(seed).digest("hex").slice(0, 16)}`;
 }
 
+function createRegisteredRunSpan(): OtlpPayload {
+  return {
+    traceId: "0123456789abcdef0123456789abcdef",
+    spanId: "0123456789abcdef",
+    name: "harness.run",
+    kind: 1,
+    startTimeUnixNano: "1000000000",
+    endTimeUnixNano: "2000000000",
+    attributes: [{ key: "harness.run.id", value: { stringValue: "run.fixture" } }],
+    status: { code: 1 },
+  };
+}
+
+function createLeakingRunSpan(canary: string): OtlpPayload {
+  return {
+    traceId: "0123456789abcdef0123456789abcdef",
+    spanId: "1123456789abcdef",
+    name: "harness.run",
+    kind: 1,
+    startTimeUnixNano: "2000000000",
+    endTimeUnixNano: "3000000000",
+    attributes: [
+      { key: "harness.run.id", value: { stringValue: "run.fixture" } },
+      { key: "http.url", value: { stringValue: `https://example.invalid/?token=${canary}` } },
+      { key: "exception.message", value: { stringValue: canary } },
+      { key: "custom.note", value: { stringValue: canary } },
+    ],
+    events: [
+      {
+        timeUnixNano: "2500000000",
+        name: "exception",
+        attributes: [{ key: "exception.message", value: { stringValue: canary } }],
+      },
+    ],
+    status: { code: 2, message: `status-${canary}` },
+  };
+}
+
+function createGenAiSpan(canary: string): OtlpPayload {
+  return {
+    traceId: "0123456789abcdef0123456789abcdef",
+    spanId: "3123456789abcdef",
+    name: "harness.model_call",
+    kind: 1,
+    startTimeUnixNano: "4000000000",
+    endTimeUnixNano: "5000000000",
+    attributes: [
+      { key: "harness.run.id", value: { stringValue: "run.fixture" } },
+      { key: "gen_ai.provider.name", value: { stringValue: "provider_a" } },
+      { key: "gen_ai.request.model", value: { stringValue: "model_a" } },
+      { key: "gen_ai.usage.input_tokens", value: { intValue: "7" } },
+      { key: "gen_ai.usage.output_tokens", value: { intValue: "5" } },
+      { key: "gen_ai.usage.cache_read.input_tokens", value: { intValue: "2" } },
+      { key: "gen_ai.usage.cache_creation.input_tokens", value: { intValue: "1" } },
+      { key: "gen_ai.prompt", value: { stringValue: canary } },
+      { key: "gen_ai.input.messages", value: { stringValue: canary } },
+      { key: "gen_ai.output.messages", value: { stringValue: canary } },
+      { key: "gen_ai.tool.call.arguments", value: { stringValue: canary } },
+      { key: "gen_ai.tool.call.result", value: { stringValue: canary } },
+    ],
+    status: { code: 1 },
+  };
+}
+
+function createUnregisteredSpan(canary: string): OtlpPayload {
+  return {
+    traceId: "0123456789abcdef0123456789abcdef",
+    spanId: "2123456789abcdef",
+    name: `custom.unregistered.${canary}`,
+    kind: 1,
+    startTimeUnixNano: "3000000000",
+    endTimeUnixNano: "4000000000",
+    attributes: [{ key: "custom.note", value: { stringValue: canary } }],
+  };
+}
+
 function createTraceFixture(canary: string, resourceAttributes: OtlpAttributes): OtlpPayload {
+  const spans = [
+    createRegisteredRunSpan(),
+    createLeakingRunSpan(canary),
+    createGenAiSpan(canary),
+    createUnregisteredSpan(canary),
+  ];
   return {
     resourceSpans: [
       {
         resource: { attributes: resourceAttributes },
-        scopeSpans: [
-          {
-            scope: { name: "harness.fixture", version: "1.0.0" },
-            spans: [
-              {
-                traceId: "0123456789abcdef0123456789abcdef",
-                spanId: "0123456789abcdef",
-                name: "harness.run",
-                kind: 1,
-                startTimeUnixNano: "1000000000",
-                endTimeUnixNano: "2000000000",
-                attributes: [{ key: "harness.run.id", value: { stringValue: "run.fixture" } }],
-                status: { code: 1 },
-              },
-              {
-                traceId: "0123456789abcdef0123456789abcdef",
-                spanId: "1123456789abcdef",
-                name: "harness.run",
-                kind: 1,
-                startTimeUnixNano: "2000000000",
-                endTimeUnixNano: "3000000000",
-                attributes: [
-                  { key: "harness.run.id", value: { stringValue: "run.fixture" } },
-                  {
-                    key: "http.url",
-                    value: { stringValue: `https://example.invalid/?token=${canary}` },
-                  },
-                  { key: "exception.message", value: { stringValue: canary } },
-                  { key: "custom.note", value: { stringValue: canary } },
-                ],
-                events: [
-                  {
-                    timeUnixNano: "2500000000",
-                    name: "exception",
-                    attributes: [{ key: "exception.message", value: { stringValue: canary } }],
-                  },
-                ],
-                status: { code: 2, message: `status-${canary}` },
-              },
-              {
-                traceId: "0123456789abcdef0123456789abcdef",
-                spanId: "2123456789abcdef",
-                name: `custom.unregistered.${canary}`,
-                kind: 1,
-                startTimeUnixNano: "3000000000",
-                endTimeUnixNano: "4000000000",
-                attributes: [{ key: "custom.note", value: { stringValue: canary } }],
-              },
-            ],
-          },
-        ],
+        scopeSpans: [{ scope: { name: "harness.fixture", version: "1.0.0" }, spans }],
       },
     ],
   };

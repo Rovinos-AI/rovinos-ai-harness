@@ -119,6 +119,16 @@ function expectProtectedOutputs(outputs: CollectorFixtureOutput, canary: string)
   const allOutput = outputNames.map((name) => outputs[name]).join("\n");
   expect(outputs.traces).toContain("run.fixture");
   expect(outputs.traces).toContain("harness.run");
+  for (const attribute of [
+    "gen_ai.provider.name",
+    "gen_ai.request.model",
+    "gen_ai.usage.input_tokens",
+    "gen_ai.usage.output_tokens",
+    "gen_ai.usage.cache_read.input_tokens",
+    "gen_ai.usage.cache_creation.input_tokens",
+  ]) {
+    expect(outputs.traces).toContain(attribute);
+  }
   expect(outputs.logs).toContain("harness.safe.run_created");
   expect(outputs.metrics).toContain("harness.model.tokens");
   for (const name of outputNames) {
