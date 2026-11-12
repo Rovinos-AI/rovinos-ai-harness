@@ -23,7 +23,7 @@ The benchmark covers:
 | --- | --- |
 | Event store | SQLite and Postgres append batches of 1, 10, and 100 events; read and fold 100,000 events; full-log versus snapshot-tail resume |
 | PII and telemetry | Sentinel p95 scan cost with 1,000, 10,000, and 100,000 vault values and variants enabled; tokenizer throughput on 1 MiB of mixed synthetic text; allowlist sanitization plus sentinel spans/second |
-| Queue and SDK | Four concurrent queue claimers; SDK full-history reads, pending-approval lookup over 1,000 suspended runs, and backpressured content streaming |
+| Queue and SDK | Four concurrent queue claimers; SDK full-history reads, pending-approval lookup over 1,000 suspended runs, and content streaming under backpressure |
 | MCP | Selection from a 1,000-tool catalog, repeated invalid-catalog rejection, and mixed text/binary normalization plus workspace artifact offloading |
 
 `yarn test:unit scripts/bench` runs the scenarios at smoke sizes. The nightly runner writes only
