@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "runner": "ubuntu-24.04",
+    "description": "GitHub-hosted 2-vCPU x64 runner; each result records CPU model, CPU count, memory, Node version, and platform."
+  },
+  "sample": {
+    "profile": "nightly",
+    "durationMs": 1000,
+    "warmupMs": 200,
+    "minimumSamples": 10,
+    "note": "One-second measurement window per scenario after a 200 ms warmup; commit these absolute limits as the initial baseline and compare later scheduled runs against the prior artifact."
+  },
+  "absolute": [
+    { "metric": "store.sqlite.append.batch_1", "direction": "min", "limit": 100, "unit": "events/s" },
+    { "metric": "store.sqlite.append.batch_10", "direction": "min", "limit": 500, "unit": "events/s" },
+    { "metric": "store.sqlite.append.batch_100", "direction": "min", "limit": 1000, "unit": "events/s" },
+    { "metric": "store.postgres.append.batch_1", "direction": "min", "limit": 50, "unit": "events/s" },
+    { "metric": "store.postgres.append.batch_10", "direction": "min", "limit": 250, "unit": "events/s" },
+    { "metric": "store.postgres.append.batch_100", "direction": "min", "limit": 500, "unit": "events/s" },
+    { "metric": "store.read_fold.100k", "direction": "max", "limit": 30000, "unit": "ms" },
+    { "metric": "store.resume.full_log", "direction": "max", "limit": 30000, "unit": "ms" },
+    { "metric": "store.resume.snapshot_tail", "direction": "max", "limit": 10000, "unit": "ms" },
+    { "metric": "sentinel.p95.1000", "direction": "max", "limit": 50, "unit": "ms" },
+    { "metric": "sentinel.p95.10000", "direction": "max", "limit": 150, "unit": "ms" },
+    { "metric": "sentinel.p95.100000", "direction": "max", "limit": 1000, "unit": "ms" },
+    { "metric": "pii.tokenizer.1mib", "direction": "min", "limit": 0.1, "unit": "MiB/s" },
+    { "metric": "telemetry.allowlist_sentinel.spans", "direction": "min", "limit": 10, "unit": "ops/s" },
+    { "metric": "queue.claim.4_workers", "direction": "min", "limit": 10, "unit": "ops/s" },
+    { "metric": "sdk.full_history.100k", "direction": "max", "limit": 30000, "unit": "ms" },
+    { "metric": "sdk.pending_approval.1000_runs", "direction": "max", "limit": 10000, "unit": "ms" },
+    { "metric": "sdk.mcp_catalog.1000_tools", "direction": "max", "limit": 5000, "unit": "ms" },
+    { "metric": "sdk.mcp.rejection_storm.1000", "direction": "max", "limit": 5000, "unit": "ms" },
+    { "metric": "mcp.mixed_result_offload", "direction": "min", "limit": 0.1, "unit": "MiB/s" },
+    { "metric": "sdk.content_stream.backpressure", "direction": "max", "limit": 30000, "unit": "ms" }
+  ],
+  "relative": [
+    { "metric": "store.sqlite.append.batch_1", "direction": "min", "maxRegression": 0.2, "unit": "events/s" },
+    { "metric": "store.sqlite.append.batch_10", "direction": "min", "maxRegression": 0.2, "unit": "events/s" },
+    { "metric": "store.sqlite.append.batch_100", "direction": "min", "maxRegression": 0.2, "unit": "events/s" },
+    { "metric": "store.postgres.append.batch_1", "direction": "min", "maxRegression": 0.2, "unit": "events/s" },
+    { "metric": "store.postgres.append.batch_10", "direction": "min", "maxRegression": 0.2, "unit": "events/s" },
+    { "metric": "store.postgres.append.batch_100", "direction": "min", "maxRegression": 0.2, "unit": "events/s" },
+    { "metric": "store.read_fold.100k", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "store.resume.full_log", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "store.resume.snapshot_tail", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "sentinel.p95.1000", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "sentinel.p95.10000", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "sentinel.p95.100000", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "pii.tokenizer.1mib", "direction": "min", "maxRegression": 0.2, "unit": "MiB/s" },
+    { "metric": "telemetry.allowlist_sentinel.spans", "direction": "min", "maxRegression": 0.2, "unit": "ops/s" },
+    { "metric": "queue.claim.4_workers", "direction": "min", "maxRegression": 0.2, "unit": "ops/s" },
+    { "metric": "sdk.full_history.100k", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "sdk.pending_approval.1000_runs", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "sdk.mcp_catalog.1000_tools", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "sdk.mcp.rejection_storm.1000", "direction": "max", "maxRegression": 0.2, "unit": "ms" },
+    { "metric": "mcp.mixed_result_offload", "direction": "min", "maxRegression": 0.2, "unit": "MiB/s" },
+    { "metric": "sdk.content_stream.backpressure", "direction": "max", "maxRegression": 0.2, "unit": "ms" }
+  ]
+}
