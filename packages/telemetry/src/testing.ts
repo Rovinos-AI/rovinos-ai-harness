@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ExportResultCode, type ExportResult } from "@opentelemetry/core";
 import {
+  SpanKind,
+  SpanStatusCode,
+  type Attributes,
+  type Span,
+  type SpanContext,
+} from "@opentelemetry/api";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import {
   TracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
+  type ReadableSpan,
 } from "@opentelemetry/sdk-trace";
 import {
   AggregationTemporality,
@@ -49,6 +58,34 @@ export function createTestSpanCollector(): {
   return {
     provider,
     getFinishedSpans: () => exporter.getFinishedSpans(),
+  };
+}
+
+/** Ends a registered span and projects it into a deterministic finished-span fixture. */
+export function createTestReadableSpan(
+  span: Span,
+  name: string,
+  attributes: Attributes,
+  spanContext: SpanContext,
+): ReadableSpan {
+  span.end();
+  return {
+    name,
+    kind: SpanKind.INTERNAL,
+    spanContext: () => spanContext,
+    startTime: [0, 0],
+    endTime: [0, 1],
+    duration: [0, 1],
+    status: { code: SpanStatusCode.UNSET },
+    attributes,
+    links: [],
+    events: [],
+    ended: true,
+    resource: resourceFromAttributes({}),
+    instrumentationScope: { name: "test" },
+    droppedAttributesCount: 0,
+    droppedEventsCount: 0,
+    droppedLinksCount: 0,
   };
 }
 
