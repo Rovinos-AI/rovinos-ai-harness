@@ -17,8 +17,7 @@ export const GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
 /** Cache-read input-token count from the pinned semantic-conventions package. */
 export const GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens";
 /** Cache-creation input-token count from the pinned semantic-conventions package. */
-export const GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS =
-  "gen_ai.usage.cache_creation.input_tokens";
+export const GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS = "gen_ai.usage.cache_creation.input_tokens";
 
 /** Span names admitted through the semantic-convention registry path. */
 export const SEMCONV_SPAN_NAMES = ["mcp.client.call"] as const;
@@ -37,10 +36,7 @@ export const GEN_AI_ATTRIBUTE_NAMES = [
 ] as const;
 
 /** Semantic-convention attribute names admitted by registered definitions. */
-export const SEMCONV_ATTRIBUTE_NAMES = [
-  ...MCP_ATTRIBUTE_NAMES,
-  ...GEN_AI_ATTRIBUTE_NAMES,
-] as const;
+export const SEMCONV_ATTRIBUTE_NAMES = [...MCP_ATTRIBUTE_NAMES, ...GEN_AI_ATTRIBUTE_NAMES] as const;
 
 /** Stability migration setting used by the telemetry SDK bootstrap. */
 export const SEMCONV_STABILITY_OPT_IN = "http";

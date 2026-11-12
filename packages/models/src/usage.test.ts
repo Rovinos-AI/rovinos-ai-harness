@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, trace } from "@opentelemetry/api";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import {
-  InMemorySpanExporter,
-  SimpleSpanProcessor,
-  TracerProvider,
-} from "@opentelemetry/sdk-trace";
 import { Code, ModelUsageSchema } from "@rovinos/schemas";
 import {
   attr,
@@ -17,13 +11,12 @@ import {
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
 } from "@rovinos/telemetry";
+import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { reportModelUsage } from "./usage.js";
 
-const exporter = new InMemorySpanExporter();
-const provider = new TracerProvider({
-  spanProcessors: [new SimpleSpanProcessor({ exporter })],
-});
+const spanCollector = createTestSpanCollector();
+const { provider, getFinishedSpans } = spanCollector;
 const modelCall = defineSpan(
   "harness.model_call",
   {
@@ -43,7 +36,7 @@ const modelCall = defineSpan(
 
 beforeAll(() => {
   trace.setGlobalTracerProvider(provider);
-  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  context.setGlobalContextManager(createTestContextManager());
 });
 
 afterAll(async () => {
@@ -53,7 +46,7 @@ afterAll(async () => {
 
 it("maps only bounded provider, model, and usage metadata onto the active model span", async () => {
   const span = modelCall.start({});
-  context.with(trace.setSpan(context.active(), span), () =>
+  context.with(trace.setSpan(context.active(), span), () => {
     reportModelUsage(
       { provider: Code.parse("provider_a"), model: Code.parse("model_a") },
       ModelUsageSchema.parse({
@@ -63,12 +56,12 @@ it("maps only bounded provider, model, and usage metadata onto the active model 
         cacheWriteTokens: 1,
       }),
       false,
-    ),
-  );
+    );
+  });
   span.end();
   await provider.forceFlush();
 
-  expect(exporter.getFinishedSpans()[0]?.attributes).toMatchObject({
+  expect(getFinishedSpans()[0]?.attributes).toMatchObject({
     [GEN_AI_PROVIDER_NAME]: "provider_a",
     [GEN_AI_REQUEST_MODEL]: "model_a",
     [GEN_AI_USAGE_INPUT_TOKENS]: 7,

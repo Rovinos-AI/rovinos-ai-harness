@@ -21,11 +21,7 @@ import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
 import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 import { getTracer } from "./tracer.js";
-import {
-  GEN_AI_ATTRIBUTE_NAMES,
-  MCP_ATTRIBUTE_NAMES,
-  SEMCONV_SPAN_NAMES,
-} from "./semconv.js";
+import { GEN_AI_ATTRIBUTE_NAMES, MCP_ATTRIBUTE_NAMES, SEMCONV_SPAN_NAMES } from "./semconv.js";
 import { env } from "node:process";
 
 /** Attribute-schema shape accepted by registered span definitions. */

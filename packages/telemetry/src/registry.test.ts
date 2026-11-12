@@ -228,11 +228,7 @@ describe("span registry", () => {
       ),
     ).toThrow("span_attr_name_invalid");
     expect(() =>
-      defineSpan(
-        "harness.test.mcp_semconv",
-        { "mcp.method.name": attr.code() },
-        testOwnerTask,
-      ),
+      defineSpan("harness.test.mcp_semconv", { "mcp.method.name": attr.code() }, testOwnerTask),
     ).toThrow("span_attr_name_invalid");
   });
 
