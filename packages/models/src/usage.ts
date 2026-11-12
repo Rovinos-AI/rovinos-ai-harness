@@ -5,7 +5,16 @@ import {
   type ModelRef,
   type ModelUsage,
 } from "@rovinos/schemas";
-import { countModelUsage, setActiveSpanAttribute } from "@rovinos/telemetry";
+import {
+  countModelUsage,
+  GEN_AI_PROVIDER_NAME,
+  GEN_AI_REQUEST_MODEL,
+  GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+  GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+  GEN_AI_USAGE_INPUT_TOKENS,
+  GEN_AI_USAGE_OUTPUT_TOKENS,
+  setActiveSpanAttribute,
+} from "@rovinos/telemetry";
 
 function aggregateOptionalTokens(
   previous: number | undefined,
@@ -76,13 +85,19 @@ export function reportModelUsage(
   deferSpanUsage: boolean,
 ): void {
   if (!deferSpanUsage) {
+    setActiveSpanAttribute(GEN_AI_PROVIDER_NAME, model.provider);
+    setActiveSpanAttribute(GEN_AI_REQUEST_MODEL, model.model);
     setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
     setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
+    setActiveSpanAttribute(GEN_AI_USAGE_INPUT_TOKENS, usage.inputTokens);
+    setActiveSpanAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, usage.outputTokens);
     if (usage.cacheReadTokens !== undefined) {
       setActiveSpanAttribute("harness.model.cache_read_tokens", usage.cacheReadTokens);
+      setActiveSpanAttribute(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, usage.cacheReadTokens);
     }
     if (usage.cacheWriteTokens !== undefined) {
       setActiveSpanAttribute("harness.model.cache_write_tokens", usage.cacheWriteTokens);
+      setActiveSpanAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, usage.cacheWriteTokens);
     }
     if (usage.costMicros !== undefined) {
       setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);

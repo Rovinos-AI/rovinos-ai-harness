@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { attr, defineSpan } from "@rovinos/telemetry";
+import {
+  attr,
+  defineSpan,
+  GEN_AI_PROVIDER_NAME,
+  GEN_AI_REQUEST_MODEL,
+  GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+  GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+  GEN_AI_USAGE_INPUT_TOKENS,
+  GEN_AI_USAGE_OUTPUT_TOKENS,
+} from "@rovinos/telemetry";
 import type { SpanDefinition, SpanDefinitionShape } from "@rovinos/telemetry";
 import type { Code, Id } from "@rovinos/schemas";
 
@@ -70,6 +79,12 @@ export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     "harness.model.cache_read_tokens": attr.optional(attr.nonnegativeInt()),
     "harness.model.cache_write_tokens": attr.optional(attr.nonnegativeInt()),
     "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
+    [GEN_AI_PROVIDER_NAME]: attr.optional(attr.code()),
+    [GEN_AI_REQUEST_MODEL]: attr.optional(attr.code()),
+    [GEN_AI_USAGE_INPUT_TOKENS]: attr.optional(attr.nonnegativeInt()),
+    [GEN_AI_USAGE_OUTPUT_TOKENS]: attr.optional(attr.nonnegativeInt()),
+    [GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS]: attr.optional(attr.nonnegativeInt()),
+    [GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS]: attr.optional(attr.nonnegativeInt()),
     "harness.context.strategy": attr.code(),
     "harness.context.strategy_version": attr.code(),
     "harness.context.estimated_tokens": attr.int(),
