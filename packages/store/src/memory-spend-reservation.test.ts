@@ -76,7 +76,9 @@ describe("InMemorySpendReservationStore", () => {
       responseHash: "b".repeat(64),
     };
     const options = {
-      usageUpdates: [{ quotaId, period: "day" as const, periodStart, costMicros: 700, runsStarted: 0 }],
+      usageUpdates: [
+        { quotaId, period: "day" as const, periodStart, costMicros: 700, runsStarted: 0 },
+      ],
     };
 
     const settled = await store.settleSpend(settlement, response(700), 2, options);
@@ -85,12 +87,7 @@ describe("InMemorySpendReservationStore", () => {
       nextSeq: settled.nextSeq,
     });
     await expect(
-      store.settleSpend(
-        { ...settlement, responseHash: "c".repeat(64) },
-        response(700),
-        2,
-        options,
-      ),
+      store.settleSpend({ ...settlement, responseHash: "c".repeat(64) }, response(700), 2, options),
     ).rejects.toBeInstanceOf(SpendReservationError);
     await expect(store.readUsageLedger(quotaId, "day", [periodStart])).resolves.toMatchObject([
       { costMicros: 700 },

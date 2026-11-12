@@ -93,10 +93,7 @@ function settlement(
   };
 }
 
-function usageUpdates(
-  quotaPeriods: SpendReservationInput["quotaPeriods"],
-  amountMicros: number,
-) {
+function usageUpdates(quotaPeriods: SpendReservationInput["quotaPeriods"], amountMicros: number) {
   return {
     usageUpdates: quotaPeriods.map(({ quotaId, period, periodStart }) => ({
       quotaId,
@@ -195,7 +192,8 @@ function registerCrossQuota(factory: SpendReservationStoreFactory): void {
         estimatedMicros: 80,
         pricingRevision: Code.parse("price.v1"),
       });
-      nextSeq = (await store.reserveSpend(blocker, modelRequest(runId, blockerId), nextSeq)).nextSeq;
+      nextSeq = (await store.reserveSpend(blocker, modelRequest(runId, blockerId), nextSeq))
+        .nextSeq;
 
       await expect(
         store.reserveSpend(
@@ -286,9 +284,9 @@ function registerSettlementIdempotency(factory: SpendReservationStoreFactory): v
           options,
         ),
       ).rejects.toMatchObject({ code: "spend_reservation_conflict" });
-      await expect(store.readUsageLedger(baseQuotaId, "day", [basePeriodStart])).resolves.toMatchObject([
-        { costMicros: 150 },
-      ]);
+      await expect(
+        store.readUsageLedger(baseQuotaId, "day", [basePeriodStart]),
+      ).resolves.toMatchObject([{ costMicros: 150 }]);
     }));
 }
 
@@ -375,7 +373,9 @@ function registerPricingRevision(factory: SpendReservationStoreFactory): void {
           nextSeq,
         ),
       ).rejects.toMatchObject({ code: "spend_reservation_quota_exceeded" });
-      await expect(store.reserveSpend(originalInput, originalRequest, nextSeq)).resolves.toMatchObject({
+      await expect(
+        store.reserveSpend(originalInput, originalRequest, nextSeq),
+      ).resolves.toMatchObject({
         reservation: { estimatedMicros: 400, pricingRevision: "price.v1" },
         nextSeq,
       });
@@ -395,9 +395,8 @@ function registerIntegerBoundaries(factory: SpendReservationStoreFactory): void 
         estimatedMicros: max,
         pricingRevision: Code.parse("price.v1"),
       });
-      nextSeq = (
-        await store.reserveSpend(maxInput, modelRequest(runId, attemptId), nextSeq)
-      ).nextSeq;
+      nextSeq = (await store.reserveSpend(maxInput, modelRequest(runId, attemptId), nextSeq))
+        .nextSeq;
       await expect(
         store.reserveSpend(
           input(runId, nextAttempt, {

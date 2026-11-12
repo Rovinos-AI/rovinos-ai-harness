@@ -17,7 +17,10 @@ import type { SpendReservationStore } from "./spend-reservation.js";
 import { systemClock, type Clock, type UsageAppendOptions } from "./types.js";
 
 /** In-memory reference implementation of the transactional spend-reservation port. */
-export class InMemorySpendReservationStore extends InMemoryEventStore implements SpendReservationStore {
+export class InMemorySpendReservationStore
+  extends InMemoryEventStore
+  implements SpendReservationStore
+{
   private readonly reservations = new Map<SpendReservation["attemptId"], SpendReservation>();
   private readonly requestSequences = new Map<SpendReservation["attemptId"], number>();
   private serial: Promise<void> = Promise.resolve();
@@ -140,7 +143,10 @@ export class InMemorySpendReservationStore extends InMemoryEventStore implements
         if (!sameSettlement(reservation.settlement, parsedSettlement.data)) {
           throw new SpendReservationError("spend_reservation_conflict");
         }
-        return { reservation: SpendReservationSchema.parse(reservation), nextSeq: await this.head(reservation.runId) };
+        return {
+          reservation: SpendReservationSchema.parse(reservation),
+          nextSeq: await this.head(reservation.runId),
+        };
       }
       if (reservation.state !== "dispatching" && reservation.state !== "uncertain") {
         throw new SpendReservationError("spend_reservation_transition_invalid");
@@ -213,7 +219,10 @@ export class InMemorySpendReservationStore extends InMemoryEventStore implements
     return SpendReservationSchema.parse(updated);
   }
 
-  private async sameRequest(attemptId: SpendReservation["attemptId"], modelRequest: NewEvent): Promise<boolean> {
+  private async sameRequest(
+    attemptId: SpendReservation["attemptId"],
+    modelRequest: NewEvent,
+  ): Promise<boolean> {
     const sequence = this.requestSequences.get(attemptId);
     if (sequence === undefined) {
       return false;
@@ -229,7 +238,9 @@ export class InMemorySpendReservationStore extends InMemoryEventStore implements
 
   private async assertHeadroom(input: SpendReservationInput): Promise<void> {
     for (const quota of input.quotaPeriods) {
-      const ledgerRows = await this.readUsageLedger(quota.quotaId, quota.period, [quota.periodStart]);
+      const ledgerRows = await this.readUsageLedger(quota.quotaId, quota.period, [
+        quota.periodStart,
+      ]);
       const ledger = ledgerRows[0];
       if (ledger?.unknownCostCount !== undefined && ledger.unknownCostCount > 0) {
         throw new SpendReservationError("spend_reservation_uncertain");
