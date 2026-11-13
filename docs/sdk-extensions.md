@@ -4,6 +4,9 @@
 imports an implementation it trusts, then registers it explicitly with `createHarness`. There is
 no automatic package loading and no dependency on authoring helpers.
 
+See the [optional extension roadmap](./extensions-roadmap.md) for package boundaries, deferred
+areas, compatibility expectations, and proposed follow-up scopes.
+
 ## Registration and grants
 
 An extension definition contains an `ExtensionManifest`, one Zod configuration schema, and a
