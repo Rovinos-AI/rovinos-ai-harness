@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: Apache-2.0
+.create-merge table HarnessTraces (
+    TraceID:string,
+    SpanID:string,
+    ParentID:string,
+    SpanName:string,
+    SpanStatus:string,
+    SpanKind:string,
+    StartTime:datetime,
+    EndTime:datetime,
+    ResourceAttributes:dynamic,
+    TraceAttributes:dynamic,
+    Events:dynamic,
+    Links:dynamic,
+    SpanStatusMessage:string
+)
+
+.create-merge table HarnessLogs (
+    Timestamp:datetime,
+    ObservedTimestamp:datetime,
+    TraceID:string,
+    SpanID:string,
+    SeverityText:string,
+    SeverityNumber:int,
+    Body:string,
+    ResourceAttributes:dynamic,
+    LogsAttributes:dynamic
+)
+
+.create-merge table HarnessMetrics (
+    Timestamp:datetime,
+    MetricName:string,
+    MetricType:string,
+    MetricUnit:string,
+    MetricDescription:string,
+    MetricValue:real,
+    Host:string,
+    ResourceAttributes:dynamic,
+    MetricAttributes:dynamic
+)
+
+.create-or-alter table HarnessTraces ingestion json mapping 'HarnessTracesMapping' '[{"column":"TraceID","path":"$.TraceID","datatype":"string"},{"column":"SpanID","path":"$.SpanID","datatype":"string"},{"column":"ParentID","path":"$.ParentID","datatype":"string"},{"column":"SpanName","path":"$.SpanName","datatype":"string"},{"column":"SpanStatus","path":"$.SpanStatus","datatype":"string"},{"column":"SpanKind","path":"$.SpanKind","datatype":"string"},{"column":"StartTime","path":"$.StartTime","datatype":"datetime"},{"column":"EndTime","path":"$.EndTime","datatype":"datetime"},{"column":"ResourceAttributes","path":"$.ResourceAttributes","datatype":"dynamic"},{"column":"TraceAttributes","path":"$.TraceAttributes","datatype":"dynamic"},{"column":"Events","path":"$.Events","datatype":"dynamic"},{"column":"Links","path":"$.Links","datatype":"dynamic"},{"column":"SpanStatusMessage","path":"$.SpanStatusMessage","datatype":"string"}]'
+
+.create-or-alter table HarnessLogs ingestion json mapping 'HarnessLogsMapping' '[{"column":"Timestamp","path":"$.Timestamp","datatype":"datetime"},{"column":"ObservedTimestamp","path":"$.ObservedTimestamp","datatype":"datetime"},{"column":"TraceID","path":"$.TraceID","datatype":"string"},{"column":"SpanID","path":"$.SpanID","datatype":"string"},{"column":"SeverityText","path":"$.SeverityText","datatype":"string"},{"column":"SeverityNumber","path":"$.SeverityNumber","datatype":"int"},{"column":"Body","path":"$.Body","datatype":"string"},{"column":"ResourceAttributes","path":"$.ResourceAttributes","datatype":"dynamic"},{"column":"LogsAttributes","path":"$.LogsAttributes","datatype":"dynamic"}]'
+
+.create-or-alter table HarnessMetrics ingestion json mapping 'HarnessMetricsMapping' '[{"column":"Timestamp","path":"$.Timestamp","datatype":"datetime"},{"column":"MetricName","path":"$.MetricName","datatype":"string"},{"column":"MetricType","path":"$.MetricType","datatype":"string"},{"column":"MetricUnit","path":"$.MetricUnit","datatype":"string"},{"column":"MetricDescription","path":"$.MetricDescription","datatype":"string"},{"column":"MetricValue","path":"$.MetricValue","datatype":"real"},{"column":"Host","path":"$.Host","datatype":"string"},{"column":"ResourceAttributes","path":"$.ResourceAttributes","datatype":"dynamic"},{"column":"MetricAttributes","path":"$.MetricAttributes","datatype":"dynamic"}]'
+
+.alter-merge table HarnessTraces policy retention softdelete = 30d
+
+.alter-merge table HarnessLogs policy retention softdelete = 30d
+
+.alter-merge table HarnessMetrics policy retention softdelete = 30d
