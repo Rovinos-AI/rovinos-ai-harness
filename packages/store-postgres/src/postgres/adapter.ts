@@ -204,35 +204,35 @@ export class PostgresEventStore implements EventStore, SpendReservationStore, St
     return this.writer.appendWithUsage(...args);
   }
 
-  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.reserveSpend} */
+  /** Reserve quota headroom while atomically appending the model request. */
   reserveSpend(
     ...args: Parameters<SpendReservationStore["reserveSpend"]>
   ): ReturnType<SpendReservationStore["reserveSpend"]> {
     return this.spendReservations.reserveSpend(...args);
   }
 
-  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.markSpendDispatching} */
+  /** Mark a reserved request as dispatching before calling the provider. */
   markSpendDispatching(
     ...args: Parameters<SpendReservationStore["markSpendDispatching"]>
   ): ReturnType<SpendReservationStore["markSpendDispatching"]> {
     return this.spendReservations.markSpendDispatching(...args);
   }
 
-  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.releaseSpend} */
+  /** Release a reservation that has not been dispatched. */
   releaseSpend(
     ...args: Parameters<SpendReservationStore["releaseSpend"]>
   ): ReturnType<SpendReservationStore["releaseSpend"]> {
     return this.spendReservations.releaseSpend(...args);
   }
 
-  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.settleSpend} */
+  /** Settle a dispatched reservation while atomically appending the model response. */
   settleSpend(
     ...args: Parameters<SpendReservationStore["settleSpend"]>
   ): ReturnType<SpendReservationStore["settleSpend"]> {
     return this.spendReservations.settleSpend(...args);
   }
 
-  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.markSpendUncertain} */
+  /** Mark an unconfirmed provider outcome as uncertain. */
   markSpendUncertain(
     ...args: Parameters<SpendReservationStore["markSpendUncertain"]>
   ): ReturnType<SpendReservationStore["markSpendUncertain"]> {
