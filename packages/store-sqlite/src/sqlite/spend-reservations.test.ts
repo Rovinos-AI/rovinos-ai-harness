@@ -244,3 +244,55 @@ it("recovers reserved and dispatching attempts and their ledger across file reop
     await store.close();
   }
 });
+
+it("preserves terminal runs with active reservations until settlement", async () => {
+  if (directory === undefined) {
+    throw new Error("SQLite spend-reservation directory is not initialized");
+  }
+  const path = join(directory, "reservation-retention.sqlite");
+  const store = new SqliteEventStore(path);
+  const runId = builders.nextRunId();
+  const attemptId = builders.nextRunId();
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    const reserved = await store.reserveSpend(
+      reservationInput(runId, attemptId, 100),
+      request(runId, attemptId),
+      1,
+    );
+    await store.markSpendDispatching(attemptId);
+    await store.append(
+      runId,
+      [builders.runStatusChanged(runId, "pending", "completed")],
+      reserved.nextSeq,
+    );
+
+    await expect(store.deleteRun(runId)).resolves.toBe(0);
+    await expect(
+      store.settleSpend(
+        {
+          runId,
+          attemptId,
+          cost: { version: 1, state: "known", amountMicros: 120 },
+          responseHash: "c".repeat(64),
+        },
+        response(runId, attemptId, 120),
+        reserved.nextSeq + 1,
+        {
+          usageUpdates: [
+            {
+              quotaId,
+              period: "day",
+              periodStart,
+              costMicros: 120,
+              runsStarted: 0,
+            },
+          ],
+        },
+      ),
+    ).resolves.toMatchObject({ reservation: { state: "settled" } });
+    await expect(store.deleteRun(runId)).resolves.toBe(4);
+  } finally {
+    await store.close();
+  }
+});
