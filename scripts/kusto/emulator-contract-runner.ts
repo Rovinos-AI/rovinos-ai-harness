@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deepStrictEqual } from "node:assert/strict";
 import {
   Client,
   KustoConnectionStringBuilder,
@@ -9,6 +11,14 @@ import {
   MatchRule,
 } from "azure-kusto-data";
 import { applySchemaFile, type KustoManagementClient } from "./apply-schema.ts";
+import {
+  assertKustoQueryGoldens,
+  kustoQueryNames,
+  parseKustoLogFixtures,
+  parseKustoQueryRows,
+  parseKustoQueryGoldens,
+  type KustoLogFixture,
+} from "./query-contract.ts";
 
 const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const emulatorDatabase = "NetDefaultDB";
@@ -21,7 +31,11 @@ type ConfigurationErrorCode =
   | "database_invalid";
 
 type ContractFailureCode =
-  "connect_failed" | "database_create_failed" | "schema_apply_failed" | "fixture_ingest_failed";
+  | "connect_failed"
+  | "database_create_failed"
+  | "schema_apply_failed"
+  | "fixture_ingest_failed"
+  | "query_execute_failed";
 
 interface ContractConfiguration {
   readonly clusterUri: string;
@@ -59,7 +73,7 @@ export function getContractConfiguration(
   args: readonly string[],
   environment: Readonly<Record<string, string | undefined>>,
 ): ConfigurationResult {
-  if (args.length !== 1 || args[0] !== "--run") {
+  if (args.length !== 1 || !["--run", "--queries"].includes(args[0] ?? "")) {
     return { error: "invalid_arguments" };
   }
   const clusterUri = environment.KUSTO_CLUSTER_URI;
@@ -201,11 +215,71 @@ async function ingestFixtures(
   }
 }
 
+async function ingestQueryFixtures(client: Client, database: string): Promise<void> {
+  const fixtureText = await readFile(
+    new URL("../../test/fixtures/kusto/safe-events.jsonl", import.meta.url),
+    "utf8",
+  );
+  const fixtures = parseKustoLogFixtures(fixtureText);
+  const timestamp = new Date().toISOString();
+  for (const fixture of fixtures) {
+    const recentFixture: KustoLogFixture = {
+      ...fixture,
+      Timestamp: timestamp,
+      ObservedTimestamp: timestamp,
+    };
+    await client.executeMgmt(
+      database,
+      `.ingest inline into table HarnessLogs with (format='json', ingestionMappingReference='HarnessLogsMapping') <| ${JSON.stringify(recentFixture)}`,
+    );
+  }
+}
+
+function queryRows(response: Awaited<ReturnType<Client["executeQuery"]>>): unknown {
+  const table = response.primaryResults[0];
+  if (table === undefined) {
+    throw new TypeError("kusto_query_result_missing");
+  }
+  return parseKustoQueryRows(table.toJSON().data);
+}
+
+async function executeQueries(client: Client, database: string): Promise<void> {
+  const goldens = parseKustoQueryGoldens(
+    await readFile(new URL("../../test/fixtures/kusto/query-results.json", import.meta.url), "utf8"),
+  );
+  assertKustoQueryGoldens(goldens);
+  for (const name of kustoQueryNames) {
+    const query = await readFile(new URL(`../../infra/kusto/queries/${name}.kql`, import.meta.url), "utf8");
+    let response: Awaited<ReturnType<Client["executeQuery"]>>;
+    try {
+      response = await client.executeQuery(database, query);
+    } catch {
+      process.stderr.write(`kusto_query_${name}_execution_failed\n`);
+      throw new TypeError("kusto_query_execution_failed");
+    }
+    const expected = goldens[name];
+    if (expected === undefined) {
+      throw new TypeError("kusto_query_golden_missing");
+    }
+    const actual = queryRows(response);
+    try {
+      deepStrictEqual(actual, expected);
+    } catch {
+      process.stderr.write(`kusto_query_${name}_golden_mismatch ${JSON.stringify(actual)}\n`);
+      throw new TypeError("kusto_query_golden_mismatch");
+    }
+  }
+}
+
 async function dropDatabase(client: Client, database: string): Promise<void> {
   await client.executeMgmt(database, `.drop database ${database} ifexists`).catch(() => undefined);
 }
 
-async function runContract(clusterUri: string, baseDatabase: string): Promise<void> {
+async function runContract(
+  clusterUri: string,
+  baseDatabase: string,
+  queryContract: boolean,
+): Promise<void> {
   const database = createDatabaseName();
   let client: Client | undefined;
   let databaseCreated = false;
@@ -218,8 +292,15 @@ async function runContract(clusterUri: string, baseDatabase: string): Promise<vo
     databaseCreated = true;
     failureCode = "schema_apply_failed";
     await applySchema(client, database);
-    failureCode = "fixture_ingest_failed";
-    await ingestFixtures(client, database, createFixtures(new Date().toISOString()));
+    if (queryContract) {
+      failureCode = "fixture_ingest_failed";
+      await ingestQueryFixtures(client, database);
+      failureCode = "query_execute_failed";
+      await executeQueries(client, database);
+    } else {
+      failureCode = "fixture_ingest_failed";
+      await ingestFixtures(client, database, createFixtures(new Date().toISOString()));
+    }
     process.stdout.write("kusto_emulator_contract_passed\n");
   } catch {
     process.stderr.write(`kusto_emulator_contract_${failureCode}\n`);
@@ -233,13 +314,18 @@ async function runContract(clusterUri: string, baseDatabase: string): Promise<vo
 }
 
 async function main(): Promise<void> {
-  const result = getContractConfiguration(process.argv.slice(2), process.env);
+  const args = process.argv.slice(2);
+  const result = getContractConfiguration(args, process.env);
   if (result.configuration === undefined) {
     process.stderr.write(`kusto_emulator_contract_${result.error}\n`);
     process.exitCode = 1;
     return;
   }
-  await runContract(result.configuration.clusterUri, result.configuration.database);
+  await runContract(
+    result.configuration.clusterUri,
+    result.configuration.database,
+    args[0] === "--queries",
+  );
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

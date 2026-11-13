@@ -43,3 +43,18 @@ export async function runKustoEmulatorComposeContract(projectName: string): Prom
     await compose(projectName, ["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
   }
 }
+
+/** Starts the isolated emulator and runs all Kusto query fixtures and golden contracts. */
+export async function runKustoEmulatorComposeQueriesContract(projectName: string): Promise<string> {
+  try {
+    return await compose(projectName, [
+      "up",
+      "--abort-on-container-exit",
+      "--exit-code-from",
+      "kusto-query-test-client",
+      "kusto-query-test-client",
+    ]);
+  } finally {
+    await compose(projectName, ["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
+  }
+}

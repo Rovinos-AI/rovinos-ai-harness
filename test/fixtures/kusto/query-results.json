@@ -1,0 +1,80 @@
+{
+  "run_success_rate": [
+    { "outcome": "cancelled", "runs": 1, "completed_runs": 0, "success_rate": 0 },
+    { "outcome": "completed", "runs": 2, "completed_runs": 2, "success_rate": 0.5 },
+    { "outcome": "failed", "runs": 1, "completed_runs": 0, "success_rate": 0 }
+  ],
+  "model_latency_percentiles": [
+    {
+      "provider": "anthropic",
+      "model": "claude",
+      "percentile_latency_ms_50": 600,
+      "percentile_latency_ms_95": 600,
+      "percentile_latency_ms_99": 600
+    },
+    {
+      "provider": "openai",
+      "model": "gpt_4",
+      "percentile_latency_ms_50": 200,
+      "percentile_latency_ms_95": 400,
+      "percentile_latency_ms_99": 400
+    }
+  ],
+  "cost_and_repair_rate": [
+    {
+      "provider": "anthropic",
+      "model": "claude",
+      "calls": 1,
+      "input_tokens": 800,
+      "output_tokens": 100,
+      "total_tokens": 900,
+      "repair_attempts": 2,
+      "repair_attempts_per_call": 2,
+      "schema_valid_rate": 1
+    },
+    {
+      "provider": "openai",
+      "model": "gpt_4",
+      "calls": 2,
+      "input_tokens": 2200,
+      "output_tokens": 500,
+      "total_tokens": 2700,
+      "repair_attempts": 1,
+      "repair_attempts_per_call": 0.5,
+      "schema_valid_rate": 0.5
+    }
+  ],
+  "tool_timeouts": [
+    { "tool_id": "browser", "timeouts": 1 },
+    { "tool_id": "search", "timeouts": 1 }
+  ],
+  "approval_wait": [
+    {
+      "decision": "approve",
+      "decided_by": "human",
+      "percentile_wait_ms_50": 250,
+      "percentile_wait_ms_95": 250,
+      "percentile_wait_ms_99": 250
+    },
+    {
+      "decision": "deny",
+      "decided_by": "policy",
+      "percentile_wait_ms_50": 50,
+      "percentile_wait_ms_95": 50,
+      "percentile_wait_ms_99": 50
+    },
+    {
+      "decision": "edit",
+      "decided_by": "expiry",
+      "percentile_wait_ms_50": 500,
+      "percentile_wait_ms_95": 500,
+      "percentile_wait_ms_99": 500
+    }
+  ],
+  "pii_actions": [
+    { "boundary": "telemetry_export", "action": "blocked", "events": 1, "entity_count": 1 },
+    { "boundary": "tool_input", "action": "redacted", "events": 1, "entity_count": 3 }
+  ],
+  "resume_counts": [{ "outcome": "running", "resume_count": 1 }],
+  "sentinel_trips": [{ "action": "blocked", "sentinel_trips": 1, "entity_count": 1 }]
+}

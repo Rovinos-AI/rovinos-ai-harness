@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+let lookback = 7d;
+let ResumedRuns = (period:timespan) {
+    HarnessLogs
+    | where Timestamp >= ago(period)
+    | extend event_kind = tostring(Body),
+             reason = tostring(LogsAttributes["harness.run.status.reason"]),
+             outcome = tostring(LogsAttributes["harness.run.status.to"])
+    | where event_kind == "harness.safe.run_status"
+};
+ResumedRuns(lookback)
+| where reason == "resumed"
+| summarize resume_count = count() by outcome
+| order by outcome asc
