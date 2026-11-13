@@ -182,6 +182,7 @@ describe("SQLite schema migrations", () => {
       "0010",
       "0011",
       "0012",
+      "0013",
     ]);
     const names = db
       .prepare<[], { name: string }>(
@@ -210,6 +211,9 @@ describe("SQLite schema migrations", () => {
         "run_queue_run_id_idx",
         "usage_ledger",
         "instances",
+        "spend_reservations",
+        "spend_reservation_quotas",
+        "spend_reservation_quotas_period_idx",
       ]),
     );
     expect(db.prepare("PRAGMA table_info(events)").all()).toEqual(
@@ -250,6 +254,7 @@ describe("SQLite schema migrations", () => {
     expect(await readdir(directory)).toContain("0008_run_queue_wakeups.sql");
     expect(await readdir(directory)).toContain("0009_instances.sql");
     expect(await readdir(directory)).toContain("0012_unknown_cost_ledger.sql");
+    expect(await readdir(directory)).toContain("0013_spend_reservations.sql");
     const postgresMigrations = new URL(
       "../packages/store-postgres/migrations/postgres/",
       import.meta.url,

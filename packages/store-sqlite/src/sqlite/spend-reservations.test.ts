@@ -120,6 +120,132 @@ it("serializes reservations from independent SQLite connections", async () => {
   }
 });
 
+it("fails closed for reservation conflicts, missing attempts, invalid states, and exhausted quotas", async () => {
+  if (directory === undefined) {
+    throw new Error("SQLite spend-reservation directory is not initialized");
+  }
+  const store = new SqliteEventStore(join(directory, "reservation-errors.sqlite"));
+  const runId = builders.nextRunId();
+  const otherRunId = builders.nextRunId();
+  const attemptId = builders.nextRunId();
+  const missingAttemptId = builders.nextRunId();
+  const overflowAttemptId = builders.nextRunId();
+  const settlement = {
+    runId,
+    attemptId,
+    cost: { version: 1 as const, state: "known" as const, amountMicros: 120 },
+    responseHash: "d".repeat(64),
+  };
+  const usageOptions = {
+    usageUpdates: [
+      {
+        quotaId,
+        period: "day" as const,
+        periodStart,
+        costMicros: 120,
+        runsStarted: 0,
+      },
+    ],
+  };
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    await store.append(otherRunId, [builders.runCreated(otherRunId)], 0);
+    await expect(
+      store.reserveSpend(
+        reservationInput(runId, attemptId, 100),
+        request(runId, missingAttemptId),
+        1,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_invalid" });
+    const reserved = await store.reserveSpend(
+      reservationInput(runId, attemptId, 100, 150),
+      request(runId, attemptId),
+      1,
+    );
+
+    await expect(
+      store.reserveSpend(
+        reservationInput(runId, attemptId, 101, 150),
+        request(runId, attemptId),
+        reserved.nextSeq,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_conflict" });
+    await expect(
+      store.settleSpend(
+        { ...settlement, attemptId: missingAttemptId },
+        response(runId, missingAttemptId, 120),
+        reserved.nextSeq,
+        usageOptions,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_not_found" });
+    await expect(
+      store.settleSpend(
+        { ...settlement, runId: otherRunId },
+        response(otherRunId, attemptId, 120),
+        reserved.nextSeq,
+        usageOptions,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_conflict" });
+    await expect(
+      store.settleSpend(
+        settlement,
+        response(runId, missingAttemptId, 120),
+        reserved.nextSeq,
+        usageOptions,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_invalid" });
+    await expect(
+      store.settleSpend(
+        settlement,
+        response(runId, attemptId, 121),
+        reserved.nextSeq,
+        usageOptions,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_invalid" });
+    await expect(
+      store.settleSpend(
+        settlement,
+        response(runId, attemptId, 120),
+        reserved.nextSeq,
+        usageOptions,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_transition_invalid" });
+    await expect(
+      store.reserveSpend(
+        reservationInput(runId, overflowAttemptId, 100, 150),
+        request(runId, overflowAttemptId),
+        reserved.nextSeq,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_quota_exceeded" });
+
+    await store.markSpendDispatching(attemptId);
+    await store.markSpendUncertain(attemptId, "spend_reservation_usage_incomplete");
+    await expect(
+      store.settleSpend(settlement, response(runId, attemptId, 120), reserved.nextSeq, {
+        usageUpdates: [],
+      }),
+    ).rejects.toMatchObject({ code: "spend_reservation_usage_incomplete" });
+    await expect(
+      store.settleSpend(
+        settlement,
+        response(runId, attemptId, 120),
+        reserved.nextSeq,
+        usageOptions,
+      ),
+    ).resolves.toMatchObject({ reservation: { state: "settled" } });
+    await expect(
+      store.settleSpend(
+        { ...settlement, responseHash: "e".repeat(64) },
+        response(runId, attemptId, 120),
+        reserved.nextSeq,
+        usageOptions,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_conflict" });
+  } finally {
+    await store.close();
+  }
+});
+
 it("rolls back a reservation when the model-request append fails", async () => {
   if (directory === undefined) {
     throw new Error("SQLite spend-reservation directory is not initialized");

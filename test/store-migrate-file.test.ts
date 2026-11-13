@@ -72,6 +72,7 @@ describe("migrateSqliteFile", () => {
       "0010",
       "0011",
       "0012",
+      "0013",
     ]);
     expect(existsSync(path)).toBe(false);
   });
@@ -93,6 +94,7 @@ describe("migrateSqliteFile", () => {
       "0010",
       "0011",
       "0012",
+      "0013",
     ]);
     const filesBeforeDryRun = readdirSync(directory);
     expect(migrateSqliteFile(path, { dryRun: true })).toEqual([]);
