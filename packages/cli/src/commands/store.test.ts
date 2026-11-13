@@ -235,6 +235,7 @@ describe("harness store migrate", () => {
         "0011",
         "0012",
         "0013",
+        "0014",
       ],
     });
     expect(postgresState.queries).toEqual([
