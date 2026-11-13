@@ -7,6 +7,9 @@ exporters:
     traces_table_name: HarnessTraces
     logs_table_name: HarnessLogs
     metrics_table_name: HarnessMetrics
+    traces_table_json_mapping: HarnessTracesMapping
+    logs_table_json_mapping: HarnessLogsMapping
+    metrics_table_json_mapping: HarnessMetricsMapping
     ingestion_type: managed
 
 service:

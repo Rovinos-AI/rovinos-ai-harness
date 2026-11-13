@@ -11,6 +11,9 @@ the new sink in the captured-output scan and add a negative control if protectio
 could be bypassed. Keep committed fixtures synthetic; cassette and `__fixtures__` files are
 scanned for canary-like patterns.
 
+The reference retrieval canary checks that synthetic PII in a corpus is tokenized in governed
+run content and absent from exported metadata spans.
+
 The advisory MCP conformance gate scans its archived report tree for the synthetic bearer-token
 canaries; `scripts/ci/mcp-conformance-report-safety.canary.test.ts` is the negative control for
 that report sink.

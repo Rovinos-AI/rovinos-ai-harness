@@ -18,6 +18,7 @@ Publish only these packages under the confirmed `@rovinos` scope:
 | --- | --- |
 | `@rovinos/sdk` | Bundled stable programmatic API |
 | `@rovinos/extensions` | Optional SDK-backed authoring helpers; SDK is a required peer |
+| `@rovinos/extension-retrieval` | Optional bounded reference retrieval implementation; SDK and extensions are required peers |
 | `@rovinos/cli` | Bundled implementation and `harness` executable |
 | `@rovinos/store-sqlite` | SQLite adapter and its required driver |
 | `@rovinos/store-postgres` | Postgres adapter and its required driver |
@@ -33,10 +34,14 @@ packages remain external dependencies. The SDK lists the SQLite and Postgres dri
 dependencies; each adapter lists its own driver as a regular dependency and the SDK as an optional
 peer dependency.
 
+The retrieval package is an optional lexical reference over an explicitly supplied in-memory corpus.
+It has no network or vector-store dependency and remains trusted in-process code; it does not claim
+plugin confinement or hosted tenant isolation.
+
 Published packages require Node.js 26 or later. `check-publish-surface.ts` checks workspace
 privacy, package dependencies, tarball contents, source maps, and uncompressed size budgets before
-release. The SDK, extensions, CLI, SQLite adapter, Postgres adapter, and Redis adapter budgets are
-30 MB, 1 MB, 40 MB, 10 MB, 10 MB, and 10 MB respectively.
+release. The SDK, extensions, retrieval extension, CLI, SQLite adapter, Postgres adapter, and Redis
+adapter budgets are 30 MB, 1 MB, 1 MB, 40 MB, 10 MB, 10 MB, and 10 MB respectively.
 
 The `@rovinos` npm organization must exist before the first publication. Versioning and trusted
 publishing mechanics are owned by task 21.6.

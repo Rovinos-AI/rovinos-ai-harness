@@ -36,6 +36,8 @@ flowchart LR
   current --> may_core
   may_config["config"]
   current --> may_config
+  used_by_extension_retrieval["extension-retrieval"]
+  used_by_extension_retrieval --> current
   used_by_extensions["extensions"]
   used_by_extensions --> current
 ```
