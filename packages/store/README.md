@@ -49,3 +49,7 @@ in the ledger and can block subsequent reservations.
 production storage. Backend adapters can run the shared scenarios exported from
 `@rovinos/store/testing` with `runSpendReservationConformance`. These transactions limit only
 harness-admitted recorded spend; they do not impose a hard provider-billing cap.
+
+`SqliteEventStore` provides durable single-node reservations. Its migrations create persistent
+reservation and quota-period records, and SQLite serializes admission, request-event append, and
+settlement with usage-ledger updates across independent connections.

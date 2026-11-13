@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isDeepStrictEqual } from "node:util";
 import type Database from "better-sqlite3";
 import type {
   Code,
@@ -8,6 +9,10 @@ import type {
   NewEvent,
   RunStatus,
   Snapshot,
+  SpendReservation,
+  SpendReservationErrorCode,
+  SpendReservationInput,
+  SpendReservationSettlement,
 } from "@rovinos/schemas";
 import {
   ChangeEmitter,
@@ -22,6 +27,8 @@ import {
   watchEvents,
   watchRunSummaries,
   parseUsageLedgerDeltas,
+  SeqConflictError,
+  StoreUnavailableError,
   type ContentCodec,
   type Clock,
   type ChangeSubscription,
@@ -38,6 +45,7 @@ import {
   type StoreKeyRotation,
   type SqliteStoreOptions,
 } from "@rovinos/store/adapter-internal";
+import { SpendReservationError, type SpendReservationStore } from "@rovinos/store";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
 import {
   claimSqliteIdempotencyKey,
@@ -70,11 +78,17 @@ import { writeSqliteAppend } from "./append-writer.js";
 import { readSqliteUsageLedger } from "./usage-ledger.js";
 import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
 import { listSqliteRuns, prepareListRunsQuery, type ListRunsQueryParams } from "./run-listing.js";
+import {
+  completeCostAmount,
+  parseSpendReservationInput,
+  parseSpendSettlement,
+  SqliteSpendReservations,
+} from "./spend-reservations.js";
 
 const READ_PAGE_SIZE = 256;
 
 /** Durable SQLite implementation of the append-only event store. */
-export class SqliteEventStore implements EventStore, StoreKeyRotation {
+export class SqliteEventStore implements EventStore, SpendReservationStore, StoreKeyRotation {
   private readonly db: Database.Database;
   private readonly codec: ContentCodec;
   private readonly insertRun: Database.Statement<[Id, number, number]>;
@@ -118,6 +132,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   private readonly outbox: SqliteOutboxReader;
   private readonly approvalNotifications: SqliteApprovalNotifications;
   private readonly confirmationStates: SqliteConfirmationStates;
+  private readonly spendReservations: SqliteSpendReservations;
 
   /**
    * Open a SQLite database and initialize its initial schema.
@@ -141,6 +156,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
     this.approvalNotifications = new SqliteApprovalNotifications(this.db);
     this.confirmationStates = new SqliteConfirmationStates(this.db);
+    this.spendReservations = new SqliteSpendReservations(this.db, clock);
 
     this.insertRun = this.db.prepare<[Id, number, number]>(
       "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES (?, ?, 'pending', 0, ?)",
@@ -276,6 +292,160 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     return releaseSqliteExecutionLease({ db: this.db, runId, owner });
   }
 
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.reserveSpend} */
+  async reserveSpend(
+    input: SpendReservationInput,
+    modelRequest: NewEvent,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    const parsedInput = parseSpendReservationInput(input);
+    if (
+      modelRequest.type !== "model_request" ||
+      modelRequest.runId !== parsedInput.runId ||
+      modelRequest.requestId !== parsedInput.attemptId
+    ) {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+    const encoded = await encodeEvents(this.codec, parsedInput.runId, [modelRequest], expectedSeq);
+    const existing = await this.existingReservation(parsedInput, modelRequest);
+    if (existing !== undefined) {
+      return existing;
+    }
+    try {
+      const { nextSeq } = this.writeAppend({
+        runId: parsedInput.runId,
+        encoded,
+        expectedSeq,
+        beforeAppend: () => this.spendReservations.insert(parsedInput, expectedSeq),
+      });
+      const reservation = this.spendReservations.read(parsedInput.attemptId)?.reservation;
+      if (reservation === undefined) {
+        throw new StoreUnavailableError();
+      }
+      return { reservation, nextSeq };
+    } catch (error) {
+      const raced = await this.existingReservation(parsedInput, modelRequest);
+      if (raced !== undefined) {
+        return raced;
+      }
+      throw error;
+    }
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.markSpendDispatching} */
+  markSpendDispatching(attemptId: SpendReservation["attemptId"]): Promise<SpendReservation> {
+    return this.spendReservations.transition(attemptId, "dispatching");
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.releaseSpend} */
+  releaseSpend(attemptId: SpendReservation["attemptId"]): Promise<SpendReservation> {
+    return this.spendReservations.transition(attemptId, "released");
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.settleSpend} */
+  async settleSpend(
+    settlement: SpendReservationSettlement,
+    modelResponse: NewEvent,
+    expectedSeq: number,
+    options: Parameters<EventStore["appendWithUsage"]>[3],
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    const parsedSettlement = parseSpendSettlement(settlement);
+    if (
+      modelResponse.type !== "model_response" ||
+      modelResponse.runId !== parsedSettlement.runId ||
+      modelResponse.requestId !== parsedSettlement.attemptId
+    ) {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+    const settlementAmount = completeCostAmount(parsedSettlement.cost);
+    const responseAmount = completeCostAmount(modelResponse.cost);
+    if (
+      modelResponse.cost.state !== parsedSettlement.cost.state ||
+      settlementAmount === undefined ||
+      responseAmount !== settlementAmount
+    ) {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+
+    const existing = this.spendReservations.read(parsedSettlement.attemptId);
+    if (existing === undefined) {
+      throw new SpendReservationError("spend_reservation_not_found");
+    }
+    if (existing.reservation.runId !== parsedSettlement.runId) {
+      throw new SpendReservationError("spend_reservation_conflict");
+    }
+    if (existing.reservation.state === "settled") {
+      if (!this.spendReservations.matchesSettlement(existing.reservation.settlement, parsedSettlement)) {
+        throw new SpendReservationError("spend_reservation_conflict");
+      }
+      return {
+        reservation: existing.reservation,
+        nextSeq: await this.head(existing.reservation.runId),
+      };
+    }
+    if (
+      existing.reservation.state !== "dispatching" &&
+      existing.reservation.state !== "uncertain"
+    ) {
+      throw new SpendReservationError("spend_reservation_transition_invalid");
+    }
+    assertUsageUpdates(existing.reservation, parsedSettlement, options);
+    const encoded = await encodeEvents(
+      this.codec,
+      parsedSettlement.runId,
+      [modelResponse],
+      expectedSeq,
+    );
+    try {
+      const { nextSeq } = this.writeAppend({
+        runId: parsedSettlement.runId,
+        encoded,
+        expectedSeq,
+        usageUpdates: parseUsageLedgerDeltas(options.usageUpdates),
+        beforeAppend: () => {
+          const current = this.spendReservations.read(parsedSettlement.attemptId)?.reservation;
+          if (
+            current === undefined ||
+            current.runId !== parsedSettlement.runId ||
+            (current.state !== "dispatching" && current.state !== "uncertain")
+          ) {
+            throw new SpendReservationError(
+              current === undefined
+                ? "spend_reservation_not_found"
+                : "spend_reservation_transition_invalid",
+            );
+          }
+        },
+        afterAppend: () => this.spendReservations.settle(parsedSettlement.attemptId, parsedSettlement),
+      });
+      const reservation = this.spendReservations.read(parsedSettlement.attemptId)?.reservation;
+      if (reservation === undefined) {
+        throw new StoreUnavailableError();
+      }
+      return { reservation, nextSeq };
+    } catch (error) {
+      const current = this.spendReservations.read(parsedSettlement.attemptId)?.reservation;
+      if (current?.state === "settled") {
+        if (!this.spendReservations.matchesSettlement(current.settlement, parsedSettlement)) {
+          throw new SpendReservationError("spend_reservation_conflict");
+        }
+        return { reservation: current, nextSeq: await this.head(current.runId) };
+      }
+      if (error instanceof SeqConflictError) {
+        throw error;
+      }
+      throw error;
+    }
+  }
+
+  /** {@inheritDoc @rovinos/store!spend-reservation.SpendReservationStore.markSpendUncertain} */
+  markSpendUncertain(
+    attemptId: SpendReservation["attemptId"],
+    reason: SpendReservationErrorCode,
+  ): Promise<SpendReservation> {
+    return this.spendReservations.transition(attemptId, "uncertain", reason);
+  }
+
   private writeAppend(options: {
     readonly runId: Id;
     readonly encoded: readonly EncodedEvent[];
@@ -283,6 +453,8 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     readonly encodedSnapshot?: EncodedSnapshot;
     readonly usageUpdates?: readonly UsageLedgerDelta[];
     readonly leaseOwner?: Id;
+    readonly beforeAppend?: () => void;
+    readonly afterAppend?: () => void;
   }): { nextSeq: number } {
     return writeSqliteAppend({
       db: this.db,
@@ -453,4 +625,59 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
       return Promise.reject(storeError(error));
     }
   }
+
+  private async existingReservation(
+    input: SpendReservationInput,
+    modelRequest: NewEvent,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number } | undefined> {
+    const existing = this.spendReservations.read(input.attemptId);
+    if (existing === undefined) {
+      return undefined;
+    }
+    if (!this.spendReservations.matchesInput(existing.reservation, input)) {
+      throw new SpendReservationError("spend_reservation_conflict");
+    }
+    let matchingRequest = false;
+    for await (const stored of this.read(input.runId, {
+      fromSeq: existing.requestSeq,
+      toSeq: existing.requestSeq,
+    })) {
+      matchingRequest = isDeepStrictEqual(stored, { ...modelRequest, seq: existing.requestSeq });
+      break;
+    }
+    if (!matchingRequest) {
+      throw new SpendReservationError("spend_reservation_conflict");
+    }
+    return {
+      reservation: existing.reservation,
+      nextSeq: await this.head(existing.reservation.runId),
+    };
+  }
+}
+
+function assertUsageUpdates(
+  reservation: SpendReservation,
+  settlement: SpendReservationSettlement,
+  options: Parameters<EventStore["appendWithUsage"]>[3],
+): void {
+  const amount = completeCostAmount(settlement.cost);
+  if (amount === undefined) {
+    throw new SpendReservationError("spend_reservation_usage_incomplete");
+  }
+  for (const quota of reservation.quotaPeriods) {
+    const matching = options.usageUpdates.filter(
+      (update) =>
+        update.quotaId === quota.quotaId &&
+        update.period === quota.period &&
+        update.periodStart === quota.periodStart,
+    );
+    const cost = matching.reduce((total, update) => total + BigInt(update.costMicros), 0n);
+    if (matching.length === 0 || cost !== BigInt(amount)) {
+      throw new SpendReservationError("spend_reservation_usage_incomplete");
+    }
+  }
+}
+
+function completeCostAmount(cost: SpendReservationSettlement["cost"]): number | undefined {
+  return cost.state === "known" || cost.state === "estimated" ? cost.amountMicros : undefined;
 }
