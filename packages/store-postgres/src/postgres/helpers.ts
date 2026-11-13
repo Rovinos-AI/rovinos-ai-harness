@@ -12,10 +12,7 @@ import {
 } from "@rovinos/schemas";
 import type { QueryResultRow } from "pg";
 import { z } from "zod";
-import type {
-  ContentCodec,
-  RunSummary,
-} from "@rovinos/store/adapter-internal";
+import type { ContentCodec, RunSummary } from "@rovinos/store/adapter-internal";
 import {
   ContentDecryptFailedError,
   InvalidEventError,

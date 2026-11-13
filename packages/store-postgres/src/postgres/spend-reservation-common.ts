@@ -16,12 +16,7 @@ import {
 } from "@rovinos/store";
 import type { Clock, ContentCodec } from "@rovinos/store/adapter-internal";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
-import {
-  eventFromRow,
-  integer,
-  storeError,
-  type EventRow,
-} from "./helpers.js";
+import { eventFromRow, integer, storeError, type EventRow } from "./helpers.js";
 import {
   appendTransaction as appendPostgresTransaction,
   lockPostgresQuotaPeriods,

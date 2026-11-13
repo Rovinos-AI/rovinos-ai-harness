@@ -346,9 +346,7 @@ export class PostgresEventStore implements EventStore, SpendReservationStore, St
   }
 
   /** {@inheritDoc @rovinos/store!types.EventStore.ackOutbox} */
-  ackOutbox(
-    ...args: Parameters<EventStore["ackOutbox"]>
-  ): ReturnType<EventStore["ackOutbox"]> {
+  ackOutbox(...args: Parameters<EventStore["ackOutbox"]>): ReturnType<EventStore["ackOutbox"]> {
     return this.runAccess.ackOutbox(...args);
   }
 

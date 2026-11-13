@@ -149,7 +149,10 @@ export class PostgresRunAccess {
     }
   }
 
-  async retainedSnapshots(runId: Id, limit: number): Promise<Awaited<ReturnType<EventStore["retainedSnapshots"]>>> {
+  async retainedSnapshots(
+    runId: Id,
+    limit: number,
+  ): Promise<Awaited<ReturnType<EventStore["retainedSnapshots"]>>> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new TypeError("Snapshot limit must be a positive integer");
     }

@@ -226,7 +226,6 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
       });
     });
   }
-
 }
 
 function completeCostAmount(cost: SpendReservationSettlement["cost"]): number | undefined {

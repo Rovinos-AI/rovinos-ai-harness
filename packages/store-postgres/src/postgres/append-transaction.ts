@@ -10,11 +10,7 @@ import {
   UsageLimitExceededError,
 } from "@rovinos/store/adapter-internal";
 import { insertPostgresEventBatches } from "./event-insert.js";
-import {
-  integer,
-  storeError,
-  type EncodedEvent,
-} from "./helpers.js";
+import { integer, storeError, type EncodedEvent } from "./helpers.js";
 import { insertSnapshot } from "./snapshot.js";
 
 /** Arguments for one atomic Postgres event and optional snapshot append. */
@@ -77,7 +73,10 @@ export async function lockPostgresQuotaPeriods(
 ): Promise<void> {
   const keys = new Map<string, QuotaPeriodKey>();
   for (const period of periods) {
-    keys.set(`${period.quotaId}\u0000${period.period}\u0000${period.periodStart.toString()}`, period);
+    keys.set(
+      `${period.quotaId}\u0000${period.period}\u0000${period.periodStart.toString()}`,
+      period,
+    );
   }
   const sorted = [...keys.values()].sort((left, right) => {
     const quotaComparison = compare(left.quotaId, right.quotaId);
@@ -85,9 +84,7 @@ export async function lockPostgresQuotaPeriods(
       return quotaComparison;
     }
     const periodComparison = compare(left.period, right.period);
-    return periodComparison === 0
-      ? left.periodStart - right.periodStart
-      : periodComparison;
+    return periodComparison === 0 ? left.periodStart - right.periodStart : periodComparison;
   });
   for (const period of sorted) {
     await client.query(
