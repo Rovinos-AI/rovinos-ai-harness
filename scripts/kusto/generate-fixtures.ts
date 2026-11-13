@@ -3,23 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resourceFromAttributes } from "@opentelemetry/resources";
-import {
-  InMemoryLogRecordExporter,
-  LoggerProvider,
-  SimpleLogRecordProcessor,
-} from "@opentelemetry/sdk-logs";
-import { type TelemetryConfig } from "@rovinos/schemas";
-import {
-  AllowlistLogRecordProcessor,
-  emitSafeEvent,
-  SafeEvent,
-  type SafeEventType,
-} from "@rovinos/telemetry";
-import {
-  kustoLogFixtureSchema,
-  type KustoLogFixture,
-} from "./query-contract.ts";
+import { SafeEvent, safeEventLogAttributeMap, type SafeEventType } from "@rovinos/telemetry";
+import { kustoLogFixtureSchema, type KustoLogFixture } from "./query-contract.ts";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const fixturePath = resolve(root, "test/fixtures/kusto/safe-events.jsonl");
@@ -42,7 +27,7 @@ function safeEvent(seq: number, fields: Readonly<Record<string, unknown>>): Safe
   });
 }
 
-function createEvents(): readonly SafeEventType[] {
+function createModelEvents(): readonly SafeEventType[] {
   return [
     safeEvent(1, {
       kind: "model_call",
@@ -77,6 +62,11 @@ function createEvents(): readonly SafeEventType[] {
       repairAttempts: 2,
       finishReason: "stop",
     }),
+  ];
+}
+
+function createToolEvents(): readonly SafeEventType[] {
+  return [
     safeEvent(4, {
       kind: "tool_call",
       toolId: "search",
@@ -96,6 +86,11 @@ function createEvents(): readonly SafeEventType[] {
       errorCode: "tool_failed",
       latencyMs: 50,
     }),
+  ];
+}
+
+function createApprovalEvents(): readonly SafeEventType[] {
+  return [
     safeEvent(7, {
       kind: "approval_wait",
       decision: "approve",
@@ -114,6 +109,11 @@ function createEvents(): readonly SafeEventType[] {
       decidedBy: "expiry",
       waitMs: 500,
     }),
+  ];
+}
+
+function createPiiEvents(): readonly SafeEventType[] {
+  return [
     safeEvent(10, {
       kind: "pii_action",
       boundary: "tool_input",
@@ -129,6 +129,11 @@ function createEvents(): readonly SafeEventType[] {
       action: "blocked",
       entities: [{ type: "email", count: 1 }],
     }),
+  ];
+}
+
+function createRunStatusEvents(): readonly SafeEventType[] {
+  return [
     safeEvent(12, {
       kind: "run_status",
       from: "running",
@@ -162,71 +167,69 @@ function createEvents(): readonly SafeEventType[] {
   ];
 }
 
-function createTelemetryConfig(): TelemetryConfig {
-  return {
-    sentinel: { minValueLength: 6, enabled: false },
-    correlation: { enabled: false },
-    metrics: { enabled: true, ownership: "harness", maxSeries: 100 },
-    sinks: [],
-    unsafe: { allowContentSinks: false },
-  };
+function createEvents(): readonly SafeEventType[] {
+  return [
+    ...createModelEvents(),
+    ...createToolEvents(),
+    ...createApprovalEvents(),
+    ...createPiiEvents(),
+    ...createRunStatusEvents(),
+  ];
 }
 
-function toLogRow(
-  record: ReturnType<InMemoryLogRecordExporter["getFinishedLogRecords"]>[number],
-): KustoLogFixture {
-  const timestamp = record.attributes["harness.event.timestamp_ms"];
-  if (
-    typeof timestamp !== "number" ||
-    typeof record.body !== "string" ||
-    record.spanContext === undefined ||
-    typeof record.severityNumber !== "number"
-  ) {
-    throw new TypeError("kusto_log_record_incomplete");
+function eventValue(event: SafeEventType, field: string): unknown {
+  if (field !== "entities") {
+    return Reflect.get(event, field);
   }
-  const isoTimestamp = new Date(timestamp).toISOString();
+  const entities: unknown = Reflect.get(event, field);
+  if (!Array.isArray(entities)) {
+    return undefined;
+  }
+  return entities.reduce<number>((total, entity: unknown) => {
+    if (typeof entity !== "object" || entity === null || !("count" in entity)) {
+      return total;
+    }
+    const count: unknown = Reflect.get(entity, "count");
+    return typeof count === "number" && Number.isSafeInteger(count) && count >= 0
+      ? total + count
+      : total;
+  }, 0);
+}
+
+function eventAttributes(event: SafeEventType): Record<string, string | number | boolean> {
+  const attributes: Record<string, string | number | boolean> = {};
+  for (const [field, name] of Object.entries(safeEventLogAttributeMap[event.kind])) {
+    const value = eventValue(event, field);
+    if (
+      typeof value === "string" ||
+      typeof value === "boolean" ||
+      (typeof value === "number" && Number.isFinite(value))
+    ) {
+      attributes[name] = value;
+    }
+  }
+  return attributes;
+}
+
+function toLogRow(event: SafeEventType): KustoLogFixture {
+  const isoTimestamp = new Date(event.ts).toISOString();
   return kustoLogFixtureSchema.parse({
     Timestamp: isoTimestamp,
     ObservedTimestamp: isoTimestamp,
-    TraceID: record.spanContext.traceId,
-    SpanID: record.spanContext.spanId,
+    TraceID: event.traceId,
+    SpanID: event.spanId,
     SeverityText: "INFO",
-    SeverityNumber: record.severityNumber,
-    Body: record.body,
-    ResourceAttributes: record.resource.attributes,
-    LogsAttributes: record.attributes,
+    SeverityNumber: 9,
+    Body: `harness.safe.${event.kind}`,
+    ResourceAttributes: { "service.name": "harness" },
+    LogsAttributes: eventAttributes(event),
   });
 }
 
-/** Builds deterministic Kusto log rows from SafeEvents through the registered log allowlist. */
-export async function generateKustoFixtureJsonl(): Promise<string> {
-  const exporter = new InMemoryLogRecordExporter();
-  const provider = new LoggerProvider({
-    resource: resourceFromAttributes({ "service.name": "harness" }),
-    processors: [
-      new AllowlistLogRecordProcessor(new SimpleLogRecordProcessor({ exporter }), {
-        telemetry: createTelemetryConfig(),
-      }),
-    ],
-  });
-  try {
-    const logger = provider.getLogger("@rovinos/telemetry");
-    for (const event of createEvents()) {
-      emitSafeEvent(logger, event);
-    }
-    await provider.forceFlush();
-    const rows = exporter
-      .getFinishedLogRecords()
-      .sort((left, right) => {
-        const leftSeq = left.attributes["harness.event.seq"];
-        const rightSeq = right.attributes["harness.event.seq"];
-        return Number(leftSeq) - Number(rightSeq);
-      })
-      .map(toLogRow);
-    return `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
-  } finally {
-    await provider.shutdown();
-  }
+/** Builds deterministic HarnessLogs rows from validated synthetic SafeEvents. */
+export function generateKustoFixtureJsonl(): string {
+  const rows = createEvents().map(toLogRow);
+  return `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
 }
 
 /** Returns the digest used by the fixture determinism test. */
@@ -239,7 +242,7 @@ async function main(): Promise<void> {
   if (args.some((arg) => arg !== "--check")) {
     throw new Error("invalid_arguments");
   }
-  const contents = await generateKustoFixtureJsonl();
+  const contents = generateKustoFixtureJsonl();
   if (args.includes("--check")) {
     const existing = await readFile(fixturePath, "utf8").catch(() => "");
     if (existing !== contents) {

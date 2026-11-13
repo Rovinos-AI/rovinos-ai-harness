@@ -6,8 +6,8 @@ import { generateKustoFixtureJsonl, hashFixtureContents } from "./generate-fixtu
 
 describe("Kusto fixture generator", () => {
   it("generates stable JSONL matching the committed fixture", async () => {
-    const first = await generateKustoFixtureJsonl();
-    const second = await generateKustoFixtureJsonl();
+    const first = generateKustoFixtureJsonl();
+    const second = generateKustoFixtureJsonl();
     const committed = await readFile(
       resolve(process.cwd(), "test/fixtures/kusto/safe-events.jsonl"),
       "utf8",

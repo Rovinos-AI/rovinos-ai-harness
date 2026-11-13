@@ -8,8 +8,8 @@ const attributesSchema = z.record(z.string(), safeValueSchema);
 /** Zod contract for a SafeEvent converted to the ADX HarnessLogs row shape. */
 export const kustoLogFixtureSchema = z
   .object({
-    Timestamp: z.string().datetime(),
-    ObservedTimestamp: z.string().datetime(),
+    Timestamp: z.iso.datetime(),
+    ObservedTimestamp: z.iso.datetime(),
     TraceID: z.string(),
     SpanID: z.string(),
     SeverityText: z.string(),
@@ -20,11 +20,13 @@ export const kustoLogFixtureSchema = z
   })
   .strict();
 
+/** Inferred row shape for the `HarnessLogs` Kusto table. */
 export type KustoLogFixture = z.infer<typeof kustoLogFixtureSchema>;
 
 const queryResultRowsSchema = z.array(z.record(z.string(), safeValueSchema));
 /** Zod contract for query result rows and their committed golden file. */
 export const kustoQueryGoldensSchema = z.record(z.string(), queryResultRowsSchema);
+/** Inferred query-result golden contract. */
 export type KustoQueryGoldens = z.infer<typeof kustoQueryGoldensSchema>;
 
 /** Names of all KQL files covered by the emulator contract. */

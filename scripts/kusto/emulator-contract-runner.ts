@@ -22,6 +22,7 @@ import {
 
 const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const emulatorDatabase = "NetDefaultDB";
+const contractModes = ["--run", "--queries"] as const;
 
 type ConfigurationErrorCode =
   | "invalid_arguments"
@@ -45,6 +46,34 @@ interface ContractConfiguration {
 type ConfigurationResult =
   | { readonly configuration: ContractConfiguration; readonly error?: never }
   | { readonly configuration?: never; readonly error: ConfigurationErrorCode };
+
+function isContractMode(args: readonly string[]): boolean {
+  return args.length === 1 && contractModes.some((mode) => mode === args[0]);
+}
+
+function clusterUriError(clusterUri: string): ConfigurationErrorCode | undefined {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(clusterUri);
+  } catch {
+    return "cluster_uri_invalid";
+  }
+  return endpoint.protocol !== "http:" ||
+    endpoint.hostname !== "kusto-emulator" ||
+    endpoint.port !== "8080" ||
+    endpoint.pathname !== "/" ||
+    endpoint.search.length > 0 ||
+    endpoint.hash.length > 0
+    ? "cluster_uri_invalid"
+    : undefined;
+}
+
+function databaseError(database: string): ConfigurationErrorCode | undefined {
+  if (database.length === 0) {
+    return "database_missing";
+  }
+  return database === emulatorDatabase ? undefined : "database_invalid";
+}
 
 interface Fixture {
   readonly table: string;
@@ -73,35 +102,24 @@ export function getContractConfiguration(
   args: readonly string[],
   environment: Readonly<Record<string, string | undefined>>,
 ): ConfigurationResult {
-  if (args.length !== 1 || !["--run", "--queries"].includes(args[0] ?? "")) {
+  if (!isContractMode(args)) {
     return { error: "invalid_arguments" };
   }
   const clusterUri = environment.KUSTO_CLUSTER_URI;
   if (clusterUri === undefined || clusterUri.length === 0) {
     return { error: "cluster_uri_missing" };
   }
-  let endpoint: URL;
-  try {
-    endpoint = new URL(clusterUri);
-  } catch {
-    return { error: "cluster_uri_invalid" };
-  }
-  if (
-    endpoint.protocol !== "http:" ||
-    endpoint.hostname !== "kusto-emulator" ||
-    endpoint.port !== "8080" ||
-    endpoint.pathname !== "/" ||
-    endpoint.search.length > 0 ||
-    endpoint.hash.length > 0
-  ) {
-    return { error: "cluster_uri_invalid" };
+  const uriError = clusterUriError(clusterUri);
+  if (uriError !== undefined) {
+    return { error: uriError };
   }
   const database = environment.KUSTO_DATABASE;
   if (database === undefined || database.length === 0) {
     return { error: "database_missing" };
   }
-  if (database !== emulatorDatabase) {
-    return { error: "database_invalid" };
+  const dbError = databaseError(database);
+  if (dbError !== undefined) {
+    return { error: dbError };
   }
   return { configuration: { clusterUri, database } };
 }
