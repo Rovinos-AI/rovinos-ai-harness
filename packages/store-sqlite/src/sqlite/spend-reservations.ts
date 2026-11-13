@@ -98,35 +98,13 @@ export class SqliteSpendReservations {
     );
     this.transitionTransaction = db.transaction((attemptId, action, reason) => {
       const current = this.require(attemptId);
-      if (action === "dispatching" && current.reservation.state === "dispatching") {
+      const change = reservationTransition(current.reservation, action, reason);
+      if (change === undefined) {
         return current.reservation;
       }
-      if (action === "released" && current.reservation.state === "released") {
-        return current.reservation;
-      }
-      if (
-        action === "uncertain" &&
-        current.reservation.state === "uncertain" &&
-        current.reservation.uncertaintyCode === reason
-      ) {
-        return current.reservation;
-      }
-      if (action === "uncertain" && current.reservation.state === "uncertain") {
-        throw new SpendReservationError("spend_reservation_conflict");
-      }
-      if (
-        (action === "dispatching" || action === "uncertain") &&
-        current.reservation.state !== (action === "dispatching" ? "reserved" : "dispatching")
-      ) {
-        throw new SpendReservationError("spend_reservation_transition_invalid");
-      }
-      if (action === "released" && current.reservation.state !== "reserved") {
-        throw new SpendReservationError("spend_reservation_transition_invalid");
-      }
-      const nextState = action;
       this.updateState.run(
-        nextState,
-        action === "uncertain" ? (reason ?? null) : null,
+        change.state,
+        change.uncertaintyCode ?? null,
         null,
         attemptId,
       );
@@ -184,16 +162,15 @@ export class SqliteSpendReservations {
     if (!parsedId.success) {
       return Promise.reject(new SpendReservationError("spend_reservation_not_found"));
     }
-    if (action === "uncertain") {
-      const parsedReason = SpendReservationErrorCodeSchema.safeParse(reason);
-      if (!parsedReason.success) {
-        return Promise.reject(new SpendReservationError("spend_reservation_invalid"));
-      }
-      reason = parsedReason.data;
+    const parsedReason =
+      action === "uncertain" ? SpendReservationErrorCodeSchema.safeParse(reason) : undefined;
+    if (parsedReason !== undefined && !parsedReason.success) {
+      return Promise.reject(new SpendReservationError("spend_reservation_invalid"));
     }
+    const validReason = parsedReason?.success === true ? parsedReason.data : undefined;
     try {
       return Promise.resolve(
-        this.transitionTransaction.immediate(parsedId.data, action, reason),
+        this.transitionTransaction.immediate(parsedId.data, action, validReason),
       );
     } catch (error) {
       return Promise.reject(sqliteStoreError(error));
@@ -314,7 +291,8 @@ export class SqliteSpendReservations {
       !runId.success ||
       !pricingRevision.success ||
       !state.success ||
-      (row.uncertainty_code !== null && !uncertaintyCode?.success)
+      (row.uncertainty_code !== null &&
+        (uncertaintyCode === undefined || !uncertaintyCode.success))
     ) {
       throw new StoreUnavailableError();
     }
@@ -326,7 +304,9 @@ export class SqliteSpendReservations {
       state: state.data,
       reservedAt: row.reserved_at,
       quotaPeriods,
-      ...(uncertaintyCode?.success ? { uncertaintyCode: uncertaintyCode.data } : {}),
+      ...(uncertaintyCode !== undefined && uncertaintyCode.success
+        ? { uncertaintyCode: uncertaintyCode.data }
+        : {}),
       ...(settlement === undefined ? {} : { settlement }),
     });
     if (!parsed.success) {
@@ -371,4 +351,39 @@ export function completeCostAmount(
   cost: SpendReservationSettlement["cost"],
 ): number | undefined {
   return cost.state === "known" || cost.state === "estimated" ? cost.amountMicros : undefined;
+}
+
+function reservationTransition(
+  current: SpendReservation,
+  action: "dispatching" | "released" | "uncertain",
+  reason?: SpendReservationErrorCode,
+): { readonly state: SpendReservation["state"]; readonly uncertaintyCode?: Code } | undefined {
+  if (action === "dispatching") {
+    if (current.state === "dispatching") {
+      return undefined;
+    }
+    if (current.state !== "reserved") {
+      throw new SpendReservationError("spend_reservation_transition_invalid");
+    }
+    return { state: "dispatching" };
+  }
+  if (action === "released") {
+    if (current.state === "released") {
+      return undefined;
+    }
+    if (current.state !== "reserved") {
+      throw new SpendReservationError("spend_reservation_transition_invalid");
+    }
+    return { state: "released" };
+  }
+  if (current.state === "uncertain") {
+    if (current.uncertaintyCode === reason) {
+      return undefined;
+    }
+    throw new SpendReservationError("spend_reservation_conflict");
+  }
+  if (current.state !== "dispatching" || reason === undefined) {
+    throw new SpendReservationError("spend_reservation_transition_invalid");
+  }
+  return { state: "uncertain", uncertaintyCode: reason };
 }

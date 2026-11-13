@@ -72,7 +72,9 @@ function sqliteFactory(): SpendReservationStoreFactory {
     if (directory === undefined) {
       throw new Error("SQLite spend-reservation directory is not initialized");
     }
-    const store = new SqliteEventStore(join(directory, `conformance-${storeNumber++}.sqlite`));
+    const store = new SqliteEventStore(
+      join(directory, `conformance-${String(storeNumber++)}.sqlite`),
+    );
     return Promise.resolve({ store, cleanup: () => store.close() });
   };
 }
