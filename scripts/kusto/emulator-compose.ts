@@ -29,30 +29,18 @@ async function compose(projectName: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-/** Starts the isolated emulator and runs its schema and ingestion contract client. */
-export async function runKustoEmulatorComposeContract(projectName: string): Promise<string> {
+/** Starts the isolated emulator and runs the selected schema or query contract client. */
+export async function runKustoEmulatorComposeContract(
+  projectName: string,
+  client: "kusto-test-client" | "kusto-query-test-client" = "kusto-test-client",
+): Promise<string> {
   try {
     return await compose(projectName, [
       "up",
       "--abort-on-container-exit",
       "--exit-code-from",
-      "kusto-test-client",
-      "kusto-test-client",
-    ]);
-  } finally {
-    await compose(projectName, ["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
-  }
-}
-
-/** Starts the isolated emulator and runs all Kusto query fixtures and golden contracts. */
-export async function runKustoEmulatorComposeQueriesContract(projectName: string): Promise<string> {
-  try {
-    return await compose(projectName, [
-      "up",
-      "--abort-on-container-exit",
-      "--exit-code-from",
-      "kusto-query-test-client",
-      "kusto-query-test-client",
+      client,
+      client,
     ]);
   } finally {
     await compose(projectName, ["down", "--volumes", "--remove-orphans"]).catch(() => undefined);

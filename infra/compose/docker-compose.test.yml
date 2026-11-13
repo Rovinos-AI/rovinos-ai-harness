@@ -216,6 +216,7 @@ services:
       - internal
   kusto-query-test-client:
     extends:
+      file: docker-compose.test.yml
       service: kusto-test-client
     command:
       [
@@ -224,6 +225,8 @@ services:
         "scripts/kusto/emulator-contract-runner.ts",
         "--queries",
       ]
+    networks:
+      - internal
 networks:
   internal:
     internal: true
