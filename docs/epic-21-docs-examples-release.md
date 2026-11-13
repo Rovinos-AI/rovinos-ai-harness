@@ -250,7 +250,8 @@ integration test.
 3. The crash-and-resume example kills the process after a non-idempotent tool's side effect is
    durable, resumes from the event log, and verifies the effect occurred exactly once.
 4. Keep all examples synthetic and offline. Run every README command through `run-doc-tests` in CI;
-   list the integration suite in `composeIntegrationSuites` if it starts a Compose stack.
+   list the integration suite in `composeIntegrationSuites` if it starts a Compose stack, including
+   suites that start Compose through a helper such as `runKustoEmulatorComposeContract`.
 
 **Acceptance Criteria:**
 

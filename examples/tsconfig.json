@@ -5,5 +5,5 @@
     "customConditions": ["source"],
     "noEmit": true
   },
-  "include": ["basic-agent/run.ts", "crash-and-resume/run.ts"]
+  "include": ["basic-agent/run.ts", "crash-and-resume/run.ts", "retrieval/run.ts"]
 }

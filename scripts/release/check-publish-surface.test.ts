@@ -84,6 +84,27 @@ describe("publish surface checks", () => {
     ).toEqual([]);
   });
 
+  it("accepts the retrieval package with SDK and extensions peers", () => {
+    expect(
+      inspectPackedPackage(
+        {
+          ...publishableManifest,
+          name: "@rovinos/extension-retrieval",
+          peerDependencies: {
+            "@rovinos/sdk": "^0.2.0",
+            "@rovinos/extensions": "^0.2.0",
+          },
+          dependencies: { zod: "^4.6.7" },
+        },
+        [
+          { path: "package/package.json", size: 256 },
+          { path: "package/dist/index.js", size: 128 },
+          { path: "package/dist/index.d.ts", size: 64 },
+        ],
+      ),
+    ).toEqual([]);
+  });
+
   it("rejects an extensions package without its compatible SDK peer range", () => {
     expect(
       inspectPackedPackage({ ...extensionsManifest, peerDependencies: { "@rovinos/sdk": "*" } }, [

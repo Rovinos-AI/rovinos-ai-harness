@@ -6,6 +6,7 @@
     [
       "@rovinos/sdk",
       "@rovinos/extensions",
+      "@rovinos/extension-retrieval",
       "@rovinos/cli",
       "@rovinos/store-sqlite",
       "@rovinos/store-postgres",
