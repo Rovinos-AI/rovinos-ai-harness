@@ -19,7 +19,7 @@ import {
   completeCostAmount,
   parseSpendReservationInput,
   parseSpendSettlement,
-  SqliteSpendReservations,
+  type SqliteSpendReservations,
 } from "./spend-reservations.js";
 
 interface AppendRequest {
@@ -33,15 +33,17 @@ interface AppendRequest {
 
 type Append = (request: AppendRequest) => { readonly nextSeq: number };
 
+interface SqliteSpendReservationOperationsOptions {
+  readonly codec: ContentCodec;
+  readonly reservations: SqliteSpendReservations;
+  readonly append: Append;
+  readonly read: EventStore["read"];
+  readonly head: EventStore["head"];
+}
+
 /** Coordinates spend-reservation operations with the event-store append transaction. */
 export class SqliteSpendReservationOperations {
-  constructor(
-    private readonly codec: ContentCodec,
-    private readonly reservations: SqliteSpendReservations,
-    private readonly append: Append,
-    private readonly read: EventStore["read"],
-    private readonly head: EventStore["head"],
-  ) {}
+  constructor(private readonly options: SqliteSpendReservationOperationsOptions) {}
 
   async reserveSpend(
     input: SpendReservationInput,
@@ -56,21 +58,26 @@ export class SqliteSpendReservationOperations {
     ) {
       throw new SpendReservationError("spend_reservation_invalid");
     }
-    const encoded = await encodeEvents(this.codec, parsedInput.runId, [modelRequest], expectedSeq);
+    const encoded = await encodeEvents(
+      this.options.codec,
+      parsedInput.runId,
+      [modelRequest],
+      expectedSeq,
+    );
     const existing = await this.existingReservation(parsedInput, modelRequest);
     if (existing !== undefined) {
       return existing;
     }
     try {
-      const { nextSeq } = this.append({
+      const { nextSeq } = this.options.append({
         runId: parsedInput.runId,
         encoded,
         expectedSeq,
         beforeAppend: () => {
-          this.reservations.insert(parsedInput, expectedSeq);
+          this.options.reservations.insert(parsedInput, expectedSeq);
         },
       });
-      const reservation = this.reservations.read(parsedInput.attemptId)?.reservation;
+      const reservation = this.options.reservations.read(parsedInput.attemptId)?.reservation;
       if (reservation === undefined) {
         throw new SpendReservationError("spend_reservation_not_found");
       }
@@ -85,18 +92,18 @@ export class SqliteSpendReservationOperations {
   }
 
   markSpendDispatching(attemptId: SpendReservation["attemptId"]): Promise<SpendReservation> {
-    return this.reservations.transition(attemptId, "dispatching");
+    return this.options.reservations.transition(attemptId, "dispatching");
   }
 
   releaseSpend(attemptId: SpendReservation["attemptId"]): Promise<SpendReservation> {
-    return this.reservations.transition(attemptId, "released");
+    return this.options.reservations.transition(attemptId, "released");
   }
 
   markSpendUncertain(
     attemptId: SpendReservation["attemptId"],
     reason: Parameters<SpendReservationStore["markSpendUncertain"]>[1],
   ): Promise<SpendReservation> {
-    return this.reservations.transition(attemptId, "uncertain", reason);
+    return this.options.reservations.transition(attemptId, "uncertain", reason);
   }
 
   async settleSpend(
@@ -107,7 +114,7 @@ export class SqliteSpendReservationOperations {
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
     const parsed = parseSpendSettlement(settlement);
     this.validateResponse(parsed, modelResponse);
-    const current = this.reservations.read(parsed.attemptId)?.reservation;
+    const current = this.options.reservations.read(parsed.attemptId)?.reservation;
     if (current === undefined) {
       throw new SpendReservationError("spend_reservation_not_found");
     }
@@ -121,7 +128,12 @@ export class SqliteSpendReservationOperations {
       throw new SpendReservationError("spend_reservation_transition_invalid");
     }
     assertUsageUpdates(current, parsed, options);
-    const encoded = await encodeEvents(this.codec, parsed.runId, [modelResponse], expectedSeq);
+    const encoded = await encodeEvents(
+      this.options.codec,
+      parsed.runId,
+      [modelResponse],
+      expectedSeq,
+    );
     return this.appendSettlement(parsed, encoded, expectedSeq, options);
   }
 
@@ -146,10 +158,10 @@ export class SqliteSpendReservationOperations {
     current: SpendReservation,
     settlement: SpendReservationSettlement,
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
-    if (!this.reservations.matchesSettlement(current.settlement, settlement)) {
+    if (!this.options.reservations.matchesSettlement(current.settlement, settlement)) {
       throw new SpendReservationError("spend_reservation_conflict");
     }
-    return { reservation: current, nextSeq: await this.head(current.runId) };
+    return { reservation: current, nextSeq: await this.options.head(current.runId) };
   }
 
   private async appendSettlement(
@@ -159,13 +171,13 @@ export class SqliteSpendReservationOperations {
     options: Parameters<EventStore["appendWithUsage"]>[3],
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
     try {
-      const { nextSeq } = this.append({
+      const { nextSeq } = this.options.append({
         runId: settlement.runId,
         encoded,
         expectedSeq,
         usageUpdates: parseUsageLedgerDeltas(options.usageUpdates),
         beforeAppend: () => {
-          const current = this.reservations.read(settlement.attemptId)?.reservation;
+          const current = this.options.reservations.read(settlement.attemptId)?.reservation;
           if (
             current?.runId !== settlement.runId ||
             (current.state !== "dispatching" && current.state !== "uncertain")
@@ -178,16 +190,16 @@ export class SqliteSpendReservationOperations {
           }
         },
         afterAppend: () => {
-          this.reservations.settle(settlement.attemptId, settlement);
+          this.options.reservations.settle(settlement.attemptId, settlement);
         },
       });
-      const reservation = this.reservations.read(settlement.attemptId)?.reservation;
+      const reservation = this.options.reservations.read(settlement.attemptId)?.reservation;
       if (reservation === undefined) {
         throw new SpendReservationError("spend_reservation_not_found");
       }
       return { reservation, nextSeq };
     } catch (error) {
-      const current = this.reservations.read(settlement.attemptId)?.reservation;
+      const current = this.options.reservations.read(settlement.attemptId)?.reservation;
       if (current?.state === "settled") {
         return this.settledRetry(current, settlement);
       }
@@ -199,14 +211,14 @@ export class SqliteSpendReservationOperations {
     input: SpendReservationInput,
     modelRequest: NewEvent,
   ): Promise<{ reservation: SpendReservation; nextSeq: number } | undefined> {
-    const existing = this.reservations.read(input.attemptId);
+    const existing = this.options.reservations.read(input.attemptId);
     if (existing === undefined) {
       return undefined;
     }
-    if (!this.reservations.matchesInput(existing.reservation, input)) {
+    if (!this.options.reservations.matchesInput(existing.reservation, input)) {
       throw new SpendReservationError("spend_reservation_conflict");
     }
-    for await (const stored of this.read(input.runId, {
+    for await (const stored of this.options.read(input.runId, {
       fromSeq: existing.requestSeq,
       toSeq: existing.requestSeq,
     })) {
@@ -215,7 +227,7 @@ export class SqliteSpendReservationOperations {
       }
       return {
         reservation: existing.reservation,
-        nextSeq: await this.head(existing.reservation.runId),
+        nextSeq: await this.options.head(existing.reservation.runId),
       };
     }
     throw new SpendReservationError("spend_reservation_conflict");

@@ -49,9 +49,7 @@ const quotasSchema = z.array(SpendReservationQuotaSchema);
 export class SqliteSpendReservations {
   private readonly getReservation: Database.Statement<[Id], ReservationRow>;
   private readonly getQuotas: Database.Statement<[Id], ReservationQuotaRow>;
-  private readonly insertReservation: Database.Statement<
-    [Id, Id, number, Code, number, number]
-  >;
+  private readonly insertReservation: Database.Statement<[Id, Id, number, Code, number, number]>;
   private readonly insertQuota: Database.Statement<[Id, Code, string, number, number]>;
   private readonly readUsage: Database.Statement<[Code, string, number], UsageRow>;
   private readonly readExposed: Database.Statement<
@@ -102,18 +100,15 @@ export class SqliteSpendReservations {
       if (change === undefined) {
         return current.reservation;
       }
-      this.updateState.run(
-        change.state,
-        change.uncertaintyCode ?? null,
-        null,
-        attemptId,
-      );
+      this.updateState.run(change.state, change.uncertaintyCode ?? null, null, attemptId);
       return this.require(attemptId).reservation;
     });
   }
 
   /** Read and validate a durable reservation and its request sequence. */
-  read(attemptId: Id): { readonly reservation: SpendReservation; readonly requestSeq: number } | undefined {
+  read(
+    attemptId: Id,
+  ): { readonly reservation: SpendReservation; readonly requestSeq: number } | undefined {
     const row = this.getReservation.get(attemptId);
     if (row === undefined) {
       return undefined;
@@ -147,9 +142,7 @@ export class SqliteSpendReservations {
         quota.limitMicros,
       );
     }
-    this.toReservation(
-      this.getReservation.get(input.attemptId) ?? throwUnavailable(),
-    );
+    this.toReservation(this.getReservation.get(input.attemptId) ?? throwUnavailable());
   }
 
   /** Atomically apply one allowed lifecycle transition. */
@@ -291,8 +284,7 @@ export class SqliteSpendReservations {
       !runId.success ||
       !pricingRevision.success ||
       !state.success ||
-      (row.uncertainty_code !== null &&
-        (uncertaintyCode === undefined || !uncertaintyCode.success))
+      (row.uncertainty_code !== null && uncertaintyCode?.success !== true)
     ) {
       throw new StoreUnavailableError();
     }
@@ -304,9 +296,7 @@ export class SqliteSpendReservations {
       state: state.data,
       reservedAt: row.reserved_at,
       quotaPeriods,
-      ...(uncertaintyCode !== undefined && uncertaintyCode.success
-        ? { uncertaintyCode: uncertaintyCode.data }
-        : {}),
+      ...(uncertaintyCode?.success === true ? { uncertaintyCode: uncertaintyCode.data } : {}),
       ...(settlement === undefined ? {} : { settlement }),
     });
     if (!parsed.success) {
@@ -347,9 +337,7 @@ export function parseSpendSettlement(
 }
 
 /** Return the complete integer cost amount represented by a settled reservation. */
-export function completeCostAmount(
-  cost: SpendReservationSettlement["cost"],
-): number | undefined {
+export function completeCostAmount(cost: SpendReservationSettlement["cost"]): number | undefined {
   return cost.state === "known" || cost.state === "estimated" ? cost.amountMicros : undefined;
 }
 

@@ -135,22 +135,14 @@ it("rolls back a reservation when the model-request append fails", async () => {
       "CREATE TRIGGER reject_model_request BEFORE INSERT ON events WHEN NEW.type = 'model_request' BEGIN SELECT RAISE(ABORT, 'synthetic append failure'); END",
     );
     await expect(
-      store.reserveSpend(
-        reservationInput(runId, attemptId, 100),
-        request(runId, attemptId),
-        1,
-      ),
+      store.reserveSpend(reservationInput(runId, attemptId, 100), request(runId, attemptId), 1),
     ).rejects.toThrow();
     await expect(store.head(runId)).resolves.toBe(1);
     await expect(store.releaseSpend(attemptId)).rejects.toBeInstanceOf(SpendReservationError);
 
     database.exec("DROP TRIGGER reject_model_request");
     await expect(
-      store.reserveSpend(
-        reservationInput(runId, attemptId, 100),
-        request(runId, attemptId),
-        1,
-      ),
+      store.reserveSpend(reservationInput(runId, attemptId, 100), request(runId, attemptId), 1),
     ).resolves.toMatchObject({ reservation: { state: "reserved" }, nextSeq: 2 });
   } finally {
     database.close();
@@ -222,22 +214,17 @@ it("recovers reserved and dispatching attempts and their ledger across file reop
 
     store = new SqliteEventStore(path);
     await expect(
-      store.settleSpend(
-        settlement,
-        response(runId, afterDispatchId, 120),
-        second.nextSeq,
-        {
-          usageUpdates: [
-            {
-              quotaId,
-              period: "day",
-              periodStart,
-              costMicros: 120,
-              runsStarted: 0,
-            },
-          ],
-        },
-      ),
+      store.settleSpend(settlement, response(runId, afterDispatchId, 120), second.nextSeq, {
+        usageUpdates: [
+          {
+            quotaId,
+            period: "day",
+            periodStart,
+            costMicros: 120,
+            runsStarted: 0,
+          },
+        ],
+      }),
     ).resolves.toMatchObject({ reservation: { state: "settled" }, nextSeq: settled.nextSeq });
     await expect(store.readUsageLedger(quotaId, "day", [periodStart])).resolves.toMatchObject([
       { costMicros: 120 },
