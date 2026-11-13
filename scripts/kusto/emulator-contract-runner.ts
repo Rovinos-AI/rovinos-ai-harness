@@ -263,11 +263,17 @@ function queryRows(response: Awaited<ReturnType<Client["executeQuery"]>>): unkno
 
 async function executeQueries(client: Client, database: string): Promise<void> {
   const goldens = parseKustoQueryGoldens(
-    await readFile(new URL("../../test/fixtures/kusto/query-results.json", import.meta.url), "utf8"),
+    await readFile(
+      new URL("../../test/fixtures/kusto/query-results.json", import.meta.url),
+      "utf8",
+    ),
   );
   assertKustoQueryGoldens(goldens);
   for (const name of kustoQueryNames) {
-    const query = await readFile(new URL(`../../infra/kusto/queries/${name}.kql`, import.meta.url), "utf8");
+    const query = await readFile(
+      new URL(`../../infra/kusto/queries/${name}.kql`, import.meta.url),
+      "utf8",
+    );
     let response: Awaited<ReturnType<Client["executeQuery"]>>;
     try {
       response = await client.executeQuery(database, query);

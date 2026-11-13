@@ -218,7 +218,12 @@ services:
     extends:
       service: kusto-test-client
     command:
-      ["node", "--experimental-strip-types", "scripts/kusto/emulator-contract-runner.ts", "--queries"]
+      [
+        "node",
+        "--experimental-strip-types",
+        "scripts/kusto/emulator-contract-runner.ts",
+        "--queries",
+      ]
 networks:
   internal:
     internal: true

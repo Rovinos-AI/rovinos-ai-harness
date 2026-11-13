@@ -9,7 +9,9 @@ const root = resolve(process.cwd());
 describe("Kusto query catalog lint", () => {
   it("uses the standard header and only reads cataloged attributes in each query helper", async () => {
     const queryDirectory = resolve(root, "infra/kusto/queries");
-    const queryFiles = (await readdir(queryDirectory)).filter((file) => file.endsWith(".kql")).sort();
+    const queryFiles = (await readdir(queryDirectory))
+      .filter((file) => file.endsWith(".kql"))
+      .sort();
     const catalog = await readFile(resolve(root, "docs/telemetry/attribute-catalog.md"), "utf8");
     const catalogAttributes = new Set(
       [...catalog.matchAll(/^\| `(harness\.[a-z0-9_.]+)` \|/gmu)].map((match) => match[1]),
