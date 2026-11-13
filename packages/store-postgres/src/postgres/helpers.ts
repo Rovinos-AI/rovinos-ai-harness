@@ -10,26 +10,17 @@ import {
   type Event as StoredEvent,
   type NewEvent,
 } from "@rovinos/schemas";
-import type { PoolClient, QueryResultRow } from "pg";
+import type { QueryResultRow } from "pg";
 import { z } from "zod";
-import type {
-  ContentCodec,
-  EncodedSnapshot,
-  RunSummary,
-  UsageLedgerDelta,
-} from "@rovinos/store/adapter-internal";
+import type { ContentCodec, RunSummary } from "@rovinos/store/adapter-internal";
 import {
   ContentDecryptFailedError,
   InvalidEventError,
   KeyNotFoundError,
-  RunExecutionLeaseLostError,
   SeqConflictError,
   StoreUnavailableError,
-  UsageLimitExceededError,
   isPreservedStoreError,
 } from "@rovinos/store/adapter-internal";
-import { insertPostgresEventBatches } from "./event-insert.js";
-import { insertSnapshot } from "./snapshot.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const contentRecordSchema = z.record(z.string(), z.json());
@@ -48,11 +39,6 @@ export interface EventRow extends QueryResultRow {
   meta: unknown;
   content_blob: string;
   key_id: string | null;
-}
-
-interface RunRow extends QueryResultRow {
-  next_seq: number | string;
-  status: string;
 }
 
 /** Database representation of a run-listing row. */
@@ -256,152 +242,4 @@ export function runListPage(
   const nextCursor =
     hasMore && last !== undefined ? encodeCursor(integer(last.created_at), last.run_id) : undefined;
   return nextCursor === undefined ? { runs } : { runs, nextCursor };
-}
-
-function nextStatus(currentStatus: string, encoded: readonly EncodedEvent[]): RunStatus {
-  const parsed = RunStatus.safeParse(currentStatus);
-  if (!parsed.success) {
-    throw new StoreUnavailableError();
-  }
-  let status = parsed.data;
-  for (const { event } of encoded) {
-    if (event.type === "run_status_changed") {
-      status = event.to;
-    }
-  }
-  return status;
-}
-
-async function applyUsageUpdates(
-  client: PoolClient,
-  usageUpdates: readonly UsageLedgerDelta[],
-): Promise<void> {
-  for (const delta of usageUpdates) {
-    const result = await client.query<{ quota_id: string }>(
-      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, unknown_cost_count, runs_started) SELECT $1, $2, $3, $4, $5, $6 WHERE $7::BIGINT IS NULL OR $6 <= $7 ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + EXCLUDED.cost_micros, unknown_cost_count = usage_ledger.unknown_cost_count + EXCLUDED.unknown_cost_count, runs_started = usage_ledger.runs_started + EXCLUDED.runs_started WHERE $7::BIGINT IS NULL OR usage_ledger.runs_started + EXCLUDED.runs_started <= $7 RETURNING quota_id",
-      [
-        delta.quotaId,
-        delta.period,
-        delta.periodStart,
-        delta.costMicros,
-        delta.unknownCostCount ?? 0,
-        delta.runsStarted,
-        delta.maxRunsStarted ?? null,
-      ],
-    );
-    if (result.rows.length !== 1) {
-      throw new UsageLimitExceededError(delta.quotaId);
-    }
-  }
-}
-
-/** Arguments for one atomic Postgres event and optional snapshot append. */
-export interface AppendTransactionOptions {
-  runId: Id;
-  encoded: readonly EncodedEvent[];
-  expectedSeq: number;
-  encodedSnapshot?: EncodedSnapshot;
-  snapshotKeep?: number;
-  usageUpdates?: readonly UsageLedgerDelta[];
-  leaseOwner?: Id;
-}
-
-/** Append a batch atomically while holding the run's sequence row lock. */
-export async function appendTransaction(
-  client: PoolClient,
-  options: AppendTransactionOptions,
-): Promise<number> {
-  const {
-    runId,
-    encoded,
-    expectedSeq,
-    encodedSnapshot,
-    snapshotKeep = 5,
-    usageUpdates,
-    leaseOwner,
-  } = options;
-  const { first, last } = appendBoundaryEvents(encoded);
-
-  let transactionStarted = false;
-  let actualSeq = 0;
-  try {
-    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    transactionStarted = true;
-    await client.query(
-      "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES ($1, $2, 'pending', 0, $2) ON CONFLICT (run_id) DO NOTHING",
-      [runId, first.ts],
-    );
-    const runResult = await client.query<RunRow>(
-      "SELECT next_seq, status FROM runs WHERE run_id = $1 FOR UPDATE",
-      [runId],
-    );
-    const run = runResult.rows[0];
-    if (run === undefined) {
-      throw new StoreUnavailableError();
-    }
-    actualSeq = integer(run.next_seq);
-    if (actualSeq !== expectedSeq) {
-      throw new SeqConflictError(expectedSeq, actualSeq);
-    }
-    await assertExecutionLease(client, runId, leaseOwner);
-    if (actualSeq === 0 && first.type !== "run_created") {
-      throw new InvalidEventError([[0, "type"]]);
-    }
-
-    const status = nextStatus(run.status, encoded);
-    await insertPostgresEventBatches(client, encoded, {
-      runId,
-      expectedSeq,
-      status,
-      lastTs: last.ts,
-    });
-    await applyUsageUpdates(client, usageUpdates ?? []);
-    if (encodedSnapshot !== undefined) {
-      await insertSnapshot(client, encodedSnapshot);
-      await client.query(
-        "DELETE FROM snapshots WHERE run_id = $1 AND snapshot_id NOT IN (SELECT snapshot_id FROM snapshots WHERE run_id = $1 ORDER BY at_seq DESC, snapshot_id DESC LIMIT $2)",
-        [runId, snapshotKeep],
-      );
-    }
-
-    const finalSeq = last.seq.toString();
-    await client.query("SELECT pg_notify($1, $2)", ["harness_events", `${runId}:${finalSeq}`]);
-    await client.query("COMMIT");
-    transactionStarted = false;
-    return expectedSeq + encoded.length;
-  } catch (error) {
-    if (transactionStarted) {
-      await client.query("ROLLBACK").catch(() => undefined);
-    }
-    throw storeError(error, expectedSeq, actualSeq, true);
-  }
-}
-
-function appendBoundaryEvents(encoded: readonly EncodedEvent[]): {
-  readonly first: EncodedEvent["event"];
-  readonly last: EncodedEvent["event"];
-} {
-  const first = encoded[0]?.event;
-  const last = encoded.at(-1)?.event;
-  if (first === undefined || last === undefined) {
-    throw new InvalidEventError([[]]);
-  }
-  return { first, last };
-}
-
-async function assertExecutionLease(
-  client: PoolClient,
-  runId: Id,
-  leaseOwner: Id | undefined,
-): Promise<void> {
-  if (leaseOwner === undefined) {
-    return;
-  }
-  const leaseResult = await client.query<{ owner_id: string }>(
-    "SELECT owner_id FROM run_execution_leases WHERE run_id = $1 FOR UPDATE",
-    [runId],
-  );
-  if (leaseResult.rows[0]?.owner_id !== leaseOwner) {
-    throw new RunExecutionLeaseLostError();
-  }
 }

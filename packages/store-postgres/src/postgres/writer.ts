@@ -10,7 +10,8 @@ import {
   type UsageLedgerDelta,
   parseUsageLedgerDeltas,
 } from "@rovinos/store/adapter-internal";
-import { appendTransaction, encodeEvents, storeError, type EncodedEvent } from "./helpers.js";
+import { appendTransaction } from "./append-transaction.js";
+import { encodeEvents, storeError, type EncodedEvent } from "./helpers.js";
 
 /** Dependencies used by a Postgres event writer. */
 export interface PostgresEventWriterOptions {
