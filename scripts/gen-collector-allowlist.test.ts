@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   renderCollectorAllowlist,
   runCollectorAllowlistCommand,
-} from "./gen-collector-allowlist.js";
+} from "./gen-collector-allowlist.ts";
 
 const ownerTask = { taskId: "4.6", packageName: "@rovinos/telemetry" } as const;
 const alphaSpan = defineSpan(

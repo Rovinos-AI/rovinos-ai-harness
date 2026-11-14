@@ -2,7 +2,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BENCHMARK_PROFILES, runBenchmarks } from "./scenarios.js";
+import { BENCHMARK_PROFILES, runBenchmarks } from "./scenarios.ts";
 
 function parseArgs(args: readonly string[]): { profile: "smoke" | "nightly"; output: string } {
   const options = new Map<string, string>();

@@ -4,7 +4,7 @@ import {
   evaluateRelease,
   publishedPackageNames,
   type ReleasePackageManifest,
-} from "./verify-release.js";
+} from "./verify-release.ts";
 
 function packages(version: string): ReleasePackageManifest[] {
   return publishedPackageNames.map((name) => ({ name, version }));

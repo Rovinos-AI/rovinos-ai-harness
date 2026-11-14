@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { checkExternalLinks } from "./check-external-links.js";
-import type { MarkdownSource } from "./markdown.js";
+import { checkExternalLinks } from "./check-external-links.ts";
+import type { MarkdownSource } from "./markdown.ts";
 
 describe("external Markdown link checker", () => {
   it("checks deduplicated HTTP links only when explicitly invoked", async () => {

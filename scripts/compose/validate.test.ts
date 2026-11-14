@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseYaml, RunConfigSchema } from "@rovinos/schemas";
-import { evaluateComposeSecurity, validateComposeProfiles } from "./validate.js";
+import { evaluateComposeSecurity, validateComposeProfiles } from "./validate.ts";
 import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));

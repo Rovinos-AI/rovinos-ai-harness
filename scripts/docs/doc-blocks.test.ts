@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { extractDocTestBlocks, substituteCaptures } from "./doc-blocks.js";
+import { extractDocTestBlocks, substituteCaptures } from "./doc-blocks.ts";
 
 describe("documentation test block parser", () => {
   it("extracts marked shell blocks and captures", () => {

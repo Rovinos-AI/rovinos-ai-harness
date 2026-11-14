@@ -5,7 +5,7 @@ import {
   createEventSchemaLock,
   evaluateEventSchemaLock,
   type EventSchemaLockEntry,
-} from "./check-event-schema.js";
+} from "./check-event-schema.ts";
 
 const original: EventSchemaLockEntry = { v: 1, hash: Sha256Hex.parse("a".repeat(64)) };
 const changed: EventSchemaLockEntry = { v: 1, hash: Sha256Hex.parse("b".repeat(64)) };

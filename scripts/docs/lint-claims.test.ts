@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collectMarkdownSources, findClaimViolations } from "./lint-claims.js";
+import { collectMarkdownSources, findClaimViolations } from "./lint-claims.ts";
 
 const bannedPhrases = [
   "completely secure",

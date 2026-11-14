@@ -62,7 +62,7 @@ it("removes the image even if Compose teardown fails", async () => {
     it: test,
   }));
 
-  await import("./docker-image.int.test.js");
+  await import("./docker-image.int.test.ts");
   const build = beforeAll.mock.calls[0]?.[0];
   const startBundledServer = test.mock.calls[2]?.[1];
   const startCompose = test.mock.calls[3]?.[1];
@@ -110,7 +110,7 @@ it("removes the image when the bundled server exits", async () => {
     it: test,
   }));
 
-  await import("./docker-image.int.test.js");
+  await import("./docker-image.int.test.ts");
   const build = beforeAll.mock.calls[0]?.[0];
   const startBundledServer = test.mock.calls[2]?.[1];
   const cleanup = afterAll.mock.calls[0]?.[0];

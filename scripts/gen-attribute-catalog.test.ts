@@ -8,7 +8,7 @@ import {
   isAttributeCatalogCurrent,
   renderAttributeCatalog,
   runAttributeCatalogCommand,
-} from "./gen-attribute-catalog.js";
+} from "./gen-attribute-catalog.ts";
 
 const ownerTask = { taskId: "4.7", packageName: "@rovinos/telemetry" } as const;
 const fixtureSpan = defineSpan(
