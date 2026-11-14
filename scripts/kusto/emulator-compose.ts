@@ -43,6 +43,24 @@ export async function runKustoEmulatorComposeContract(
       client,
     ]);
   } finally {
-    await compose(projectName, ["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
+    const emulatorImageOutput = await compose(projectName, [
+      "images",
+      "--quiet",
+      "kusto-emulator",
+    ]).catch(() => "");
+    const emulatorImageIds = emulatorImageOutput.trim().split(/\s+/u);
+    try {
+      await compose(projectName, ["down", "--volumes", "--remove-orphans"]);
+    } finally {
+      for (const imageId of emulatorImageIds) {
+        if (/^(?:sha256:)?[a-f0-9]{12,64}$/u.test(imageId)) {
+          await execFileAsync("docker", ["image", "rm", imageId], {
+            cwd: root,
+            encoding: "utf8",
+            maxBuffer: 1024 * 1024,
+          });
+        }
+      }
+    }
   }
 }
