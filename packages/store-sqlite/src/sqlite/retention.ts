@@ -11,6 +11,14 @@ export function deleteRunTransaction(db: Database.Database, runId: Id): number {
     if (run === undefined || !["completed", "failed", "cancelled"].includes(run.status)) {
       return 0;
     }
+    const activeReservation = db
+      .prepare<[Id], { attempt_id: string }>(
+        "SELECT attempt_id FROM spend_reservations WHERE run_id = ? AND state IN ('reserved', 'dispatching', 'uncertain') LIMIT 1",
+      )
+      .get(runId);
+    if (activeReservation !== undefined) {
+      return 0;
+    }
     const eventCount = db.prepare<[Id]>("DELETE FROM events WHERE run_id = ?").run(runId).changes;
     db.prepare<[Id]>("DELETE FROM snapshots WHERE run_id = ?").run(runId);
     db.prepare<[Id]>("DELETE FROM approval_notifications WHERE run_id = ?").run(runId);
