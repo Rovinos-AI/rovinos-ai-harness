@@ -111,7 +111,20 @@ services:
   postgres:
     image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     user: postgres
-    command: ["postgres", "-c", "unix_socket_directories=/var/run/postgresql"]
+    command:
+      [
+        "postgres",
+        "-c",
+        "unix_socket_directories=/var/run/postgresql",
+        "-c",
+        "max_wal_size=64MB",
+        "-c",
+        "min_wal_size=32MB",
+        "-c",
+        "wal_level=minimal",
+        "-c",
+        "max_wal_senders=0",
+      ]
     environment:
       POSTGRES_DB: harness
       POSTGRES_USER: harness
@@ -123,7 +136,7 @@ services:
       - "127.0.0.1:5432:5432"
     read_only: true
     tmpfs:
-      - /tmp:size=256m,noexec,nosuid,nodev
+      - /tmp:size=1g,noexec,nosuid,nodev
       - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,uid=999,gid=999,mode=3775
     cap_drop:
       - ALL
