@@ -53,9 +53,7 @@ export const DatadogMonitorSchema = z
     runbook: z.string().regex(/^docs\/runbooks\/[a-z0-9-]+\.md#[a-z0-9-]+$/u),
     options: z
       .object({
-        thresholds: z
-          .object({ critical: z.number(), warning: z.number().optional() })
-          .strict(),
+        thresholds: z.object({ critical: z.number(), warning: z.number().optional() }).strict(),
       })
       .strict(),
   })

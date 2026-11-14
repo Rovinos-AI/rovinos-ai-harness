@@ -9,7 +9,7 @@ import { AlertValidationError, validateAlerts } from "./validate.ts";
 const rootDirectory = fileURLToPath(new URL("../../", import.meta.url));
 const thresholdsText = readFileSync(resolve(rootDirectory, "infra/alerts/thresholds.yaml"), "utf8");
 const monitorsText = readFileSync(
-  resolve(rootDirectory, "infra/alerts/datadog-monitors.json"),
+  resolve(rootDirectory, "infra/alerts/datadog-monitors.generated.json"),
   "utf8",
 );
 
@@ -33,10 +33,7 @@ describe("alert configuration validator", () => {
   });
 
   it("rejects monitor metrics outside METRIC_ALLOWLIST", () => {
-    const invalid = monitorsText.replace(
-      "harness.pii.detector_degraded",
-      "harness.unknown.metric",
-    );
+    const invalid = monitorsText.replace("harness.pii.detector_degraded", "harness.unknown.metric");
 
     expect(() => {
       validateAlerts(thresholdsText, invalid, readRunbooks());
