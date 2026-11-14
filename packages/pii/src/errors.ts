@@ -38,6 +38,15 @@ export class PiiStorageFailedError extends HarnessError {
   }
 }
 
+/** Strict spend reservation never falls back when transactional storage is unavailable. */
+export class SpendReservationStorageUnavailableError extends HarnessError {
+  readonly code = "spend_reservation_storage_unavailable";
+
+  constructor() {
+    super("Transactional spend reservation storage is unavailable.");
+  }
+}
+
 /** Policy block carrying only entity types and counts, never detected values. */
 export class PiiBlockedError extends HarnessError {
   readonly code = "pii_blocked";

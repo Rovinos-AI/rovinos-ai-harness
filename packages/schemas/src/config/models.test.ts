@@ -92,15 +92,23 @@ describe("ModelsConfigSchema", () => {
             outputMicrosPerMTok: 375,
             cacheReadMicrosPerMTok: 25,
             cacheWriteMicrosPerMTok: 200,
+            maxInputTokens: 10_000,
+            maxOutputTokens: 1_000,
           },
         },
-      }).pricing,
+        pricingRevision: "prices.v2",
+      }),
     ).toEqual({
-      "sample/model-a": {
-        inputMicrosPerMTok: 125,
-        outputMicrosPerMTok: 375,
-        cacheReadMicrosPerMTok: 25,
-        cacheWriteMicrosPerMTok: 200,
+      pricingRevision: "prices.v2",
+      pricing: {
+        "sample/model-a": {
+          inputMicrosPerMTok: 125,
+          outputMicrosPerMTok: 375,
+          cacheReadMicrosPerMTok: 25,
+          cacheWriteMicrosPerMTok: 200,
+          maxInputTokens: 10_000,
+          maxOutputTokens: 1_000,
+        },
       },
     });
     expect(() =>

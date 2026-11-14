@@ -94,6 +94,9 @@ export function createStructuredModelRequester(
       ...(quotaHooks.usageUpdatesForCost === undefined
         ? {}
         : { usageUpdatesForCost: quotaHooks.usageUpdatesForCost }),
+      ...(quotaHooks.strictSpendOptions === undefined
+        ? {}
+        : { strictSpendOptions: quotaHooks.strictSpendOptions }),
       includeTools: false,
     });
     nestedModelEvents.push(...result.events);

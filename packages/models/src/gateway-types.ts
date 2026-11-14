@@ -61,6 +61,8 @@ export type RequestSanitizer = (
 export interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** Strict spend admission disables unreserved retries and repair dispatches. */
+  readonly strictSpendReservations?: boolean;
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;

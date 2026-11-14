@@ -36,7 +36,7 @@ import {
   startRun,
   type RunControl,
 } from "./runtime-runs.js";
-import { QuotaService } from "./quotas.js";
+import { QuotaService, strictSpendPricingFromConfig } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
 import { assertRuntimePreflight } from "./runtime-preflight.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
@@ -286,7 +286,12 @@ function createRuntimeResume(
   runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes } = options;
-  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
+  const quotaService = new QuotaService(
+    config.quotas ?? [],
+    store,
+    clock,
+    strictSpendPricingFromConfig(config),
+  );
   return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     const childAllocation = await readChildBudgetAllocation(store, runId);

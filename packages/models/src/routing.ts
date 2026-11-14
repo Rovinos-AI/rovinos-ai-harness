@@ -142,9 +142,11 @@ function shouldFallback(options: {
   readonly signal: AbortSignal;
   readonly hasNext: boolean;
   readonly fallbackOn: readonly string[];
+  readonly strictSpendReservations?: boolean;
 }): boolean {
-  const { error, code, signal, hasNext, fallbackOn } = options;
+  const { error, code, signal, hasNext, fallbackOn, strictSpendReservations } = options;
   if (
+    strictSpendReservations === true ||
     !hasNext ||
     signal.aborted ||
     (error instanceof Error && error.name === "AbortError") ||
@@ -241,6 +243,9 @@ export class RoutingModelGateway {
             signal: context.signal,
             hasNext: index < candidates.length - 1,
             fallbackOn: this.routing.fallbackOn,
+            ...(context.strictSpendReservations === undefined
+              ? {}
+              : { strictSpendReservations: context.strictSpendReservations }),
           })
         ) {
           if (accumulatedUsage === undefined) {

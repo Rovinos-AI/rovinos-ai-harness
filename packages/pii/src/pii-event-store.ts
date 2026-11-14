@@ -13,9 +13,16 @@ import {
   type Snapshot,
   type Code,
   type TraceId,
+  type SpendReservation,
+  type SpendReservationErrorCode,
+  type SpendReservationInput,
+  type SpendReservationSettlement,
 } from "@rovinos/schemas";
 import { storedModelRequestHash } from "@rovinos/schemas/request-signature";
-import { PiiStorageFailedError } from "./errors.js";
+import {
+  PiiStorageFailedError,
+  SpendReservationStorageUnavailableError,
+} from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
 import { isMarked } from "./sanitization-markers.js";
 
@@ -87,6 +94,23 @@ export interface EventStoreLike {
     expectedSeq: number,
     options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
   ): Promise<{ nextSeq: number }>;
+  reserveSpend?(
+    input: SpendReservationInput,
+    modelRequest: NewEvent,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }>;
+  markSpendDispatching?(attemptId: Id): Promise<SpendReservation>;
+  releaseSpend?(attemptId: Id): Promise<SpendReservation>;
+  settleSpend?(
+    settlement: SpendReservationSettlement,
+    modelResponse: NewEvent,
+    expectedSeq: number,
+    options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }>;
+  markSpendUncertain?(
+    attemptId: Id,
+    reason: SpendReservationErrorCode,
+  ): Promise<SpendReservation>;
   readUsageLedger(
     quotaId: Code,
     period: UsageLedgerDeltaLike["period"],
@@ -202,6 +226,65 @@ export class PiiEventStore implements EventStoreLike {
     const prepared = await this.prepareEvents(runId, events, expectedSeq);
     await this.notifySummaries(prepared.summaries);
     return this.inner.appendWithUsage(runId, prepared.events, expectedSeq, options);
+  }
+
+  async reserveSpend(
+    input: SpendReservationInput,
+    modelRequest: NewEvent,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    if (this.inner.reserveSpend === undefined) {
+      throw new SpendReservationStorageUnavailableError();
+    }
+    const prepared = await this.prepareEvents(input.runId, [modelRequest], expectedSeq);
+    await this.notifySummaries(prepared.summaries);
+    const [sanitizedRequest] = prepared.events;
+    if (sanitizedRequest === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    return this.inner.reserveSpend(input, sanitizedRequest, expectedSeq);
+  }
+
+  markSpendDispatching(attemptId: Id): Promise<SpendReservation> {
+    if (this.inner.markSpendDispatching === undefined) {
+      throw new SpendReservationStorageUnavailableError();
+    }
+    return this.inner.markSpendDispatching(attemptId);
+  }
+
+  releaseSpend(attemptId: Id): Promise<SpendReservation> {
+    if (this.inner.releaseSpend === undefined) {
+      throw new SpendReservationStorageUnavailableError();
+    }
+    return this.inner.releaseSpend(attemptId);
+  }
+
+  async settleSpend(
+    settlement: SpendReservationSettlement,
+    modelResponse: NewEvent,
+    expectedSeq: number,
+    options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    if (this.inner.settleSpend === undefined) {
+      throw new SpendReservationStorageUnavailableError();
+    }
+    const prepared = await this.prepareEvents(settlement.runId, [modelResponse], expectedSeq);
+    await this.notifySummaries(prepared.summaries);
+    const [sanitizedResponse] = prepared.events;
+    if (sanitizedResponse === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    return this.inner.settleSpend(settlement, sanitizedResponse, expectedSeq, options);
+  }
+
+  markSpendUncertain(
+    attemptId: Id,
+    reason: SpendReservationErrorCode,
+  ): Promise<SpendReservation> {
+    if (this.inner.markSpendUncertain === undefined) {
+      throw new SpendReservationStorageUnavailableError();
+    }
+    return this.inner.markSpendUncertain(attemptId, reason);
   }
 
   readUsageLedger(

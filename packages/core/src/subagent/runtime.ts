@@ -21,7 +21,11 @@ import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
 import { finalizeChild, type SubagentResult } from "./result.js";
 import { foldRunState, isTerminalRunState } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
-import { QuotaService, type QuotaIdentity } from "../quotas.js";
+import {
+  QuotaService,
+  strictSpendPricingFromConfig,
+  type QuotaIdentity,
+} from "../quotas.js";
 import { withSandboxLease } from "../runtime-lifecycle.js";
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
@@ -380,7 +384,12 @@ async function runNewChild(
 export function createSubagentTool(options: SubagentRuntimeInput): ToolPort {
   const runtimeOptions: SubagentRuntimeOptions = {
     ...options,
-    quotaService: new QuotaService(options.config.quotas ?? [], options.store, options.clock),
+    quotaService: new QuotaService(
+      options.config.quotas ?? [],
+      options.store,
+      options.clock,
+      strictSpendPricingFromConfig(options.config),
+    ),
   };
   const supervisor = new SubagentSupervisor({
     store: runtimeOptions.store,
