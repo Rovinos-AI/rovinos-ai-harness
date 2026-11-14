@@ -54,6 +54,10 @@ jobs:
         run: yarn docs:catalog --check
       - name: Check Collector allowlist
         run: yarn gen:collector --check
+      - name: Check alert definitions
+        run: |
+          yarn gen:alerts --check
+          yarn validate:alerts
       - name: Check synthetic PII corpus determinism
         run: yarn check:pii-corpus
       - name: Check documentation claims

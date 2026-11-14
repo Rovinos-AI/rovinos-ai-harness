@@ -122,11 +122,29 @@ describe("SDK and CLI OTLP metrics export", () => {
       const metricPayloads = requestBodies.map((body) => body.toString("latin1"));
       expect(metricPayloads.some((payload) => payload.includes("harness.model.tokens"))).toBe(true);
       expect(
+        metricPayloads.some(
+          (payload) =>
+            payload.includes("harness.model.provider") && payload.includes("harness.model.name"),
+        ),
+      ).toBe(true);
+      expect(
         metricPayloads.some((payload) => payload.includes("harness.worker.queue_lag_ms")),
       ).toBe(true);
+      const prohibitedMetricAttributes = [
+        "harness.run.id",
+        "harness.session.id",
+        "harness.user.id",
+        "harness.trace.id",
+        "harness.span.id",
+        "harness.path",
+        "harness.url",
+      ];
       for (const body of requestBodies) {
         expect(body.includes(Buffer.from(canary))).toBe(false);
         expect(body.includes(Buffer.from("cli.local"))).toBe(false);
+        for (const attribute of prohibitedMetricAttributes) {
+          expect(body.includes(Buffer.from(attribute))).toBe(false);
+        }
       }
     } finally {
       if (!harnessClosed) {
