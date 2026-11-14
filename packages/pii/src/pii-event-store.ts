@@ -16,7 +16,6 @@ import {
 } from "@rovinos/schemas";
 import {
   PiiStorageFailedError,
-  SpendReservationStorageUnavailableError,
 } from "./errors.js";
 import {
   notifyPiiSummaries,
@@ -160,6 +159,8 @@ export interface EventStoreLike {
 
 /** Tokenizes classified event content and snapshot values before they reach storage. */
 export class PiiEventStore implements EventStoreLike {
+  private readonly supportsSpendReservations: boolean;
+
   /**
    * Wraps an event store with storage-boundary content sanitization.
    *
@@ -172,7 +173,14 @@ export class PiiEventStore implements EventStoreLike {
     private readonly tokenizer: Tokenizer,
     private readonly onSummary: (summary: PiiActionSummary) => void | Promise<void> = () =>
       Promise.resolve(),
-  ) {}
+  ) {
+    this.supportsSpendReservations =
+      typeof inner.reserveSpend === "function" &&
+      typeof inner.markSpendDispatching === "function" &&
+      typeof inner.releaseSpend === "function" &&
+      typeof inner.settleSpend === "function" &&
+      typeof inner.markSpendUncertain === "function";
+  }
 
   async append(
     runId: Id,
@@ -234,7 +242,7 @@ export class PiiEventStore implements EventStoreLike {
     expectedSeq: number,
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
     if (this.inner.reserveSpend === undefined) {
-      throw new SpendReservationStorageUnavailableError();
+      throw new PiiStorageFailedError();
     }
     const prepared = await this.prepareEvents(input.runId, [modelRequest], expectedSeq);
     await this.notifySummaries(prepared.summaries);
@@ -247,14 +255,14 @@ export class PiiEventStore implements EventStoreLike {
 
   markSpendDispatching(attemptId: Id): Promise<SpendReservation> {
     if (this.inner.markSpendDispatching === undefined) {
-      throw new SpendReservationStorageUnavailableError();
+      throw new PiiStorageFailedError();
     }
     return this.inner.markSpendDispatching(attemptId);
   }
 
   releaseSpend(attemptId: Id): Promise<SpendReservation> {
     if (this.inner.releaseSpend === undefined) {
-      throw new SpendReservationStorageUnavailableError();
+      throw new PiiStorageFailedError();
     }
     return this.inner.releaseSpend(attemptId);
   }
@@ -266,7 +274,7 @@ export class PiiEventStore implements EventStoreLike {
     options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
     if (this.inner.settleSpend === undefined) {
-      throw new SpendReservationStorageUnavailableError();
+      throw new PiiStorageFailedError();
     }
     const prepared = await this.prepareEvents(settlement.runId, [modelResponse], expectedSeq);
     await this.notifySummaries(prepared.summaries);
@@ -282,7 +290,7 @@ export class PiiEventStore implements EventStoreLike {
     reason: SpendReservationErrorCode,
   ): Promise<SpendReservation> {
     if (this.inner.markSpendUncertain === undefined) {
-      throw new SpendReservationStorageUnavailableError();
+      throw new PiiStorageFailedError();
     }
     return this.inner.markSpendUncertain(attemptId, reason);
   }

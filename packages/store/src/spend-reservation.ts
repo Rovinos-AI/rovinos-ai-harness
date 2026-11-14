@@ -57,6 +57,9 @@ export interface SpendReservationStore extends EventStore {
 
 /** Return whether an event store exposes the complete transactional reservation contract. */
 export function isSpendReservationStore(store: EventStore): store is SpendReservationStore {
+  if ("supportsSpendReservations" in store && store.supportsSpendReservations === false) {
+    return false;
+  }
   return (
     "reserveSpend" in store &&
     typeof store.reserveSpend === "function" &&

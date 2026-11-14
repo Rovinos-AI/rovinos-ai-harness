@@ -5,6 +5,7 @@ import {
   Code,
   FakeClock,
   Id,
+  PiiConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
   type CostValue,
@@ -18,6 +19,8 @@ import {
   type EventStore,
   type UsageLedgerDelta,
 } from "@rovinos/store";
+import { InMemoryVault } from "@rovinos/vault";
+import { PiiEventStore, Tokenizer } from "@rovinos/pii";
 import type { ModelCompletion, ModelPort } from "../ports.js";
 import { RunRecorder } from "../recorder.js";
 import type { StrictSpendCallOptions } from "../quotas.js";
@@ -80,6 +83,17 @@ async function setup(store: EventStore): Promise<RunRecorder> {
     }),
   );
   return recorder;
+}
+
+function nonTransactionalPiiStore(): EventStore {
+  return new PiiEventStore(
+    new InMemoryEventStore(),
+    new Tokenizer({
+      detectors: { detect: () => [] },
+      policy: PiiConfigSchema.parse({}),
+      vault: new InMemoryVault(),
+    }),
+  );
 }
 
 function strictOptions(
@@ -197,6 +211,12 @@ describe("modelStep strict spend reservations", () => {
       {
         name: "transactional reservation store unavailable",
         store: new InMemoryEventStore(),
+        strict: strictOptions(),
+        code: "spend_reservation_storage_unavailable",
+      },
+      {
+        name: "PII adapter wrapping non-transactional storage",
+        store: nonTransactionalPiiStore(),
         strict: strictOptions(),
         code: "spend_reservation_storage_unavailable",
       },

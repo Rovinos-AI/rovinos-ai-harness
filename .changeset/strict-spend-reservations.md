@@ -1,5 +1,5 @@
 ---
-"@rovinos/sdk": patch
+"@rovinos/sdk": minor
 ---
 
 # Strict spend reservations
