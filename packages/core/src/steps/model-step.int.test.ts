@@ -9,6 +9,7 @@ import {
   SequentialIdGenerator,
   type CostValue,
   type Event,
+  type ModelRequest,
   type ModelRef,
 } from "@rovinos/schemas";
 import {
@@ -117,7 +118,7 @@ function stepOptions(
       messageCount: 1,
       stablePrefixMessages: 0,
     },
-    ...(strict === undefined || strict === null ? {} : { strictSpendOptions: strict }),
+    ...(strict === null ? {} : { strictSpendOptions: strict }),
     usageUpdatesForCost: (cost: CostValue): readonly UsageLedgerDelta[] => [
       {
         quotaId,
@@ -204,7 +205,8 @@ describe("modelStep strict spend reservations", () => {
     for (const testCase of cases) {
       const store = testCase.store;
       const recorder = await setup(store);
-      const model: ModelPort = { complete: vi.fn(() => Promise.resolve(completion())) };
+      const complete = vi.fn(() => Promise.resolve(completion()));
+      const model: ModelPort = { complete };
       const overrides =
         testCase.name === "input estimate beyond the configured ceiling"
           ? {
@@ -217,12 +219,11 @@ describe("modelStep strict spend reservations", () => {
               },
             }
           : {};
-      await expect(
-        modelStep(stepOptions(recorder, model, testCase.strict, overrides)),
-        testCase.name,
-      ).rejects.toMatchObject({ code: testCase.code });
-      expect(model.complete, testCase.name).not.toHaveBeenCalled();
-      expect((await readEvents(store)).map(({ type }) => type), testCase.name).toEqual([
+      await expect(modelStep(stepOptions(recorder, model, testCase.strict, overrides))).rejects.toMatchObject({
+        code: testCase.code,
+      });
+      expect(complete).not.toHaveBeenCalled();
+      expect((await readEvents(store)).map(({ type }) => type)).toEqual([
         "run_created",
       ]);
     }
@@ -234,12 +235,13 @@ describe("modelStep strict spend reservations", () => {
     const store = new InMemorySpendReservationStore();
     const recorder = await setup(store);
     const markDispatching = vi.spyOn(store, "markSpendDispatching");
+    const complete = vi.fn(async (request: ModelRequest) => {
+      expect((await readEvents(store)).some((event) => event.type === "model_request")).toBe(true);
+      expect(markDispatching).toHaveBeenCalledWith(request.requestId);
+      return completion();
+    });
     const model: ModelPort = {
-      complete: vi.fn(async (request) => {
-        expect((await readEvents(store)).some((event) => event.type === "model_request")).toBe(true);
-        expect(markDispatching).toHaveBeenCalledWith(request.requestId);
-        return completion();
-      }),
+      complete,
     };
 
     const result = await modelStep(stepOptions(recorder, model));
@@ -264,15 +266,15 @@ describe("modelStep strict spend reservations", () => {
         maxOutputTokens: 10,
       },
     };
-    const firstModel: ModelPort = {
-      complete: vi.fn(() => Promise.resolve(completion(1_100))),
-    };
+    const firstComplete = vi.fn(() => Promise.resolve(completion(1_100)));
+    const firstModel: ModelPort = { complete: firstComplete };
     await modelStep(stepOptions(recorder, firstModel, strictOptions(cheapRate)));
-    const laterModel: ModelPort = { complete: vi.fn(() => Promise.resolve(completion())) };
+    const laterComplete = vi.fn(() => Promise.resolve(completion()));
+    const laterModel: ModelPort = { complete: laterComplete };
     await expect(modelStep(stepOptions(recorder, laterModel))).rejects.toMatchObject({
       code: "spend_reservation_quota_exceeded",
     });
-    expect(laterModel.complete).not.toHaveBeenCalled();
+    expect(laterComplete).not.toHaveBeenCalled();
     expect((await store.readUsageLedger(quotaId, "day", [0]))[0]?.costMicros).toBe(1_100);
   });
 
@@ -287,11 +289,12 @@ describe("modelStep strict spend reservations", () => {
     const first = await modelStep(stepOptions(recorder, failedModel));
     expect(first.outcome).toBe("failed");
 
-    const blockedModel: ModelPort = { complete: vi.fn(() => Promise.resolve(completion())) };
+    const blockedComplete = vi.fn(() => Promise.resolve(completion()));
+    const blockedModel: ModelPort = { complete: blockedComplete };
     await expect(modelStep(stepOptions(recorder, blockedModel))).rejects.toMatchObject({
       code: "spend_reservation_uncertain",
     });
-    expect(blockedModel.complete).not.toHaveBeenCalled();
+    expect(blockedComplete).not.toHaveBeenCalled();
 
     const nextPeriod = [{ ...quotaPeriod, periodStart: 86_400_000 }];
     const retryModel: ModelPort = { complete: vi.fn(() => Promise.resolve(completion())) };
@@ -319,22 +322,22 @@ describe("modelStep strict spend reservations", () => {
   it("keeps an incomplete-cost response uncertain and blocks another call in the same period", async () => {
     const store = new InMemorySpendReservationStore();
     const recorder = await setup(store);
-    const incompleteModel: ModelPort = {
-      complete: vi.fn(() =>
-        Promise.resolve({
-          ...completion(),
-          usage: { inputTokens: 10, outputTokens: 5 },
-        }),
-      ),
-    };
+    const incompleteComplete = vi.fn(() =>
+      Promise.resolve({
+        ...completion(),
+        usage: { inputTokens: 10, outputTokens: 5 },
+      }),
+    );
+    const incompleteModel: ModelPort = { complete: incompleteComplete };
     const result = await modelStep(stepOptions(recorder, incompleteModel));
     expect(result.outcome).toBe("response");
 
-    const laterModel: ModelPort = { complete: vi.fn(() => Promise.resolve(completion())) };
+    const laterComplete = vi.fn(() => Promise.resolve(completion()));
+    const laterModel: ModelPort = { complete: laterComplete };
     await expect(modelStep(stepOptions(recorder, laterModel))).rejects.toMatchObject({
       code: "spend_reservation_uncertain",
     });
-    expect(laterModel.complete).not.toHaveBeenCalled();
+    expect(laterComplete).not.toHaveBeenCalled();
   });
 
   it("does not reserve when strict mode is omitted", async () => {
