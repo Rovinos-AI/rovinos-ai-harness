@@ -1,0 +1,135 @@
+[
+  {
+    "id": "leak_sentinel",
+    "name": "Harness leak sentinel tripped",
+    "type": "metric alert",
+    "query": "sum(last_5m):sum:harness.telemetry.dropped{harness.telemetry.dropped.reason:leak_sentinel}.as_count() > 0",
+    "message": "Page on any nonzero leak-sentinel drop count.\n\nRunbook: docs/runbooks/leak-sentinel.md#suspected-telemetry-leak",
+    "tags": [
+      "service:harness",
+      "signal:privacy"
+    ],
+    "priority": 1,
+    "threshold_key": "leak_sentinel",
+    "runbook": "docs/runbooks/leak-sentinel.md#suspected-telemetry-leak",
+    "options": {
+      "thresholds": {
+        "critical": 0
+      }
+    }
+  },
+  {
+    "id": "rejected_app_spans",
+    "name": "Harness rejected app spans",
+    "type": "metric alert",
+    "query": "sum(last_5m):sum:harness.host.app_rejected{*}.as_count() > 10",
+    "message": "Counts rejected application spans over the configured window.\n\nRunbook: docs/runbooks/rejected-app-spans.md#rejected-app-spans",
+    "tags": [
+      "service:harness",
+      "signal:application"
+    ],
+    "priority": 3,
+    "threshold_key": "rejected_app_spans",
+    "runbook": "docs/runbooks/rejected-app-spans.md#rejected-app-spans",
+    "options": {
+      "thresholds": {
+        "critical": 10
+      }
+    }
+  },
+  {
+    "id": "pii_detector_degraded",
+    "name": "Harness PII detector degraded",
+    "type": "metric alert",
+    "query": "sum(last_5m):sum:harness.pii.detector_degraded{*}.as_count() > 0",
+    "message": "Counts PII detector degradation events over the configured window.\n\nRunbook: docs/runbooks/pii-detector-degraded.md#pii-detector-degraded",
+    "tags": [
+      "service:harness",
+      "signal:privacy"
+    ],
+    "priority": 2,
+    "threshold_key": "pii_detector_degraded",
+    "runbook": "docs/runbooks/pii-detector-degraded.md#pii-detector-degraded",
+    "options": {
+      "thresholds": {
+        "critical": 0
+      }
+    }
+  },
+  {
+    "id": "budget_exceeded",
+    "name": "Harness budget-exceeded runs",
+    "type": "log alert",
+    "query": "logs(\"@message:harness.safe.budget_exceeded\").index(\"*\").rollup(\"count\").last(\"15m\") > 3",
+    "message": "Counts metadata-only budget-exceeded events over the configured window.\n\nRunbook: docs/runbooks/budget-exceeded.md#budget-exceeded",
+    "tags": [
+      "service:harness",
+      "signal:budget"
+    ],
+    "priority": 2,
+    "threshold_key": "budget_exceeded",
+    "runbook": "docs/runbooks/budget-exceeded.md#budget-exceeded",
+    "options": {
+      "thresholds": {
+        "critical": 3
+      }
+    }
+  },
+  {
+    "id": "approval_wait",
+    "name": "Harness approval wait p95",
+    "type": "metric alert",
+    "query": "avg(last_5m):p95:harness.approval.wait_ms{*} > 30000",
+    "message": "Pages when approval wait p95 exceeds the configured threshold; review expiry decisions separately.\n\nRunbook: docs/runbooks/approval-wait.md#approval-wait",
+    "tags": [
+      "service:harness",
+      "signal:approval"
+    ],
+    "priority": 2,
+    "threshold_key": "approval_wait",
+    "runbook": "docs/runbooks/approval-wait.md#approval-wait",
+    "options": {
+      "thresholds": {
+        "critical": 30000
+      }
+    }
+  },
+  {
+    "id": "provider_error",
+    "name": "Harness provider error rate",
+    "type": "log alert",
+    "query": "logs(\"@message:harness.safe.run_status @harness.run.status.to:failed @harness.run.status.reason:model_error\").index(\"*\").rollup(\"count\").last(\"5m\") > 5",
+    "message": "Counts failed runs marked model_error. The current safe-event contract does not expose fallback depth.\n\nRunbook: docs/runbooks/provider-error.md#provider-error-and-fallback-rate",
+    "tags": [
+      "service:harness",
+      "signal:model"
+    ],
+    "priority": 2,
+    "threshold_key": "provider_error",
+    "runbook": "docs/runbooks/provider-error.md#provider-error-and-fallback-rate",
+    "options": {
+      "thresholds": {
+        "critical": 5
+      }
+    }
+  },
+  {
+    "id": "no_telemetry",
+    "name": "Harness safe telemetry missing",
+    "type": "log alert",
+    "query": "logs(\"@message:harness.safe*\").index(\"*\").rollup(\"count\").last(\"15m\") <= 0",
+    "message": "Alerts when no safe event logs arrive within the configured window.\n\nRunbook: docs/runbooks/no-telemetry.md#no-safe-telemetry-received",
+    "tags": [
+      "service:harness",
+      "signal:availability"
+    ],
+    "priority": 1,
+    "threshold_key": "no_telemetry",
+    "runbook": "docs/runbooks/no-telemetry.md#no-safe-telemetry-received",
+    "options": {
+      "thresholds": {
+        "critical": 0
+      }
+    }
+  }
+]

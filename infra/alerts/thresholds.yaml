@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Defaults are starting points; tune them for the deployment before enabling notifications.
+leak_sentinel:
+  window_minutes: 5
+  critical: 0
+  priority: 1
+rejected_app_spans:
+  window_minutes: 5
+  critical: 10
+  priority: 3
+pii_detector_degraded:
+  window_minutes: 5
+  critical: 0
+  priority: 2
+budget_exceeded:
+  window_minutes: 15
+  critical: 3
+  priority: 2
+approval_wait:
+  window_minutes: 5
+  critical: 30000
+  priority: 2
+provider_error:
+  window_minutes: 5
+  critical: 5
+  priority: 2
+no_telemetry:
+  window_minutes: 15
+  critical: 0
+  priority: 1
