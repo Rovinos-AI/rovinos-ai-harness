@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+let lookback = 7d;
+let ModelCalls = (period:timespan) {
+    HarnessLogs
+    | where Timestamp >= ago(period)
+    | extend event_kind = tostring(Body),
+             provider = tostring(LogsAttributes["harness.model.provider"]),
+             model = tostring(LogsAttributes["harness.model.name"]),
+             latency_ms = tolong(LogsAttributes["harness.model.latency_ms"])
+    | where event_kind == "harness.safe.model_call"
+};
+ModelCalls(lookback)
+| summarize percentiles(latency_ms, 50, 95, 99) by provider, model
+| project provider, model, percentile_latency_ms_50, percentile_latency_ms_95, percentile_latency_ms_99
+| order by provider asc, model asc

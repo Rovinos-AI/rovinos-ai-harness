@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+let lookback = 7d;
+let ApprovalWaits = (period:timespan) {
+    HarnessLogs
+    | where Timestamp >= ago(period)
+    | extend event_kind = tostring(Body),
+             decision = tostring(LogsAttributes["harness.approval.decision"]),
+             decided_by = tostring(LogsAttributes["harness.approval.decided_by"]),
+             wait_ms = tolong(LogsAttributes["harness.approval.wait_ms"])
+    | where event_kind == "harness.safe.approval_wait"
+};
+ApprovalWaits(lookback)
+| summarize percentiles(wait_ms, 50, 95, 99) by decision, decided_by
+| project decision, decided_by, percentile_wait_ms_50, percentile_wait_ms_95, percentile_wait_ms_99
+| order by decision asc, decided_by asc

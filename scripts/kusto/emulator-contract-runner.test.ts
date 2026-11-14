@@ -15,6 +15,17 @@ describe("Kusto emulator contract configuration", () => {
         database: "NetDefaultDB",
       },
     });
+    expect(
+      getContractConfiguration(["--queries"], {
+        KUSTO_CLUSTER_URI: "http://kusto-emulator:8080",
+        KUSTO_DATABASE: "NetDefaultDB",
+      }),
+    ).toEqual({
+      configuration: {
+        clusterUri: "http://kusto-emulator:8080",
+        database: "NetDefaultDB",
+      },
+    });
   });
 
   it("returns closed error codes for invalid endpoint or database configuration", () => {
