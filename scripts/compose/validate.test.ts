@@ -54,6 +54,40 @@ function config(services: Record<string, Record<string, unknown>>) {
 }
 
 describe("compose security evaluator", () => {
+  it("limits test Postgres WAL growth and provides hardened storage headroom", () => {
+    const compose = parseYaml(
+      composeSchema,
+      readFileSync(resolve(root, "infra/compose/docker-compose.test.yml"), "utf8"),
+    );
+    const postgres = z
+      .object({
+        command: z.array(z.string()),
+        tmpfs: z.array(z.string()),
+        read_only: z.boolean(),
+        cap_drop: z.array(z.string()),
+        security_opt: z.array(z.string()),
+      })
+      .parse(compose.services.postgres);
+
+    expect(postgres.command).toEqual([
+      "postgres",
+      "-c",
+      "unix_socket_directories=/var/run/postgresql",
+      "-c",
+      "max_wal_size=64MB",
+      "-c",
+      "min_wal_size=32MB",
+      "-c",
+      "wal_level=minimal",
+      "-c",
+      "max_wal_senders=0",
+    ]);
+    expect(postgres.tmpfs).toContain("/tmp:size=1g,noexec,nosuid,nodev");
+    expect(postgres.read_only).toBe(true);
+    expect(postgres.cap_drop).toEqual(["ALL"]);
+    expect(postgres.security_opt).toContain("no-new-privileges:true");
+  });
+
   it("keeps the Presidio startup grace at or above its documented minimum", () => {
     const compose = parseYaml(
       composeSchema,
