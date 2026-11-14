@@ -54,3 +54,19 @@ export interface SpendReservationStore extends EventStore {
     reason: SpendReservationErrorCode,
   ): Promise<SpendReservation>;
 }
+
+/** Return whether an event store exposes the complete transactional reservation contract. */
+export function isSpendReservationStore(store: EventStore): store is SpendReservationStore {
+  return (
+    "reserveSpend" in store &&
+    typeof store.reserveSpend === "function" &&
+    "markSpendDispatching" in store &&
+    typeof store.markSpendDispatching === "function" &&
+    "releaseSpend" in store &&
+    typeof store.releaseSpend === "function" &&
+    "settleSpend" in store &&
+    typeof store.settleSpend === "function" &&
+    "markSpendUncertain" in store &&
+    typeof store.markSpendUncertain === "function"
+  );
+}

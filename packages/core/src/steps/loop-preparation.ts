@@ -56,6 +56,7 @@ export async function prepareLoopIteration(
     goal: options.goal,
     deadlineTs: preflight.deadlineTs,
     unknownCostPolicy: options.budgets.unknownCostPolicy,
+    strictSpendReservations: quotaHooks.strictSpendOptions?.() !== undefined,
     ...quotaHooks,
   });
   const compactionBudget = execution.budgetTracker.checkWithOpenChildren(

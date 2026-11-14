@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { RunConfigSchema } from "./run.js";
 
 describe("RunConfigSchema resume policy", () => {
+  it("keeps strict spend reservations disabled unless explicitly enabled", () => {
+    expect(RunConfigSchema.parse({}).strictSpendReservations).toBeUndefined();
+    expect(RunConfigSchema.parse({ strictSpendReservations: true }).strictSpendReservations).toBe(
+      true,
+    );
+  });
+
   it("enables approval auto-resume by default and allows it to be disabled", () => {
     expect(RunConfigSchema.parse({}).autoResume).toBe(true);
     expect(RunConfigSchema.parse({ autoResume: false }).autoResume).toBe(false);

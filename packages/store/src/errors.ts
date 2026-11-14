@@ -37,6 +37,8 @@ function spendReservationErrorMessage(code: SpendReservationErrorCodeType): stri
       return "Spend reservation estimate is missing";
     case "spend_reservation_usage_incomplete":
       return "Spend reservation usage is incomplete";
+    case "spend_reservation_storage_unavailable":
+      return "Transactional spend reservation storage is unavailable";
     case "spend_reservation_uncertain":
       return "Spend reservation remains uncertain";
   }

@@ -247,6 +247,8 @@ export const ModelPricingRateSchema = z
     outputMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     cacheReadMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
     cacheWriteMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    maxInputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+    maxOutputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   })
   .strict();
 
@@ -266,6 +268,7 @@ export const ModelsConfigSchema = z
     retry: ModelRetryConfigSchema,
     enforcement: ModelEnforcementConfigSchema,
     maxConcurrent: z.coerce.number().int().positive().default(4),
+    pricingRevision: Code.optional(),
     pricing: z.record(modelPricingKey, ModelPricingRateSchema).default({}),
     providers: z
       .array(ModelProviderConfigSchema)

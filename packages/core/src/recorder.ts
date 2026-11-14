@@ -3,13 +3,9 @@
 import {
   context,
   isSpanContextValid,
-  ROOT_CONTEXT,
-  SpanStatusCode,
   trace,
   type AnyValue,
-  type Link,
   type Span,
-  type Context,
   type SpanContext,
 } from "@opentelemetry/api";
 import {
@@ -20,21 +16,32 @@ import {
   type NewEvent,
   type Snapshot,
   type WorkspaceRef,
+  type SpendReservationInput,
+  type SpendReservationSettlement,
 } from "@rovinos/schemas";
-import { SeqConflictError, type EventStore, type UsageLedgerDelta } from "@rovinos/store";
+import {
+  SeqConflictError,
+  SpendReservationError,
+  isSpendReservationStore,
+  type EventStore,
+  type UsageAppendOptions,
+  type UsageLedgerDelta,
+  type SpendReservationErrorCode,
+  type SpendReservationStore,
+} from "@rovinos/store";
 import {
   countCompletedRun,
   countToolCall,
   recordApprovalWait,
   recordModelLatency,
   sentinelTripQueue,
-  setActiveSpanAttribute,
   type SpanDefinition,
   type SpanDefinitionShape,
   type TripQueue,
 } from "@rovinos/telemetry";
-import { RUN_SPAN } from "./spans.js";
 import { DeploymentStartupError } from "./runtime-deployment.js";
+import { runStepSpan, type StepSpanOptions } from "./recorder-span.js";
+export type { StepSpanOptions } from "./recorder-span.js";
 
 /** Clock used to timestamp recorded events. */
 export interface Clock {
@@ -84,12 +91,6 @@ export class RunEventRecordingError extends HarnessError {
     super("Run event recording failed.");
     this.name = "RunEventRecordingError";
   }
-}
-
-/** Optional parent context and links for a registered span. */
-export interface StepSpanOptions {
-  readonly links?: readonly Link[];
-  readonly parentContext?: Context;
 }
 
 /**
@@ -165,6 +166,107 @@ export class RunRecorder {
       throw new SpanContextMissingError();
     }
     return event;
+  }
+
+  /** Atomically reserve spend and append the corresponding model request. */
+  async reserveSpend(
+    input: SpendReservationInput,
+    partial: Extract<EventPartial, { type: "model_request" }>,
+  ): Promise<Event> {
+    if (this.storedHead !== undefined) {
+      throw new LeaseLostError(this.storedHead);
+    }
+    const spanContext = this.activeSpanContext();
+    return this.enqueue(async () => {
+      this.assertWritable();
+      if (!isSpendReservationStore(this.store)) {
+        throw new SpendReservationError("spend_reservation_storage_unavailable");
+      }
+      const expectedSeq = this.nextSequence;
+      const request: NewEvent = {
+        ...partial,
+        runId: this.runId,
+        ts: this.clock.now(),
+        traceId: spanContext.traceId,
+        spanId: spanContext.spanId,
+        segmentId: this.segmentId,
+      };
+      try {
+        const result = await this.store.reserveSpend(input, request, expectedSeq);
+        this.nextSequence = result.nextSeq;
+      } catch (error) {
+        if (error instanceof SeqConflictError) {
+          this.storedHead = error.actual;
+          throw new LeaseLostError(error.actual);
+        }
+        throw error;
+      }
+      return EventSchema.parse({ ...request, seq: expectedSeq });
+    });
+  }
+
+  /** Persist the transition after which the provider may have received the request. */
+  markSpendDispatching(attemptId: SpendReservationInput["attemptId"]): Promise<void> {
+    return this.reservationTransition((store) => store.markSpendDispatching(attemptId));
+  }
+
+  /** Release a spend reservation only while the provider dispatch is known not to have begun. */
+  releaseSpend(attemptId: SpendReservationInput["attemptId"]): Promise<void> {
+    return this.reservationTransition((store) => store.releaseSpend(attemptId));
+  }
+
+  /** Mark a dispatched attempt uncertain without releasing its quota exposure. */
+  markSpendUncertain(
+    attemptId: SpendReservationInput["attemptId"],
+    reason: SpendReservationErrorCode,
+  ): Promise<void> {
+    return this.reservationTransition((store) => store.markSpendUncertain(attemptId, reason));
+  }
+
+  /** Atomically append a model response, its usage, and the settled reservation. */
+  async settleSpend(
+    settlement: SpendReservationSettlement,
+    partial: Extract<EventPartial, { type: "model_response" }>,
+    usageUpdates: readonly UsageLedgerDelta[],
+  ): Promise<Event> {
+    if (this.storedHead !== undefined) {
+      throw new LeaseLostError(this.storedHead);
+    }
+    const spanContext = this.activeSpanContext();
+    return this.enqueue(async () => {
+      this.assertWritable();
+      if (!isSpendReservationStore(this.store)) {
+        throw new SpendReservationError("spend_reservation_storage_unavailable");
+      }
+      const expectedSeq = this.nextSequence;
+      const response: NewEvent = {
+        ...partial,
+        runId: this.runId,
+        ts: this.clock.now(),
+        traceId: spanContext.traceId,
+        spanId: spanContext.spanId,
+        segmentId: this.segmentId,
+      };
+      const options: UsageAppendOptions = {
+        usageUpdates,
+        ...(this.leaseOwner === undefined ? {} : { leaseOwner: this.leaseOwner }),
+      };
+      try {
+        const result = await this.store.settleSpend(settlement, response, expectedSeq, options);
+        this.nextSequence = result.nextSeq;
+      } catch (error) {
+        if (error instanceof SeqConflictError) {
+          this.storedHead = error.actual;
+          throw new LeaseLostError(error.actual);
+        }
+        throw error;
+      }
+      const event = EventSchema.parse({ ...response, seq: expectedSeq });
+      if (event.type === "model_response") {
+        recordModelLatency(event.latencyMs, event.provider, event.model);
+      }
+      return event;
+    });
   }
 
   /**
@@ -248,38 +350,13 @@ export class RunRecorder {
     fn: (span: Span) => Event | Promise<Event>,
     options: StepSpanOptions = {},
   ): Promise<Event> {
-    const spanAttrs: Record<string, unknown> = {
-      ...attrs,
-      "harness.run.id": this.runId,
-    };
-    if (definition.name === "harness.run") {
-      spanAttrs["harness.segment.id"] = this.segmentId;
-    }
-
-    const span = definition.start(
-      spanAttrs,
-      definition.name === RUN_SPAN.name
-        ? {
-            parent: options.parentContext ?? ROOT_CONTEXT,
-            ...(options.links === undefined ? {} : { links: [...options.links] }),
-          }
-        : undefined,
-    );
-    const activeContext = trace.setSpan(context.active(), span);
-    return context.with(activeContext, async () => {
-      try {
-        const event = await fn(span);
-        setActiveSpanAttribute("harness.event.seq", event.seq);
-        return event;
-      } catch (error) {
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        if (error instanceof HarnessError) {
-          setActiveSpanAttribute("harness.error.code", error.code);
-        }
-        throw error;
-      } finally {
-        span.end();
-      }
+    return runStepSpan({
+      runId: this.runId,
+      segmentId: this.segmentId,
+      definition,
+      attrs,
+      fn,
+      options,
     });
   }
 
@@ -298,6 +375,18 @@ export class RunRecorder {
       () => undefined,
     );
     return result;
+  }
+
+  private reservationTransition(
+    transition: (store: SpendReservationStore) => Promise<unknown>,
+  ): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertWritable();
+      if (!isSpendReservationStore(this.store)) {
+        throw new SpendReservationError("spend_reservation_storage_unavailable");
+      }
+      await transition(this.store);
+    });
   }
 
   private async append(
