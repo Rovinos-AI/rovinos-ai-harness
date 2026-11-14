@@ -14,9 +14,7 @@ import {
   type SpendReservationInput,
   type SpendReservationSettlement,
 } from "@rovinos/schemas";
-import {
-  PiiStorageFailedError,
-} from "./errors.js";
+import { PiiStorageFailedError } from "./errors.js";
 import {
   notifyPiiSummaries,
   preparePiiEvents,
@@ -106,10 +104,7 @@ export interface EventStoreLike {
     expectedSeq: number,
     options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
   ): Promise<{ reservation: SpendReservation; nextSeq: number }>;
-  markSpendUncertain?(
-    attemptId: Id,
-    reason: SpendReservationErrorCode,
-  ): Promise<SpendReservation>;
+  markSpendUncertain?(attemptId: Id, reason: SpendReservationErrorCode): Promise<SpendReservation>;
   readUsageLedger(
     quotaId: Code,
     period: UsageLedgerDeltaLike["period"],
@@ -285,10 +280,7 @@ export class PiiEventStore implements EventStoreLike {
     return this.inner.settleSpend(settlement, sanitizedResponse, expectedSeq, options);
   }
 
-  markSpendUncertain(
-    attemptId: Id,
-    reason: SpendReservationErrorCode,
-  ): Promise<SpendReservation> {
+  markSpendUncertain(attemptId: Id, reason: SpendReservationErrorCode): Promise<SpendReservation> {
     if (this.inner.markSpendUncertain === undefined) {
       throw new PiiStorageFailedError();
     }

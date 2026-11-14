@@ -12,11 +12,7 @@ import type { ModelStepOptions, ModelStepResult } from "./model-step.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { EventPartial } from "../recorder.js";
 import type { ModelCompletion, ModelRequest } from "../ports.js";
-import {
-  piiActionRunContext,
-  prepareCompletion,
-  toolRunContext,
-} from "./prepare-tool.js";
+import { piiActionRunContext, prepareCompletion, toolRunContext } from "./prepare-tool.js";
 import { requestCompletion } from "./model-completion.js";
 import { recordModelFailure } from "./model-step-failure.js";
 import {
@@ -197,16 +193,8 @@ async function recordModelCompletion(input: {
         ? "budget_cost_unknown_allowed"
         : undefined,
     );
-    if (
-      dispatching &&
-      cost.state !== "known" &&
-      cost.state !== "estimated"
-    ) {
-      await markUncertain(
-        options.recorder,
-        requestId,
-        "spend_reservation_usage_incomplete",
-      );
+    if (dispatching && cost.state !== "known" && cost.state !== "estimated") {
+      await markUncertain(options.recorder, requestId, "spend_reservation_usage_incomplete");
       reservationMarkedUncertain = true;
     }
     const response = await persistResponse({

@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  SpendReservationInputSchema,
-  type Id,
-} from "@rovinos/schemas";
+import { SpendReservationInputSchema, type Id } from "@rovinos/schemas";
 import { SpendReservationError } from "@rovinos/store";
 import type { ModelStepOptions } from "./model-step.js";
 import { boundedSpendEstimate } from "../strict-spend.js";

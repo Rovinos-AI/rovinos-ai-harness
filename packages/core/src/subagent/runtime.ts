@@ -21,11 +21,7 @@ import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
 import { finalizeChild, type SubagentResult } from "./result.js";
 import { foldRunState, isTerminalRunState } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
-import {
-  QuotaService,
-  strictSpendPricingFromConfig,
-  type QuotaIdentity,
-} from "../quotas.js";
+import { QuotaService, strictSpendPricingFromConfig, type QuotaIdentity } from "../quotas.js";
 import { withSandboxLease } from "../runtime-lifecycle.js";
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {

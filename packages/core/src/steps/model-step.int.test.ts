@@ -190,16 +190,14 @@ describe("modelStep strict spend reservations", () => {
       {
         name: "estimate exceeds the safe integer range",
         store: new InMemorySpendReservationStore(),
-        strict: strictOptions(
-          {
-            [`${modelRef.provider}/${modelRef.model}`]: {
-              inputMicrosPerMTok: Number.MAX_SAFE_INTEGER,
-              outputMicrosPerMTok: Number.MAX_SAFE_INTEGER,
-              maxInputTokens: Number.MAX_SAFE_INTEGER,
-              maxOutputTokens: Number.MAX_SAFE_INTEGER,
-            },
+        strict: strictOptions({
+          [`${modelRef.provider}/${modelRef.model}`]: {
+            inputMicrosPerMTok: Number.MAX_SAFE_INTEGER,
+            outputMicrosPerMTok: Number.MAX_SAFE_INTEGER,
+            maxInputTokens: Number.MAX_SAFE_INTEGER,
+            maxOutputTokens: Number.MAX_SAFE_INTEGER,
           },
-        ),
+        }),
         code: "spend_reservation_estimate_missing",
       },
       {
@@ -239,13 +237,13 @@ describe("modelStep strict spend reservations", () => {
               },
             }
           : {};
-      await expect(modelStep(stepOptions(recorder, model, testCase.strict, overrides))).rejects.toMatchObject({
+      await expect(
+        modelStep(stepOptions(recorder, model, testCase.strict, overrides)),
+      ).rejects.toMatchObject({
         code: testCase.code,
       });
       expect(complete).not.toHaveBeenCalled();
-      expect((await readEvents(store)).map(({ type }) => type)).toEqual([
-        "run_created",
-      ]);
+      expect((await readEvents(store)).map(({ type }) => type)).toEqual(["run_created"]);
     }
 
     expect(RunConfigSchema.parse({}).strictSpendReservations).toBeUndefined();
@@ -302,9 +300,13 @@ describe("modelStep strict spend reservations", () => {
     const store = new InMemorySpendReservationStore();
     const recorder = await setup(store);
     const failedModel: ModelPort = {
-      complete: vi.fn(() => Promise.reject(Object.assign(new Error("provider lost"), {
-        code: "provider_timeout",
-      }))),
+      complete: vi.fn(() =>
+        Promise.reject(
+          Object.assign(new Error("provider lost"), {
+            code: "provider_timeout",
+          }),
+        ),
+      ),
     };
     const first = await modelStep(stepOptions(recorder, failedModel));
     expect(first.outcome).toBe("failed");

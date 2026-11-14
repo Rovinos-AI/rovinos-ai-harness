@@ -41,9 +41,8 @@ export async function recordModelFailure(input: {
   if (strictSpendActive && !reservationHandled) {
     await markUncertain(options.recorder, requestId, "spend_reservation_uncertain");
   }
-  const reason = code === "model_output_invalid" && options.outputSchema !== undefined
-    ? "result_invalid"
-    : code;
+  const reason =
+    code === "model_output_invalid" && options.outputSchema !== undefined ? "result_invalid" : code;
   span.setStatus({ code: SpanStatusCode.ERROR });
   setActiveSpanAttribute("harness.error.code", reason);
   if (options.failureMode === "tool") {

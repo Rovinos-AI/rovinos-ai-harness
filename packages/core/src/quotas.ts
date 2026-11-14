@@ -179,12 +179,17 @@ export class QuotaService {
   }
 
   /** Return model pricing and current UTC cost-quota periods for one strict call. */
-  strictSpendOptions(identity: QuotaIdentity, role?: Code): {
-    readonly pricing: ModelsConfig["pricing"];
-    readonly modelRef?: ModelRef;
-    readonly pricingRevision?: Code;
-    readonly quotaPeriods: readonly SpendReservationQuota[];
-  } | undefined {
+  strictSpendOptions(
+    identity: QuotaIdentity,
+    role?: Code,
+  ):
+    | {
+        readonly pricing: ModelsConfig["pricing"];
+        readonly modelRef?: ModelRef;
+        readonly pricingRevision?: Code;
+        readonly quotaPeriods: readonly SpendReservationQuota[];
+      }
+    | undefined {
     if (this.strictSpendPricing === undefined) {
       return undefined;
     }
