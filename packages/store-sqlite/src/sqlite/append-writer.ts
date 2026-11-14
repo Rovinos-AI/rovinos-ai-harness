@@ -53,6 +53,8 @@ interface AppendOptions {
   readonly encodedSnapshot?: EncodedSnapshot;
   readonly usageUpdates?: readonly UsageLedgerDelta[];
   readonly leaseOwner?: Id;
+  readonly beforeAppend?: () => void;
+  readonly afterAppend?: () => void;
 }
 
 interface SqliteAppendWriterOptions {
@@ -131,6 +133,7 @@ export function writeSqliteAppend(options: SqliteAppendWriterOptions): { nextSeq
       if (existingRun === undefined) {
         commands.insertRun(runId, first.ts, first.ts);
       }
+      append.beforeAppend?.();
       insertEvents(commands, runId, encoded);
       applyUsageUpdates(commands, append.usageUpdates ?? []);
       const status = nextRunStatus(
@@ -138,6 +141,7 @@ export function writeSqliteAppend(options: SqliteAppendWriterOptions): { nextSeq
         encoded.map(({ event }) => event),
       );
       commands.updateRun(expectedSeq + encoded.length, status, last.ts, runId);
+      append.afterAppend?.();
       if (encodedSnapshot !== undefined) {
         commands.insertSnapshot(encodedSnapshot);
         commands.pruneSnapshots(runId, snapshotKeep);

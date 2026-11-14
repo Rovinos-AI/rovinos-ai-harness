@@ -1,17 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import type {
-  Code,
-  Id,
-  TraceId,
-  Event as StoredEvent,
-  NewEvent,
-  RunStatus,
-  Snapshot,
-} from "@rovinos/schemas";
+import type { Code, Id, Event as StoredEvent, NewEvent, RunStatus } from "@rovinos/schemas";
 import {
   ChangeEmitter,
-  decodeSnapshot,
   encodeSnapshot,
   JsonContentCodec,
   snapshotKeep,
@@ -32,12 +23,11 @@ import {
   type UsageLedgerRow,
   type IdempotencyKeyHash,
   type IdempotencyKeyTakeoverOptions,
-  type ListRunsOptions,
   type RunSummary,
-  type SnapshotRow,
   type StoreKeyRotation,
   type SqliteStoreOptions,
 } from "@rovinos/store/adapter-internal";
+import type { SpendReservationStore } from "@rovinos/store";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
 import {
   claimSqliteIdempotencyKey,
@@ -45,13 +35,9 @@ import {
   takeoverSqliteIdempotencyKey,
 } from "./idempotency.js";
 import {
-  decodeStoredContent,
-  eventFromRow,
   insertSnapshot,
-  parseStoredMeta,
   prepareRunSummaryQuery,
   readRunSummary,
-  type EventRow,
   type RunRow,
   type RunSummaryRow,
 } from "./serialization.js";
@@ -64,17 +50,16 @@ import {
   releaseSqliteExecutionLease,
   renewSqliteExecutionLease,
 } from "./execution-leases.js";
-import { findRunsByTrace } from "./traces.js";
 import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
 import { writeSqliteAppend } from "./append-writer.js";
 import { readSqliteUsageLedger } from "./usage-ledger.js";
 import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
-import { listSqliteRuns, prepareListRunsQuery, type ListRunsQueryParams } from "./run-listing.js";
-
-const READ_PAGE_SIZE = 256;
+import { SqliteReadOperations } from "./read-operations.js";
+import { SqliteSpendReservations } from "./spend-reservations.js";
+import { SqliteSpendReservationOperations } from "./spend-reservation-operations.js";
 
 /** Durable SQLite implementation of the append-only event store. */
-export class SqliteEventStore implements EventStore, StoreKeyRotation {
+export class SqliteEventStore implements EventStore, SpendReservationStore, StoreKeyRotation {
   private readonly db: Database.Database;
   private readonly codec: ContentCodec;
   private readonly insertRun: Database.Statement<[Id, number, number]>;
@@ -84,19 +69,10 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     [Id, number, number, string, string, string, string, string, string, string | null]
   >;
   private readonly updateRun: Database.Statement<[number, RunStatus, number, Id]>;
-  private readonly readEvents: Database.Statement<
-    [Id, number, number | null, number | null, number],
-    EventRow
-  >;
-  private readonly getHead: Database.Statement<[Id], { next_seq: number }>;
-  private readonly findRunsByTraceQuery: Database.Statement<[TraceId], { run_id: string }>;
-  private readonly listRunsQuery: Database.Statement<ListRunsQueryParams, RunSummaryRow>;
   private readonly insertSnapshot: Database.Statement<
     [string, Id, number, number, string, string, string | null]
   >;
   private readonly pruneSnapshots: Database.Statement<[Id, Id, number]>;
-  private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
-  private readonly retainedSnapshotsQuery: Database.Statement<[Id, number], SnapshotRow>;
   private readonly readUsageLedgerQuery: Database.Statement<
     [Code, UsageLedgerPeriod, number],
     {
@@ -114,10 +90,13 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   >;
   private readonly snapshotKeep: number;
   private readonly pollIntervalMs: number;
+  private readonly readOperations: SqliteReadOperations;
   private readonly changeEmitter = new ChangeEmitter();
   private readonly outbox: SqliteOutboxReader;
   private readonly approvalNotifications: SqliteApprovalNotifications;
   private readonly confirmationStates: SqliteConfirmationStates;
+  private readonly spendReservations: SqliteSpendReservations;
+  private readonly spendReservationOperations: SqliteSpendReservationOperations;
 
   /**
    * Open a SQLite database and initialize its initial schema.
@@ -139,8 +118,17 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     this.snapshotKeep = snapshotKeep({ snapshotKeep: parsedOptions.snapshotKeep });
     this.pollIntervalMs = parsedOptions.pollIntervalMs;
     this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
+    this.readOperations = new SqliteReadOperations({ db: this.db, codec: this.codec });
     this.approvalNotifications = new SqliteApprovalNotifications(this.db);
     this.confirmationStates = new SqliteConfirmationStates(this.db);
+    this.spendReservations = new SqliteSpendReservations(this.db, clock);
+    this.spendReservationOperations = new SqliteSpendReservationOperations({
+      codec: this.codec,
+      reservations: this.spendReservations,
+      append: (request) => this.writeAppend(request),
+      read: (runId, range) => this.read(runId, range),
+      head: (runId) => this.head(runId),
+    });
 
     this.insertRun = this.db.prepare<[Id, number, number]>(
       "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES (?, ?, 'pending', 0, ?)",
@@ -157,16 +145,6 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     this.updateRun = this.db.prepare<[number, RunStatus, number, Id]>(
       "UPDATE runs SET next_seq = ?, status = ?, last_ts = ? WHERE run_id = ?",
     );
-    this.readEvents = this.db.prepare<[Id, number, number | null, number | null, number], EventRow>(
-      "SELECT run_id, seq, ts, type, trace_id, span_id, segment_id, meta_json, content_blob, key_id FROM events WHERE run_id = ? AND seq >= ? AND (? IS NULL OR seq <= ?) ORDER BY seq LIMIT ?",
-    );
-    this.getHead = this.db.prepare<[Id], { next_seq: number }>(
-      "SELECT next_seq FROM runs WHERE run_id = ?",
-    );
-    this.findRunsByTraceQuery = this.db.prepare<[TraceId], { run_id: string }>(
-      "SELECT run_id FROM events WHERE trace_id = ? GROUP BY run_id ORDER BY MIN(global_seq)",
-    );
-    this.listRunsQuery = prepareListRunsQuery(this.db);
     this.insertSnapshot = this.db.prepare<
       [string, Id, number, number, string, string, string | null]
     >(
@@ -174,12 +152,6 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     );
     this.pruneSnapshots = this.db.prepare<[Id, Id, number]>(
       "DELETE FROM snapshots WHERE run_id = ? AND snapshot_id NOT IN (SELECT snapshot_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT ?)",
-    );
-    this.latestSnapshotQuery = this.db.prepare<[Id], SnapshotRow>(
-      "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT 1",
-    );
-    this.retainedSnapshotsQuery = this.db.prepare<[Id, number], SnapshotRow>(
-      "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT ?",
     );
     this.readUsageLedgerQuery = this.db.prepare(
       "SELECT quota_id, period, period_start, cost_micros, unknown_cost_count, runs_started FROM usage_ledger WHERE quota_id = ? AND period = ? AND period_start = ?",
@@ -276,6 +248,17 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     return releaseSqliteExecutionLease({ db: this.db, runId, owner });
   }
 
+  reserveSpend: SpendReservationStore["reserveSpend"] = (...args) =>
+    this.spendReservationOperations.reserveSpend(...args);
+  markSpendDispatching: SpendReservationStore["markSpendDispatching"] = (...args) =>
+    this.spendReservationOperations.markSpendDispatching(...args);
+  releaseSpend: SpendReservationStore["releaseSpend"] = (...args) =>
+    this.spendReservationOperations.releaseSpend(...args);
+  settleSpend: SpendReservationStore["settleSpend"] = (...args) =>
+    this.spendReservationOperations.settleSpend(...args);
+  markSpendUncertain: SpendReservationStore["markSpendUncertain"] = (...args) =>
+    this.spendReservationOperations.markSpendUncertain(...args);
+
   private writeAppend(options: {
     readonly runId: Id;
     readonly encoded: readonly EncodedEvent[];
@@ -283,6 +266,8 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     readonly encodedSnapshot?: EncodedSnapshot;
     readonly usageUpdates?: readonly UsageLedgerDelta[];
     readonly leaseOwner?: Id;
+    readonly beforeAppend?: () => void;
+    readonly afterAppend?: () => void;
   }): { nextSeq: number } {
     return writeSqliteAppend({
       db: this.db,
@@ -308,25 +293,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc @rovinos/store!types.EventStore.read} */
-  async *read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<StoredEvent> {
-    const fromSeq = range?.fromSeq ?? 0;
-    const toSeq = range?.toSeq ?? null;
-    let nextSeq = fromSeq;
-    try {
-      let rows = this.readEvents.all(runId, nextSeq, toSeq, toSeq, READ_PAGE_SIZE);
-      while (rows.length !== 0) {
-        for (const row of rows) {
-          const storedMeta = parseStoredMeta(row.meta_json);
-          const content = await decodeStoredContent(this.codec, runId, row);
-          yield eventFromRow(row, storedMeta, content);
-          nextSeq = row.seq + 1;
-        }
-        rows = this.readEvents.all(runId, nextSeq, toSeq, toSeq, READ_PAGE_SIZE);
-      }
-    } catch (error) {
-      throw storeError(error);
-    }
-  }
+  read: EventStore["read"] = (runId, range) => this.readOperations.read(runId, range);
 
   private waitForChange(runId: Id | undefined, signal: AbortSignal): ChangeSubscription {
     return waitForChangeWithPolling(this.changeEmitter, runId, signal, this.pollIntervalMs);
@@ -360,14 +327,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc @rovinos/store!types.EventStore.head} */
-  head(runId: Id): Promise<number> {
-    try {
-      const row = this.getHead.get(runId);
-      return Promise.resolve(row?.next_seq ?? 0);
-    } catch (error) {
-      return Promise.reject(storeError(error));
-    }
-  }
+  head: EventStore["head"] = (runId) => this.readOperations.head(runId);
 
   /** {@inheritDoc @rovinos/store!types.EventStore.claimIdempotencyKey} */
   claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
@@ -397,37 +357,19 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc @rovinos/store!types.EventStore.latestSnapshot} */
-  async latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
-    try {
-      const row = this.latestSnapshotQuery.get(runId);
-      return row === undefined ? undefined : await decodeSnapshot(this.codec, row);
-    } catch (error) {
-      throw storeError(error);
-    }
-  }
+  latestSnapshot: EventStore["latestSnapshot"] = (runId) =>
+    this.readOperations.latestSnapshot(runId);
 
   /** {@inheritDoc @rovinos/store!types.EventStore.retainedSnapshots} */
-  async retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
-    if (!Number.isSafeInteger(limit) || limit < 1) {
-      throw new TypeError("Snapshot limit must be a positive integer");
-    }
-    try {
-      return await Promise.all(
-        this.retainedSnapshotsQuery.all(runId, limit).map((row) => decodeSnapshot(this.codec, row)),
-      );
-    } catch (error) {
-      throw storeError(error);
-    }
-  }
+  retainedSnapshots: EventStore["retainedSnapshots"] = (runId, limit) =>
+    this.readOperations.retainedSnapshots(runId, limit);
 
   /** {@inheritDoc @rovinos/store!types.EventStore.listRuns} */
-  listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
-    return listSqliteRuns(this.listRunsQuery, opts);
-  }
+  listRuns: EventStore["listRuns"] = (opts) => this.readOperations.listRuns(opts);
 
   /** {@inheritDoc @rovinos/store!types.EventStore.findRunsByTrace} */
   findRunsByTrace: EventStore["findRunsByTrace"] = (traceId) =>
-    findRunsByTrace(this.findRunsByTraceQuery, traceId);
+    this.readOperations.findRunsByTrace(traceId);
 
   /** {@inheritDoc @rovinos/store!types.EventStore.fetchOutbox} */
   fetchOutbox: EventStore["fetchOutbox"] = (sinkId, limit) => this.outbox.fetch(sinkId, limit);
