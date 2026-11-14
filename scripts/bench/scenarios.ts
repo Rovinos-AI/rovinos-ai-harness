@@ -2,16 +2,16 @@
 import { cpus, totalmem } from "node:os";
 import { SqliteEventStore } from "@rovinos/store-sqlite";
 import { PostgresEventStore } from "@rovinos/store-postgres";
-import { BenchmarkResultSchema, type BenchmarkResult } from "./contracts.js";
-import { BENCHMARK_PROFILES, type BenchmarkProfile } from "./profiles.js";
+import { BenchmarkResultSchema, type BenchmarkResult } from "./contracts.ts";
+import { BENCHMARK_PROFILES, type BenchmarkProfile } from "./profiles.ts";
 import {
   appendBenchmarks,
   sentinelBenchmarks,
   storeReadAndResumeBenchmarks,
   tokenizerBenchmark,
-} from "./store-scenarios.js";
-import { allowlistSentinelBenchmark, queueBenchmark, sdkBenchmarks } from "./service-scenarios.js";
-import { mcpBenchmarks } from "./mcp-scenarios.js";
+} from "./store-scenarios.ts";
+import { allowlistSentinelBenchmark, queueBenchmark, sdkBenchmarks } from "./service-scenarios.ts";
+import { mcpBenchmarks } from "./mcp-scenarios.ts";
 
 export { BENCHMARK_PROFILES };
 

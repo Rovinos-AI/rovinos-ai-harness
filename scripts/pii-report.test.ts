@@ -11,8 +11,8 @@ import {
   PiiThresholdsSchema,
   runPiiReport,
   type PiiReport,
-} from "./pii-report.js";
-import { PiiCorpusSampleSchema } from "./gen-pii-corpus.js";
+} from "./pii-report.ts";
+import { PiiCorpusSampleSchema } from "./gen-pii-corpus.ts";
 
 const temporaryDirectories: string[] = [];
 

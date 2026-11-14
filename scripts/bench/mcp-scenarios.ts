@@ -3,8 +3,8 @@ import { InMemoryWorkspace, OffloadingToolPort } from "@rovinos/context";
 import { normalizedResult } from "@rovinos/mcp/tool-result";
 import { Code, JsonValue } from "@rovinos/schemas";
 import { McpCatalogInspectionSchema, registerMcpServer, selectMcpTools } from "@rovinos/sdk";
-import { hash, makeId, measure, metric, type BenchmarkProfile } from "./common.js";
-import type { BenchmarkResult } from "./contracts.js";
+import { hash, makeId, measure, metric, type BenchmarkProfile } from "./common.ts";
+import type { BenchmarkResult } from "./contracts.ts";
 
 function mcpCatalog(size: number) {
   const serverId = "bench_server";

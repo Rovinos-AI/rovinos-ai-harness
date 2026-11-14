@@ -13,7 +13,7 @@ import {
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type * as RegistrationSourceModule from "./telemetry-registration-sources.js";
+import type * as RegistrationSourceModule from "./telemetry-registration-sources.ts";
 
 type CatalogSpanDefinition = Pick<
   SpanDefinition<SpanDefinitionShape>,

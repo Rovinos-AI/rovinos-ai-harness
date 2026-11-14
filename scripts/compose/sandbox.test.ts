@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { createSandboxComposeInvocation } from "./sandbox.js";
+import { createSandboxComposeInvocation } from "./sandbox.ts";
 
 describe("sandbox Compose configuration", () => {
   it("adds the egress profile and serializes the config allowlist", () => {

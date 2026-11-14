@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { lint } from "./lint-extended.js";
+import { lint } from "./lint-extended.ts";
 
 const rootDirectory = resolve(fileURLToPath(new URL("../", import.meta.url)));
 

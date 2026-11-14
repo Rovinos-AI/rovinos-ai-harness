@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { DashboardValidationError, validateDatadogDashboard } from "./validate-dashboard.js";
+import { DashboardValidationError, validateDatadogDashboard } from "./validate-dashboard.ts";
 
 const dashboardText = readFileSync(
   new URL("../../infra/dashboards/datadog/harness-overview.json", import.meta.url),

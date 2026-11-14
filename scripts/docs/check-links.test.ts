@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { checkLinks } from "./check-links.js";
-import type { MarkdownSource } from "./markdown.js";
+import { checkLinks } from "./check-links.ts";
+import type { MarkdownSource } from "./markdown.ts";
 
 describe("Markdown link checker", () => {
   it("reports broken relative links and anchors", () => {

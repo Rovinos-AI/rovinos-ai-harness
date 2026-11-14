@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { evaluateCommunityFiles } from "./check-community-files.js";
+import { evaluateCommunityFiles } from "./check-community-files.ts";
 
 const completeFiles = {
   "CONTRIBUTING.md": "# Contributing\n\n## DCO sign-off\n",

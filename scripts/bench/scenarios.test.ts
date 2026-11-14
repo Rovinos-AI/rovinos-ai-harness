@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { BENCHMARK_PROFILES, runBenchmarks } from "./scenarios.js";
+import { BENCHMARK_PROFILES, runBenchmarks } from "./scenarios.ts";
 
 describe("benchmark scenarios", () => {
   it("smoke-runs all local scenarios with small inputs", async () => {

@@ -5,7 +5,7 @@ import {
   calculateApiCoverage,
   TypeDocReflectionSchema,
   type TypeDocReflection,
-} from "./api-coverage.js";
+} from "./api-coverage.ts";
 
 const fixtureJson = JSON.stringify({
   id: 0,

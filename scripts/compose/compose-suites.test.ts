@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { composeIntegrationSuites } from "../../vitest.config.js";
+import { composeIntegrationSuites } from "../../vitest.config.ts";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 // A suite starts a Docker/Compose container, through the documentation runner, or builds images.

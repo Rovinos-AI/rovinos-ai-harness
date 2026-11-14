@@ -11,7 +11,7 @@ import {
   ThreatCaseSchema,
   ThreatCasesSchema,
   type ThreatCase,
-} from "./check-threat-cases.js";
+} from "./check-threat-cases.ts";
 
 const testFile = "scripts/ci/image-hardening.int.test.ts";
 const activeCase: ThreatCase = {

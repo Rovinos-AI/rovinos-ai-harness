@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { BenchmarkBudgetsSchema, BenchmarkResultSchema } from "./contracts.js";
-import { compareBenchmarkResults, formatComparison } from "./compare.js";
+import { BenchmarkBudgetsSchema, BenchmarkResultSchema } from "./contracts.ts";
+import { compareBenchmarkResults, formatComparison } from "./compare.ts";
 
 const budgets = BenchmarkBudgetsSchema.parse({
   schemaVersion: 1,

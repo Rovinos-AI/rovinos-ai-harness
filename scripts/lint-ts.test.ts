@@ -12,7 +12,7 @@ import {
   parsePeakRssKiB,
   runLintBatches,
   type LintBatch,
-} from "./lint-ts.js";
+} from "./lint-ts.ts";
 
 const temporaryDirectories: string[] = [];
 

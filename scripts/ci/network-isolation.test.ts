@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { parseYaml } from "@rovinos/schemas";
 import { z } from "zod";
-import { buildTestComposeCommand } from "./network-isolation.js";
+import { buildTestComposeCommand } from "./network-isolation.ts";
 
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const serviceSchema = z.object({

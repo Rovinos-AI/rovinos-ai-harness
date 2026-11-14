@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GoldenSignatureSchema } from "@rovinos/replay";
 import { parseJson, RawEventEnvelopeSchema, upcastEvent } from "@rovinos/schemas";
-import { withGoldenTracing } from "../test/replay/golden/scenario.js";
-import { LegacyLogHeaderSchema } from "../test/legacy-log-schema.js";
-import { generateLegacyLog } from "./gen-legacy-log.js";
+import { withGoldenTracing } from "../test/replay/golden/scenario.ts";
+import { LegacyLogHeaderSchema } from "../test/legacy-log-schema.ts";
+import { generateLegacyLog } from "./gen-legacy-log.ts";
 
 const temporaryDirectories: string[] = [];
 
