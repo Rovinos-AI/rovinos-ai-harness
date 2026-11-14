@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+let lookback = 7d;
+let PiiActions = (period:timespan) {
+    HarnessLogs
+    | where Timestamp >= ago(period)
+    | extend event_kind = tostring(Body),
+             boundary = tostring(LogsAttributes["harness.pii.boundary"]),
+             action = tostring(LogsAttributes["harness.pii.action"]),
+             entity_count = tolong(LogsAttributes["harness.pii.entity_count"])
+    | where event_kind == "harness.safe.pii_action"
+};
+PiiActions(lookback)
+| summarize events = count(), entity_count = sum(entity_count) by boundary, action
+| project boundary, action, events, entity_count
+| order by boundary asc, action asc

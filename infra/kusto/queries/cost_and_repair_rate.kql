@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0
+let lookback = 7d;
+let ModelCalls = (period:timespan) {
+    HarnessLogs
+    | where Timestamp >= ago(period)
+    | extend event_kind = tostring(Body),
+             provider = tostring(LogsAttributes["harness.model.provider"]),
+             model = tostring(LogsAttributes["harness.model.name"]),
+             input_tokens = tolong(LogsAttributes["harness.model.input_tokens"]),
+             output_tokens = tolong(LogsAttributes["harness.model.output_tokens"]),
+             repair_attempts = tolong(LogsAttributes["harness.model.repair_attempts"]),
+             schema_valid = tobool(LogsAttributes["harness.model.schema_valid"])
+    | where event_kind == "harness.safe.model_call"
+};
+ModelCalls(lookback)
+| summarize calls = count(),
+            input_tokens = sum(input_tokens),
+            output_tokens = sum(output_tokens),
+            total_tokens = sum(input_tokens + output_tokens),
+            repair_attempts = sum(repair_attempts),
+            repair_attempts_per_call = avg(todouble(repair_attempts)),
+            schema_valid_rate = avg(iff(schema_valid, 1.0, 0.0))
+    by provider, model
+| project provider, model, calls, input_tokens, output_tokens, total_tokens, repair_attempts, repair_attempts_per_call, schema_valid_rate
+| order by provider asc, model asc

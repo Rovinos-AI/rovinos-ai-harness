@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+let lookback = 7d;
+let ToolCalls = (period:timespan) {
+    HarnessLogs
+    | where Timestamp >= ago(period)
+    | extend event_kind = tostring(Body),
+             tool_id = tostring(LogsAttributes["harness.tool.id"]),
+             outcome = tostring(LogsAttributes["harness.tool.outcome"])
+    | where event_kind == "harness.safe.tool_call"
+};
+ToolCalls(lookback)
+| where outcome == "timeout"
+| summarize timeouts = count() by tool_id
+| order by tool_id asc
