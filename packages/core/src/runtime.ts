@@ -27,6 +27,7 @@ import type { RunLoopResult } from "./loop.js";
 import type { RoleRegistry } from "./roles.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createRuntimeToolPort } from "./runtime-tool-composition.js";
+import { createRuntimeQuotaService } from "./runtime-quota-service.js";
 import {
   createRuntimeContinuation,
   readChildBudgetAllocation,
@@ -36,7 +37,6 @@ import {
   startRun,
   type RunControl,
 } from "./runtime-runs.js";
-import { QuotaService, strictSpendPricingFromConfig } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
 import { assertRuntimePreflight } from "./runtime-preflight.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
@@ -286,12 +286,7 @@ function createRuntimeResume(
   runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes } = options;
-  const quotaService = new QuotaService(
-    config.quotas ?? [],
-    store,
-    clock,
-    strictSpendPricingFromConfig(config),
-  );
+  const quotaService = createRuntimeQuotaService(config, store, clock);
   return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     const childAllocation = await readChildBudgetAllocation(store, runId);
@@ -300,11 +295,7 @@ function createRuntimeResume(
       runId,
       config.run.continuations.maxChainLength,
     );
-    const budgets =
-      childAllocation?.budgets ??
-      (previousEventLogs !== undefined && config.run.continuations.inheritBudgets
-        ? inheritedBudgets(config.run.budgets, previousEventLogs)
-        : config.run.budgets);
+    const budgets = resumeBudgets(config, childAllocation, previousEventLogs);
     return runWithControl(
       runId,
       async (signal) => {
@@ -364,6 +355,19 @@ function createRuntimeResume(
       firstNewSeq,
     );
   };
+}
+
+function resumeBudgets(
+  config: RuntimeConfig,
+  childAllocation: Awaited<ReturnType<typeof readChildBudgetAllocation>>,
+  previousEventLogs: Awaited<ReturnType<typeof readContinuationHistory>>,
+) {
+  return (
+    childAllocation?.budgets ??
+    (previousEventLogs !== undefined && config.run.continuations.inheritBudgets
+      ? inheritedBudgets(config.run.budgets, previousEventLogs)
+      : config.run.budgets)
+  );
 }
 
 /** Builds a runtime from validated config and injectable ports. Binary results are offloaded. */
