@@ -472,6 +472,19 @@ describe("GitHub workflows", () => {
     expect(steps.at(-1)).toBe(teardown);
   });
 
+  it("frees unused Android SDK space before integration setup", () => {
+    const steps = jobSteps("integration");
+    const cleanup = stepRunning(steps, "sudo rm -rf /usr/local/lib/android");
+    const setup = steps.find((step) => step.uses === "./.github/actions/node-setup");
+
+    expect(cleanup).toBeDefined();
+    expect(setup).toBeDefined();
+    if (cleanup === undefined || setup === undefined) {
+      throw new TypeError("Integration disk cleanup must precede setup.");
+    }
+    expect(steps.indexOf(cleanup)).toBeLessThan(steps.indexOf(setup));
+  });
+
   it("prints and saves Compose diagnostics when startup fails before reports exist", () => {
     const steps = jobSteps("integration");
     const collect = steps.find((step) => step.name === "Collect Compose logs");
