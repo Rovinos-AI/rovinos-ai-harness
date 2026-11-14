@@ -156,6 +156,32 @@ describe("RoutingModelGateway", () => {
     expect(secondaryComplete).not.toHaveBeenCalled();
   });
 
+  it("does not make an unreserved fallback attempt in strict spend mode", async () => {
+    const primary = adapter("primary", () =>
+      Promise.reject(new ProviderError("provider_unavailable")),
+    );
+    const secondaryComplete = vi.fn((_request: ModelRequest) => Promise.resolve(result));
+    const gateway = createRoutingModelGateway(
+      [primary, adapter("secondary", secondaryComplete)],
+      dependencies,
+      routing({
+        default: [
+          { provider: "primary", model: "model-one" },
+          { provider: "secondary", model: "model-two" },
+        ],
+      }),
+    );
+
+    await expect(
+      gateway.complete(request, {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        strictSpendReservations: true,
+      }),
+    ).rejects.toMatchObject({ code: "provider_unavailable" });
+    expect(secondaryComplete).not.toHaveBeenCalled();
+  });
+
   it("uses role routes instead of the default route", async () => {
     const selectedComplete = vi.fn(() => Promise.resolve(result));
     const gateway = createRoutingModelGateway(

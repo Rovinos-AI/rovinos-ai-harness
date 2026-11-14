@@ -296,9 +296,10 @@ export async function compactBeforeModelCall(options: {
   readonly goal: JsonValue;
   readonly usageUpdatesForCost?: (cost: CostValue) => readonly UsageLedgerDelta[];
   readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
+  readonly strictSpendReservations?: boolean;
 }): Promise<void> {
   const compaction = options.compaction;
-  if (compaction === undefined) {
+  if (compaction === undefined || options.strictSpendReservations === true) {
     return;
   }
   const summarizer =

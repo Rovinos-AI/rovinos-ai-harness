@@ -5,6 +5,10 @@ import {
   type CostValue,
   type Principal,
   type QuotaConfig,
+  type ModelsConfig,
+  type RunConfig,
+  type ModelRef,
+  type SpendReservationQuota,
 } from "@rovinos/schemas";
 import { type EventStore, type UsageLedgerDelta, type UsageLedgerPeriod } from "@rovinos/store";
 import { countQuotaRejection } from "@rovinos/telemetry";
@@ -15,6 +19,36 @@ import type { BudgetViolation } from "./budgets.js";
 export interface QuotaIdentity {
   readonly requestedBy?: Principal;
   readonly role?: Code;
+}
+
+/** Pricing metadata required to make per-model strict reservation estimates. */
+export interface StrictSpendPricing {
+  readonly pricing: ModelsConfig["pricing"];
+  readonly routing?: ModelsConfig["routing"];
+  readonly pricingRevision?: Code;
+}
+
+/** Pricing and quota-period snapshot for one model-call admission decision. */
+export interface StrictSpendCallOptions extends StrictSpendPricing {
+  readonly modelRef?: ModelRef;
+  readonly quotaPeriods: readonly SpendReservationQuota[];
+}
+
+/** Build reservation pricing settings only when the opt-in strict mode is enabled. */
+export function strictSpendPricingFromConfig(config: {
+  readonly run: RunConfig;
+  readonly models?: ModelsConfig;
+}): StrictSpendPricing | undefined {
+  if (!config.run.strictSpendReservations) {
+    return undefined;
+  }
+  const pricing = config.models?.pricing ?? {};
+  const pricingRevision = config.models?.pricingRevision;
+  return {
+    pricing,
+    ...(config.models === undefined ? {} : { routing: config.models.routing }),
+    ...(pricingRevision === undefined ? {} : { pricingRevision }),
+  };
 }
 
 /** Raised when quota admission refuses a run. */
@@ -64,6 +98,7 @@ export class QuotaService {
     private readonly quotas: readonly QuotaConfig[],
     private readonly store: Pick<EventStore, "readUsageLedger">,
     private readonly clock: Clock,
+    private readonly strictSpendPricing?: StrictSpendPricing,
   ) {}
 
   /** Return every configured quota matched by this run identity. */
@@ -141,6 +176,51 @@ export class QuotaService {
       }
     }
     return updates;
+  }
+
+  /** Return model pricing and current UTC cost-quota periods for one strict call. */
+  strictSpendOptions(identity: QuotaIdentity, role?: Code): {
+    readonly pricing: ModelsConfig["pricing"];
+    readonly modelRef?: ModelRef;
+    readonly pricingRevision?: Code;
+    readonly quotaPeriods: readonly SpendReservationQuota[];
+  } | undefined {
+    if (this.strictSpendPricing === undefined) {
+      return undefined;
+    }
+    const now = this.clock.now();
+    const quotaPeriods: SpendReservationQuota[] = [];
+    for (const quota of this.matching(identity)) {
+      for (const [period, configuredLimit] of [
+        ["day", quota.dailyCostUsd],
+        ["month", quota.monthlyCostUsd],
+      ] as const) {
+        if (configuredLimit === undefined) {
+          continue;
+        }
+        const limitMicros = costLimitMicros(configuredLimit);
+        if (!Number.isSafeInteger(limitMicros) || limitMicros < 0) {
+          throw new RangeError("Configured quota must fit integer micro-dollars.");
+        }
+        quotaPeriods.push({
+          quotaId: quota.id,
+          period,
+          periodStart: periodStart(now, period),
+          limitMicros,
+        });
+      }
+    }
+    const roleRoute = role === undefined ? undefined : this.strictSpendPricing.routing?.roles[role];
+    const route =
+      roleRoute === undefined || roleRoute.length === 0
+        ? this.strictSpendPricing.routing?.default
+        : roleRoute;
+    const modelRef = route?.[0];
+    return {
+      ...this.strictSpendPricing,
+      ...(modelRef === undefined ? {} : { modelRef }),
+      quotaPeriods,
+    };
   }
 
   /** Return a quota budget violation when the next model call would start exhausted. */

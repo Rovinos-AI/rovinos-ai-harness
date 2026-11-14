@@ -68,10 +68,15 @@ export {
   type UsageLedgerDelta,
   type UsageLedgerPeriod,
   type UsageLedgerRow,
+  type UsageAppendOptions,
   type WatchOptions,
   type WatchRunsOptions,
 } from "./types.js";
-export type { SpendReservationErrorCode, SpendReservationStore } from "./spend-reservation.js";
+export {
+  isSpendReservationStore,
+  type SpendReservationErrorCode,
+  type SpendReservationStore,
+} from "./spend-reservation.js";
 export {
   purgeExpiredRuns,
   type PurgeExpiredRunsOptions,

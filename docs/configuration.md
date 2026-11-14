@@ -66,6 +66,18 @@ Top-level quotas apply cost, concurrency, and run-rate limits across matching
 principals or roles. See [Quotas](quotas.md) for configuration and enforcement
 details.
 
+Strict spend reservations are opt-in with `run.strictSpendReservations: true`; omitting the
+setting preserves the existing post-response quota behavior. Strict mode reserves a bounded
+integer-micro-dollar estimate before dispatch, using the configured model pricing revision,
+`maxInputTokens`, and `maxOutputTokens` ceilings. Every matching cost quota must be backed by a
+transactional reservation store; missing pricing, finite ceilings, or transactional storage rejects
+the call before dispatch. Strict calls do not use gateway retries, provider fallbacks, or
+output-repair dispatches. Optional transcript compaction is skipped in strict mode because it is a
+separate model call; an application retry is a new attempt. A dispatched attempt with a lost
+response or incomplete cost remains uncertain and continues to block its quota period until
+resolved. This is an admission guarantee against configured estimates, not a hard cap on provider
+billing.
+
 `run.subagents.maxDepth` defaults to `4` and cannot exceed that global ceiling. `run.subagents.maxChildrenPerRun` defaults to `8`, and `run.subagents.maxConcurrentChildren` defaults to `2`. Each spawned child inherits the parent's remaining step, cost, and absolute wall-clock deadline, further capped by its role budgets. Unfinished children reserve their allocated step and cost budgets, including while suspended; those limits and deadlines remain in force after resume. Parent usage includes terminal child usage. Cancelling a run cancels its unfinished child tree before recording the parent's cancellation.
 
 `run.checkpointEveryEvents` defaults to `20` and must be a positive integer. The run loop writes a checkpoint when that many events have accrued since the previous checkpoint, and always writes one before returning a suspended run.

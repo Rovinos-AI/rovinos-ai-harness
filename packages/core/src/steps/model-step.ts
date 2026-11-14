@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  createHash,
+} from "node:crypto";
+import {
   APP_TELEMETRY_TOOL_NAME,
   Code,
+  Sha256Hex,
   costValueFromUsage,
   HarnessError,
   JsonValue as JsonValueSchema,
   ModelRequestSchema,
   ModelUsageSchema,
+  SpendReservationInputSchema,
   type Event,
   type CostValue,
   type Id,
@@ -16,6 +21,7 @@ import {
   type ToolSpec,
 } from "@rovinos/schemas";
 import {
+  canonicalJson,
   modelRequestParametersHash,
   storedModelRequestHash,
 } from "@rovinos/schemas/request-signature";
@@ -23,6 +29,7 @@ import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { setActiveSpanAttribute } from "@rovinos/telemetry";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import type { UsageLedgerDelta } from "@rovinos/store";
+import { SpendReservationError } from "@rovinos/store";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
 import type { ValueTransform } from "@rovinos/models";
@@ -34,6 +41,8 @@ import {
   type PreparedToolCall,
 } from "./prepare-tool.js";
 import { requestCompletion } from "./model-completion.js";
+import { boundedSpendEstimate } from "../strict-spend.js";
+import type { StrictSpendCallOptions } from "../quotas.js";
 
 class ModelStepEventMissingError extends HarnessError {
   readonly code = "model_step_event_missing";
@@ -65,6 +74,7 @@ export interface ModelStepOptions {
   readonly failureMode?: "tool";
   readonly valueTransform?: ValueTransform;
   readonly usageUpdatesForCost?: (cost: CostValue) => readonly UsageLedgerDelta[];
+  readonly strictSpendOptions?: (role?: Code) => StrictSpendCallOptions | undefined;
   readonly unknownCostPolicy?: RunConfig["budgets"]["unknownCostPolicy"];
   readonly includeTools?: boolean;
   readonly contextMetadata: {
@@ -126,7 +136,11 @@ function modelRunContext(options: ModelStepOptions): RunContext {
 function requestParts(
   options: ModelStepOptions,
   requestId: Id,
-): { readonly modelRequest: ModelRequest; readonly requestPartial: EventPartial } {
+  maxOutputTokens?: number,
+): {
+  readonly modelRequest: ModelRequest;
+  readonly requestPartial: Extract<EventPartial, { readonly type: "model_request" }>;
+} {
   const role = options.role;
   const modelRequest = ModelRequestSchema.parse({
     requestId,
@@ -138,6 +152,7 @@ function requestParts(
     stablePrefixMessages: options.contextMetadata.stablePrefixMessages,
     ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
     ...(role === undefined ? {} : { role }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
   });
   const requestParametersHash = modelRequestParametersHash(modelRequest);
@@ -178,7 +193,35 @@ function toolDefinitionDiagnostics(tools: readonly ToolSpec[] | undefined): {
  */
 export async function modelStep(options: ModelStepOptions): Promise<ModelStepResult> {
   const requestId = options.ids.next();
-  const { modelRequest, requestPartial } = requestParts(options, requestId);
+  const strictOptions = options.strictSpendOptions?.(options.role);
+  const strictQuotaPeriods = strictOptions?.quotaPeriods ?? [];
+  let reservationInput: ReturnType<typeof SpendReservationInputSchema.parse> | undefined;
+  let maxOutputTokens: number | undefined;
+  if (strictOptions !== undefined && strictQuotaPeriods.length > 0) {
+    if (strictOptions.pricingRevision === undefined) {
+      throw new SpendReservationError("spend_reservation_pricing_missing");
+    }
+    const pricingModel =
+      strictOptions.modelRef ??
+      ({
+        provider: options.provider ?? "unknown",
+        model: options.modelName ?? "unknown",
+      } as const);
+    const rate = strictOptions.pricing[`${pricingModel.provider}/${pricingModel.model}`];
+    if (rate === undefined) {
+      throw new SpendReservationError("spend_reservation_pricing_missing");
+    }
+    const estimate = boundedSpendEstimate(rate, options.contextMetadata.estimatedTokens);
+    maxOutputTokens = estimate.maxOutputTokens;
+    reservationInput = SpendReservationInputSchema.parse({
+      attemptId: requestId,
+      runId: options.runId,
+      quotaPeriods: strictQuotaPeriods,
+      estimatedMicros: estimate.estimatedMicros,
+      pricingRevision: strictOptions.pricingRevision,
+    });
+  }
+  const { modelRequest, requestPartial } = requestParts(options, requestId, maxOutputTokens);
   const toolDiagnostics = toolDefinitionDiagnostics(modelRequest.tools);
   const recorded: Event[] = [];
   let result: ModelStepResult | undefined;
@@ -194,20 +237,55 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       "harness.tool.definition_bytes": toolDiagnostics.bytes,
     },
     async (span) => {
-      const requestEvent = await options.recorder.record(requestPartial);
+      const requestEvent =
+        reservationInput === undefined
+          ? await options.recorder.record(requestPartial)
+          : await options.recorder.reserveSpend(reservationInput, requestPartial);
       recorded.push(requestEvent);
+      let dispatching = false;
+      let reservationMarkedUncertain = false;
+      if (reservationInput !== undefined) {
+        if (options.signal.aborted) {
+          await options.recorder.releaseSpend(requestId);
+          options.signal.throwIfAborted();
+        }
+        await options.recorder.markSpendDispatching(requestId);
+        dispatching = true;
+      }
 
       const completionOutcome = await requestCompletion({
         completion: options.model.complete(
           modelRequest,
-          piiActionRunContext(modelRunContext(options), options.recorder, recorded),
+          piiActionRunContext(
+            {
+              ...modelRunContext(options),
+              ...(dispatching ? { strictSpendReservations: true } : {}),
+            },
+            options.recorder,
+            recorded,
+          ),
         ),
         signal: options.signal,
         recorded,
         requestEvent,
-        recordFailure: (error) => recordModelFailure({ options, requestId, error, span, recorded }),
+        recordFailure: (error) =>
+          recordModelFailure({
+            options,
+            requestId,
+            error,
+            span,
+            recorded,
+            strictSpendActive: dispatching,
+          }),
       });
       if ("result" in completionOutcome) {
+        if (dispatching && completionOutcome.result.outcome === "aborted") {
+          await markUncertain(
+            options.recorder,
+            requestId,
+            "spend_reservation_uncertain",
+          );
+        }
         result = completionOutcome.result;
         return completionOutcome.event;
       }
@@ -216,17 +294,20 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         throw new ModelStepEventMissingError();
       }
       let completion = completionOutcome.completion;
-      const prepared = await prepareCompletion(
-        completion,
-        options.tool,
-        toolRunContext(modelRunContext(options), options.recorder, recorded),
-        requestEvent.advertisedToolIds,
-      );
-      completion = prepared.completion;
-      const structuredValue = tokenizedStructuredValue(completion);
-      const cost = costValueFromUsage(completion.usage);
-      const response = await options.recorder.record(
-        responsePayload(
+      let response: Event;
+      let preparedCalls: readonly PreparedToolCall[] = [];
+      try {
+        const prepared = await prepareCompletion(
+          completion,
+          options.tool,
+          toolRunContext(modelRunContext(options), options.recorder, recorded),
+          requestEvent.advertisedToolIds,
+        );
+        preparedCalls = prepared.preparedCalls;
+        completion = prepared.completion;
+        const structuredValue = tokenizedStructuredValue(completion);
+        const cost = costValueFromUsage(completion.usage);
+        const responsePartial = responsePayload(
           requestId,
           completion,
           structuredValue,
@@ -234,14 +315,45 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
             (cost.state === "unknown" || cost.state === "partial")
             ? "budget_cost_unknown_allowed"
             : undefined,
-        ),
-        options.usageUpdatesForCost?.(cost),
-      );
+        );
+        const usageUpdates = options.usageUpdatesForCost?.(cost) ?? [];
+        if (dispatching && (cost.state === "known" || cost.state === "estimated")) {
+          response = await options.recorder.settleSpend(
+            {
+              attemptId: requestId,
+              runId: options.runId,
+              cost,
+              responseHash: responseHash(responsePartial),
+            },
+            responsePartial,
+            usageUpdates,
+          );
+        } else {
+          if (dispatching) {
+            await markUncertain(
+              options.recorder,
+              requestId,
+              "spend_reservation_usage_incomplete",
+            );
+            reservationMarkedUncertain = true;
+          }
+          response = await options.recorder.record(responsePartial, usageUpdates);
+        }
+      } catch (error) {
+        if (dispatching && !reservationMarkedUncertain) {
+          await markUncertain(
+            options.recorder,
+            requestId,
+            "spend_reservation_uncertain",
+          );
+        }
+        throw error;
+      }
       recorded.push(response);
       result = {
         outcome: "response",
         completion,
-        preparedCalls: prepared.preparedCalls,
+        preparedCalls,
         events: recorded,
       };
       return response;
@@ -260,39 +372,77 @@ async function recordModelFailure({
   error,
   span,
   recorded,
+  strictSpendActive,
 }: {
   readonly options: ModelStepOptions;
   readonly requestId: Id;
   readonly error: unknown;
   readonly span: Span;
   readonly recorded: Event[];
+  readonly strictSpendActive: boolean;
 }): Promise<{ readonly result: ModelStepResult; readonly event?: Event }> {
   const code = errorCode(error);
+  let reservationHandled = false;
   if (options.outputSchema !== undefined && code === "model_output_invalid") {
     const usage = readFailureUsage(error);
     if (usage !== undefined) {
-      const response = await options.recorder.record(
-        {
-          type: "model_response",
-          v: 2,
-          requestId,
-          provider: options.provider ?? "unknown",
-          model: options.modelName ?? "unknown",
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          cost: costValueFromUsage(usage),
-          finishReason: "invalid_output",
-          latencyMs: readFailureCount(error, "latencyMs"),
-          schemaValid: false,
-          repairAttempts: readFailureCount(error, "repairAttempts"),
-          fallbackDepth: 0,
-          content: [],
-          providerBlobs: null,
-        },
-        options.usageUpdatesForCost?.(costValueFromUsage(usage)),
-      );
+      const cost = costValueFromUsage(usage);
+      const responsePartial: Extract<EventPartial, { readonly type: "model_response" }> = {
+        type: "model_response",
+        v: 2,
+        requestId,
+        provider: options.provider ?? "unknown",
+        model: options.modelName ?? "unknown",
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cost,
+        finishReason: "invalid_output",
+        latencyMs: readFailureCount(error, "latencyMs"),
+        schemaValid: false,
+        repairAttempts: readFailureCount(error, "repairAttempts"),
+        fallbackDepth: 0,
+        content: [],
+        providerBlobs: null,
+      };
+      const usageUpdates = options.usageUpdatesForCost?.(cost) ?? [];
+      let response: Event;
+      if (strictSpendActive && (cost.state === "known" || cost.state === "estimated")) {
+        try {
+          response = await options.recorder.settleSpend(
+            {
+              attemptId: requestId,
+              runId: options.runId,
+              cost,
+              responseHash: responseHash(responsePartial),
+            },
+            responsePartial,
+            usageUpdates,
+          );
+          reservationHandled = true;
+        } catch (settlementError) {
+          await markUncertain(
+            options.recorder,
+            requestId,
+            "spend_reservation_uncertain",
+          );
+          throw settlementError;
+        }
+      } else {
+        if (strictSpendActive) {
+          await markUncertain(
+            options.recorder,
+            requestId,
+            "spend_reservation_usage_incomplete",
+          );
+          reservationHandled = true;
+        }
+        response = await options.recorder.record(responsePartial, usageUpdates);
+      }
       recorded.push(response);
     }
+  }
+  if (strictSpendActive && !reservationHandled) {
+    await markUncertain(options.recorder, requestId, "spend_reservation_uncertain");
   }
   const reason =
     code === "model_output_invalid" && options.outputSchema !== undefined ? "result_invalid" : code;
@@ -316,12 +466,30 @@ async function recordModelFailure({
   return { result: { outcome: "failed", code: reason, events: recorded }, event };
 }
 
+function responseHash(
+  response: Extract<EventPartial, { readonly type: "model_response" }>,
+): ReturnType<typeof Sha256Hex.parse> {
+  return Sha256Hex.parse(
+    createHash("sha256")
+      .update(canonicalJson(response) ?? "null")
+      .digest("hex"),
+  );
+}
+
+async function markUncertain(
+  recorder: RunRecorder,
+  attemptId: Id,
+  reason: "spend_reservation_uncertain" | "spend_reservation_usage_incomplete",
+): Promise<void> {
+  await recorder.markSpendUncertain(attemptId, reason);
+}
+
 function responsePayload(
   requestId: Id,
   completion: ModelCompletion,
   structuredValue: ModelCompletion["providerBlobs"] | undefined,
   costWarningCode: Code | undefined,
-): EventPartial {
+): Extract<EventPartial, { readonly type: "model_response" }> {
   return {
     type: "model_response",
     v: 2,

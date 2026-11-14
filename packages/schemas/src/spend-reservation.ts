@@ -59,6 +59,7 @@ export const SpendReservationErrorCodeSchema = z.enum([
   "spend_reservation_estimate_missing",
   "spend_reservation_usage_incomplete",
   "spend_reservation_uncertain",
+  "spend_reservation_storage_unavailable",
 ]);
 
 /** Inferred closed spend-reservation failure codes. */
