@@ -39,7 +39,7 @@ export function strictSpendPricingFromConfig(config: {
   readonly run: RunConfig;
   readonly models?: ModelsConfig;
 }): StrictSpendPricing | undefined {
-  if (!config.run.strictSpendReservations) {
+  if (config.run.strictSpendReservations !== true) {
     return undefined;
   }
   const pricing = config.models?.pricing ?? {};

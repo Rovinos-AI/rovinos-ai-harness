@@ -3,13 +3,9 @@
 import {
   context,
   isSpanContextValid,
-  ROOT_CONTEXT,
-  SpanStatusCode,
   trace,
   type AnyValue,
-  type Link,
   type Span,
-  type Context,
   type SpanContext,
 } from "@opentelemetry/api";
 import {
@@ -39,13 +35,13 @@ import {
   recordApprovalWait,
   recordModelLatency,
   sentinelTripQueue,
-  setActiveSpanAttribute,
   type SpanDefinition,
   type SpanDefinitionShape,
   type TripQueue,
 } from "@rovinos/telemetry";
-import { RUN_SPAN } from "./spans.js";
 import { DeploymentStartupError } from "./runtime-deployment.js";
+import { runStepSpan, type StepSpanOptions } from "./recorder-span.js";
+export type { StepSpanOptions } from "./recorder-span.js";
 
 /** Clock used to timestamp recorded events. */
 export interface Clock {
@@ -95,12 +91,6 @@ export class RunEventRecordingError extends HarnessError {
     super("Run event recording failed.");
     this.name = "RunEventRecordingError";
   }
-}
-
-/** Optional parent context and links for a registered span. */
-export interface StepSpanOptions {
-  readonly links?: readonly Link[];
-  readonly parentContext?: Context;
 }
 
 /**
@@ -360,38 +350,13 @@ export class RunRecorder {
     fn: (span: Span) => Event | Promise<Event>,
     options: StepSpanOptions = {},
   ): Promise<Event> {
-    const spanAttrs: Record<string, unknown> = {
-      ...attrs,
-      "harness.run.id": this.runId,
-    };
-    if (definition.name === "harness.run") {
-      spanAttrs["harness.segment.id"] = this.segmentId;
-    }
-
-    const span = definition.start(
-      spanAttrs,
-      definition.name === RUN_SPAN.name
-        ? {
-            parent: options.parentContext ?? ROOT_CONTEXT,
-            ...(options.links === undefined ? {} : { links: [...options.links] }),
-          }
-        : undefined,
-    );
-    const activeContext = trace.setSpan(context.active(), span);
-    return context.with(activeContext, async () => {
-      try {
-        const event = await fn(span);
-        setActiveSpanAttribute("harness.event.seq", event.seq);
-        return event;
-      } catch (error) {
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        if (error instanceof HarnessError) {
-          setActiveSpanAttribute("harness.error.code", error.code);
-        }
-        throw error;
-      } finally {
-        span.end();
-      }
+    return runStepSpan({
+      runId: this.runId,
+      segmentId: this.segmentId,
+      definition,
+      attrs,
+      fn,
+      options,
     });
   }
 

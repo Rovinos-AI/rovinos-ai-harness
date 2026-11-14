@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  EventSchema,
-  JsonValue as JsonValueSchema,
-  joinEvent,
-  splitEvent,
   type Event,
   type Id,
   type JsonValue,
@@ -18,11 +14,15 @@ import {
   type SpendReservationInput,
   type SpendReservationSettlement,
 } from "@rovinos/schemas";
-import { storedModelRequestHash } from "@rovinos/schemas/request-signature";
 import {
   PiiStorageFailedError,
   SpendReservationStorageUnavailableError,
 } from "./errors.js";
+import {
+  notifyPiiSummaries,
+  preparePiiEvents,
+  sanitizeStorageJson,
+} from "./pii-event-sanitization.js";
 import type { Tokenizer } from "./tokenizer.js";
 import { isMarked } from "./sanitization-markers.js";
 
@@ -409,93 +409,23 @@ export class PiiEventStore implements EventStoreLike {
     readonly events: readonly NewEvent[];
     readonly summaries: readonly PiiActionSummary[];
   }> {
-    const prepared: NewEvent[] = [];
-    const summaries: PiiActionSummary[] = [];
-    for (const [index, source] of events.entries()) {
-      if (isMarked(source)) {
-        prepared.push(source);
-        continue;
-      }
-      const parsed = EventSchema.safeParse({ ...source, seq: expectedSeq + index });
-      if (!parsed.success) {
-        prepared.push(source);
-        continue;
-      }
-      const { meta, content } = splitEvent(parsed.data);
-      const unmarkedContent = Object.fromEntries(
-        Object.entries(content).filter(([key]) => !isMarked(source, key)),
-      );
-      if (Object.keys(unmarkedContent).length === 0) {
-        prepared.push(source);
-        continue;
-      }
-
-      try {
-        const contentValue = JsonValueSchema.parse(unmarkedContent);
-        const result = await this.tokenizer.tokenizeJson(runId, contentValue, {
-          boundary: "storage",
-          destination: "any",
-        });
-        if (result.actions.some(({ action }) => action === "allow")) {
-          throw new PiiStorageFailedError();
-        }
-        if (
-          typeof result.value !== "object" ||
-          result.value === null ||
-          Array.isArray(result.value)
-        ) {
-          throw new PiiStorageFailedError();
-        }
-        const sanitizedContent = result.value;
-        summaries.push(...result.actions);
-        if (Object.keys(sanitizedContent).length === 0) {
-          prepared.push(source);
-          continue;
-        }
-        const event = joinEvent(meta, { ...content, ...sanitizedContent });
-        if (
-          event.type === "model_request" &&
-          event.requestParametersHash !== undefined &&
-          event.requestParametersHash !== null
-        ) {
-          event.requestHash = storedModelRequestHash(event.messages, event.requestParametersHash);
-        }
-        const { seq, ...newEvent } = event;
-        if (seq !== expectedSeq + index) {
-          throw new PiiStorageFailedError();
-        }
-        prepared.push(newEvent);
-      } catch {
-        throw new PiiStorageFailedError();
-      }
-    }
-    return { events: prepared, summaries };
+    const prepared = await preparePiiEvents({
+      runId,
+      events,
+      expectedSeq,
+      tokenizer: this.tokenizer,
+    });
+    return prepared;
   }
 
   private async sanitizeJson(
     runId: Id,
     value: JsonValue,
   ): Promise<{ value: JsonValue; actions: readonly PiiActionSummary[] }> {
-    if (isMarked(value)) {
-      return { value, actions: [] };
-    }
-    const result = await this.tokenizer.tokenizeJson(runId, value, {
-      boundary: "storage",
-      destination: "any",
-    });
-    if (result.actions.some(({ action }) => action === "allow")) {
-      throw new PiiStorageFailedError();
-    }
-    return result;
+    return sanitizeStorageJson({ runId, value, tokenizer: this.tokenizer });
   }
 
   private async notifySummaries(summaries: readonly PiiActionSummary[]): Promise<void> {
-    for (const summary of summaries) {
-      try {
-        await this.onSummary(summary);
-      } catch {
-        throw new PiiStorageFailedError();
-      }
-    }
+    return notifyPiiSummaries(summaries, this.onSummary);
   }
 }

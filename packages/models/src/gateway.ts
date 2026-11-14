@@ -195,7 +195,7 @@ export class ModelGateway {
     const useStream =
       stream !== undefined && this.dependencies.providerStreaming?.[adapter.provider] !== false;
     return withRetries({
-      policy: context.strictSpendReservations
+      policy: context.strictSpendReservations === true
         ? { ...this.retryPolicy, maxAttempts: 1 }
         : this.retryPolicy,
       clock: this.dependencies.clock,
@@ -293,7 +293,7 @@ export class ModelGateway {
           parts: result.parts,
           enforcement,
           repairAttempts,
-          maxRepairs: context.strictSpendReservations ? 0 : this.maxRepairs,
+          maxRepairs: context.strictSpendReservations === true ? 0 : this.maxRepairs,
           usage: aggregateUsage,
           latencyMs: aggregateLatencyMs,
         });
