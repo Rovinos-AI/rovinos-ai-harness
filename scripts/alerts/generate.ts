@@ -8,7 +8,7 @@ import { createDatadogMonitors } from "./template.ts";
 
 const rootDirectory = fileURLToPath(new URL("../../", import.meta.url));
 const defaultThresholdsPath = resolve(rootDirectory, "infra/alerts/thresholds.yaml");
-const defaultOutputPath = resolve(rootDirectory, "infra/alerts/datadog-monitors.json");
+const defaultOutputPath = resolve(rootDirectory, "infra/alerts/datadog-monitors.generated.json");
 
 /** Files used by the alert generator. */
 export interface AlertGeneratorPaths {
@@ -41,10 +41,7 @@ export function runAlertGenerator(
 
   let generated: string;
   try {
-    const thresholds = parseYaml(
-      AlertThresholdsSchema,
-      readFileSync(paths.thresholdsPath, "utf8"),
-    );
+    const thresholds = parseYaml(AlertThresholdsSchema, readFileSync(paths.thresholdsPath, "utf8"));
     generated = renderDatadogMonitors(thresholds);
   } catch {
     return { exitCode: 1, stderr: "Alert thresholds are invalid or unavailable.\n" };

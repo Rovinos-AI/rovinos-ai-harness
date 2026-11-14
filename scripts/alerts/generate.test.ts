@@ -23,7 +23,7 @@ describe("Datadog alert generator", () => {
 
   it("writes output, passes --check, and detects drift without modifying the file", () => {
     const directory = mkdtempSync(join(tmpdir(), "harness-alert-generator-"));
-    const outputPath = join(directory, "datadog-monitors.json");
+    const outputPath = join(directory, "datadog-monitors.generated.json");
     const result = runAlertGenerator([], { thresholdsPath, outputPath });
     const generated = readFileSync(outputPath, "utf8");
 

@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore tolong countif startswith -->
 
-Datadog query syntax in `datadog-monitors.json` is a repository subset and has not been verified against a live Datadog account. Verify it and configure the account's notification routes before applying monitors. Thresholds, including each lookback window and critical value, are owned by [`thresholds.yaml`](./thresholds.yaml); scheduled query rules should use those values rather than maintaining a second set of defaults.
+Datadog query syntax in `datadog-monitors.generated.json` is a repository subset and has not been verified against a live Datadog account. Verify it and configure the account's notification routes before applying monitors. Thresholds, including each lookback window and critical value, are owned by [`thresholds.yaml`](./thresholds.yaml); scheduled query rules should use those values rather than maintaining a second set of defaults.
 
 The queries below use `HarnessLogs` and `HarnessMetrics` columns from the Kusto schema. Bind `lookback` to the corresponding `window_minutes` in `thresholds.yaml` when configuring each scheduled query rule. They intentionally aggregate across runs and do not group on IDs or other high-cardinality fields.
 

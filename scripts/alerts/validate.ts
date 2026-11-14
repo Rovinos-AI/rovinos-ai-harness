@@ -182,7 +182,7 @@ function main(): void {
   try {
     validateAlerts(
       readFileSync(resolve(rootDirectory, "infra/alerts/thresholds.yaml"), "utf8"),
-      readFileSync(resolve(rootDirectory, "infra/alerts/datadog-monitors.json"), "utf8"),
+      readFileSync(resolve(rootDirectory, "infra/alerts/datadog-monitors.generated.json"), "utf8"),
       loadRunbooks(),
     );
     process.stdout.write("Alert definitions are valid.\n");
