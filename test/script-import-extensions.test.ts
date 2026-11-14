@@ -49,13 +49,13 @@ it("detects relative JavaScript imports without matching comments or other strin
 });
 
 it("uses TypeScript extensions for relative imports throughout scripts", () => {
-  const root = fileURLToPath(new URL(".", import.meta.url));
+  const scripts = new URL("../scripts/", import.meta.url);
   const files = globSync("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", {
-    cwd: root,
+    cwd: fileURLToPath(scripts),
     exclude: ["**/node_modules/**", "**/dist/**"],
   });
   const violations = files.flatMap((file) =>
-    relativeJsImports(readFileSync(new URL(file, import.meta.url), "utf8"), file).map(
+    relativeJsImports(readFileSync(new URL(file, scripts), "utf8"), file).map(
       (specifier) => `${file}: ${specifier}`,
     ),
   );
