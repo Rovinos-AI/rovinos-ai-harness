@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+let lookback = 7d;
+let TerminalRuns = (period:timespan) {
+    HarnessLogs
+    | where Timestamp >= ago(period)
+    | extend event_kind = tostring(Body),
+             outcome = tostring(LogsAttributes["harness.run.status.to"])
+    | where event_kind == "harness.safe.run_status"
+    | where outcome in ("completed", "failed", "cancelled")
+    | project outcome
+};
+let terminalRuns = materialize(TerminalRuns(lookback));
+let terminalCount = toscalar(terminalRuns | count);
+terminalRuns
+| summarize runs = count(), completed_runs = countif(outcome == "completed") by outcome
+| extend success_rate = iff(terminalCount == 0, 0.0, todouble(completed_runs) / todouble(terminalCount))
+| project outcome, runs, completed_runs, success_rate
+| order by outcome asc

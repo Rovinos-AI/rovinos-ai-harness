@@ -29,17 +29,38 @@ async function compose(projectName: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-/** Starts the isolated emulator and runs its schema and ingestion contract client. */
-export async function runKustoEmulatorComposeContract(projectName: string): Promise<string> {
+/** Starts the isolated emulator and runs the selected schema or query contract client. */
+export async function runKustoEmulatorComposeContract(
+  projectName: string,
+  client: "kusto-test-client" | "kusto-query-test-client" = "kusto-test-client",
+): Promise<string> {
   try {
     return await compose(projectName, [
       "up",
       "--abort-on-container-exit",
       "--exit-code-from",
-      "kusto-test-client",
-      "kusto-test-client",
+      client,
+      client,
     ]);
   } finally {
-    await compose(projectName, ["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
+    const emulatorImageOutput = await compose(projectName, [
+      "images",
+      "--quiet",
+      "kusto-emulator",
+    ]).catch(() => "");
+    const emulatorImageIds = emulatorImageOutput.trim().split(/\s+/u);
+    try {
+      await compose(projectName, ["down", "--volumes", "--remove-orphans"]);
+    } finally {
+      for (const imageId of emulatorImageIds) {
+        if (/^(?:sha256:)?[a-f0-9]{12,64}$/u.test(imageId)) {
+          await execFileAsync("docker", ["image", "rm", imageId], {
+            cwd: root,
+            encoding: "utf8",
+            maxBuffer: 1024 * 1024,
+          });
+        }
+      }
+    }
   }
 }

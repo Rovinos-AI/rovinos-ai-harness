@@ -197,6 +197,8 @@ services:
     volumes:
       - ../../scripts/kusto:/workspace/scripts/kusto:ro
       - ../../infra/kusto:/workspace/infra/kusto:ro
+      - ../../packages/schemas:/workspace/packages/schemas:ro
+      - ../../test/fixtures/kusto:/workspace/test/fixtures/kusto:ro
       - ../../node_modules:/workspace/node_modules:ro
     read_only: true
     tmpfs:
@@ -210,6 +212,19 @@ services:
     depends_on:
       kusto-emulator:
         condition: service_healthy
+    networks:
+      - internal
+  kusto-query-test-client:
+    extends:
+      file: docker-compose.test.yml
+      service: kusto-test-client
+    command:
+      [
+        "node",
+        "--experimental-strip-types",
+        "scripts/kusto/emulator-contract-runner.ts",
+        "--queries",
+      ]
     networks:
       - internal
 networks:
