@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { inputRequired } from "@modelcontextprotocol/server";
 import { Code, type Event } from "@rovinos/schemas";
-import { InMemorySpendReservationStore } from "@rovinos/store";
+import { InMemoryEventStore, InMemorySpendReservationStore, type EventStore } from "@rovinos/store";
 import { createEventBuilders } from "@rovinos/store/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConfirmationGate } from "../confirmation-gate.js";
 import { createControlPlaneServer } from "../server.js";
 
 const connections: {
@@ -11,22 +13,29 @@ const connections: {
   readonly server: ReturnType<typeof createControlPlaneServer>;
 }[] = [];
 
-async function connect(store: InMemorySpendReservationStore) {
+async function connect(
+  store: EventStore,
+  options: Parameters<typeof createControlPlaneServer>[1] = {},
+  response: "accept" | "decline" | undefined = "accept",
+) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createControlPlaneServer(store, {
     confirmation: { key: Buffer.alloc(32, 19) },
+    ...options,
   });
   const client = new Client(
     { name: "spend-resolution-test", version: "1.0.0" },
     {
-      capabilities: { elicitation: { form: {} } },
+      capabilities: response === undefined ? {} : { elicitation: { form: {} } },
       versionNegotiation: { mode: "auto" },
     },
   );
-  client.setRequestHandler("elicitation/create", () => ({
-    action: "accept",
-    content: { confirm: true },
-  }));
+  if (response !== undefined) {
+    client.setRequestHandler("elicitation/create", () => ({
+      action: response,
+      ...(response === "accept" ? { content: { confirm: true } } : {}),
+    }));
+  }
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   const connection = { client, server };
@@ -89,5 +98,101 @@ describe("resolve_uncertain_spend", () => {
       decidedBy: "cli.control_plane",
       reason: "operator_reviewed",
     });
+  });
+
+  it("returns input-required and denied confirmation results without changing the store", async () => {
+    const store = new InMemorySpendReservationStore();
+    const gate = new ConfirmationGate({ key: Buffer.alloc(32, 19) });
+    vi.spyOn(gate, "requireHuman").mockResolvedValue({
+      status: "input_required",
+      result: inputRequired({ requestState: "synthetic-state" }),
+    });
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    const attemptId = builders.nextRunId();
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    const { client } = await connect(store, { confirmationGate: gate });
+    await expect(
+      client.callTool({
+        name: "resolve_uncertain_spend",
+        arguments: { runId, attemptId, reason: "operator_reviewed" },
+      }),
+    ).rejects.toThrow();
+
+    const deniedGate = new ConfirmationGate({ key: Buffer.alloc(32, 19) });
+    vi.spyOn(deniedGate, "requireHuman").mockResolvedValue({
+      status: "denied",
+      code: Code.parse("human_confirmation_declined"),
+    });
+    const { client: deniedClient } = await connect(store, { confirmationGate: deniedGate });
+    await expect(
+      deniedClient.callTool({
+        name: "resolve_uncertain_spend",
+        arguments: { runId, attemptId, reason: "operator_reviewed" },
+      }),
+    ).resolves.toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, code: "human_confirmation_declined" },
+    });
+  });
+
+  it("rejects a regular event store and reports a missing run", async () => {
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    const attemptId = builders.nextRunId();
+    const { client } = await connect(new InMemoryEventStore());
+    await expect(
+      client.callTool({
+        name: "resolve_uncertain_spend",
+        arguments: { runId, attemptId, reason: "operator_reviewed" },
+      }),
+    ).resolves.toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, code: "spend_reservation_storage_unavailable" },
+    });
+
+    const reservationStore = new InMemorySpendReservationStore();
+    const missingRunClient = await connect(reservationStore);
+    await expect(
+      missingRunClient.client.callTool({
+        name: "resolve_uncertain_spend",
+        arguments: { runId, attemptId, reason: "operator_reviewed" },
+      }),
+    ).resolves.toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, code: "run_not_found" },
+    });
+  });
+
+  it("maps coded and uncoded reservation resolution failures safely", async () => {
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    const attemptId = builders.nextRunId();
+    for (const [failure, expectedCode] of [
+      [{ code: Code.parse("spend_reservation_conflict") }, "spend_reservation_conflict"],
+      [new Error("synthetic failure"), "spend_reservation_resolution_failed"],
+    ] as const) {
+      const base = new InMemorySpendReservationStore();
+      await base.append(runId, [builders.runCreated(runId)], 0);
+      const store = new Proxy(base, {
+        get(target, property) {
+          if (property === "resolveUncertainSpend") {
+            return () => Promise.reject(failure);
+          }
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const { client } = await connect(store);
+      await expect(
+        client.callTool({
+          name: "resolve_uncertain_spend",
+          arguments: { runId, attemptId, reason: "operator_reviewed" },
+        }),
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: { ok: false, code: expectedCode },
+      });
+    }
   });
 });
