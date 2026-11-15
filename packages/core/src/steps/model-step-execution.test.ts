@@ -14,7 +14,7 @@ import {
 } from "@rovinos/store";
 import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { ModelCompletion, ModelPort } from "../ports.js";
+import type { ModelCompletion, ModelPort, ModelRequest } from "../ports.js";
 import { RunRecorder } from "../recorder.js";
 import { RUN_SPAN } from "../spans.js";
 import type { ModelStepOptions } from "./model-step.js";
@@ -226,9 +226,9 @@ describe("executeModelStep", () => {
     const settle = vi.spyOn(recorder, "settleSpend").mockRejectedValue(new Error("storage failure"));
     let requestId: Id | undefined;
     const model: ModelPort = {
-      complete: vi.fn(async (request) => {
+      complete: vi.fn<ModelPort["complete"]>((request: ModelRequest) => {
         requestId = request.requestId;
-        return completion();
+        return Promise.resolve(completion());
       }),
     };
 

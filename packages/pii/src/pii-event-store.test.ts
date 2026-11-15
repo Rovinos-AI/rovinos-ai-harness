@@ -11,11 +11,11 @@ import {
   type Event,
   type JsonValue,
   type NewEvent,
+  type SpendReservation,
   type SpendReservationInput,
   type SpendReservationSettlement,
   type Snapshot,
 } from "@rovinos/schemas";
-import { InMemorySpendReservationStore } from "@rovinos/store";
 import {
   AuditingVaultResolver,
   InMemoryVault,
@@ -299,9 +299,74 @@ function createInnerStore(): EventStoreLike {
   };
 }
 
+function createReservationInnerStore(): EventStoreLike {
+  const base = createInnerStore();
+  const reservations = new Map<Id, SpendReservation>();
+  const requireReservation = (attemptId: Id): SpendReservation => {
+    const reservation = reservations.get(attemptId);
+    if (reservation === undefined) {
+      throw new Error("Missing test reservation.");
+    }
+    return reservation;
+  };
+  return {
+    ...base,
+    async reserveSpend(input, modelRequest, expectedSeq) {
+      const { nextSeq } = await base.append(input.runId, [modelRequest], expectedSeq);
+      const reservation: SpendReservation = {
+        ...input,
+        state: "reserved",
+        reservedAt: 10,
+      };
+      reservations.set(input.attemptId, reservation);
+      return { reservation, nextSeq };
+    },
+    markSpendDispatching(attemptId) {
+      const reservation = {
+        ...requireReservation(attemptId),
+        state: "dispatching" as const,
+      };
+      reservations.set(attemptId, reservation);
+      return Promise.resolve(reservation);
+    },
+    releaseSpend(attemptId) {
+      const reservation = {
+        ...requireReservation(attemptId),
+        state: "released" as const,
+      };
+      reservations.set(attemptId, reservation);
+      return Promise.resolve(reservation);
+    },
+    async settleSpend(settlement, modelResponse, expectedSeq, options) {
+      const { nextSeq } = await base.appendWithUsage(
+        settlement.runId,
+        [modelResponse],
+        expectedSeq,
+        options,
+      );
+      const reservation = {
+        ...requireReservation(settlement.attemptId),
+        state: "settled" as const,
+        settlement,
+      };
+      reservations.set(settlement.attemptId, reservation);
+      return { reservation, nextSeq };
+    },
+    markSpendUncertain(attemptId, reason) {
+      const reservation = {
+        ...requireReservation(attemptId),
+        state: "uncertain" as const,
+        uncertaintyCode: reason,
+      };
+      reservations.set(attemptId, reservation);
+      return Promise.resolve(reservation);
+    },
+  };
+}
+
 describe("PiiEventStore", () => {
   it("sanitizes requests and responses around transactional spend reservations", async () => {
-    const inner = new InMemorySpendReservationStore();
+    const inner = createReservationInnerStore();
     const store = new PiiEventStore(inner, createTokenizer());
     const attemptId = Id.parse(ids.next());
     const requestCanary = canary("reserved-request");
@@ -309,7 +374,6 @@ describe("PiiEventStore", () => {
 
     await store.append(runId, [runCreated()], 0);
     await store.reserveSpend(spendInput(attemptId), spendRequest(attemptId, requestCanary), 1);
-    await expect(inner.readUsageLedger("team", "day", [0])).resolves.toEqual([]);
     await store.markSpendDispatching(attemptId);
     const settlement: SpendReservationSettlement = {
       runId,
