@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { checkReadmes } from "./check-readmes.js";
-import { generateReadmeDependencyBlock } from "./gen-readme-deps.js";
-import type { MarkdownSource } from "./markdown.js";
+import { checkReadmes } from "./check-readmes.ts";
+import { generateReadmeDependencyBlock } from "./gen-readme-deps.ts";
+import type { MarkdownSource } from "./markdown.ts";
 
 const layers = { pkg: ["schemas"], schemas: [] };
 const generatedBlock = generateReadmeDependencyBlock("pkg", layers);

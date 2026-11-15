@@ -10,7 +10,7 @@ import {
   LicensePolicySchema,
   readInstalledPackages,
   type LicensePackage,
-} from "./check-licenses.js";
+} from "./check-licenses.ts";
 
 const temporaryDirectories: string[] = [];
 

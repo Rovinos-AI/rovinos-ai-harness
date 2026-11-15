@@ -9,7 +9,7 @@ import {
   runQuickstartDown,
   type QuickstartCommandRunner,
   type QuickstartSpawnOptions,
-} from "./quickstart.js";
+} from "./quickstart.ts";
 
 const runId = "00000000000000000000000001";
 const approvalId = "00000000000000000000000002";

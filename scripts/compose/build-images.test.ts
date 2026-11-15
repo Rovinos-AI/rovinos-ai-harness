@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, expect, it } from "vitest";
-import { acquireBuildLock, releaseBuildLock } from "./build-images.js";
+import { acquireBuildLock, releaseBuildLock } from "./build-images.ts";
 
 afterEach(() => {
   releaseBuildLock();

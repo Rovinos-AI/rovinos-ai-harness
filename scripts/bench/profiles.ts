@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { BenchmarkProfile } from "./common.js";
+import type { BenchmarkProfile } from "./common.ts";
 
 /** Sampling configurations used by smoke and nightly runs. */
 export const BENCHMARK_PROFILES: Readonly<Record<"smoke" | "nightly", BenchmarkProfile>> = {

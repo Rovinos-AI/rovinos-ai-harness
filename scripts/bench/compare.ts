@@ -9,7 +9,7 @@ import {
   type BenchmarkBudgets,
   type BenchmarkResult,
   type BudgetViolation,
-} from "./contracts.js";
+} from "./contracts.ts";
 
 /** Evaluates a current result against absolute and optional previous-run budgets. */
 export function compareBenchmarkResults(

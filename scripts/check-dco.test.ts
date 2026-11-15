@@ -12,7 +12,7 @@ import {
   evaluateDco,
   parseDcoLog,
   type DcoExemptions,
-} from "./check-dco.js";
+} from "./check-dco.ts";
 
 const temporaryDirectories: string[] = [];
 const gpgAvailable = spawnSync("gpg", ["--version"], { encoding: "utf8" }).status === 0;

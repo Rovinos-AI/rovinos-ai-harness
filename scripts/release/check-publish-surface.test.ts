@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { inspectPackedPackage } from "./check-publish-surface.js";
+import { inspectPackedPackage } from "./check-publish-surface.ts";
 
 const publishableManifest = {
   name: "@rovinos/sdk",

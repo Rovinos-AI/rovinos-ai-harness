@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { evaluateChangesetRequirement, type ChangesetReader } from "./check-changeset-required.js";
+import { evaluateChangesetRequirement, type ChangesetReader } from "./check-changeset-required.ts";
 
 const manifestPath = "packages/sdk/package.json";
 const manifest = {
