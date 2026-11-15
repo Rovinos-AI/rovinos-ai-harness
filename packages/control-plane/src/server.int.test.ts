@@ -487,6 +487,7 @@ describe("control-plane HTTP transport", () => {
         "get_run",
         "list_pending_inputs",
         "list_runs",
+        "resolve_uncertain_spend",
         "resume_run",
         "review_approval",
         "review_input",
