@@ -7,7 +7,7 @@ import {
   generatePiiCorpus,
   materializePiiCorpusSample,
   PiiCorpusSampleSchema,
-} from "./gen-pii-corpus.js";
+} from "./gen-pii-corpus.ts";
 
 describe("generatePiiCorpus", () => {
   it("is deterministic for the same seed and matches its asserted hash", () => {

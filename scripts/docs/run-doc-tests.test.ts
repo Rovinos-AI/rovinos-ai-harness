@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { ModelsConfigSchema, parseYaml } from "@rovinos/schemas";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DocTestError } from "./doc-blocks.js";
-import { createDocTestTemporaryRoot, executeDocTestBlocks } from "./run-doc-tests.js";
+import { DocTestError } from "./doc-blocks.ts";
+import { createDocTestTemporaryRoot, executeDocTestBlocks } from "./run-doc-tests.ts";
 
 describe("quickstart documentation test runner", () => {
   afterEach(() => {

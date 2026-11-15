@@ -5,8 +5,8 @@ import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat } from "n
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DocTestError, extractDocTestBlocks, substituteCaptures } from "./doc-blocks.js";
-import type { DocTestBlock, DocTestDocumentPath } from "./doc-blocks.js";
+import { DocTestError, extractDocTestBlocks, substituteCaptures } from "./doc-blocks.ts";
+import type { DocTestBlock, DocTestDocumentPath } from "./doc-blocks.ts";
 
 interface IndexedDocTestBlock extends DocTestBlock {
   readonly blockIndex: number;

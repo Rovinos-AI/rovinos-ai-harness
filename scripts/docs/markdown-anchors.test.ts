@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { collectHeadingIds } from "./markdown-anchors.js";
+import { collectHeadingIds } from "./markdown-anchors.ts";
 
 describe("Markdown anchor generation", () => {
   it("uses GitHub-style slugs and suffixes duplicate headings", () => {

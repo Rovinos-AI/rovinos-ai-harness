@@ -7,7 +7,7 @@ import { Principal, type Id } from "@rovinos/schemas";
 import { createHarness } from "@rovinos/sdk";
 import { AllowlistSpanProcessor, SentinelGate, TripQueue, VaultRunView } from "@rovinos/telemetry";
 import { createTestReadableSpan, StaticVaultReader } from "@rovinos/telemetry/testing";
-import type { BenchmarkResult } from "./contracts.js";
+import type { BenchmarkResult } from "./contracts.ts";
 import {
   appendInputBatch,
   approvalRequested,
@@ -20,8 +20,8 @@ import {
   syntheticVaultValues,
   traceId,
   type BenchmarkProfile,
-} from "./common.js";
-import { MAX_LOG_EVENTS } from "./common.js";
+} from "./common.ts";
+import { MAX_LOG_EVENTS } from "./common.ts";
 
 /** Measures allowlist sanitization plus sentinel checking for each span. */
 export async function allowlistSentinelBenchmark(

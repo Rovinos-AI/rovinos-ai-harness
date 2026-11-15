@@ -9,7 +9,7 @@ afterEach(() => {
 it("explains how to start the Compose harness when its container is missing", async () => {
   const execFileSync = vi.fn((): string => "");
   vi.doMock("node:child_process", () => ({ execFileSync }));
-  const { readHarnessHealthStatus } = await import("./compose-smoke.js");
+  const { readHarnessHealthStatus } = await import("./compose-smoke.ts");
 
   expect(() => readHarnessHealthStatus()).toThrow(
     "harness service is not running; start it with scripts/ci/compose-wait.sh",

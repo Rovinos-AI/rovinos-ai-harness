@@ -2,7 +2,7 @@
 import { Bench } from "tinybench";
 import { Code, Id, type Event, type NewEvent, type VaultValueEntry } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
-import type { BenchmarkResult } from "./contracts.js";
+import type { BenchmarkResult } from "./contracts.ts";
 
 /** Reproducible smoke or nightly benchmark sampling configuration. */
 export interface BenchmarkProfile {

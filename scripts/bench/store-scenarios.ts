@@ -20,8 +20,8 @@ import {
   type BenchmarkProfile,
   traceId,
   spanId,
-} from "./common.js";
-import type { BenchmarkResult } from "./contracts.js";
+} from "./common.ts";
+import type { BenchmarkResult } from "./contracts.ts";
 
 /** Measures append throughput for one configured event store. */
 export async function appendBenchmarks(

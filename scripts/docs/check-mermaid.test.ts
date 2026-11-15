@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { checkMermaid } from "./check-mermaid.js";
-import type { MarkdownSource } from "./markdown.js";
+import { checkMermaid } from "./check-mermaid.ts";
+import type { MarkdownSource } from "./markdown.ts";
 
 describe("Mermaid checker", () => {
   it("accepts valid Mermaid diagrams", () => {
