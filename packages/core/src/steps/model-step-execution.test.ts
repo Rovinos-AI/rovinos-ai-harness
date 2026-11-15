@@ -168,6 +168,79 @@ describe("executeModelStep", () => {
     ]);
   });
 
+  it("keeps a successful response with incomplete cost uncertain", async () => {
+    const store = new InMemorySpendReservationStore();
+    const recorder = await setup(store);
+    const incomplete = {
+      ...completion(),
+      usage: { inputTokens: 10, outputTokens: 5 },
+    };
+    const model: ModelPort = {
+      complete: vi.fn(() => Promise.resolve(incomplete)),
+    };
+
+    const result = await executeModelStep(options(recorder, model, true));
+
+    expect(result.outcome).toBe("response");
+    expect((await readEvents(store)).map(({ type }) => type)).toEqual([
+      "run_created",
+      "model_request",
+      "model_response",
+    ]);
+    await expect(
+      store.reserveSpend(
+        {
+          runId,
+          attemptId: Id.parse("00000000000000000000000099"),
+          quotaPeriods: [
+            { quotaId, period: "day", periodStart: 0, limitMicros: 1_000 },
+          ],
+          estimatedMicros: 1,
+          pricingRevision: Code.parse("prices.v1"),
+        },
+        {
+          runId,
+          ts: 1,
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          segmentId,
+          type: "model_request",
+          v: 3,
+          requestId: Id.parse("00000000000000000000000099"),
+          provider: "test",
+          model: "model",
+          messages: [],
+          advertisedToolIds: [],
+          requestHash: "c".repeat(64),
+          requestParametersHash: "d".repeat(64),
+        },
+        3,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_uncertain" });
+  });
+
+  it("retains uncertainty when atomic settlement fails after dispatch", async () => {
+    const store = new InMemorySpendReservationStore();
+    const recorder = await setup(store);
+    const markUncertain = vi.spyOn(store, "markSpendUncertain");
+    const settle = vi.spyOn(recorder, "settleSpend").mockRejectedValue(new Error("storage failure"));
+    let requestId: Id | undefined;
+    const model: ModelPort = {
+      complete: vi.fn(async (request) => {
+        requestId = request.requestId;
+        return completion();
+      }),
+    };
+
+    await expect(executeModelStep(options(recorder, model, true))).rejects.toThrow(
+      "storage failure",
+    );
+
+    expect(settle).toHaveBeenCalledOnce();
+    expect(markUncertain).toHaveBeenCalledOnce();
+    expect(requestId).toBeDefined();
+  });
+
   it("releases a reservation when cancellation occurs before dispatch", async () => {
     const store = new InMemorySpendReservationStore();
     const recorder = await setup(store);
