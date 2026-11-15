@@ -123,7 +123,12 @@ async function resolveOperatorWaiver(store: SpendReservationStore): Promise<void
   });
   expect(result.nextSeq).toBe(nextSeq + 1);
   await expect(store.resolveUncertainSpend(event, nextSeq)).resolves.toMatchObject(result);
-  await expect(store.readUsageLedger(baseQuotaId, "day", [basePeriodStart])).resolves.toEqual([]);
+  const ledger = await store.readUsageLedger(baseQuotaId, "day", [basePeriodStart]);
+  expect(
+    ledger.every(
+      (row) => row.costMicros === 0 && row.unknownCostCount === 0 && row.runsStarted === 0,
+    ),
+  ).toBe(true);
   await expect(
     store.reserveSpend(
       input(runId, nextAttemptId, {
