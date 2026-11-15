@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id, type Snapshot } from "@rovinos/schemas";
-import { isSpendReservationStore, type EventStore } from "@rovinos/store";
+import type { EventStore } from "@rovinos/store";
 import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import { activeRuns } from "@rovinos/telemetry";
 import { applyResolvedApprovals } from "./approvals.js";
@@ -17,6 +17,8 @@ import { suspendForShutdown } from "./steps/shutdown.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import {
   previousSegmentLink,
+  recoverSpendReservations,
+  resultForResume,
   readRunEvents,
   restoreRunScope,
   restoreWorkspaceSnapshot,
@@ -112,16 +114,6 @@ function hasResolvedApprovalToApply(state: RunState): boolean {
     }
   }
   return false;
-}
-
-function resultForResume(events: readonly Event[], firstNewEvent: number): RunLoopResult {
-  const state = foldRunState(events);
-  return {
-    status: state.status,
-    approvalIds: Array.from(state.pendingApprovals.keys()),
-    state,
-    events: events.slice(firstNewEvent),
-  };
 }
 
 interface ResumeExecution {
@@ -366,9 +358,7 @@ async function withResumeLease(
     };
     renewalTimer = startLeaseRenewal(options, leaseOwner, leaseController);
     renewalTimer.unref();
-    if (isSpendReservationStore(options.store)) {
-      await options.store.recoverSpendReservations(options.runId);
-    }
+    await recoverSpendReservations(options.store, options.runId);
     const { events, snapshot, state, head } = await readResumeHistory(executionOptions);
     return await resumeFromHistory(executionOptions, leaseOwner, { events, snapshot, state, head });
   } finally {

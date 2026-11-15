@@ -6,10 +6,10 @@ import { createEventBuilders } from "@rovinos/store/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { createControlPlaneServer } from "../server.js";
 
-const connections: Array<{
+const connections: {
   readonly client: Client;
   readonly server: ReturnType<typeof createControlPlaneServer>;
-}> = [];
+}[] = [];
 
 async function connect(store: InMemorySpendReservationStore) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

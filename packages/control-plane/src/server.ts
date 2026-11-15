@@ -108,13 +108,17 @@ export function createControlPlaneServer(
     supervisor,
     clientCapabilities,
   });
-  registerResolveUncertainSpendTool(server, {
+  registerSpendResolutionTool(server, {
     store,
+    options,
     confirmationGate,
     clientCapabilities,
-    now: () => options.clock?.now() ?? Date.now(),
-    ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),
   });
+  registerToolListHandler(server);
+  return server;
+}
+
+function registerToolListHandler(server: McpServer): void {
   const definitions = toolDefinitions();
   server.server.setRequestHandler("tools/list", (_request, context) => {
     const capabilities = requestClientCapabilities(context, server);
@@ -125,7 +129,28 @@ export function createControlPlaneServer(
       ),
     };
   });
-  return server;
+}
+
+function registerSpendResolutionTool(
+  server: McpServer,
+  dependencies: {
+    readonly store: EventStore;
+    readonly options: ControlPlaneServerOptions;
+    readonly confirmationGate: ConfirmationGate;
+    readonly clientCapabilities: (
+      context: ServerContext,
+    ) => ConfirmationClientCapabilities | undefined;
+  },
+): void {
+  registerResolveUncertainSpendTool(server, {
+    store: dependencies.store,
+    confirmationGate: dependencies.confirmationGate,
+    clientCapabilities: dependencies.clientCapabilities,
+    now: () => dependencies.options.clock?.now() ?? Date.now(),
+    ...(dependencies.options.onAudit === undefined
+      ? {}
+      : { onAudit: dependencies.options.onAudit }),
+  });
 }
 
 function registerRunInspection(

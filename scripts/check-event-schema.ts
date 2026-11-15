@@ -110,6 +110,7 @@ export function createEventSchemaLock(): Record<EventType, EventSchemaLockEntry>
     context_compacted: entryFor("context_compacted"),
     pii_action: entryFor("pii_action"),
     budget_exceeded: entryFor("budget_exceeded"),
+    spend_reservation_resolved: entryFor("spend_reservation_resolved"),
     subagent_spawned: entryFor("subagent_spawned"),
     subagent_completed: entryFor("subagent_completed"),
   };

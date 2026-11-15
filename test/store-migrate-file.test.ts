@@ -73,6 +73,7 @@ describe("migrateSqliteFile", () => {
       "0011",
       "0012",
       "0013",
+      "0014",
     ]);
     expect(existsSync(path)).toBe(false);
   });
@@ -95,6 +96,7 @@ describe("migrateSqliteFile", () => {
       "0011",
       "0012",
       "0013",
+      "0014",
     ]);
     const filesBeforeDryRun = readdirSync(directory);
     expect(migrateSqliteFile(path, { dryRun: true })).toEqual([]);
@@ -127,6 +129,7 @@ describe("migratePostgresConnection", () => {
       "0012",
       "0013",
       "0014",
+      "0015",
     ]);
     expect(postgresState.queries).toEqual([
       "SELECT to_regclass('schema_migrations') IS NOT NULL AS present",

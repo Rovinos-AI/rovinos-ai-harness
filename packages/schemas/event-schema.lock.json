@@ -16,8 +16,8 @@
     "hash": "3b930242db551a26064d275138c7e2c3b322551fbf6d23cd7c5fd6551bf0c79d"
   },
   "model_response": {
-    "v": 1,
-    "hash": "f2cc9dd3814a3e40e60e224d9a5ca9d5f1b6dc9c69eb7e9f1860d7f3c1184c4e"
+    "v": 2,
+    "hash": "a32602f03673c763b3333612f317e37271020ec14c05ff1556bb401518debdcd"
   },
   "tool_intent": {
     "v": 1,
@@ -56,8 +56,8 @@
     "hash": "f0cefb32012052e6022351db18bf089d535d789a9ae6de6103cea6b1876d5efd"
   },
   "context_compacted": {
-    "v": 1,
-    "hash": "af0e9c3cd89e21f646add5910be94813480c2c1ba8520611bf6d9f9e29065a62"
+    "v": 2,
+    "hash": "e89ef3697c31e9c180dc3088c2ea21a19ee3c72728168a84de72b738652bf04e"
   },
   "pii_action": {
     "v": 1,
@@ -67,12 +67,16 @@
     "v": 1,
     "hash": "4c969de3f925ad9dc097f920fd04fa6c551610762ff45d1ecb9e25c70d391221"
   },
-  "subagent_spawned": {
+  "spend_reservation_resolved": {
     "v": 1,
-    "hash": "8d38af22e98b52394b51951eee593e4a3cd0672124fab2536636fdc13e4e2454"
+    "hash": "4d0e1118f440c520799d2731a2e8d9450bfab99867871caffba381b7e6f8dac6"
+  },
+  "subagent_spawned": {
+    "v": 2,
+    "hash": "72ba6ae55e10961657a07e47a2dfb79799cfe27293e9fa382e2f83d059174f25"
   },
   "subagent_completed": {
-    "v": 1,
-    "hash": "2ebf7314da3b3c7c4daef018b3e195d2769f81ef318ed97d3333fd04e79d858b"
+    "v": 2,
+    "hash": "763fac06d3b8f20c3ef5225c5c0b7eae222ce2bd775972b28bfa53e567bf283c"
   }
 }

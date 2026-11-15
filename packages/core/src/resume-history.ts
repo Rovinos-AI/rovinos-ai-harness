@@ -1,10 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Event, Id, Snapshot } from "@rovinos/schemas";
 import type { Link } from "@opentelemetry/api";
-import type { EventStore } from "@rovinos/store";
+import { isSpendReservationStore, type EventStore } from "@rovinos/store";
 import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
-import { CorruptLogError } from "./run-state.js";
+import type { RunLoopResult } from "./loop.js";
+import { CorruptLogError, foldRunState } from "./run-state.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
+
+/** Recovers durable spend reservations before a resumed run reads its history. */
+export async function recoverSpendReservations(store: EventStore, runId: Id): Promise<void> {
+  if (isSpendReservationStore(store)) {
+    await store.recoverSpendReservations(runId);
+  }
+}
+
+/** Builds the resume result from recovered history and events appended during this attempt. */
+export function resultForResume(events: readonly Event[], firstNewEvent: number): RunLoopResult {
+  const state = foldRunState(events);
+  return {
+    status: state.status,
+    approvalIds: Array.from(state.pendingApprovals.keys()),
+    state,
+    events: events.slice(firstNewEvent),
+  };
+}
 
 /** Reads a complete run log from its event store. */
 export async function readRunEvents(store: EventStore, runId: Id): Promise<Event[]> {
