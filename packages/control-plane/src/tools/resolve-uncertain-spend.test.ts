@@ -16,7 +16,7 @@ const connections: {
 async function connect(
   store: EventStore,
   options: Parameters<typeof createControlPlaneServer>[1] = {},
-  response: "accept" | "decline" | undefined = "accept",
+  response: "accept" | "decline" | null = "accept",
 ) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createControlPlaneServer(store, {
@@ -26,11 +26,11 @@ async function connect(
   const client = new Client(
     { name: "spend-resolution-test", version: "1.0.0" },
     {
-      capabilities: response === undefined ? {} : { elicitation: { form: {} } },
+      capabilities: response === null ? {} : { elicitation: { form: {} } },
       versionNegotiation: { mode: "auto" },
     },
   );
-  if (response !== undefined) {
+  if (response !== null) {
     client.setRequestHandler("elicitation/create", () => ({
       action: response,
       ...(response === "accept" ? { content: { confirm: true } } : {}),
@@ -111,7 +111,7 @@ describe("resolve_uncertain_spend", () => {
     const runId = builders.nextRunId();
     const attemptId = builders.nextRunId();
     await store.append(runId, [builders.runCreated(runId)], 0);
-    const { client } = await connect(store, { confirmationGate: gate });
+    const { client } = await connect(store, { confirmationGate: gate }, null);
     await expect(
       client.callTool({
         name: "resolve_uncertain_spend",
@@ -164,26 +164,23 @@ describe("resolve_uncertain_spend", () => {
     });
   });
 
-  it("maps coded and uncoded reservation resolution failures safely", async () => {
+  it("maps coded and unknown reservation resolution failures safely", async () => {
     const builders = createEventBuilders();
     const runId = builders.nextRunId();
     const attemptId = builders.nextRunId();
     for (const [failure, expectedCode] of [
-      [{ code: Code.parse("spend_reservation_conflict") }, "spend_reservation_conflict"],
+      [
+        Object.assign(new Error("synthetic conflict"), {
+          code: Code.parse("spend_reservation_conflict"),
+        }),
+        "spend_reservation_conflict",
+      ],
       [new Error("synthetic failure"), "spend_reservation_resolution_failed"],
     ] as const) {
       const base = new InMemorySpendReservationStore();
       await base.append(runId, [builders.runCreated(runId)], 0);
-      const store = new Proxy(base, {
-        get(target, property) {
-          if (property === "resolveUncertainSpend") {
-            return () => Promise.reject(failure);
-          }
-          const value: unknown = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-      const { client } = await connect(store);
+      vi.spyOn(base, "resolveUncertainSpend").mockRejectedValue(failure);
+      const { client } = await connect(base);
       await expect(
         client.callTool({
           name: "resolve_uncertain_spend",

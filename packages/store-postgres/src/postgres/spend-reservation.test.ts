@@ -18,6 +18,7 @@ import { PostgresSpendReservation } from "./spend-reservation.js";
 import { PostgresSpendReservationCommon } from "./spend-reservation-common.js";
 
 const attemptId = Id.parse("00000000000000000000000001");
+const recoveryAttemptId = Id.parse("00000000000000000000000003");
 const runId = Id.parse("00000000000000000000000002");
 const quotaId = Code.parse("synthetic-quota");
 const quotaPeriod: SpendReservationInput["quotaPeriods"][number] = {
@@ -79,6 +80,24 @@ function reservationRow(
     reserved_at: 1,
     uncertainty_code: uncertaintyCode,
     settlement,
+  };
+}
+
+function resolutionEvent(
+  reason = "operator_reviewed",
+): Extract<NewEvent, { type: "spend_reservation_resolved" }> {
+  return {
+    runId,
+    ts: 3,
+    v: 1,
+    traceId: "a".repeat(32),
+    spanId: "b".repeat(16),
+    segmentId: runId,
+    type: "spend_reservation_resolved",
+    attemptId,
+    decision: "waive",
+    decidedBy: "cli.test",
+    reason: Code.parse(reason),
   };
 }
 
@@ -597,6 +616,181 @@ describe("Postgres spend-reservation unit error paths", () => {
     ).resolves.toMatchObject({
       reservation: { state: "settled", settlement },
       nextSeq: 2,
+    });
+    await database.pool.end();
+  });
+
+  it("recovers reservations according to their durable dispatch state", async () => {
+    const states = new Map([
+      [attemptId, "reserved"],
+      [recoveryAttemptId, "dispatching"],
+    ]);
+    const database = await setupDatabase((sql, values) => {
+      if (sql.startsWith("SELECT reservation.attempt_id")) {
+        return queryResult(
+          [...states.entries()]
+            .filter(([, state]) => state === "reserved" || state === "dispatching")
+            .map(([id]) => ({
+              attempt_id: id,
+              quota_id: quotaId,
+              period: "day",
+              period_start: 0,
+              limit_micros: 100,
+            })),
+        );
+      }
+      if (sql.startsWith("SELECT attempt_id, run_id")) {
+        const id = Id.parse(values[0]);
+        return queryResult([
+          {
+            ...reservationRow(states.get(id) ?? "missing"),
+            attempt_id: id,
+          },
+        ]);
+      }
+      if (sql.startsWith("SELECT quota_id, period, period_start, limit_micros")) {
+        return queryResult([
+          { quota_id: quotaId, period: "day", period_start: 0, limit_micros: 100 },
+        ]);
+      }
+      if (sql.startsWith("SELECT quota_id FROM usage_ledger")) {
+        return queryResult([{ quota_id: quotaId }]);
+      }
+      if (sql.startsWith("UPDATE spend_reservations SET state = 'released'")) {
+        states.set(Id.parse(values[0]), "released");
+      }
+      if (sql.startsWith("UPDATE spend_reservations SET state = 'uncertain'")) {
+        states.set(Id.parse(values[0]), "uncertain");
+      }
+      return queryResult([]);
+    });
+    const store = new PostgresSpendReservationTestHarness(options(database.pool), database.client);
+
+    await expect(store.recoverSpendReservations(runId)).resolves.toMatchObject([
+      { attemptId, state: "released" },
+      {
+        attemptId: recoveryAttemptId,
+        state: "uncertain",
+        uncertaintyCode: "spend_reservation_worker_lease_expired",
+      },
+    ]);
+    await expect(store.recoverSpendReservations(runId)).resolves.toEqual([]);
+    await database.pool.end();
+  });
+
+  it("rejects malformed or missing reservations during recovery", async () => {
+    const malformedDb = await setupDatabase((sql) =>
+      sql.startsWith("SELECT reservation.attempt_id")
+        ? queryResult([
+            {
+              attempt_id: attemptId,
+              quota_id: quotaId,
+              period: "invalid",
+              period_start: 0,
+              limit_micros: 100,
+            },
+          ])
+        : queryResult([]),
+    );
+    const malformedStore = new PostgresSpendReservation(options(malformedDb.pool));
+    await expect(malformedStore.recoverSpendReservations(runId)).rejects.toMatchObject({
+      code: "store_unavailable",
+    });
+    await malformedDb.pool.end();
+
+    const missingDb = await setupDatabase((sql) => {
+      if (sql.startsWith("SELECT reservation.attempt_id")) {
+        return queryResult([
+          {
+            attempt_id: attemptId,
+            quota_id: quotaId,
+            period: "day",
+            period_start: 0,
+            limit_micros: 100,
+          },
+        ]);
+      }
+      if (sql.startsWith("SELECT quota_id FROM usage_ledger")) {
+        return queryResult([{ quota_id: quotaId }]);
+      }
+      return queryResult([]);
+    });
+    const missingStore = new PostgresSpendReservation(options(missingDb.pool));
+    await expect(missingStore.recoverSpendReservations(runId)).rejects.toMatchObject({
+      code: "store_unavailable",
+    });
+    await missingDb.pool.end();
+  });
+
+  it("resolves uncertain reservations idempotently and rejects conflicts or invalid states", async () => {
+    let state = "uncertain";
+    let operatorResolution: unknown = null;
+    const database = await setupDatabase((sql) => {
+      if (sql.startsWith("SELECT quota_id, period, period_start, limit_micros")) {
+        return queryResult([
+          { quota_id: quotaId, period: "day", period_start: 0, limit_micros: 100 },
+        ]);
+      }
+      if (sql.startsWith("SELECT attempt_id, run_id")) {
+        return queryResult([
+          {
+            ...reservationRow(
+              state,
+              state === "uncertain" ? "spend_reservation_worker_lease_expired" : null,
+            ),
+            operator_resolution: operatorResolution,
+          },
+        ]);
+      }
+      if (sql.startsWith("SELECT next_seq")) {
+        return queryResult([{ next_seq: 4 }]);
+      }
+      if (sql.startsWith("UPDATE spend_reservations SET operator_resolution")) {
+        operatorResolution = { decidedBy: "cli.test", reason: "operator_reviewed" };
+      }
+      return queryResult([]);
+    });
+    const store = new PostgresSpendReservationTestHarness(options(database.pool), database.client);
+    const event = resolutionEvent();
+    await expect(store.resolveUncertainSpend(event, 3)).resolves.toMatchObject({
+      reservation: {
+        state: "uncertain",
+        operatorResolution: { decidedBy: "cli.test", reason: "operator_reviewed" },
+      },
+      nextSeq: 4,
+    });
+    await expect(store.resolveUncertainSpend(event, 3)).resolves.toMatchObject({
+      reservation: {
+        operatorResolution: { decidedBy: "cli.test", reason: "operator_reviewed" },
+      },
+      nextSeq: 4,
+    });
+    await expect(
+      store.resolveUncertainSpend(resolutionEvent("different_reason"), 3),
+    ).rejects.toMatchObject({
+      code: "spend_reservation_conflict",
+    });
+    state = "dispatching";
+    operatorResolution = null;
+    await expect(store.resolveUncertainSpend(event, 3)).rejects.toMatchObject({
+      code: "spend_reservation_transition_invalid",
+    });
+    await database.pool.end();
+  });
+
+  it("rejects resolution requests for missing attempts and invalid resolution data", async () => {
+    const database = await setupDatabase((sql) =>
+      sql.startsWith("SELECT quota_id, period, period_start, limit_micros")
+        ? queryResult([{ quota_id: quotaId, period: "day", period_start: 0, limit_micros: 100 }])
+        : queryResult([]),
+    );
+    const store = new PostgresSpendReservationTestHarness(options(database.pool), database.client);
+    await expect(store.resolveUncertainSpend(resolutionEvent(), 3)).rejects.toMatchObject({
+      code: "spend_reservation_not_found",
+    });
+    const invalidEvent = { ...resolutionEvent(), decidedBy: Code.parse("model") };
+    await expect(store.resolveUncertainSpend(invalidEvent, 3)).rejects.toMatchObject({
+      code: "spend_reservation_invalid",
     });
     await database.pool.end();
   });
