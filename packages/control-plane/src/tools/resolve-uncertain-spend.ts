@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, Principal, type Event, type Id, type NewEvent } from "@rovinos/schemas";
-import {
-  isSpendReservationStore,
-  type EventStore,
-} from "@rovinos/store";
+import { isSpendReservationStore, type EventStore } from "@rovinos/store";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { controlPlanePrincipal, withControlPlaneAuthorization } from "../auth.js";
 import type { ControlPlaneAuditHandler } from "../auth.js";

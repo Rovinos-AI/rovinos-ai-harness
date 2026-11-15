@@ -277,9 +277,7 @@ export class InMemorySpendReservationStore
 
   private replace(
     reservation: SpendReservation,
-    change: Partial<
-      Pick<SpendReservation, "state" | "uncertaintyCode" | "operatorResolution">
-    >,
+    change: Partial<Pick<SpendReservation, "state" | "uncertaintyCode" | "operatorResolution">>,
   ): SpendReservation {
     const updated = SpendReservationSchema.parse({ ...reservation, ...change });
     this.reservations.set(updated.attemptId, updated);

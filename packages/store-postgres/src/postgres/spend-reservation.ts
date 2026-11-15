@@ -4,6 +4,7 @@ import {
   SpendReservationErrorCodeSchema,
   SpendReservationInputSchema,
   SpendReservationOperatorResolutionSchema,
+  SpendReservationQuotaSchema,
   SpendReservationSchema,
   SpendReservationSettlementSchema,
   type NewEvent,
@@ -245,8 +246,7 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
         "SELECT reservation.attempt_id, period.quota_id, period.period, period.period_start, period.limit_micros FROM spend_reservations AS reservation JOIN spend_reservation_quota_periods AS period USING (attempt_id) WHERE reservation.run_id = $1 AND reservation.state IN ('reserved', 'dispatching') ORDER BY reservation.attempt_id, period.quota_id, period.period, period.period_start",
         [runId],
       );
-      await lockPostgresQuotaPeriods(
-        client,
+      const parsedQuotas = SpendReservationQuotaSchema.array().safeParse(
         quotaRows.rows.map((row) => ({
           quotaId: row.quota_id,
           period: row.period,
@@ -254,6 +254,10 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
           limitMicros: integer(row.limit_micros),
         })),
       );
+      if (!parsedQuotas.success) {
+        throw new StoreUnavailableError();
+      }
+      await lockPostgresQuotaPeriods(client, parsedQuotas.data);
       const attemptIds = [...new Set(quotaRows.rows.map((row) => row.attempt_id))];
       const recovered: SpendReservation[] = [];
       for (const attemptId of attemptIds) {

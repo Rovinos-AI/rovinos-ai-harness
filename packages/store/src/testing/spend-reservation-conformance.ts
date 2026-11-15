@@ -445,7 +445,7 @@ function registerIntegerBoundaries(factory: SpendReservationStoreFactory): void 
 }
 
 function registerRecovery(factory: SpendReservationStoreFactory): void {
-  it("releases undispatched attempts and preserves dispatched uncertainty across lease expiry", () =>
+  it("releases attempts whose dispatch has not begun and preserves dispatched uncertainty after lease expiry", () =>
     withStore(factory, async (store) => {
       const runId = builders.nextRunId();
       const reservedId = builders.nextRunId();
@@ -455,14 +455,20 @@ function registerRecovery(factory: SpendReservationStoreFactory): void {
       let nextSeq = await seedRun(store, runId);
       nextSeq = (
         await store.reserveSpend(
-          input(runId, reservedId, { estimatedMicros: 10, pricingRevision: Code.parse("price.v1") }),
+          input(runId, reservedId, {
+            estimatedMicros: 10,
+            pricingRevision: Code.parse("price.v1"),
+          }),
           modelRequest(runId, reservedId),
           nextSeq,
         )
       ).nextSeq;
       nextSeq = (
         await store.reserveSpend(
-          input(runId, dispatchedId, { estimatedMicros: 20, pricingRevision: Code.parse("price.v1") }),
+          input(runId, dispatchedId, {
+            estimatedMicros: 20,
+            pricingRevision: Code.parse("price.v1"),
+          }),
           modelRequest(runId, dispatchedId),
           nextSeq,
         )
@@ -526,9 +532,9 @@ function registerOperatorResolution(factory: SpendReservationStoreFactory): void
       });
       expect(result.nextSeq).toBe(nextSeq + 1);
       await expect(store.resolveUncertainSpend(event, nextSeq)).resolves.toMatchObject(result);
-      await expect(
-        store.readUsageLedger(baseQuotaId, "day", [basePeriodStart]),
-      ).resolves.toEqual([]);
+      await expect(store.readUsageLedger(baseQuotaId, "day", [basePeriodStart])).resolves.toEqual(
+        [],
+      );
       await expect(
         store.reserveSpend(
           input(runId, nextAttemptId, {

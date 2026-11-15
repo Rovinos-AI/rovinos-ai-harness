@@ -192,9 +192,7 @@ export class PostgresSpendReservationCommon {
       state: row.state,
       reservedAt: integer(row.reserved_at),
       ...(row.uncertainty_code === null ? {} : { uncertaintyCode: row.uncertainty_code }),
-      ...(row.operator_resolution === null
-        ? {}
-        : { operatorResolution: row.operator_resolution }),
+      ...(row.operator_resolution === null ? {} : { operatorResolution: row.operator_resolution }),
       ...(row.settlement === null ? {} : { settlement: row.settlement }),
     });
     if (!parsed.success) {

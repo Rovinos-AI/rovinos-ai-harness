@@ -58,9 +58,7 @@ export class SqliteSpendReservations {
     [Code, string, number],
     { readonly state: string; readonly estimated_micros: number }
   >;
-  private readonly updateState: Database.Statement<
-    [string, string | null, string | null, Id]
-  >;
+  private readonly updateState: Database.Statement<[string, string | null, string | null, Id]>;
   private readonly updateSettlement: Database.Statement<[string, Id]>;
   private readonly transitionTransaction: Database.Transaction<
     (
@@ -200,10 +198,7 @@ export class SqliteSpendReservations {
   }
 
   /** Persist an audited operator waiver inside the enclosing event append transaction. */
-  setOperatorResolution(
-    attemptId: Id,
-    resolution: SpendReservation["operatorResolution"],
-  ): void {
+  setOperatorResolution(attemptId: Id, resolution: SpendReservation["operatorResolution"]): void {
     const current = this.require(attemptId).reservation;
     if (current.state !== "uncertain" || resolution === undefined) {
       throw new SpendReservationError("spend_reservation_transition_invalid");

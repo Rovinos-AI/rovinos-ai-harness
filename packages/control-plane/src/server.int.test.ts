@@ -190,11 +190,7 @@ describe("control-plane HTTP transport", () => {
     const store = new InMemoryEventStore();
     const runId = createEventBuilders().nextRunId();
     const attemptId = createEventBuilders().nextRunId();
-    const server = await startControlPlaneHttp(
-      store,
-      0,
-      controlPlaneOptions({}, ["read"]),
-    );
+    const server = await startControlPlaneHttp(store, 0, controlPlaneOptions({}, ["read"]));
     const client = new Client({ name: "control-plane-spend-scope-test", version: "1.0.0" });
     try {
       await client.connect(createHttpTransport(server.endpoint));
