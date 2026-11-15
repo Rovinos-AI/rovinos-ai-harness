@@ -26,6 +26,7 @@ import { registerAnswerInputTool } from "./tools/answer-input.js";
 import { registerGetInputTool } from "./tools/get-input.js";
 import { registerListPendingInputsTool } from "./tools/list-pending-inputs.js";
 import { registerReviewInputTool } from "./tools/review-input.js";
+import { registerResolveUncertainSpendTool } from "./tools/resolve-uncertain-spend.js";
 import { registerApprovalAppTools, ApprovalAppRevealRateLimiter } from "./tools/approvals-app.js";
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
@@ -106,6 +107,13 @@ export function createControlPlaneServer(
     confirmationGate,
     supervisor,
     clientCapabilities,
+  });
+  registerResolveUncertainSpendTool(server, {
+    store,
+    confirmationGate,
+    clientCapabilities,
+    now: () => options.clock?.now() ?? Date.now(),
+    ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),
   });
   const definitions = toolDefinitions();
   server.server.setRequestHandler("tools/list", (_request, context) => {

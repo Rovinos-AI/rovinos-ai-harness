@@ -124,6 +124,15 @@ export const inputResolutionOutputSchema = InputAnswerResponseSchema;
 /** Validated input for run lifecycle tools. */
 export const runLifecycleInputSchema = z.object({ runId: Id }).strict();
 
+/** Validated input for an audited operator waiver of uncertain spend exposure. */
+export const resolveUncertainSpendInputSchema = z
+  .object({
+    runId: Id,
+    attemptId: Id,
+    reason: Code,
+  })
+  .strict();
+
 const runMetadataSchema = z.record(Code, z.union([Code, z.number(), z.boolean()]));
 
 /** Validated input for `start_run`; `goal` is content and is never returned. */

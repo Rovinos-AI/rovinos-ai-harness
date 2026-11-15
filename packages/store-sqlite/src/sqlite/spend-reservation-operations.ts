@@ -5,6 +5,8 @@ import {
   type NewEvent,
   type SpendReservation,
   type SpendReservationInput,
+  SpendReservationOperatorResolutionSchema,
+  type SpendReservationOperatorResolution,
   type SpendReservationSettlement,
 } from "@rovinos/schemas";
 import { SpendReservationError, type SpendReservationStore } from "@rovinos/store";
@@ -104,6 +106,86 @@ export class SqliteSpendReservationOperations {
     reason: Parameters<SpendReservationStore["markSpendUncertain"]>[1],
   ): Promise<SpendReservation> {
     return this.options.reservations.transition(attemptId, "uncertain", reason);
+  }
+
+  recoverSpendReservations(runId: SpendReservation["runId"]): Promise<SpendReservation[]> {
+    return Promise.resolve(this.options.reservations.recoverRun(runId));
+  }
+
+  async resolveUncertainSpend(
+    event: Extract<NewEvent, { type: "spend_reservation_resolved" }>,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    if (event.type !== "spend_reservation_resolved" || event.decision !== "waive") {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+    const resolution: SpendReservationOperatorResolution = {
+      decidedBy: event.decidedBy,
+      reason: event.reason,
+    };
+    const parsedResolution = SpendReservationOperatorResolutionSchema.safeParse(resolution);
+    if (!parsedResolution.success) {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+    const current = this.options.reservations.read(event.attemptId)?.reservation;
+    if (current === undefined) {
+      throw new SpendReservationError("spend_reservation_not_found");
+    }
+    if (current.runId !== event.runId) {
+      throw new SpendReservationError("spend_reservation_conflict");
+    }
+    if (current.operatorResolution !== undefined) {
+      if (!sameOperatorResolution(current.operatorResolution, parsedResolution.data)) {
+        throw new SpendReservationError("spend_reservation_conflict");
+      }
+      return { reservation: current, nextSeq: await this.options.head(current.runId) };
+    }
+    if (current.state !== "uncertain") {
+      throw new SpendReservationError("spend_reservation_transition_invalid");
+    }
+
+    const encoded = await encodeEvents(this.options.codec, event.runId, [event], expectedSeq);
+    try {
+      const { nextSeq } = this.options.append({
+        runId: event.runId,
+        encoded,
+        expectedSeq,
+        beforeAppend: () => {
+          const latest = this.options.reservations.read(event.attemptId)?.reservation;
+          if (latest?.runId !== event.runId || latest.state !== "uncertain") {
+            throw new SpendReservationError(
+              latest === undefined
+                ? "spend_reservation_not_found"
+                : "spend_reservation_transition_invalid",
+            );
+          }
+          if (
+            latest.operatorResolution !== undefined &&
+            !sameOperatorResolution(latest.operatorResolution, parsedResolution.data)
+          ) {
+            throw new SpendReservationError("spend_reservation_conflict");
+          }
+        },
+        afterAppend: () => {
+          this.options.reservations.setOperatorResolution(event.attemptId, parsedResolution.data);
+        },
+      });
+      const reservation = this.options.reservations.read(event.attemptId)?.reservation;
+      if (reservation === undefined) {
+        throw new SpendReservationError("spend_reservation_not_found");
+      }
+      return { reservation, nextSeq };
+    } catch (error) {
+      const latest = this.options.reservations.read(event.attemptId)?.reservation;
+      if (
+        latest?.runId === event.runId &&
+        latest.operatorResolution !== undefined &&
+        sameOperatorResolution(latest.operatorResolution, parsedResolution.data)
+      ) {
+        return { reservation: latest, nextSeq: await this.options.head(event.runId) };
+      }
+      throw error;
+    }
   }
 
   async settleSpend(
@@ -232,6 +314,13 @@ export class SqliteSpendReservationOperations {
     }
     throw new SpendReservationError("spend_reservation_conflict");
   }
+}
+
+function sameOperatorResolution(
+  left: SpendReservationOperatorResolution,
+  right: SpendReservationOperatorResolution,
+): boolean {
+  return left.decidedBy === right.decidedBy && left.reason === right.reason;
 }
 
 function assertUsageUpdates(

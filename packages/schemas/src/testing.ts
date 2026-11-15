@@ -162,6 +162,14 @@ export const eventSamples = [
   { ...envelope, type: "budget_exceeded", budget: "steps", limit: 1, observed: 2 },
   {
     ...envelope,
+    type: "spend_reservation_resolved",
+    attemptId: id,
+    decision: "waive",
+    decidedBy: "cli.test",
+    reason: "operator_reviewed",
+  },
+  {
+    ...envelope,
     type: "subagent_spawned",
     childRunId: id,
     role: "researcher",

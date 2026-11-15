@@ -71,6 +71,18 @@ describe("Event", () => {
     });
   });
 
+  it("accepts only an explicit operator waiver for uncertain spend", () => {
+    const resolution = eventSamples.find(({ type }) => type === "spend_reservation_resolved");
+    if (resolution?.type !== "spend_reservation_resolved") {
+      throw new Error("Missing spend_reservation_resolved sample.");
+    }
+
+    expect(Event.parse(resolution)).toEqual(resolution);
+    expect(Event.safeParse({ ...resolution, decision: "settle" }).success).toBe(false);
+    expect(Event.safeParse({ ...resolution, decidedBy: "model" }).success).toBe(false);
+    expect(Event.safeParse({ ...resolution, reason: "free-form explanation" }).success).toBe(false);
+  });
+
   it("requires an approver for human input resolutions and omits answers on declines", () => {
     const resolution = eventSamples.find(({ type }) => type === "input_resolved");
     if (resolution?.type !== "input_resolved") {

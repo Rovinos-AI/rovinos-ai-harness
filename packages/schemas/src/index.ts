@@ -159,6 +159,7 @@ export {
   SpendReservationInputSchema,
   SpendReservationPeriodSchema,
   SpendReservationQuotaSchema,
+  SpendReservationOperatorResolutionSchema,
   SpendReservationSchema,
   SpendReservationSettlementSchema,
   SpendReservationStateSchema,
@@ -166,6 +167,7 @@ export {
   type SpendReservationErrorCode,
   type SpendReservationInput,
   type SpendReservationQuota,
+  type SpendReservationOperatorResolution,
   type SpendReservationSettlement,
 } from "./spend-reservation.js";
 export { isSecretKeyName } from "./secret-key-name.js";

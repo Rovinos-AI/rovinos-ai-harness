@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
 import { CostValueSchema } from "./cost.js";
+import { Principal } from "./principal.js";
 import { Code, Id, Sha256Hex } from "./primitives.js";
 
 const safeMicros = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -59,6 +60,7 @@ export const SpendReservationErrorCodeSchema = z.enum([
   "spend_reservation_estimate_missing",
   "spend_reservation_usage_incomplete",
   "spend_reservation_uncertain",
+  "spend_reservation_worker_lease_expired",
   "spend_reservation_storage_unavailable",
 ]);
 
@@ -117,6 +119,19 @@ export const SpendReservationSettlementSchema = z
 /** Inferred complete settlement for a model-call attempt. */
 export type SpendReservationSettlement = z.infer<typeof SpendReservationSettlementSchema>;
 
+/** Audited operator action that waives quota exposure without asserting provider billing. */
+export const SpendReservationOperatorResolutionSchema = z
+  .object({
+    decidedBy: Principal,
+    reason: Code,
+  })
+  .strict();
+
+/** Inferred operator-resolution metadata. */
+export type SpendReservationOperatorResolution = z.infer<
+  typeof SpendReservationOperatorResolutionSchema
+>;
+
 /** Persisted state of a single model-call spend reservation. */
 export const SpendReservationSchema = z
   .object({
@@ -129,6 +144,7 @@ export const SpendReservationSchema = z
     reservedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     uncertaintyCode: Code.optional(),
     settlement: SpendReservationSettlementSchema.optional(),
+    operatorResolution: SpendReservationOperatorResolutionSchema.optional(),
   })
   .strict()
   .superRefine((reservation, context) => {
@@ -162,6 +178,18 @@ export const SpendReservationSchema = z
         path: ["settlement"],
         message: "Only settled reservations can carry settlement details.",
         params: { errorCode: "spend_reservation_settlement_invalid" },
+      });
+    }
+    if (
+      reservation.operatorResolution !== undefined &&
+      reservation.state !== "uncertain" &&
+      reservation.state !== "settled"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["operatorResolution"],
+        message: "Only an uncertain or subsequently settled reservation can retain a waiver.",
+        params: { errorCode: "spend_reservation_operator_resolution_invalid" },
       });
     }
   });

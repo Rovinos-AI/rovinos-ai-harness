@@ -2,6 +2,7 @@
 import { isDeepStrictEqual } from "node:util";
 import {
   SpendReservationQuotaSchema,
+  SpendReservationOperatorResolutionSchema,
   SpendReservationSchema,
   type Id,
   type NewEvent,
@@ -35,6 +36,7 @@ interface ReservationRow extends QueryResultRow {
   readonly state: string;
   readonly reserved_at: number | string;
   readonly uncertainty_code: string | null;
+  readonly operator_resolution: unknown;
   readonly settlement: unknown;
 }
 
@@ -159,8 +161,8 @@ export class PostgresSpendReservationCommon {
     lock = false,
   ): Promise<SpendReservation | undefined> {
     const query = lock
-      ? "SELECT attempt_id, run_id, request_seq, estimated_micros, pricing_revision, state, reserved_at, uncertainty_code, settlement FROM spend_reservations WHERE attempt_id = $1 FOR UPDATE"
-      : "SELECT attempt_id, run_id, request_seq, estimated_micros, pricing_revision, state, reserved_at, uncertainty_code, settlement FROM spend_reservations WHERE attempt_id = $1";
+      ? "SELECT attempt_id, run_id, request_seq, estimated_micros, pricing_revision, state, reserved_at, uncertainty_code, operator_resolution, settlement FROM spend_reservations WHERE attempt_id = $1 FOR UPDATE"
+      : "SELECT attempt_id, run_id, request_seq, estimated_micros, pricing_revision, state, reserved_at, uncertainty_code, operator_resolution, settlement FROM spend_reservations WHERE attempt_id = $1";
     const result = await client.query<ReservationRow>(query, [attemptId]);
     const row = result.rows[0];
     if (row === undefined) {
@@ -190,6 +192,9 @@ export class PostgresSpendReservationCommon {
       state: row.state,
       reservedAt: integer(row.reserved_at),
       ...(row.uncertainty_code === null ? {} : { uncertaintyCode: row.uncertainty_code }),
+      ...(row.operator_resolution === null
+        ? {}
+        : { operatorResolution: row.operator_resolution }),
       ...(row.settlement === null ? {} : { settlement: row.settlement }),
     });
     if (!parsed.success) {
@@ -208,7 +213,7 @@ export class PostgresSpendReservationCommon {
     requestSeq: number,
   ): Promise<void> {
     await client.query(
-      "INSERT INTO spend_reservations (attempt_id, run_id, request_seq, estimated_micros, pricing_revision, state, reserved_at, uncertainty_code, settlement) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL)",
+      "INSERT INTO spend_reservations (attempt_id, run_id, request_seq, estimated_micros, pricing_revision, state, reserved_at, uncertainty_code, operator_resolution, settlement) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL)",
       [
         reservation.attemptId,
         reservation.runId,
@@ -244,7 +249,7 @@ export class PostgresSpendReservationCommon {
         throw new SpendReservationError("spend_reservation_uncertain");
       }
       const reservations = await client.query<HeadroomRow>(
-        "SELECT COALESCE(SUM(reservation.estimated_micros), 0)::TEXT AS reserved_micros, COALESCE(BOOL_OR(reservation.state = 'uncertain'), FALSE) AS has_uncertain FROM spend_reservations AS reservation JOIN spend_reservation_quota_periods AS period USING (attempt_id) WHERE period.quota_id = $1 AND period.period = $2 AND period.period_start = $3 AND reservation.state IN ('reserved', 'dispatching', 'uncertain')",
+        "SELECT COALESCE(SUM(reservation.estimated_micros), 0)::TEXT AS reserved_micros, COALESCE(BOOL_OR(reservation.state = 'uncertain'), FALSE) AS has_uncertain FROM spend_reservations AS reservation JOIN spend_reservation_quota_periods AS period USING (attempt_id) WHERE period.quota_id = $1 AND period.period = $2 AND period.period_start = $3 AND reservation.state IN ('reserved', 'dispatching', 'uncertain') AND (reservation.state <> 'uncertain' OR reservation.operator_resolution IS NULL)",
         [quota.quotaId, quota.period, quota.periodStart],
       );
       const headroom = reservations.rows[0];

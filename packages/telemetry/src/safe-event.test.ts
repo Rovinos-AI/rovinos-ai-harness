@@ -330,6 +330,13 @@ const unexportedEvents = [
     kind: "message",
     content: { text: "APP_CONTENT_CANARY" },
   }),
+  validEvent({
+    type: "spend_reservation_resolved",
+    attemptId: "00000000000000000000000002",
+    decision: "waive",
+    decidedBy: "cli.operator",
+    reason: "operator_reviewed",
+  }),
 ];
 
 function assertConstrainedStrings(schema: z.core.$ZodType): void {

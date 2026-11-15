@@ -315,6 +315,17 @@ const budgetExceededEvent = z
   })
   .strict();
 
+const spendReservationResolvedEvent = z
+  .object({
+    ...eventEnvelopeShape,
+    type: z.literal("spend_reservation_resolved"),
+    attemptId: Id,
+    decision: z.literal("waive"),
+    decidedBy: Principal,
+    reason: Code,
+  })
+  .strict();
+
 const subagentSpawnedEvent = z
   .object({
     ...eventEnvelopeShape,
@@ -359,6 +370,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   contextCompactedEvent,
   piiActionEvent,
   budgetExceededEvent,
+  spendReservationResolvedEvent,
   subagentSpawnedEvent,
   subagentCompletedEvent,
 ]);

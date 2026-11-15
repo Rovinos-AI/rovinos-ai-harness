@@ -46,3 +46,16 @@ using an attempt; non-matching jobs can still be claimed.
 
 Quota rejections increment `harness.quota.rejections` with `harness.quota.code`
 as the only attribute. Principal identities are not included in metrics.
+
+In strict spend-reservation mode, a worker recovery after reclaiming an expired
+run lease releases reservations still in `reserved` because provider dispatch
+never began. Reservations in `dispatching` become `uncertain` and continue to
+block their quota periods until authoritative usage settles them. Lease expiry
+alone never refunds a possibly charged call; a late response can still settle an
+uncertain attempt exactly once.
+
+An authorized administrator can use `resolve_uncertain_spend` after human review
+to waive quota blocking for an uncertain attempt. The decision is appended to
+the run log and retained with the reservation. A waiver is an operational
+decision, not evidence that the provider did not bill, and does not restore a
+hard provider-billing cap; use it only after investigating the attempt.

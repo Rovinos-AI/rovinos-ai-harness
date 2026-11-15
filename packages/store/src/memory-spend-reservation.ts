@@ -5,6 +5,7 @@ import {
   SpendReservationSchema,
   SpendReservationSettlementSchema,
   SpendReservationErrorCodeSchema,
+  SpendReservationOperatorResolutionSchema,
   type SpendReservation,
   type SpendReservationErrorCode,
   type SpendReservationInput,
@@ -159,8 +160,9 @@ export class InMemorySpendReservationStore
         expectedSeq,
         options,
       );
+      const { uncertaintyCode: _uncertaintyCode, ...settledReservation } = reservation;
       const settled = SpendReservationSchema.parse({
-        ...reservation,
+        ...settledReservation,
         state: "settled",
         settlement: parsedSettlement.data,
       });
@@ -192,6 +194,69 @@ export class InMemorySpendReservationStore
     });
   }
 
+  recoverSpendReservations(runId: SpendReservation["runId"]): Promise<SpendReservation[]> {
+    return this.exclusive(() => {
+      const recovered: SpendReservation[] = [];
+      for (const reservation of this.reservations.values()) {
+        if (reservation.runId !== runId) {
+          continue;
+        }
+        if (reservation.state === "reserved") {
+          recovered.push(this.replace(reservation, { state: "released" }));
+        } else if (reservation.state === "dispatching") {
+          recovered.push(
+            this.replace(reservation, {
+              state: "uncertain",
+              uncertaintyCode: "spend_reservation_worker_lease_expired",
+            }),
+          );
+        }
+      }
+      return recovered;
+    });
+  }
+
+  resolveUncertainSpend(
+    event: Extract<NewEvent, { type: "spend_reservation_resolved" }>,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    return this.exclusive(async () => {
+      if (event.type !== "spend_reservation_resolved" || event.decision !== "waive") {
+        throw new SpendReservationError("spend_reservation_invalid");
+      }
+      const resolution = SpendReservationOperatorResolutionSchema.safeParse({
+        decidedBy: event.decidedBy,
+        reason: event.reason,
+      });
+      if (!resolution.success) {
+        throw new SpendReservationError("spend_reservation_invalid");
+      }
+      const reservation = this.requireReservation(event.attemptId);
+      if (reservation.runId !== event.runId) {
+        throw new SpendReservationError("spend_reservation_conflict");
+      }
+      if (reservation.operatorResolution !== undefined) {
+        if (!sameOperatorResolution(reservation.operatorResolution, resolution.data)) {
+          throw new SpendReservationError("spend_reservation_conflict");
+        }
+        return {
+          reservation: SpendReservationSchema.parse(reservation),
+          nextSeq: await this.head(reservation.runId),
+        };
+      }
+      if (reservation.state !== "uncertain") {
+        throw new SpendReservationError("spend_reservation_transition_invalid");
+      }
+      const updated = SpendReservationSchema.parse({
+        ...reservation,
+        operatorResolution: resolution.data,
+      });
+      const { nextSeq } = await super.append(reservation.runId, [event], expectedSeq);
+      this.reservations.set(updated.attemptId, updated);
+      return { reservation: SpendReservationSchema.parse(updated), nextSeq };
+    });
+  }
+
   private exclusive<T>(work: () => Promise<T> | T): Promise<T> {
     const result = this.serial.then(work);
     this.serial = result.then(
@@ -212,7 +277,9 @@ export class InMemorySpendReservationStore
 
   private replace(
     reservation: SpendReservation,
-    change: Partial<Pick<SpendReservation, "state" | "uncertaintyCode">>,
+    change: Partial<
+      Pick<SpendReservation, "state" | "uncertaintyCode" | "operatorResolution">
+    >,
   ): SpendReservation {
     const updated = SpendReservationSchema.parse({ ...reservation, ...change });
     this.reservations.set(updated.attemptId, updated);
@@ -248,6 +315,9 @@ export class InMemorySpendReservationStore
       let committed = BigInt(ledger?.costMicros ?? 0);
       for (const reservation of this.reservations.values()) {
         if (!isExposed(reservation)) {
+          continue;
+        }
+        if (reservation.operatorResolution !== undefined) {
           continue;
         }
         if (
@@ -289,6 +359,13 @@ export class InMemorySpendReservationStore
       }
     }
   }
+}
+
+function sameOperatorResolution(
+  left: NonNullable<SpendReservation["operatorResolution"]>,
+  right: NonNullable<SpendReservation["operatorResolution"]>,
+): boolean {
+  return left.decidedBy === right.decidedBy && left.reason === right.reason;
 }
 
 function isExposed(reservation: SpendReservation): boolean {

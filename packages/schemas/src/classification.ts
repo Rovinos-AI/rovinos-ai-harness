@@ -142,6 +142,12 @@ export const EVENT_FIELD_CLASS = {
   },
   pii_action: { boundary: "meta", action: "meta", toolId: "meta", entities: "meta" },
   budget_exceeded: { budget: "meta", limit: "meta", observed: "meta" },
+  spend_reservation_resolved: {
+    attemptId: "meta",
+    decision: "meta",
+    decidedBy: "meta",
+    reason: "meta",
+  },
   subagent_spawned: {
     childRunId: "meta",
     role: "meta",

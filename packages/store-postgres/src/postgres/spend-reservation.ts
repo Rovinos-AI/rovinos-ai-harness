@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isDeepStrictEqual } from "node:util";
 import {
   SpendReservationErrorCodeSchema,
   SpendReservationInputSchema,
+  SpendReservationOperatorResolutionSchema,
   SpendReservationSchema,
   SpendReservationSettlementSchema,
   type NewEvent,
@@ -16,10 +18,19 @@ import {
   type SpendReservationStore,
 } from "@rovinos/store";
 import { parseUsageLedgerDeltas } from "@rovinos/store/adapter-internal";
-import { encodeEvents } from "./helpers.js";
+import { lockPostgresQuotaPeriods } from "./append-transaction.js";
+import { encodeEvents, integer } from "./helpers.js";
 import { PostgresSpendReservationCommon } from "./spend-reservation-common.js";
 
 type UsageAppendOptions = Parameters<SpendReservationStore["settleSpend"]>[3];
+
+interface RecoveryQuotaRow {
+  readonly attempt_id: string;
+  readonly quota_id: string;
+  readonly period: string;
+  readonly period_start: number | string;
+  readonly limit_micros: number | string;
+}
 
 /** Postgres transactions implementing the shared strict spend-reservation port. */
 export class PostgresSpendReservation extends PostgresSpendReservationCommon {
@@ -183,8 +194,9 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
           "UPDATE spend_reservations SET state = 'settled', uncertainty_code = NULL, settlement = $2::JSONB WHERE attempt_id = $1",
           [current.attemptId, JSON.stringify(parsedSettlement.data)],
         );
+        const { uncertaintyCode: _uncertaintyCode, ...settledReservation } = current;
         reservation = SpendReservationSchema.parse({
-          ...current,
+          ...settledReservation,
           state: "settled",
           settlement: parsedSettlement.data,
         });
@@ -225,6 +237,110 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
         uncertaintyCode: parsedReason.data,
       });
     });
+  }
+
+  recoverSpendReservations(runId: SpendReservation["runId"]): Promise<SpendReservation[]> {
+    return this.transaction(async (client) => {
+      const quotaRows = await client.query<RecoveryQuotaRow>(
+        "SELECT reservation.attempt_id, period.quota_id, period.period, period.period_start, period.limit_micros FROM spend_reservations AS reservation JOIN spend_reservation_quota_periods AS period USING (attempt_id) WHERE reservation.run_id = $1 AND reservation.state IN ('reserved', 'dispatching') ORDER BY reservation.attempt_id, period.quota_id, period.period, period.period_start",
+        [runId],
+      );
+      await lockPostgresQuotaPeriods(
+        client,
+        quotaRows.rows.map((row) => ({
+          quotaId: row.quota_id,
+          period: row.period,
+          periodStart: integer(row.period_start),
+          limitMicros: integer(row.limit_micros),
+        })),
+      );
+      const attemptIds = [...new Set(quotaRows.rows.map((row) => row.attempt_id))];
+      const recovered: SpendReservation[] = [];
+      for (const attemptId of attemptIds) {
+        const reservation = await this.readReservation(client, attemptId, true);
+        if (reservation === undefined || reservation.runId !== runId) {
+          throw new StoreUnavailableError();
+        }
+        if (reservation.state === "reserved") {
+          await client.query(
+            "UPDATE spend_reservations SET state = 'released' WHERE attempt_id = $1 AND state = 'reserved'",
+            [attemptId],
+          );
+          recovered.push(SpendReservationSchema.parse({ ...reservation, state: "released" }));
+        } else if (reservation.state === "dispatching") {
+          const reason = "spend_reservation_worker_lease_expired";
+          await client.query(
+            "UPDATE spend_reservations SET state = 'uncertain', uncertainty_code = $2 WHERE attempt_id = $1 AND state = 'dispatching'",
+            [attemptId, reason],
+          );
+          recovered.push(
+            SpendReservationSchema.parse({
+              ...reservation,
+              state: "uncertain",
+              uncertaintyCode: reason,
+            }),
+          );
+        }
+      }
+      return recovered;
+    });
+  }
+
+  async resolveUncertainSpend(
+    event: Extract<NewEvent, { type: "spend_reservation_resolved" }>,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    if (event.decision !== "waive") {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+    const parsedResolution = SpendReservationOperatorResolutionSchema.safeParse({
+      decidedBy: event.decidedBy,
+      reason: event.reason,
+    });
+    if (!parsedResolution.success) {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+    this.assertWritable();
+    const encoded = await encodeEvents(this.codec, event.runId, [event], expectedSeq);
+    const quotaPeriods = await this.quotaPeriodsForAttempt(event.attemptId);
+    let reservation: SpendReservation | undefined;
+    const nextSeq = await this.append({
+      runId: event.runId,
+      encoded,
+      expectedSeq,
+      quotaPeriodsToLock: quotaPeriods,
+      beforeRunLock: async (client) => {
+        const current = await this.readReservation(client, event.attemptId, true);
+        if (current?.runId !== event.runId) {
+          throw new SpendReservationError(
+            current === undefined ? "spend_reservation_not_found" : "spend_reservation_conflict",
+          );
+        }
+        if (current.operatorResolution !== undefined) {
+          if (!isDeepStrictEqual(current.operatorResolution, parsedResolution.data)) {
+            throw new SpendReservationError("spend_reservation_conflict");
+          }
+          reservation = current;
+          return { skipNextSeq: await this.readHead(client, current.runId) };
+        }
+        if (current.state !== "uncertain") {
+          throw new SpendReservationError("spend_reservation_transition_invalid");
+        }
+        await client.query(
+          "UPDATE spend_reservations SET operator_resolution = $2::JSONB WHERE attempt_id = $1 AND operator_resolution IS NULL",
+          [event.attemptId, JSON.stringify(parsedResolution.data)],
+        );
+        reservation = SpendReservationSchema.parse({
+          ...current,
+          operatorResolution: parsedResolution.data,
+        });
+        return undefined;
+      },
+    });
+    if (reservation === undefined) {
+      throw new StoreUnavailableError();
+    }
+    return { reservation, nextSeq };
   }
 }
 

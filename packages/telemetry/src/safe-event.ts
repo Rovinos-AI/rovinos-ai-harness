@@ -204,7 +204,8 @@ type UnexportedEvent = Extract<
       | "approval_requested"
       | "input_requested"
       | "context_compacted"
-      | "app_content";
+      | "app_content"
+      | "spend_reservation_resolved";
   }
 >;
 
@@ -228,7 +229,8 @@ function isUnexportedEvent(event: Event): event is UnexportedEvent {
     event.type === "approval_requested" ||
     event.type === "input_requested" ||
     event.type === "context_compacted" ||
-    event.type === "app_content"
+    event.type === "app_content" ||
+    event.type === "spend_reservation_resolved"
   );
 }
 

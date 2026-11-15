@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id, type Snapshot } from "@rovinos/schemas";
-import type { EventStore } from "@rovinos/store";
+import { isSpendReservationStore, type EventStore } from "@rovinos/store";
 import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import { activeRuns } from "@rovinos/telemetry";
 import { applyResolvedApprovals } from "./approvals.js";
@@ -366,6 +366,9 @@ async function withResumeLease(
     };
     renewalTimer = startLeaseRenewal(options, leaseOwner, leaseController);
     renewalTimer.unref();
+    if (isSpendReservationStore(options.store)) {
+      await options.store.recoverSpendReservations(options.runId);
+    }
     const { events, snapshot, state, head } = await readResumeHistory(executionOptions);
     return await resumeFromHistory(executionOptions, leaseOwner, { events, snapshot, state, head });
   } finally {

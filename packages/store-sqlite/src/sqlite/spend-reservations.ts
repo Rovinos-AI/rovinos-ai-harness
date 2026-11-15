@@ -5,6 +5,7 @@ import {
   Id,
   SpendReservationErrorCodeSchema,
   SpendReservationInputSchema,
+  SpendReservationOperatorResolutionSchema,
   SpendReservationQuotaSchema,
   SpendReservationSchema,
   SpendReservationSettlementSchema,
@@ -29,6 +30,7 @@ interface ReservationRow {
   readonly request_seq: number;
   readonly uncertainty_code: string | null;
   readonly settlement_json: string | null;
+  readonly operator_resolution_json: string | null;
 }
 
 interface ReservationQuotaRow {
@@ -56,7 +58,9 @@ export class SqliteSpendReservations {
     [Code, string, number],
     { readonly state: string; readonly estimated_micros: number }
   >;
-  private readonly updateState: Database.Statement<[string, string | null, string | null, Id]>;
+  private readonly updateState: Database.Statement<
+    [string, string | null, string | null, Id]
+  >;
   private readonly updateSettlement: Database.Statement<[string, Id]>;
   private readonly transitionTransaction: Database.Transaction<
     (
@@ -65,13 +69,14 @@ export class SqliteSpendReservations {
       reason?: SpendReservationErrorCode,
     ) => SpendReservation
   >;
+  private readonly recoverRunTransaction: Database.Transaction<(runId: Id) => SpendReservation[]>;
 
   constructor(
     private readonly db: Database.Database,
     private readonly clock: Clock,
   ) {
     this.getReservation = db.prepare<[Id], ReservationRow>(
-      "SELECT attempt_id, run_id, estimated_micros, pricing_revision, state, reserved_at, request_seq, uncertainty_code, settlement_json FROM spend_reservations WHERE attempt_id = ?",
+      "SELECT attempt_id, run_id, estimated_micros, pricing_revision, state, reserved_at, request_seq, uncertainty_code, settlement_json, operator_resolution_json FROM spend_reservations WHERE attempt_id = ?",
     );
     this.getQuotas = db.prepare<[Id], ReservationQuotaRow>(
       "SELECT quota_id, period, period_start, limit_micros FROM spend_reservation_quotas WHERE attempt_id = ? ORDER BY quota_id, period, period_start",
@@ -86,10 +91,10 @@ export class SqliteSpendReservations {
       "SELECT cost_micros, unknown_cost_count FROM usage_ledger WHERE quota_id = ? AND period = ? AND period_start = ?",
     );
     this.readExposed = db.prepare(
-      "SELECT r.state, r.estimated_micros FROM spend_reservations r JOIN spend_reservation_quotas q ON q.attempt_id = r.attempt_id WHERE q.quota_id = ? AND q.period = ? AND q.period_start = ? AND r.state IN ('reserved', 'dispatching', 'uncertain')",
+      "SELECT r.state, r.estimated_micros FROM spend_reservations r JOIN spend_reservation_quotas q ON q.attempt_id = r.attempt_id WHERE q.quota_id = ? AND q.period = ? AND q.period_start = ? AND r.state IN ('reserved', 'dispatching', 'uncertain') AND (r.state <> 'uncertain' OR r.operator_resolution_json IS NULL)",
     );
     this.updateState = db.prepare(
-      "UPDATE spend_reservations SET state = ?, uncertainty_code = ?, settlement_json = ? WHERE attempt_id = ?",
+      "UPDATE spend_reservations SET state = ?, uncertainty_code = ?, settlement_json = ?, operator_resolution_json = NULL WHERE attempt_id = ?",
     );
     this.updateSettlement = db.prepare(
       "UPDATE spend_reservations SET state = 'settled', uncertainty_code = NULL, settlement_json = ? WHERE attempt_id = ? AND state IN ('dispatching', 'uncertain')",
@@ -102,6 +107,21 @@ export class SqliteSpendReservations {
       }
       this.updateState.run(change.state, change.uncertaintyCode ?? null, null, attemptId);
       return this.require(attemptId).reservation;
+    });
+    this.recoverRunTransaction = db.transaction((runId) => {
+      const rows = db
+        .prepare<[Id], ReservationRow>(
+          "SELECT attempt_id, run_id, estimated_micros, pricing_revision, state, reserved_at, request_seq, uncertainty_code, settlement_json, operator_resolution_json FROM spend_reservations WHERE run_id = ? AND state IN ('reserved', 'dispatching') ORDER BY attempt_id",
+        )
+        .all(runId);
+      return rows.map((row) => {
+        const reservation = this.toReservation(row);
+        const state = reservation.state === "reserved" ? "released" : "uncertain";
+        const uncertaintyCode =
+          state === "uncertain" ? "spend_reservation_worker_lease_expired" : null;
+        this.updateState.run(state, uncertaintyCode, null, reservation.attemptId);
+        return this.require(reservation.attemptId).reservation;
+      });
     });
   }
 
@@ -168,6 +188,33 @@ export class SqliteSpendReservations {
     } catch (error) {
       return Promise.reject(sqliteStoreError(error));
     }
+  }
+
+  /** Classify persisted attempts after the owning run lease has expired. */
+  recoverRun(runId: Id): SpendReservation[] {
+    try {
+      return this.recoverRunTransaction.immediate(runId);
+    } catch (error) {
+      throw sqliteStoreError(error);
+    }
+  }
+
+  /** Persist an audited operator waiver inside the enclosing event append transaction. */
+  setOperatorResolution(
+    attemptId: Id,
+    resolution: SpendReservation["operatorResolution"],
+  ): void {
+    const current = this.require(attemptId).reservation;
+    if (current.state !== "uncertain" || resolution === undefined) {
+      throw new SpendReservationError("spend_reservation_transition_invalid");
+    }
+    const parsed = SpendReservationOperatorResolutionSchema.safeParse(resolution);
+    if (!parsed.success) {
+      throw new SpendReservationError("spend_reservation_invalid");
+    }
+    this.db
+      .prepare("UPDATE spend_reservations SET operator_resolution_json = ? WHERE attempt_id = ?")
+      .run(JSON.stringify(parsed.data), attemptId);
   }
 
   /** Validate and apply the settlement update from within the response append transaction. */
@@ -276,33 +323,38 @@ export class SqliteSpendReservations {
         row.settlement_json === null
           ? undefined
           : parseJson(SpendReservationSettlementSchema, row.settlement_json);
+      const operatorResolution =
+        row.operator_resolution_json === null
+          ? undefined
+          : parseJson(SpendReservationOperatorResolutionSchema, row.operator_resolution_json);
+      if (
+        !attemptId.success ||
+        !runId.success ||
+        !pricingRevision.success ||
+        !state.success ||
+        (row.uncertainty_code !== null && uncertaintyCode?.success !== true)
+      ) {
+        throw new StoreUnavailableError();
+      }
+      const parsed = SpendReservationSchema.safeParse({
+        attemptId: attemptId.data,
+        runId: runId.data,
+        estimatedMicros: row.estimated_micros,
+        pricingRevision: pricingRevision.data,
+        state: state.data,
+        reservedAt: row.reserved_at,
+        quotaPeriods,
+        ...(uncertaintyCode?.success === true ? { uncertaintyCode: uncertaintyCode.data } : {}),
+        ...(settlement === undefined ? {} : { settlement }),
+        ...(operatorResolution === undefined ? {} : { operatorResolution }),
+      });
+      if (!parsed.success) {
+        throw new StoreUnavailableError();
+      }
+      return parsed.data;
     } catch {
       throw new StoreUnavailableError();
     }
-    if (
-      !attemptId.success ||
-      !runId.success ||
-      !pricingRevision.success ||
-      !state.success ||
-      (row.uncertainty_code !== null && uncertaintyCode?.success !== true)
-    ) {
-      throw new StoreUnavailableError();
-    }
-    const parsed = SpendReservationSchema.safeParse({
-      attemptId: attemptId.data,
-      runId: runId.data,
-      estimatedMicros: row.estimated_micros,
-      pricingRevision: pricingRevision.data,
-      state: state.data,
-      reservedAt: row.reserved_at,
-      quotaPeriods,
-      ...(uncertaintyCode?.success === true ? { uncertaintyCode: uncertaintyCode.data } : {}),
-      ...(settlement === undefined ? {} : { settlement }),
-    });
-    if (!parsed.success) {
-      throw new StoreUnavailableError();
-    }
-    return parsed.data;
   }
 }
 
