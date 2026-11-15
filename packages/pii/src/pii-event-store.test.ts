@@ -11,8 +11,11 @@ import {
   type Event,
   type JsonValue,
   type NewEvent,
+  type SpendReservationInput,
+  type SpendReservationSettlement,
   type Snapshot,
 } from "@rovinos/schemas";
+import { InMemorySpendReservationStore } from "@rovinos/store";
 import {
   AuditingVaultResolver,
   InMemoryVault,
@@ -66,6 +69,54 @@ function checkpointWritten(): NewEvent {
     checkpointId: snapshotId,
     atSeq: 1,
     traceparent: `00-${traceId}-${spanId}-01`,
+  };
+}
+
+function spendInput(attemptId: Id): SpendReservationInput {
+  return {
+    runId,
+    attemptId,
+    quotaPeriods: [
+      { quotaId: Code.parse("team"), period: "day", periodStart: 0, limitMicros: 1_000 },
+    ],
+    estimatedMicros: 100,
+    pricingRevision: Code.parse("prices.v1"),
+  };
+}
+
+function spendRequest(attemptId: Id, message: string): NewEvent {
+  return {
+    ...common(),
+    type: "model_request",
+    v: 3,
+    requestId: attemptId,
+    provider: "sample",
+    model: "model-a",
+    messages: [{ role: "user", parts: [{ type: "text", text: message }] }],
+    advertisedToolIds: [],
+    requestHash: "a".repeat(64),
+    requestParametersHash: "b".repeat(64),
+  };
+}
+
+function spendResponse(attemptId: Id, message: string): NewEvent {
+  return {
+    ...common(),
+    type: "model_response",
+    v: 2,
+    requestId: attemptId,
+    provider: "sample",
+    model: "model-a",
+    inputTokens: 2,
+    outputTokens: 3,
+    cost: { version: 1, state: "known", amountMicros: 5 },
+    finishReason: "stop",
+    latencyMs: 1,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    content: [{ type: "text", text: message }],
+    providerBlobs: null,
   };
 }
 
@@ -249,6 +300,78 @@ function createInnerStore(): EventStoreLike {
 }
 
 describe("PiiEventStore", () => {
+  it("sanitizes requests and responses around transactional spend reservations", async () => {
+    const inner = new InMemorySpendReservationStore();
+    const store = new PiiEventStore(inner, createTokenizer());
+    const attemptId = Id.parse(ids.next());
+    const requestCanary = canary("reserved-request");
+    const responseCanary = canary("settled-response");
+
+    await store.append(runId, [runCreated()], 0);
+    await store.reserveSpend(spendInput(attemptId), spendRequest(attemptId, requestCanary), 1);
+    await expect(inner.readUsageLedger("team", "day", [0])).resolves.toEqual([]);
+    await store.markSpendDispatching(attemptId);
+    const settlement: SpendReservationSettlement = {
+      runId,
+      attemptId,
+      cost: { version: 1, state: "known", amountMicros: 5 },
+      responseHash: "c".repeat(64),
+    };
+    await store.settleSpend(settlement, spendResponse(attemptId, responseCanary), 2, {
+      usageUpdates: [
+        {
+          quotaId: Code.parse("team"),
+          period: "day",
+          periodStart: 0,
+          costMicros: 5,
+          runsStarted: 0,
+        },
+      ],
+    });
+
+    const events = await collect(store.read(runId));
+    expect(events).toHaveLength(3);
+    expect(events[1]).toMatchObject({
+      type: "model_request",
+      messages: [{ parts: [{ text: "<EMAIL_1>" }] }],
+    });
+    expect(events[2]).toMatchObject({
+      type: "model_response",
+      content: [{ text: "<EMAIL_2>" }],
+    });
+    expect(JSON.stringify(events)).not.toContain(requestCanary);
+    expect(JSON.stringify(events)).not.toContain(responseCanary);
+    await expect(store.readUsageLedger("team", "day", [0])).resolves.toMatchObject([
+      { costMicros: 5, unknownCostCount: 0 },
+    ]);
+  });
+
+  it("fails closed when the wrapped store lacks reservation operations", async () => {
+    const store = new PiiEventStore(createInnerStore(), createTokenizer());
+    const attemptId = Id.parse(ids.next());
+    const settlement: SpendReservationSettlement = {
+      runId,
+      attemptId,
+      cost: { version: 1, state: "known", amountMicros: 5 },
+      responseHash: "c".repeat(64),
+    };
+
+    await expect(
+      store.reserveSpend(spendInput(attemptId), spendRequest(attemptId, "synthetic"), 0),
+    ).rejects.toBeInstanceOf(PiiStorageFailedError);
+    expect(() => store.markSpendDispatching(attemptId)).toThrow(PiiStorageFailedError);
+    expect(() => store.releaseSpend(attemptId)).toThrow(PiiStorageFailedError);
+    await expect(
+      store.settleSpend(settlement, spendResponse(attemptId, "synthetic"), 0, {
+        usageUpdates: [],
+      }),
+    ).rejects.toBeInstanceOf(PiiStorageFailedError);
+    expect(() => store.markSpendUncertain(attemptId, "spend_reservation_uncertain")).toThrow(
+      PiiStorageFailedError,
+    );
+    await expect(store.head(runId)).resolves.toBe(0);
+  });
+
   it("forwards hashed idempotency claims without treating them as event content", async () => {
     const inner = createInnerStore();
     const store = new PiiEventStore(inner, createTokenizer());
