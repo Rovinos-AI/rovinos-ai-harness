@@ -315,6 +315,8 @@ function createReservationInnerStore(): EventStoreLike {
       const { nextSeq } = await base.append(input.runId, [modelRequest], expectedSeq);
       const reservation: SpendReservation = {
         ...input,
+        estimatedMicros: input.estimatedMicros ?? 100,
+        pricingRevision: input.pricingRevision ?? Code.parse("prices.v1"),
         state: "reserved",
         reservedAt: 10,
       };

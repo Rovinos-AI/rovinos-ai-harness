@@ -224,7 +224,7 @@ function reservationInput(attemptId: Id): SpendReservationInput {
   };
 }
 
-function modelRequest(attemptId: Id): Extract<EventPartial, { type: "model_request" }> {
+function modelRequest(attemptId: Id): Parameters<RunRecorder["reserveSpend"]>[1] {
   return {
     type: "model_request",
     v: 3,
@@ -238,7 +238,7 @@ function modelRequest(attemptId: Id): Extract<EventPartial, { type: "model_reque
   };
 }
 
-function modelResponse(attemptId: Id): EventPartial {
+function modelResponse(attemptId: Id): Parameters<RunRecorder["settleSpend"]>[1] {
   return {
     type: "model_response",
     v: 2,
