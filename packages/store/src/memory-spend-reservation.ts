@@ -160,10 +160,10 @@ export class InMemorySpendReservationStore
         expectedSeq,
         options,
       );
-      const { uncertaintyCode: _uncertaintyCode, ...settledReservation } = reservation;
       const settled = SpendReservationSchema.parse({
-        ...settledReservation,
+        ...reservation,
         state: "settled",
+        uncertaintyCode: undefined,
         settlement: parsedSettlement.data,
       });
       this.reservations.set(settled.attemptId, settled);
@@ -221,9 +221,6 @@ export class InMemorySpendReservationStore
     expectedSeq: number,
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
     return this.exclusive(async () => {
-      if (event.type !== "spend_reservation_resolved" || event.decision !== "waive") {
-        throw new SpendReservationError("spend_reservation_invalid");
-      }
       const resolution = SpendReservationOperatorResolutionSchema.safeParse({
         decidedBy: event.decidedBy,
         reason: event.reason,

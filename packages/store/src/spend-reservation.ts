@@ -4,7 +4,6 @@ import type {
   SpendReservation,
   SpendReservationErrorCodeSchema,
   SpendReservationInput,
-  SpendReservationOperatorResolution,
   SpendReservationSettlement,
 } from "@rovinos/schemas";
 import type { z } from "zod";
@@ -78,20 +77,19 @@ export function isSpendReservationStore(store: EventStore): store is SpendReserv
   if ("supportsSpendReservations" in store && store.supportsSpendReservations === false) {
     return false;
   }
-  return (
-    "reserveSpend" in store &&
-    typeof store.reserveSpend === "function" &&
-    "markSpendDispatching" in store &&
-    typeof store.markSpendDispatching === "function" &&
-    "releaseSpend" in store &&
-    typeof store.releaseSpend === "function" &&
-    "settleSpend" in store &&
-    typeof store.settleSpend === "function" &&
-    "markSpendUncertain" in store &&
-    typeof store.markSpendUncertain === "function" &&
-    "recoverSpendReservations" in store &&
-    typeof store.recoverSpendReservations === "function" &&
-    "resolveUncertainSpend" in store &&
-    typeof store.resolveUncertainSpend === "function"
-  );
+  const methods = [
+    "reserveSpend",
+    "markSpendDispatching",
+    "releaseSpend",
+    "settleSpend",
+    "markSpendUncertain",
+    "recoverSpendReservations",
+    "resolveUncertainSpend",
+  ] as const;
+  for (const method of methods) {
+    if (!(method in store) || typeof Reflect.get(store, method) !== "function") {
+      return false;
+    }
+  }
+  return true;
 }

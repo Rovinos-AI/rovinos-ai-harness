@@ -2,7 +2,6 @@
 import { isDeepStrictEqual } from "node:util";
 import {
   SpendReservationQuotaSchema,
-  SpendReservationOperatorResolutionSchema,
   SpendReservationSchema,
   type Id,
   type NewEvent,

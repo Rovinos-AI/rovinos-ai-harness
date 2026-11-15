@@ -47,6 +47,29 @@ interface UsageRow {
 
 const quotasSchema = z.array(SpendReservationQuotaSchema);
 
+function parseOptionalReservationFields(
+  row: ReservationRow,
+): Pick<SpendReservation, "uncertaintyCode" | "settlement" | "operatorResolution"> {
+  const uncertaintyCode =
+    row.uncertainty_code === null ? undefined : Code.safeParse(row.uncertainty_code);
+  if (row.uncertainty_code !== null && uncertaintyCode?.success !== true) {
+    throw new StoreUnavailableError();
+  }
+  const settlement =
+    row.settlement_json === null
+      ? undefined
+      : parseJson(SpendReservationSettlementSchema, row.settlement_json);
+  const operatorResolution =
+    row.operator_resolution_json === null
+      ? undefined
+      : parseJson(SpendReservationOperatorResolutionSchema, row.operator_resolution_json);
+  return {
+    ...(uncertaintyCode?.success === true ? { uncertaintyCode: uncertaintyCode.data } : {}),
+    ...(settlement === undefined ? {} : { settlement }),
+    ...(operatorResolution === undefined ? {} : { operatorResolution }),
+  };
+}
+
 /** Persistent state transitions and quota checks for one SQLite event store. */
 export class SqliteSpendReservations {
   private readonly getReservation: Database.Statement<[Id], ReservationRow>;
@@ -301,10 +324,7 @@ export class SqliteSpendReservations {
     const runId = Id.safeParse(row.run_id);
     const pricingRevision = Code.safeParse(row.pricing_revision);
     const state = SpendReservationSchema.shape.state.safeParse(row.state);
-    const uncertaintyCode =
-      row.uncertainty_code === null ? undefined : Code.safeParse(row.uncertainty_code);
     let quotaPeriods: z.infer<typeof quotasSchema>;
-    let settlement: SpendReservationSettlement | undefined;
     try {
       quotaPeriods = quotasSchema.parse(
         this.getQuotas.all(Id.parse(row.attempt_id)).map((quota) => ({
@@ -314,21 +334,8 @@ export class SqliteSpendReservations {
           limitMicros: quota.limit_micros,
         })),
       );
-      settlement =
-        row.settlement_json === null
-          ? undefined
-          : parseJson(SpendReservationSettlementSchema, row.settlement_json);
-      const operatorResolution =
-        row.operator_resolution_json === null
-          ? undefined
-          : parseJson(SpendReservationOperatorResolutionSchema, row.operator_resolution_json);
-      if (
-        !attemptId.success ||
-        !runId.success ||
-        !pricingRevision.success ||
-        !state.success ||
-        (row.uncertainty_code !== null && uncertaintyCode?.success !== true)
-      ) {
+      const optionalFields = parseOptionalReservationFields(row);
+      if (!attemptId.success || !runId.success || !pricingRevision.success || !state.success) {
         throw new StoreUnavailableError();
       }
       const parsed = SpendReservationSchema.safeParse({
@@ -339,9 +346,7 @@ export class SqliteSpendReservations {
         state: state.data,
         reservedAt: row.reserved_at,
         quotaPeriods,
-        ...(uncertaintyCode?.success === true ? { uncertaintyCode: uncertaintyCode.data } : {}),
-        ...(settlement === undefined ? {} : { settlement }),
-        ...(operatorResolution === undefined ? {} : { operatorResolution }),
+        ...optionalFields,
       });
       if (!parsed.success) {
         throw new StoreUnavailableError();

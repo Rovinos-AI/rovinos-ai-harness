@@ -1,146 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  type Id,
-  type NewEvent,
-  type SpendReservationInput,
-  type SpendReservationSettlement,
-} from "@rovinos/schemas";
+import { Code } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import type { SpendReservationStore } from "../spend-reservation.js";
-import { createEventBuilders } from "./testing.js";
+import {
+  basePeriodStart,
+  baseQuotaId,
+  builders,
+  input,
+  modelRequest,
+  modelResponse,
+  quota,
+  seedRun,
+  settlement,
+  usageUpdates,
+  withStore,
+} from "./spend-reservation-conformance-helpers.js";
+import { runSpendReservationRecoveryConformance } from "./spend-reservation-recovery-conformance.js";
 
 /** Factory for a fresh reservation-capable store and its resource cleanup. */
 export type SpendReservationStoreFactory = () => Promise<{
   store: SpendReservationStore;
   cleanup: () => Promise<void>;
 }>;
-
-const builders = createEventBuilders();
-const basePeriodStart = Date.UTC(2026, 10, 12);
-const baseQuotaId = Code.parse("quota.daily");
-
-function quota(
-  quotaId: Code = baseQuotaId,
-  limitMicros = 1_000,
-  periodStartValue = basePeriodStart,
-): SpendReservationInput["quotaPeriods"][number] {
-  return { quotaId, period: "day", periodStart: periodStartValue, limitMicros };
-}
-
-function input(
-  runId: Id,
-  attemptId: Id,
-  options: {
-    quotaPeriods?: SpendReservationInput["quotaPeriods"];
-    estimatedMicros?: number;
-    pricingRevision?: Code;
-  } = {},
-): SpendReservationInput {
-  return {
-    runId,
-    attemptId,
-    quotaPeriods: options.quotaPeriods ?? [quota()],
-    ...(options.estimatedMicros === undefined ? {} : { estimatedMicros: options.estimatedMicros }),
-    ...(options.pricingRevision === undefined ? {} : { pricingRevision: options.pricingRevision }),
-  };
-}
-
-function modelRequest(runId: Id, attemptId: Id): Extract<NewEvent, { type: "model_request" }> {
-  return { ...builders.modelRequest(runId), requestId: attemptId };
-}
-
-function modelResponse(
-  runId: Id,
-  attemptId: Id,
-  cost: Extract<SpendReservationSettlement["cost"], { state: "known" | "estimated" | "partial" }>,
-): Extract<NewEvent, { type: "model_response" }> {
-  return {
-    runId,
-    ts: 2,
-    v: 2,
-    traceId: "a".repeat(32),
-    spanId: "b".repeat(16),
-    segmentId: runId,
-    type: "model_response",
-    requestId: attemptId,
-    provider: "test",
-    model: "test",
-    inputTokens: 1,
-    outputTokens: 1,
-    cost,
-    finishReason: "stop",
-    latencyMs: 1,
-    schemaValid: true,
-    repairAttempts: 0,
-    fallbackDepth: 0,
-    content: [{ type: "text", text: "synthetic response" }],
-    providerBlobs: null,
-  };
-}
-
-function settlement(
-  runId: Id,
-  attemptId: Id,
-  amountMicros: number,
-  responseHash = "b".repeat(64),
-): SpendReservationSettlement {
-  return {
-    runId,
-    attemptId,
-    cost: { version: 1, state: "known", amountMicros },
-    responseHash,
-  };
-}
-
-function resolutionEvent(
-  runId: Id,
-  attemptId: Id,
-): Extract<NewEvent, { type: "spend_reservation_resolved" }> {
-  const envelope = modelRequest(runId, attemptId);
-  return {
-    runId,
-    ts: 3,
-    v: 1,
-    traceId: envelope.traceId,
-    spanId: envelope.spanId,
-    segmentId: envelope.segmentId,
-    type: "spend_reservation_resolved",
-    attemptId,
-    decision: "waive",
-    decidedBy: "cli.operator",
-    reason: "operator_reviewed",
-  };
-}
-
-function usageUpdates(quotaPeriods: SpendReservationInput["quotaPeriods"], amountMicros: number) {
-  return {
-    usageUpdates: quotaPeriods.map(({ quotaId, period, periodStart }) => ({
-      quotaId,
-      period,
-      periodStart,
-      costMicros: amountMicros,
-      runsStarted: 0,
-    })),
-  };
-}
-
-async function seedRun(store: SpendReservationStore, runId: Id): Promise<number> {
-  const { nextSeq } = await store.append(runId, [builders.runCreated(runId)], 0);
-  return nextSeq;
-}
-
-async function withStore<T>(
-  factory: SpendReservationStoreFactory,
-  run: (store: SpendReservationStore) => Promise<T>,
-): Promise<T> {
-  const { store, cleanup } = await factory();
-  try {
-    return await run(store);
-  } finally {
-    await cleanup();
-  }
-}
 
 /** Registers the backend-neutral behavioral requirements for strict spend reservations. */
 export function runSpendReservationConformance(
@@ -155,9 +36,8 @@ export function runSpendReservationConformance(
     registerMissingAndPartialUsage(factory);
     registerPricingRevision(factory);
     registerIntegerBoundaries(factory);
-    registerRecovery(factory);
-    registerOperatorResolution(factory);
   });
+  runSpendReservationRecoveryConformance(name, factory);
 }
 
 function registerConcurrentReservations(factory: SpendReservationStoreFactory): void {
@@ -441,109 +321,5 @@ function registerIntegerBoundaries(factory: SpendReservationStoreFactory): void 
           nextSeq,
         ),
       ).rejects.toMatchObject({ code: "spend_reservation_invalid" });
-    }));
-}
-
-function registerRecovery(factory: SpendReservationStoreFactory): void {
-  it("releases attempts whose dispatch has not begun and preserves dispatched uncertainty after lease expiry", () =>
-    withStore(factory, async (store) => {
-      const runId = builders.nextRunId();
-      const reservedId = builders.nextRunId();
-      const dispatchedId = builders.nextRunId();
-      const owner = builders.nextRunId();
-      const replacementOwner = builders.nextRunId();
-      let nextSeq = await seedRun(store, runId);
-      nextSeq = (
-        await store.reserveSpend(
-          input(runId, reservedId, {
-            estimatedMicros: 10,
-            pricingRevision: Code.parse("price.v1"),
-          }),
-          modelRequest(runId, reservedId),
-          nextSeq,
-        )
-      ).nextSeq;
-      nextSeq = (
-        await store.reserveSpend(
-          input(runId, dispatchedId, {
-            estimatedMicros: 20,
-            pricingRevision: Code.parse("price.v1"),
-          }),
-          modelRequest(runId, dispatchedId),
-          nextSeq,
-        )
-      ).nextSeq;
-      await store.markSpendDispatching(dispatchedId);
-      await expect(store.claimRunExecution(runId, owner, 10, 10)).resolves.toBe(true);
-      await expect(store.claimRunExecution(runId, replacementOwner, 20, 10)).resolves.toBe(true);
-
-      await expect(store.recoverSpendReservations(runId)).resolves.toMatchObject([
-        { attemptId: reservedId, state: "released" },
-        {
-          attemptId: dispatchedId,
-          state: "uncertain",
-          uncertaintyCode: "spend_reservation_worker_lease_expired",
-        },
-      ]);
-      await expect(store.releaseSpend(dispatchedId)).rejects.toMatchObject({
-        code: "spend_reservation_transition_invalid",
-      });
-
-      const lateSettlement = settlement(runId, dispatchedId, 25);
-      await expect(
-        store.settleSpend(
-          lateSettlement,
-          modelResponse(runId, dispatchedId, { version: 1, state: "known", amountMicros: 25 }),
-          nextSeq,
-          usageUpdates([quota()], 25),
-        ),
-      ).resolves.toMatchObject({ reservation: { state: "settled" } });
-      await expect(
-        store.readUsageLedger(baseQuotaId, "day", [basePeriodStart]),
-      ).resolves.toMatchObject([{ costMicros: 25 }]);
-    }));
-}
-
-function registerOperatorResolution(factory: SpendReservationStoreFactory): void {
-  it("records an operator waiver without treating it as usage or provider billing", () =>
-    withStore(factory, async (store) => {
-      const runId = builders.nextRunId();
-      const attemptId = builders.nextRunId();
-      const nextAttemptId = builders.nextRunId();
-      let nextSeq = await seedRun(store, runId);
-      nextSeq = (
-        await store.reserveSpend(
-          input(runId, attemptId, {
-            estimatedMicros: 100,
-            pricingRevision: Code.parse("price.v1"),
-          }),
-          modelRequest(runId, attemptId),
-          nextSeq,
-        )
-      ).nextSeq;
-      await store.markSpendDispatching(attemptId);
-      await store.markSpendUncertain(attemptId, "spend_reservation_worker_lease_expired");
-      const event = resolutionEvent(runId, attemptId);
-
-      const result = await store.resolveUncertainSpend(event, nextSeq);
-      expect(result.reservation).toMatchObject({
-        state: "uncertain",
-        operatorResolution: { decidedBy: "cli.operator", reason: "operator_reviewed" },
-      });
-      expect(result.nextSeq).toBe(nextSeq + 1);
-      await expect(store.resolveUncertainSpend(event, nextSeq)).resolves.toMatchObject(result);
-      await expect(store.readUsageLedger(baseQuotaId, "day", [basePeriodStart])).resolves.toEqual(
-        [],
-      );
-      await expect(
-        store.reserveSpend(
-          input(runId, nextAttemptId, {
-            estimatedMicros: 100,
-            pricingRevision: Code.parse("price.v1"),
-          }),
-          modelRequest(runId, nextAttemptId),
-          result.nextSeq,
-        ),
-      ).resolves.toMatchObject({ reservation: { state: "reserved" } });
     }));
 }

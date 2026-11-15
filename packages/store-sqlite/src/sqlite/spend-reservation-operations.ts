@@ -116,9 +116,6 @@ export class SqliteSpendReservationOperations {
     event: Extract<NewEvent, { type: "spend_reservation_resolved" }>,
     expectedSeq: number,
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
-    if (event.type !== "spend_reservation_resolved" || event.decision !== "waive") {
-      throw new SpendReservationError("spend_reservation_invalid");
-    }
     const resolution: SpendReservationOperatorResolution = {
       decidedBy: event.decidedBy,
       reason: event.reason,
@@ -144,6 +141,14 @@ export class SqliteSpendReservationOperations {
       throw new SpendReservationError("spend_reservation_transition_invalid");
     }
 
+    return this.appendResolution(event, expectedSeq, parsedResolution.data);
+  }
+
+  private async appendResolution(
+    event: Extract<NewEvent, { type: "spend_reservation_resolved" }>,
+    expectedSeq: number,
+    resolution: SpendReservationOperatorResolution,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
     const encoded = await encodeEvents(this.options.codec, event.runId, [event], expectedSeq);
     try {
       const { nextSeq } = this.options.append({
@@ -161,13 +166,13 @@ export class SqliteSpendReservationOperations {
           }
           if (
             latest.operatorResolution !== undefined &&
-            !sameOperatorResolution(latest.operatorResolution, parsedResolution.data)
+            !sameOperatorResolution(latest.operatorResolution, resolution)
           ) {
             throw new SpendReservationError("spend_reservation_conflict");
           }
         },
         afterAppend: () => {
-          this.options.reservations.setOperatorResolution(event.attemptId, parsedResolution.data);
+          this.options.reservations.setOperatorResolution(event.attemptId, resolution);
         },
       });
       const reservation = this.options.reservations.read(event.attemptId)?.reservation;
@@ -180,7 +185,7 @@ export class SqliteSpendReservationOperations {
       if (
         latest?.runId === event.runId &&
         latest.operatorResolution !== undefined &&
-        sameOperatorResolution(latest.operatorResolution, parsedResolution.data)
+        sameOperatorResolution(latest.operatorResolution, resolution)
       ) {
         return { reservation: latest, nextSeq: await this.options.head(event.runId) };
       }

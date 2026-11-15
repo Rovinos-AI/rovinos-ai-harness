@@ -195,10 +195,10 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
           "UPDATE spend_reservations SET state = 'settled', uncertainty_code = NULL, settlement = $2::JSONB WHERE attempt_id = $1",
           [current.attemptId, JSON.stringify(parsedSettlement.data)],
         );
-        const { uncertaintyCode: _uncertaintyCode, ...settledReservation } = current;
         reservation = SpendReservationSchema.parse({
-          ...settledReservation,
+          ...current,
           state: "settled",
+          uncertaintyCode: undefined,
           settlement: parsedSettlement.data,
         });
         return undefined;
@@ -262,7 +262,7 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
       const recovered: SpendReservation[] = [];
       for (const attemptId of attemptIds) {
         const reservation = await this.readReservation(client, attemptId, true);
-        if (reservation === undefined || reservation.runId !== runId) {
+        if (reservation?.runId !== runId) {
           throw new StoreUnavailableError();
         }
         if (reservation.state === "reserved") {
@@ -294,9 +294,6 @@ export class PostgresSpendReservation extends PostgresSpendReservationCommon {
     event: Extract<NewEvent, { type: "spend_reservation_resolved" }>,
     expectedSeq: number,
   ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
-    if (event.decision !== "waive") {
-      throw new SpendReservationError("spend_reservation_invalid");
-    }
     const parsedResolution = SpendReservationOperatorResolutionSchema.safeParse({
       decidedBy: event.decidedBy,
       reason: event.reason,
