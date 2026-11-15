@@ -118,9 +118,6 @@ describe("model-step reservation helpers", () => {
 
     await markUncertain(recorder, attemptId, "spend_reservation_uncertain");
 
-    expect(markSpendUncertain).toHaveBeenCalledWith(
-      attemptId,
-      "spend_reservation_uncertain",
-    );
+    expect(markSpendUncertain).toHaveBeenCalledWith(attemptId, "spend_reservation_uncertain");
   });
 });

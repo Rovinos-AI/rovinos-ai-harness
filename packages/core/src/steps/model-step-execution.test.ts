@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, trace } from "@opentelemetry/api";
-import {
-  Code,
-  FakeClock,
-  Id,
-  SequentialIdGenerator,
-  type Event,
-} from "@rovinos/schemas";
-import {
-  InMemoryEventStore,
-  InMemorySpendReservationStore,
-  type EventStore,
-} from "@rovinos/store";
+import { Code, FakeClock, Id, SequentialIdGenerator, type Event } from "@rovinos/schemas";
+import { InMemoryEventStore, InMemorySpendReservationStore, type EventStore } from "@rovinos/store";
 import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ModelCompletion, ModelPort, ModelRequest } from "../ports.js";
@@ -192,9 +182,7 @@ describe("executeModelStep", () => {
         {
           runId,
           attemptId: Id.parse("00000000000000000000000099"),
-          quotaPeriods: [
-            { quotaId, period: "day", periodStart: 0, limitMicros: 1_000 },
-          ],
+          quotaPeriods: [{ quotaId, period: "day", periodStart: 0, limitMicros: 1_000 }],
           estimatedMicros: 1,
           pricingRevision: Code.parse("prices.v1"),
         },
@@ -223,7 +211,9 @@ describe("executeModelStep", () => {
     const store = new InMemorySpendReservationStore();
     const recorder = await setup(store);
     const markUncertain = vi.spyOn(store, "markSpendUncertain");
-    const settle = vi.spyOn(recorder, "settleSpend").mockRejectedValue(new Error("storage failure"));
+    const settle = vi
+      .spyOn(recorder, "settleSpend")
+      .mockRejectedValue(new Error("storage failure"));
     let requestId: Id | undefined;
     const model: ModelPort = {
       complete: vi.fn<ModelPort["complete"]>((request: ModelRequest) => {
@@ -249,7 +239,9 @@ describe("executeModelStep", () => {
     const complete = vi.fn<ModelPort["complete"]>().mockResolvedValue(completion());
     const model: ModelPort = { complete };
 
-    await expect(executeModelStep(options(recorder, model, true, controller.signal))).rejects.toThrow();
+    await expect(
+      executeModelStep(options(recorder, model, true, controller.signal)),
+    ).rejects.toThrow();
 
     expect(complete).not.toHaveBeenCalled();
     expect((await readEvents(store)).map(({ type }) => type)).toEqual([

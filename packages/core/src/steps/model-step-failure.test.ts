@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, trace, type Span } from "@opentelemetry/api";
-import {
-  Code,
-  FakeClock,
-  Id,
-  SequentialIdGenerator,
-  type Event,
-} from "@rovinos/schemas";
-import {
-  InMemoryEventStore,
-  InMemorySpendReservationStore,
-  type EventStore,
-} from "@rovinos/store";
+import { Code, FakeClock, Id, SequentialIdGenerator, type Event } from "@rovinos/schemas";
+import { InMemoryEventStore, InMemorySpendReservationStore, type EventStore } from "@rovinos/store";
 import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -186,9 +176,7 @@ describe("recordModelFailure", () => {
         {
           runId,
           attemptId: requestId,
-          quotaPeriods: [
-            { quotaId, period: "day", periodStart: 0, limitMicros: 1_000 },
-          ],
+          quotaPeriods: [{ quotaId, period: "day", periodStart: 0, limitMicros: 1_000 }],
           estimatedMicros: 100,
           pricingRevision: Code.parse("prices.v1"),
         },
@@ -242,9 +230,7 @@ describe("recordModelFailure", () => {
         {
           runId,
           attemptId: requestId,
-          quotaPeriods: [
-            { quotaId, period: "day", periodStart: 0, limitMicros: 1_000 },
-          ],
+          quotaPeriods: [{ quotaId, period: "day", periodStart: 0, limitMicros: 1_000 }],
           estimatedMicros: 100,
           pricingRevision: Code.parse("prices.v1"),
         },

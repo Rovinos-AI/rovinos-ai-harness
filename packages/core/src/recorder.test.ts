@@ -224,9 +224,7 @@ function reservationInput(attemptId: Id): SpendReservationInput {
   };
 }
 
-function modelRequest(
-  attemptId: Id,
-): Extract<EventPartial, { type: "model_request" }> {
+function modelRequest(attemptId: Id): Extract<EventPartial, { type: "model_request" }> {
   return {
     type: "model_request",
     v: 3,
@@ -312,7 +310,10 @@ describe("RunRecorder", () => {
 
     await recorder.withStepSpan(RUN_SPAN, {}, async () => {
       await recorder.record(runCreated());
-      const request = await recorder.reserveSpend(reservationInput(firstAttempt), modelRequest(firstAttempt));
+      const request = await recorder.reserveSpend(
+        reservationInput(firstAttempt),
+        modelRequest(firstAttempt),
+      );
       expect(request.seq).toBe(1);
       await recorder.markSpendDispatching(firstAttempt);
       const settlement: SpendReservationSettlement = {
@@ -335,7 +336,10 @@ describe("RunRecorder", () => {
       await recorder.reserveSpend(reservationInput(releasedAttempt), modelRequest(releasedAttempt));
       await recorder.releaseSpend(releasedAttempt);
 
-      await recorder.reserveSpend(reservationInput(uncertainAttempt), modelRequest(uncertainAttempt));
+      await recorder.reserveSpend(
+        reservationInput(uncertainAttempt),
+        modelRequest(uncertainAttempt),
+      );
       await recorder.markSpendDispatching(uncertainAttempt);
       await recorder.markSpendUncertain(uncertainAttempt, "spend_reservation_uncertain");
       return response;
@@ -359,10 +363,7 @@ describe("RunRecorder", () => {
 
     await recorder.withStepSpan(RUN_SPAN, {}, async () => {
       await expect(
-        recorder.reserveSpend(
-          reservationInput(attemptId),
-          modelRequest(attemptId),
-        ),
+        recorder.reserveSpend(reservationInput(attemptId), modelRequest(attemptId)),
       ).rejects.toBeInstanceOf(SpendReservationError);
       await expect(recorder.markSpendDispatching(attemptId)).rejects.toMatchObject({
         code: "spend_reservation_storage_unavailable",
@@ -388,10 +389,7 @@ describe("RunRecorder", () => {
 
     await reservationRecorder.withStepSpan(RUN_SPAN, {}, async () => {
       await expect(
-        reservationRecorder.reserveSpend(
-          reservationInput(attemptId),
-          modelRequest(attemptId),
-        ),
+        reservationRecorder.reserveSpend(reservationInput(attemptId), modelRequest(attemptId)),
       ).rejects.toBeInstanceOf(LeaseLostError);
       await expect(reservationRecorder.markSpendDispatching(attemptId)).rejects.toMatchObject({
         code: "lease_lost",
@@ -403,10 +401,7 @@ describe("RunRecorder", () => {
     const settlementRecorder = makeRecorder(settlementStore);
     await settlementRecorder.withStepSpan(RUN_SPAN, {}, async () => {
       await settlementRecorder.record(runCreated());
-      await settlementRecorder.reserveSpend(
-        reservationInput(attemptId),
-        modelRequest(attemptId),
-      );
+      await settlementRecorder.reserveSpend(reservationInput(attemptId), modelRequest(attemptId));
       await settlementRecorder.markSpendDispatching(attemptId);
       vi.spyOn(settlementStore, "settleSpend").mockRejectedValue(new SeqConflictError(2, 3));
       await expect(

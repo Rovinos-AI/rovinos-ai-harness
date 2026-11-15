@@ -1,17 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  ModelsConfigSchema,
-  QuotasConfigSchema,
-  RunConfigSchema,
-} from "@rovinos/schemas";
+import { Code, ModelsConfigSchema, QuotasConfigSchema, RunConfigSchema } from "@rovinos/schemas";
 import type { EventStore, UsageLedgerPeriod, UsageLedgerRow } from "@rovinos/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  QuotaExceededError,
-  QuotaService,
-  strictSpendPricingFromConfig,
-} from "./quotas.js";
+import { QuotaExceededError, QuotaService, strictSpendPricingFromConfig } from "./quotas.js";
 
 const now = Date.UTC(2026, 9, 20, 14, 30);
 const clock = { now: () => now };
@@ -156,73 +147,69 @@ describe("QuotaService", () => {
   });
 
   it("reports unknown cost and builds strict reservation periods from configured pricing", async () => {
-      const unknownCost = storeWith([
+    const unknownCost = storeWith([
+      {
+        quotaId: "team",
+        period: "day",
+        periodStart: Date.UTC(2026, 9, 20),
+        costMicros: 0,
+        unknownCostCount: 1,
+        runsStarted: 0,
+      },
+    ]);
+    await expect(
+      new QuotaService(dailyAndHourly, unknownCost.store, clock).checkBeforeModelCall(identity),
+    ).resolves.toMatchObject({ code: "quota_cost_unknown" });
+
+    const models = ModelsConfigSchema.parse({
+      pricingRevision: "prices.v1",
+      pricing: {
+        "sample/model-a": {
+          inputMicrosPerMTok: 10,
+          outputMicrosPerMTok: 20,
+          maxInputTokens: 100,
+          maxOutputTokens: 10,
+        },
+      },
+      routing: {
+        default: [{ provider: "sample", model: "model-a" }],
+        roles: { writer: [{ provider: "sample", model: "model-a" }] },
+        fallbackOn: [],
+      },
+    });
+    const run = RunConfigSchema.parse({ strictSpendReservations: true });
+    const pricing = strictSpendPricingFromConfig({ run, models });
+    expect(pricing).toMatchObject({
+      pricingRevision: "prices.v1",
+      pricing: models.pricing,
+      routing: models.routing,
+    });
+    expect(
+      strictSpendPricingFromConfig({ run: RunConfigSchema.parse({}), models }),
+    ).toBeUndefined();
+
+    const service = new QuotaService(dailyAndHourly, unknownCost.store, clock, pricing);
+    expect(service.strictSpendOptions(identity, Code.parse("writer"))).toMatchObject({
+      modelRef: { provider: "sample", model: "model-a" },
+      pricingRevision: "prices.v1",
+      quotaPeriods: [
         {
           quotaId: "team",
           period: "day",
           periodStart: Date.UTC(2026, 9, 20),
-          costMicros: 0,
-          unknownCostCount: 1,
-          runsStarted: 0,
+          limitMicros: 10,
         },
-      ]);
-      await expect(
-        new QuotaService(dailyAndHourly, unknownCost.store, clock).checkBeforeModelCall(identity),
-      ).resolves.toMatchObject({ code: "quota_cost_unknown" });
-
-      const models = ModelsConfigSchema.parse({
-        pricingRevision: "prices.v1",
-        pricing: {
-          "sample/model-a": {
-            inputMicrosPerMTok: 10,
-            outputMicrosPerMTok: 20,
-            maxInputTokens: 100,
-            maxOutputTokens: 10,
-          },
+        {
+          quotaId: "team",
+          period: "month",
+          periodStart: Date.UTC(2026, 9, 1),
+          limitMicros: 20,
         },
-        routing: {
-          default: [{ provider: "sample", model: "model-a" }],
-          roles: { writer: [{ provider: "sample", model: "model-a" }] },
-          fallbackOn: [],
-        },
-      });
-      const run = RunConfigSchema.parse({ strictSpendReservations: true });
-      const pricing = strictSpendPricingFromConfig({ run, models });
-      expect(pricing).toMatchObject({
-        pricingRevision: "prices.v1",
-        pricing: models.pricing,
-        routing: models.routing,
-      });
-      expect(
-        strictSpendPricingFromConfig({ run: RunConfigSchema.parse({}), models }),
-      ).toBeUndefined();
-
-      const service = new QuotaService(
-        dailyAndHourly,
-        unknownCost.store,
-        clock,
-        pricing,
-      );
-      expect(service.strictSpendOptions(identity, Code.parse("writer"))).toMatchObject({
-        modelRef: { provider: "sample", model: "model-a" },
-        pricingRevision: "prices.v1",
-        quotaPeriods: [
-          {
-            quotaId: "team",
-            period: "day",
-            periodStart: Date.UTC(2026, 9, 20),
-            limitMicros: 10,
-          },
-          {
-            quotaId: "team",
-            period: "month",
-            periodStart: Date.UTC(2026, 9, 1),
-            limitMicros: 20,
-          },
-        ],
-      });
-      expect(new QuotaService(dailyAndHourly, unknownCost.store, clock).strictSpendOptions(identity))
-        .toBeUndefined();
+      ],
+    });
+    expect(
+      new QuotaService(dailyAndHourly, unknownCost.store, clock).strictSpendOptions(identity),
+    ).toBeUndefined();
   });
 
   it("checks concurrency at claim time and counts only configured quota codes", () => {
