@@ -11,6 +11,7 @@ import type { EventStore, UsageAppendOptions } from "./types.js";
 
 /** Closed failure codes produced by the spend-reservation transaction port. */
 export type SpendReservationErrorCode = z.infer<typeof SpendReservationErrorCodeSchema>;
+type SpendReservationResolutionEvent = Extract<NewEvent, { type: "spend_reservation_resolved" }>;
 
 /** Transactional operations required by strict spend reservation backends. */
 export interface SpendReservationStore extends EventStore {
@@ -53,6 +54,22 @@ export interface SpendReservationStore extends EventStore {
     attemptId: SpendReservation["attemptId"],
     reason: SpendReservationErrorCode,
   ): Promise<SpendReservation>;
+
+  /**
+   * Recover reservations after this run's expired execution lease has been reclaimed.
+   * Reserved attempts are released because dispatch was never persisted; dispatching attempts
+   * remain exposed as uncertain.
+   */
+  recoverSpendReservations(runId: SpendReservation["runId"]): Promise<SpendReservation[]>;
+
+  /**
+   * Atomically record an operator's waiver in the run log and reservation.
+   * A waiver clears quota blocking but is not evidence that the provider did not bill.
+   */
+  resolveUncertainSpend(
+    event: SpendReservationResolutionEvent,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }>;
 }
 
 /** Return whether an event store exposes the complete transactional reservation contract. */
@@ -60,16 +77,19 @@ export function isSpendReservationStore(store: EventStore): store is SpendReserv
   if ("supportsSpendReservations" in store && store.supportsSpendReservations === false) {
     return false;
   }
-  return (
-    "reserveSpend" in store &&
-    typeof store.reserveSpend === "function" &&
-    "markSpendDispatching" in store &&
-    typeof store.markSpendDispatching === "function" &&
-    "releaseSpend" in store &&
-    typeof store.releaseSpend === "function" &&
-    "settleSpend" in store &&
-    typeof store.settleSpend === "function" &&
-    "markSpendUncertain" in store &&
-    typeof store.markSpendUncertain === "function"
-  );
+  const methods = [
+    "reserveSpend",
+    "markSpendDispatching",
+    "releaseSpend",
+    "settleSpend",
+    "markSpendUncertain",
+    "recoverSpendReservations",
+    "resolveUncertainSpend",
+  ] as const;
+  for (const method of methods) {
+    if (!(method in store) || typeof Reflect.get(store, method) !== "function") {
+      return false;
+    }
+  }
+  return true;
 }

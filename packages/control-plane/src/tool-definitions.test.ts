@@ -26,6 +26,7 @@ describe("control-plane tool definitions", () => {
       continue_run: "run",
       resume_run: "run",
       cancel_run: "run",
+      resolve_uncertain_spend: "admin",
     });
     expect(toolScope("future_tool")).toBe("run");
   });

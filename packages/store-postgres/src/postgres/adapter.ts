@@ -239,6 +239,20 @@ export class PostgresEventStore implements EventStore, SpendReservationStore, St
     return this.spendReservations.markSpendUncertain(...args);
   }
 
+  /** Recover durable reservations after reclaiming an expired run lease. */
+  recoverSpendReservations(
+    ...args: Parameters<SpendReservationStore["recoverSpendReservations"]>
+  ): ReturnType<SpendReservationStore["recoverSpendReservations"]> {
+    return this.spendReservations.recoverSpendReservations(...args);
+  }
+
+  /** Record an authorized operator resolution in the run log and reservation. */
+  resolveUncertainSpend(
+    ...args: Parameters<SpendReservationStore["resolveUncertainSpend"]>
+  ): ReturnType<SpendReservationStore["resolveUncertainSpend"]> {
+    return this.spendReservations.resolveUncertainSpend(...args);
+  }
+
   /** {@inheritDoc @rovinos/store!types.EventStore.readUsageLedger} */
   async readUsageLedger(
     quotaId: Parameters<EventStore["readUsageLedger"]>[0],

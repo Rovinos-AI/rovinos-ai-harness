@@ -35,6 +35,7 @@ import {
   startRunOutputSchema,
   runLifecycleInputSchema,
   answerInputInputSchema,
+  resolveUncertainSpendInputSchema,
 } from "./schemas.js";
 
 const readScopeTools: ReadonlySet<string> = new Set([
@@ -63,6 +64,7 @@ export function toolDefinitions(): Tool[] {
     ...inputToolDefinitions(),
     ...approvalToolDefinitions(),
     ...lifecycleToolDefinitions(),
+    ...spendReservationToolDefinitions(),
   ];
 }
 
@@ -195,6 +197,19 @@ function lifecycleToolDefinitions(): Tool[] {
   ];
 }
 
+function spendReservationToolDefinitions(): Tool[] {
+  return [
+    {
+      name: "resolve_uncertain_spend",
+      description:
+        "Waive quota blocking for an uncertain spend attempt after human review; this does not establish whether the provider billed.",
+      inputSchema: objectInputSchema(resolveUncertainSpendInputSchema),
+      outputSchema: z.toJSONSchema(decisionOutputSchema),
+      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+  ];
+}
+
 function runToolDefinitions(): Tool[] {
   return [
     {
@@ -241,6 +256,9 @@ export function toolScope(name: string): ControlPlaneAuthScope {
   }
   if (name === "harness.approvals.reveal") {
     return "reveal";
+  }
+  if (name === "resolve_uncertain_spend") {
+    return "admin";
   }
   return "run";
 }

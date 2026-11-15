@@ -41,6 +41,8 @@ function spendReservationErrorMessage(code: SpendReservationErrorCodeType): stri
       return "Transactional spend reservation storage is unavailable";
     case "spend_reservation_uncertain":
       return "Spend reservation remains uncertain";
+    case "spend_reservation_worker_lease_expired":
+      return "Spend reservation worker lease expired";
   }
 }
 

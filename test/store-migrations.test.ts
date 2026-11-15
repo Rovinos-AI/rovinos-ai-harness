@@ -183,6 +183,7 @@ describe("SQLite schema migrations", () => {
       "0011",
       "0012",
       "0013",
+      "0014",
     ]);
     const names = db
       .prepare<[], { name: string }>(
@@ -215,6 +216,9 @@ describe("SQLite schema migrations", () => {
         "spend_reservation_quotas",
         "spend_reservation_quotas_period_idx",
       ]),
+    );
+    expect(db.prepare("PRAGMA table_info(spend_reservations)").all()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "operator_resolution_json" })]),
     );
     expect(db.prepare("PRAGMA table_info(events)").all()).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "global_seq" })]),

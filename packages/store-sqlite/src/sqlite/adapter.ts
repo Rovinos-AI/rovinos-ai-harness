@@ -258,6 +258,10 @@ export class SqliteEventStore implements EventStore, SpendReservationStore, Stor
     this.spendReservationOperations.settleSpend(...args);
   markSpendUncertain: SpendReservationStore["markSpendUncertain"] = (...args) =>
     this.spendReservationOperations.markSpendUncertain(...args);
+  recoverSpendReservations: SpendReservationStore["recoverSpendReservations"] = (...args) =>
+    this.spendReservationOperations.recoverSpendReservations(...args);
+  resolveUncertainSpend: SpendReservationStore["resolveUncertainSpend"] = (...args) =>
+    this.spendReservationOperations.resolveUncertainSpend(...args);
 
   private writeAppend(options: {
     readonly runId: Id;

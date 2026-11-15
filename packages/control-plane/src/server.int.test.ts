@@ -186,6 +186,32 @@ describe("control-plane HTTP transport", () => {
     }
   });
 
+  it("requires admin scope for uncertain spend resolution", async () => {
+    const store = new InMemoryEventStore();
+    const runId = createEventBuilders().nextRunId();
+    const attemptId = createEventBuilders().nextRunId();
+    const server = await startControlPlaneHttp(store, 0, controlPlaneOptions({}, ["read"]));
+    const client = new Client({ name: "control-plane-spend-scope-test", version: "1.0.0" });
+    try {
+      await client.connect(createHttpTransport(server.endpoint));
+      const { tools } = await client.listTools();
+      expect(tools.map(({ name }) => name)).not.toContain("resolve_uncertain_spend");
+      await expect(
+        client.callTool({
+          name: "resolve_uncertain_spend",
+          arguments: { runId, attemptId, reason: "operator_reviewed" },
+        }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "control_plane_scope_required" }],
+      });
+    } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
   it("requires run scope for start_run and continue_run", async () => {
     const store = new InMemoryEventStore();
     const startRun = vi.fn(() =>
@@ -461,6 +487,7 @@ describe("control-plane HTTP transport", () => {
         "get_run",
         "list_pending_inputs",
         "list_runs",
+        "resolve_uncertain_spend",
         "resume_run",
         "review_approval",
         "review_input",

@@ -1,126 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  type Id,
-  type NewEvent,
-  type SpendReservationInput,
-  type SpendReservationSettlement,
-} from "@rovinos/schemas";
+import { Code } from "@rovinos/schemas";
 import { describe, expect, it } from "vitest";
 import type { SpendReservationStore } from "../spend-reservation.js";
-import { createEventBuilders } from "./testing.js";
+import {
+  basePeriodStart,
+  baseQuotaId,
+  builders,
+  input,
+  modelRequest,
+  modelResponse,
+  quota,
+  seedRun,
+  settlement,
+  usageUpdates,
+  withStore,
+} from "./spend-reservation-conformance-helpers.js";
+import { runSpendReservationRecoveryConformance } from "./spend-reservation-recovery-conformance.js";
 
 /** Factory for a fresh reservation-capable store and its resource cleanup. */
 export type SpendReservationStoreFactory = () => Promise<{
   store: SpendReservationStore;
   cleanup: () => Promise<void>;
 }>;
-
-const builders = createEventBuilders();
-const basePeriodStart = Date.UTC(2026, 10, 12);
-const baseQuotaId = Code.parse("quota.daily");
-
-function quota(
-  quotaId: Code = baseQuotaId,
-  limitMicros = 1_000,
-  periodStartValue = basePeriodStart,
-): SpendReservationInput["quotaPeriods"][number] {
-  return { quotaId, period: "day", periodStart: periodStartValue, limitMicros };
-}
-
-function input(
-  runId: Id,
-  attemptId: Id,
-  options: {
-    quotaPeriods?: SpendReservationInput["quotaPeriods"];
-    estimatedMicros?: number;
-    pricingRevision?: Code;
-  } = {},
-): SpendReservationInput {
-  return {
-    runId,
-    attemptId,
-    quotaPeriods: options.quotaPeriods ?? [quota()],
-    ...(options.estimatedMicros === undefined ? {} : { estimatedMicros: options.estimatedMicros }),
-    ...(options.pricingRevision === undefined ? {} : { pricingRevision: options.pricingRevision }),
-  };
-}
-
-function modelRequest(runId: Id, attemptId: Id): Extract<NewEvent, { type: "model_request" }> {
-  return { ...builders.modelRequest(runId), requestId: attemptId };
-}
-
-function modelResponse(
-  runId: Id,
-  attemptId: Id,
-  cost: Extract<SpendReservationSettlement["cost"], { state: "known" | "estimated" | "partial" }>,
-): Extract<NewEvent, { type: "model_response" }> {
-  return {
-    runId,
-    ts: 2,
-    v: 2,
-    traceId: "a".repeat(32),
-    spanId: "b".repeat(16),
-    segmentId: runId,
-    type: "model_response",
-    requestId: attemptId,
-    provider: "test",
-    model: "test",
-    inputTokens: 1,
-    outputTokens: 1,
-    cost,
-    finishReason: "stop",
-    latencyMs: 1,
-    schemaValid: true,
-    repairAttempts: 0,
-    fallbackDepth: 0,
-    content: [{ type: "text", text: "synthetic response" }],
-    providerBlobs: null,
-  };
-}
-
-function settlement(
-  runId: Id,
-  attemptId: Id,
-  amountMicros: number,
-  responseHash = "b".repeat(64),
-): SpendReservationSettlement {
-  return {
-    runId,
-    attemptId,
-    cost: { version: 1, state: "known", amountMicros },
-    responseHash,
-  };
-}
-
-function usageUpdates(quotaPeriods: SpendReservationInput["quotaPeriods"], amountMicros: number) {
-  return {
-    usageUpdates: quotaPeriods.map(({ quotaId, period, periodStart }) => ({
-      quotaId,
-      period,
-      periodStart,
-      costMicros: amountMicros,
-      runsStarted: 0,
-    })),
-  };
-}
-
-async function seedRun(store: SpendReservationStore, runId: Id): Promise<number> {
-  const { nextSeq } = await store.append(runId, [builders.runCreated(runId)], 0);
-  return nextSeq;
-}
-
-async function withStore<T>(
-  factory: SpendReservationStoreFactory,
-  run: (store: SpendReservationStore) => Promise<T>,
-): Promise<T> {
-  const { store, cleanup } = await factory();
-  try {
-    return await run(store);
-  } finally {
-    await cleanup();
-  }
-}
 
 /** Registers the backend-neutral behavioral requirements for strict spend reservations. */
 export function runSpendReservationConformance(
@@ -136,6 +37,7 @@ export function runSpendReservationConformance(
     registerPricingRevision(factory);
     registerIntegerBoundaries(factory);
   });
+  runSpendReservationRecoveryConformance(name, factory);
 }
 
 function registerConcurrentReservations(factory: SpendReservationStoreFactory): void {

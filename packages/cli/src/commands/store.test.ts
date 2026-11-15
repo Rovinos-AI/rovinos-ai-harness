@@ -146,6 +146,7 @@ describe("harness store migrate", () => {
         "0011",
         "0012",
         "0013",
+        "0014",
       ],
     });
     expect(existsSync(databasePath)).toBe(false);
@@ -170,6 +171,7 @@ describe("harness store migrate", () => {
         "0011",
         "0012",
         "0013",
+        "0014",
       ],
       pending: [],
     });
@@ -238,6 +240,7 @@ describe("harness store migrate", () => {
         "0012",
         "0013",
         "0014",
+        "0015",
       ],
     });
     expect(postgresState.queries).toEqual([

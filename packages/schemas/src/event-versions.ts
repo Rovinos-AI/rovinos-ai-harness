@@ -24,6 +24,7 @@ export const EVENT_SCHEMA_VERSIONS = {
   context_compacted: 2,
   pii_action: 1,
   budget_exceeded: 1,
+  spend_reservation_resolved: 1,
   subagent_spawned: 2,
   subagent_completed: 2,
 } satisfies Record<EventType, number>;
@@ -200,6 +201,7 @@ export const RawEventEnvelopeSchema = EventEnvelopeSchema.extend({
     "context_compacted",
     "pii_action",
     "budget_exceeded",
+    "spend_reservation_resolved",
     "subagent_spawned",
     "subagent_completed",
   ]),

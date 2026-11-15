@@ -26,6 +26,7 @@ import { registerAnswerInputTool } from "./tools/answer-input.js";
 import { registerGetInputTool } from "./tools/get-input.js";
 import { registerListPendingInputsTool } from "./tools/list-pending-inputs.js";
 import { registerReviewInputTool } from "./tools/review-input.js";
+import { registerResolveUncertainSpendTool } from "./tools/resolve-uncertain-spend.js";
 import { registerApprovalAppTools, ApprovalAppRevealRateLimiter } from "./tools/approvals-app.js";
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
@@ -107,6 +108,17 @@ export function createControlPlaneServer(
     supervisor,
     clientCapabilities,
   });
+  registerSpendResolutionTool(server, {
+    store,
+    options,
+    confirmationGate,
+    clientCapabilities,
+  });
+  registerToolListHandler(server);
+  return server;
+}
+
+function registerToolListHandler(server: McpServer): void {
   const definitions = toolDefinitions();
   server.server.setRequestHandler("tools/list", (_request, context) => {
     const capabilities = requestClientCapabilities(context, server);
@@ -117,7 +129,28 @@ export function createControlPlaneServer(
       ),
     };
   });
-  return server;
+}
+
+function registerSpendResolutionTool(
+  server: McpServer,
+  dependencies: {
+    readonly store: EventStore;
+    readonly options: ControlPlaneServerOptions;
+    readonly confirmationGate: ConfirmationGate;
+    readonly clientCapabilities: (
+      context: ServerContext,
+    ) => ConfirmationClientCapabilities | undefined;
+  },
+): void {
+  registerResolveUncertainSpendTool(server, {
+    store: dependencies.store,
+    confirmationGate: dependencies.confirmationGate,
+    clientCapabilities: dependencies.clientCapabilities,
+    now: () => dependencies.options.clock?.now() ?? Date.now(),
+    ...(dependencies.options.onAudit === undefined
+      ? {}
+      : { onAudit: dependencies.options.onAudit }),
+  });
 }
 
 function registerRunInspection(
