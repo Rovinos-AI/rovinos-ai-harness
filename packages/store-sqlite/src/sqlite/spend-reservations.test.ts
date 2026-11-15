@@ -67,6 +67,26 @@ function response(
   };
 }
 
+function resolution(
+  runId: Id,
+  attemptId: Id,
+  reason = "operator_reviewed",
+): Extract<NewEvent, { type: "spend_reservation_resolved" }> {
+  return {
+    runId,
+    ts: 3,
+    v: 1,
+    traceId: "a".repeat(32),
+    spanId: "b".repeat(16),
+    segmentId: runId,
+    type: "spend_reservation_resolved",
+    attemptId,
+    decision: "waive",
+    decidedBy: "cli.operator",
+    reason: Code.parse(reason),
+  };
+}
+
 function sqliteFactory(): SpendReservationStoreFactory {
   return () => {
     if (directory === undefined) {
@@ -90,6 +110,150 @@ afterAll(async () => {
 });
 
 runSpendReservationConformance("SqliteEventStore", sqliteFactory());
+
+it("persists operator resolutions across restart and rejects invalid resolution transitions", async () => {
+  if (directory === undefined) {
+    throw new Error("SQLite spend-reservation directory is not initialized");
+  }
+  const path = join(directory, "reservation-resolution.sqlite");
+  let store = new SqliteEventStore(path);
+  const runId = builders.nextRunId();
+  const wrongRunId = builders.nextRunId();
+  const attemptId = builders.nextRunId();
+  const reservedAttemptId = builders.nextRunId();
+  const missingAttemptId = builders.nextRunId();
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    await store.append(wrongRunId, [builders.runCreated(wrongRunId)], 0);
+    const uncertain = await store.reserveSpend(
+      reservationInput(runId, attemptId, 100),
+      request(runId, attemptId),
+      1,
+    );
+    const reserved = await store.reserveSpend(
+      reservationInput(runId, reservedAttemptId, 100),
+      request(runId, reservedAttemptId),
+      uncertain.nextSeq,
+    );
+    await store.markSpendDispatching(attemptId);
+    await store.markSpendUncertain(attemptId, "spend_reservation_worker_lease_expired");
+    const event = resolution(runId, attemptId);
+
+    await expect(
+      store.resolveUncertainSpend(resolution(runId, missingAttemptId), reserved.nextSeq),
+    ).rejects.toMatchObject({ code: "spend_reservation_not_found" });
+    await expect(
+      store.resolveUncertainSpend(resolution(wrongRunId, attemptId), 1),
+    ).rejects.toMatchObject({ code: "spend_reservation_conflict" });
+    await expect(
+      store.resolveUncertainSpend(resolution(runId, reservedAttemptId), reserved.nextSeq),
+    ).rejects.toMatchObject({ code: "spend_reservation_transition_invalid" });
+    await expect(store.resolveUncertainSpend(event, reserved.nextSeq)).resolves.toMatchObject({
+      reservation: {
+        state: "uncertain",
+        operatorResolution: { decidedBy: "cli.operator", reason: "operator_reviewed" },
+      },
+    });
+    await expect(
+      store.resolveUncertainSpend(resolution(runId, attemptId, "other_review"), reserved.nextSeq),
+    ).rejects.toMatchObject({ code: "spend_reservation_conflict" });
+
+    await store.close();
+    store = new SqliteEventStore(path);
+    await expect(store.resolveUncertainSpend(event, reserved.nextSeq)).resolves.toMatchObject({
+      reservation: { operatorResolution: { reason: "operator_reviewed" } },
+      nextSeq: reserved.nextSeq + 1,
+    });
+  } finally {
+    await store.close();
+  }
+});
+
+it("rejects a reservation whose persisted model request is missing or conflicts", async () => {
+  if (directory === undefined) {
+    throw new Error("SQLite spend-reservation directory is not initialized");
+  }
+  const path = join(directory, "reservation-request-integrity.sqlite");
+  const store = new SqliteEventStore(path);
+  const database = new Database(path);
+  const runId = builders.nextRunId();
+  const attemptId = builders.nextRunId();
+  const input = reservationInput(runId, attemptId, 100);
+  const originalRequest = request(runId, attemptId);
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    await store.reserveSpend(input, originalRequest, 1);
+    await expect(
+      store.reserveSpend(
+        input,
+        {
+          ...originalRequest,
+          messages: [{ role: "user", parts: [{ type: "text", text: "conflicting request" }] }],
+        },
+        1,
+      ),
+    ).rejects.toMatchObject({ code: "spend_reservation_conflict" });
+
+    database.prepare("DELETE FROM events WHERE run_id = ? AND seq = 1").run(runId);
+    await expect(store.reserveSpend(input, originalRequest, 1)).rejects.toMatchObject({
+      code: "spend_reservation_conflict",
+    });
+  } finally {
+    database.close();
+    await store.close();
+  }
+});
+
+it("returns the persisted reservation after a concurrent identical reserve", async () => {
+  if (directory === undefined) {
+    throw new Error("SQLite spend-reservation directory is not initialized");
+  }
+  const store = new SqliteEventStore(join(directory, "reservation-identical-race.sqlite"));
+  const runId = builders.nextRunId();
+  const attemptId = builders.nextRunId();
+  const input = reservationInput(runId, attemptId, 100);
+  const modelRequest = request(runId, attemptId);
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    const results = await Promise.all([
+      store.reserveSpend(input, modelRequest, 1),
+      store.reserveSpend(input, modelRequest, 1),
+    ]);
+    expect(results).toMatchObject([
+      { reservation: { state: "reserved" }, nextSeq: 2 },
+      { reservation: { state: "reserved" }, nextSeq: 2 },
+    ]);
+    await expect(store.head(runId)).resolves.toBe(2);
+  } finally {
+    await store.close();
+  }
+});
+
+it("fails closed when a persisted uncertainty code is invalid", async () => {
+  if (directory === undefined) {
+    throw new Error("SQLite spend-reservation directory is not initialized");
+  }
+  const path = join(directory, "reservation-invalid-uncertainty.sqlite");
+  const store = new SqliteEventStore(path);
+  const database = new Database(path);
+  const runId = builders.nextRunId();
+  const attemptId = builders.nextRunId();
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    await store.reserveSpend(reservationInput(runId, attemptId, 100), request(runId, attemptId), 1);
+    await store.markSpendDispatching(attemptId);
+    await store.markSpendUncertain(attemptId, "spend_reservation_worker_lease_expired");
+    database
+      .prepare("UPDATE spend_reservations SET uncertainty_code = ? WHERE attempt_id = ?")
+      .run("invalid code", attemptId);
+    await expect(
+      store.markSpendUncertain(attemptId, "spend_reservation_worker_lease_expired"),
+    ).rejects.toMatchObject({ code: "store_unavailable" });
+  } finally {
+    database.close();
+    await store.close();
+  }
+});
 
 it("serializes reservations from independent SQLite connections", async () => {
   if (directory === undefined) {
