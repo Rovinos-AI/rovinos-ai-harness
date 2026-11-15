@@ -13,8 +13,20 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { FakeClock, Id, type Event } from "@rovinos/schemas";
-import { InMemoryEventStore } from "@rovinos/store";
+import {
+  Code,
+  FakeClock,
+  Id,
+  type Event,
+  type SpendReservationInput,
+  type SpendReservationSettlement,
+} from "@rovinos/schemas";
+import {
+  InMemoryEventStore,
+  InMemorySpendReservationStore,
+  SeqConflictError,
+  SpendReservationError,
+} from "@rovinos/store";
 import { TripQueue } from "@rovinos/telemetry";
 import * as telemetry from "@rovinos/telemetry";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -200,6 +212,54 @@ function checkpointWritten(atSeq: number): EventPartial {
   };
 }
 
+function reservationInput(attemptId: Id): SpendReservationInput {
+  return {
+    runId: Id.parse(runId),
+    attemptId,
+    quotaPeriods: [
+      { quotaId: Code.parse("team"), period: "day", periodStart: 0, limitMicros: 100 },
+    ],
+    estimatedMicros: 10,
+    pricingRevision: Code.parse("prices.v1"),
+  };
+}
+
+function modelRequest(
+  attemptId: Id,
+): Extract<EventPartial, { type: "model_request" }> {
+  return {
+    type: "model_request",
+    v: 3,
+    requestId: attemptId,
+    provider: "sample",
+    model: "model-a",
+    messages: [],
+    advertisedToolIds: [],
+    requestHash: "a".repeat(64),
+    requestParametersHash: "b".repeat(64),
+  };
+}
+
+function modelResponse(attemptId: Id): EventPartial {
+  return {
+    type: "model_response",
+    v: 2,
+    requestId: attemptId,
+    provider: "sample",
+    model: "model-a",
+    inputTokens: 2,
+    outputTokens: 3,
+    cost: { version: 1, state: "known", amountMicros: 5 },
+    finishReason: "stop",
+    latencyMs: 17,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    content: [],
+    providerBlobs: null,
+  };
+}
+
 function makeTripQueue(): TripQueue {
   return new TripQueue({ emit: vi.fn(), enabled: () => true });
 }
@@ -243,6 +303,136 @@ beforeEach(() => {
 });
 
 describe("RunRecorder", () => {
+  it("persists reservation transitions and settlement through the recorder", async () => {
+    const store = new InMemorySpendReservationStore();
+    const recorder = makeRecorder(store);
+    const firstAttempt = Id.parse("22222222222222222222222222");
+    const releasedAttempt = Id.parse("33333333333333333333333333");
+    const uncertainAttempt = Id.parse("44444444444444444444444444");
+
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await recorder.record(runCreated());
+      const request = await recorder.reserveSpend(reservationInput(firstAttempt), modelRequest(firstAttempt));
+      expect(request.seq).toBe(1);
+      await recorder.markSpendDispatching(firstAttempt);
+      const settlement: SpendReservationSettlement = {
+        runId: Id.parse(runId),
+        attemptId: firstAttempt,
+        cost: { version: 1, state: "known", amountMicros: 5 },
+        responseHash: "c".repeat(64),
+      };
+      const response = await recorder.settleSpend(settlement, modelResponse(firstAttempt), [
+        {
+          quotaId: Code.parse("team"),
+          period: "day",
+          periodStart: 0,
+          costMicros: 5,
+          runsStarted: 0,
+        },
+      ]);
+      expect(response.seq).toBe(2);
+
+      await recorder.reserveSpend(reservationInput(releasedAttempt), modelRequest(releasedAttempt));
+      await recorder.releaseSpend(releasedAttempt);
+
+      await recorder.reserveSpend(reservationInput(uncertainAttempt), modelRequest(uncertainAttempt));
+      await recorder.markSpendDispatching(uncertainAttempt);
+      await recorder.markSpendUncertain(uncertainAttempt, "spend_reservation_uncertain");
+      return response;
+    });
+
+    expect(recorder.nextSeq).toBe(5);
+    await expect(store.readUsageLedger("team", "day", [0])).resolves.toMatchObject([
+      { costMicros: 5, unknownCostCount: 0 },
+    ]);
+  });
+
+  it("fails closed when the recorder store lacks transactional reservation support", async () => {
+    const recorder = makeRecorder(new InMemoryEventStore());
+    const attemptId = Id.parse("22222222222222222222222222");
+    const settlement: SpendReservationSettlement = {
+      runId: Id.parse(runId),
+      attemptId,
+      cost: { version: 1, state: "known", amountMicros: 5 },
+      responseHash: "c".repeat(64),
+    };
+
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await expect(
+        recorder.reserveSpend(
+          reservationInput(attemptId),
+          modelRequest(attemptId),
+        ),
+      ).rejects.toBeInstanceOf(SpendReservationError);
+      await expect(recorder.markSpendDispatching(attemptId)).rejects.toMatchObject({
+        code: "spend_reservation_storage_unavailable",
+      });
+      await expect(recorder.releaseSpend(attemptId)).rejects.toMatchObject({
+        code: "spend_reservation_storage_unavailable",
+      });
+      await expect(
+        recorder.markSpendUncertain(attemptId, "spend_reservation_uncertain"),
+      ).rejects.toMatchObject({ code: "spend_reservation_storage_unavailable" });
+      await expect(
+        recorder.settleSpend(settlement, modelResponse(attemptId), []),
+      ).rejects.toMatchObject({ code: "spend_reservation_storage_unavailable" });
+      return runCreatedEvent();
+    });
+  });
+
+  it("latches lease loss when reservation or settlement writes conflict", async () => {
+    const reservationStore = new InMemorySpendReservationStore();
+    const reservationRecorder = makeRecorder(reservationStore);
+    const attemptId = Id.parse("22222222222222222222222222");
+    vi.spyOn(reservationStore, "reserveSpend").mockRejectedValue(new SeqConflictError(0, 1));
+
+    await reservationRecorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await expect(
+        reservationRecorder.reserveSpend(
+          reservationInput(attemptId),
+          modelRequest(attemptId),
+        ),
+      ).rejects.toBeInstanceOf(LeaseLostError);
+      await expect(reservationRecorder.markSpendDispatching(attemptId)).rejects.toMatchObject({
+        code: "lease_lost",
+      });
+      return runCreatedEvent();
+    });
+
+    const settlementStore = new InMemorySpendReservationStore();
+    const settlementRecorder = makeRecorder(settlementStore);
+    await settlementRecorder.withStepSpan(RUN_SPAN, {}, async () => {
+      await settlementRecorder.record(runCreated());
+      await settlementRecorder.reserveSpend(
+        reservationInput(attemptId),
+        modelRequest(attemptId),
+      );
+      await settlementRecorder.markSpendDispatching(attemptId);
+      vi.spyOn(settlementStore, "settleSpend").mockRejectedValue(new SeqConflictError(2, 3));
+      await expect(
+        settlementRecorder.settleSpend(
+          {
+            runId: Id.parse(runId),
+            attemptId,
+            cost: { version: 1, state: "known", amountMicros: 5 },
+            responseHash: "c".repeat(64),
+          },
+          modelResponse(attemptId),
+          [
+            {
+              quotaId: Code.parse("team"),
+              period: "day",
+              periodStart: 0,
+              costMicros: 5,
+              runsStarted: 0,
+            },
+          ],
+        ),
+      ).rejects.toBeInstanceOf(LeaseLostError);
+      return runCreatedEvent();
+    });
+  });
+
   it("rejects invalid retained snapshot limits before querying the store", async () => {
     const store = new InMemoryEventStore();
     const retainedSnapshots = vi.spyOn(store, "retainedSnapshots");

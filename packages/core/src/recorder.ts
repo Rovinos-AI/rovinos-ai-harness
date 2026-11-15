@@ -381,6 +381,9 @@ export class RunRecorder {
     transition: (store: SpendReservationStore) => Promise<unknown>,
   ): Promise<void> {
     return this.enqueue(async () => {
+      if (this.storedHead !== undefined) {
+        throw new LeaseLostError(this.storedHead);
+      }
       this.assertWritable();
       if (!isSpendReservationStore(this.store)) {
         throw new SpendReservationError("spend_reservation_storage_unavailable");
