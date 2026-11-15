@@ -112,7 +112,7 @@ Shared design for this epic:
 **Parent:** #11 Backends
 **Task Description:** Define actionable alerts as code, each with a runbook.
 **Expected Inputs:** Metrics and queries from 11.3 and 11.4.
-**Expected Output:** `infra/alerts/datadog-monitors.json`, `infra/alerts/thresholds.yaml`, `infra/alerts/kusto-alerts.md` (queries and suggested Azure Monitor rules), `docs/runbooks/*.md`, `scripts/alerts/validate.ts`.
+**Expected Output:** `infra/alerts/datadog-monitors.generated.json`, `infra/alerts/thresholds.yaml`, `infra/alerts/kusto-alerts.md` (queries and suggested Azure Monitor rules), `docs/runbooks/*.md`, `scripts/alerts/validate.ts`.
 **Dependencies:** none.
 **Items it depends on:** 11.3, 11.4.
 **Implementation guidance:**
