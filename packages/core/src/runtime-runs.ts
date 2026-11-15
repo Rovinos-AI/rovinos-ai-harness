@@ -24,7 +24,7 @@ import type {
 } from "./runtime-config.js";
 import { EvalRunMetadataSchema } from "./runtime-config.js";
 import { configHash } from "./runtime-ids.js";
-import { QuotaService } from "./quotas.js";
+import { QuotaService, strictSpendPricingFromConfig } from "./quotas.js";
 import type { QuotaIdentity } from "./quotas.js";
 
 /** Reads the original goal from a run's persisted input or first model request. */
@@ -136,7 +136,12 @@ export function startRun(
     options.evalMetadata === undefined
       ? undefined
       : EvalRunMetadataSchema.parse(options.evalMetadata);
-  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
+  const quotaService = new QuotaService(
+    config.quotas ?? [],
+    store,
+    clock,
+    strictSpendPricingFromConfig(config),
+  );
   const quotaIdentity: QuotaIdentity = {
     ...(options.role === undefined ? {} : { role: options.role }),
     ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
@@ -196,7 +201,12 @@ export function createRuntimeContinuation(
   runWithControl: RunControl,
 ): Runtime["continueRun"] {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
-  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
+  const quotaService = new QuotaService(
+    config.quotas ?? [],
+    store,
+    clock,
+    strictSpendPricingFromConfig(config),
+  );
   return (
     previousRunId: Id,
     input: RunInput,

@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  EventSchema,
-  JsonValue as JsonValueSchema,
-  joinEvent,
-  splitEvent,
   type Event,
   type Id,
   type JsonValue,
@@ -13,9 +9,17 @@ import {
   type Snapshot,
   type Code,
   type TraceId,
+  type SpendReservation,
+  type SpendReservationErrorCode,
+  type SpendReservationInput,
+  type SpendReservationSettlement,
 } from "@rovinos/schemas";
-import { storedModelRequestHash } from "@rovinos/schemas/request-signature";
 import { PiiStorageFailedError } from "./errors.js";
+import {
+  notifyPiiSummaries,
+  preparePiiEvents,
+  sanitizeStorageJson,
+} from "./pii-event-sanitization.js";
 import type { Tokenizer } from "./tokenizer.js";
 import { isMarked } from "./sanitization-markers.js";
 
@@ -87,6 +91,20 @@ export interface EventStoreLike {
     expectedSeq: number,
     options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
   ): Promise<{ nextSeq: number }>;
+  reserveSpend?(
+    input: SpendReservationInput,
+    modelRequest: NewEvent,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }>;
+  markSpendDispatching?(attemptId: Id): Promise<SpendReservation>;
+  releaseSpend?(attemptId: Id): Promise<SpendReservation>;
+  settleSpend?(
+    settlement: SpendReservationSettlement,
+    modelResponse: NewEvent,
+    expectedSeq: number,
+    options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }>;
+  markSpendUncertain?(attemptId: Id, reason: SpendReservationErrorCode): Promise<SpendReservation>;
   readUsageLedger(
     quotaId: Code,
     period: UsageLedgerDeltaLike["period"],
@@ -136,6 +154,8 @@ export interface EventStoreLike {
 
 /** Tokenizes classified event content and snapshot values before they reach storage. */
 export class PiiEventStore implements EventStoreLike {
+  private readonly supportsSpendReservations: boolean;
+
   /**
    * Wraps an event store with storage-boundary content sanitization.
    *
@@ -148,7 +168,14 @@ export class PiiEventStore implements EventStoreLike {
     private readonly tokenizer: Tokenizer,
     private readonly onSummary: (summary: PiiActionSummary) => void | Promise<void> = () =>
       Promise.resolve(),
-  ) {}
+  ) {
+    this.supportsSpendReservations =
+      typeof inner.reserveSpend === "function" &&
+      typeof inner.markSpendDispatching === "function" &&
+      typeof inner.releaseSpend === "function" &&
+      typeof inner.settleSpend === "function" &&
+      typeof inner.markSpendUncertain === "function";
+  }
 
   async append(
     runId: Id,
@@ -202,6 +229,62 @@ export class PiiEventStore implements EventStoreLike {
     const prepared = await this.prepareEvents(runId, events, expectedSeq);
     await this.notifySummaries(prepared.summaries);
     return this.inner.appendWithUsage(runId, prepared.events, expectedSeq, options);
+  }
+
+  async reserveSpend(
+    input: SpendReservationInput,
+    modelRequest: NewEvent,
+    expectedSeq: number,
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    if (this.inner.reserveSpend === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    const prepared = await this.prepareEvents(input.runId, [modelRequest], expectedSeq);
+    await this.notifySummaries(prepared.summaries);
+    const [sanitizedRequest] = prepared.events;
+    if (sanitizedRequest === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    return this.inner.reserveSpend(input, sanitizedRequest, expectedSeq);
+  }
+
+  markSpendDispatching(attemptId: Id): Promise<SpendReservation> {
+    if (this.inner.markSpendDispatching === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    return this.inner.markSpendDispatching(attemptId);
+  }
+
+  releaseSpend(attemptId: Id): Promise<SpendReservation> {
+    if (this.inner.releaseSpend === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    return this.inner.releaseSpend(attemptId);
+  }
+
+  async settleSpend(
+    settlement: SpendReservationSettlement,
+    modelResponse: NewEvent,
+    expectedSeq: number,
+    options: { readonly usageUpdates: readonly UsageLedgerDeltaLike[]; readonly leaseOwner?: Id },
+  ): Promise<{ reservation: SpendReservation; nextSeq: number }> {
+    if (this.inner.settleSpend === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    const prepared = await this.prepareEvents(settlement.runId, [modelResponse], expectedSeq);
+    await this.notifySummaries(prepared.summaries);
+    const [sanitizedResponse] = prepared.events;
+    if (sanitizedResponse === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    return this.inner.settleSpend(settlement, sanitizedResponse, expectedSeq, options);
+  }
+
+  markSpendUncertain(attemptId: Id, reason: SpendReservationErrorCode): Promise<SpendReservation> {
+    if (this.inner.markSpendUncertain === undefined) {
+      throw new PiiStorageFailedError();
+    }
+    return this.inner.markSpendUncertain(attemptId, reason);
   }
 
   readUsageLedger(
@@ -326,93 +409,23 @@ export class PiiEventStore implements EventStoreLike {
     readonly events: readonly NewEvent[];
     readonly summaries: readonly PiiActionSummary[];
   }> {
-    const prepared: NewEvent[] = [];
-    const summaries: PiiActionSummary[] = [];
-    for (const [index, source] of events.entries()) {
-      if (isMarked(source)) {
-        prepared.push(source);
-        continue;
-      }
-      const parsed = EventSchema.safeParse({ ...source, seq: expectedSeq + index });
-      if (!parsed.success) {
-        prepared.push(source);
-        continue;
-      }
-      const { meta, content } = splitEvent(parsed.data);
-      const unmarkedContent = Object.fromEntries(
-        Object.entries(content).filter(([key]) => !isMarked(source, key)),
-      );
-      if (Object.keys(unmarkedContent).length === 0) {
-        prepared.push(source);
-        continue;
-      }
-
-      try {
-        const contentValue = JsonValueSchema.parse(unmarkedContent);
-        const result = await this.tokenizer.tokenizeJson(runId, contentValue, {
-          boundary: "storage",
-          destination: "any",
-        });
-        if (result.actions.some(({ action }) => action === "allow")) {
-          throw new PiiStorageFailedError();
-        }
-        if (
-          typeof result.value !== "object" ||
-          result.value === null ||
-          Array.isArray(result.value)
-        ) {
-          throw new PiiStorageFailedError();
-        }
-        const sanitizedContent = result.value;
-        summaries.push(...result.actions);
-        if (Object.keys(sanitizedContent).length === 0) {
-          prepared.push(source);
-          continue;
-        }
-        const event = joinEvent(meta, { ...content, ...sanitizedContent });
-        if (
-          event.type === "model_request" &&
-          event.requestParametersHash !== undefined &&
-          event.requestParametersHash !== null
-        ) {
-          event.requestHash = storedModelRequestHash(event.messages, event.requestParametersHash);
-        }
-        const { seq, ...newEvent } = event;
-        if (seq !== expectedSeq + index) {
-          throw new PiiStorageFailedError();
-        }
-        prepared.push(newEvent);
-      } catch {
-        throw new PiiStorageFailedError();
-      }
-    }
-    return { events: prepared, summaries };
+    const prepared = await preparePiiEvents({
+      runId,
+      events,
+      expectedSeq,
+      tokenizer: this.tokenizer,
+    });
+    return prepared;
   }
 
   private async sanitizeJson(
     runId: Id,
     value: JsonValue,
   ): Promise<{ value: JsonValue; actions: readonly PiiActionSummary[] }> {
-    if (isMarked(value)) {
-      return { value, actions: [] };
-    }
-    const result = await this.tokenizer.tokenizeJson(runId, value, {
-      boundary: "storage",
-      destination: "any",
-    });
-    if (result.actions.some(({ action }) => action === "allow")) {
-      throw new PiiStorageFailedError();
-    }
-    return result;
+    return sanitizeStorageJson({ runId, value, tokenizer: this.tokenizer });
   }
 
   private async notifySummaries(summaries: readonly PiiActionSummary[]): Promise<void> {
-    for (const summary of summaries) {
-      try {
-        await this.onSummary(summary);
-      } catch {
-        throw new PiiStorageFailedError();
-      }
-    }
+    return notifyPiiSummaries(summaries, this.onSummary);
   }
 }

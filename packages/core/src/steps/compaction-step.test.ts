@@ -5,7 +5,12 @@ import { FakeClock, SequentialIdGenerator, type Event, type ModelRef } from "@ro
 import { InMemoryEventStore } from "@rovinos/store";
 import { eventsToTranscript, type TranscriptGroup, SummarizingStrategy } from "@rovinos/context";
 import { RunRecorder, type EventPartial } from "../recorder.js";
-import { ModelPortSummarizer, compactionStep, SummarizerResponseError } from "./compaction-step.js";
+import {
+  ModelPortSummarizer,
+  compactBeforeModelCall,
+  compactionStep,
+  SummarizerResponseError,
+} from "./compaction-step.js";
 import { FakeModelPort } from "../testing/fake-model.js";
 import type { ModelCompletion, Summarizer } from "../ports.js";
 import { RUN_SPAN } from "../spans.js";
@@ -96,6 +101,34 @@ function successfulCompletion(text: string): ModelCompletion {
 }
 
 describe("compactionStep", () => {
+  it("does not dispatch optional compaction models in strict spend mode", async () => {
+    const { events, recorder } = await createHistory(8);
+    const summarize = vi.fn<Summarizer["summarize"]>(() =>
+      Promise.resolve({ text: "summary", usage: { inputTokens: 1, outputTokens: 1 } }),
+    );
+
+    await compactBeforeModelCall({
+      recorder,
+      events,
+      compaction: {
+        strategy: new SummarizingStrategy(modelRef),
+        budget: { maxTokens: 100, reserveOutputTokens: 0 },
+        counter: { count: () => 100 },
+        sanitizeSummary: (text) => Promise.resolve(text),
+        summarizer: { summarize },
+      },
+      model: new FakeModelPort([]),
+      ids: new SequentialIdGenerator(),
+      runId,
+      signal: new AbortController().signal,
+      modelRef,
+      goal: "goal",
+      strictSpendReservations: true,
+    });
+
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
   it("summarizes only the oldest non-pinned groups and records one event in-range", async () => {
     const { events, recorder, store } = await createHistory(8);
     const record = vi.spyOn(recorder, "record");

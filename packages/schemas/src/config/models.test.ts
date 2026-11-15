@@ -92,15 +92,44 @@ describe("ModelsConfigSchema", () => {
             outputMicrosPerMTok: 375,
             cacheReadMicrosPerMTok: 25,
             cacheWriteMicrosPerMTok: 200,
+            maxInputTokens: 10_000,
+            maxOutputTokens: 1_000,
           },
         },
-      }).pricing,
+        pricingRevision: "prices.v2",
+      }),
     ).toEqual({
-      "sample/model-a": {
-        inputMicrosPerMTok: 125,
-        outputMicrosPerMTok: 375,
-        cacheReadMicrosPerMTok: 25,
-        cacheWriteMicrosPerMTok: 200,
+      retry: {
+        maxAttempts: 3,
+        baseDelayMs: 500,
+        maxDelayMs: 20_000,
+        timeoutMs: 120_000,
+        streamTimeoutMs: 600_000,
+        idleTimeoutMs: 60_000,
+      },
+      enforcement: { maxRepairs: 2 },
+      maxConcurrent: 4,
+      pricingRevision: "prices.v2",
+      pricing: {
+        "sample/model-a": {
+          inputMicrosPerMTok: 125,
+          outputMicrosPerMTok: 375,
+          cacheReadMicrosPerMTok: 25,
+          cacheWriteMicrosPerMTok: 200,
+          maxInputTokens: 10_000,
+          maxOutputTokens: 1_000,
+        },
+      },
+      providers: [],
+      routing: {
+        default: [],
+        roles: {},
+        fallbackOn: [
+          "provider_rate_limited",
+          "provider_timeout",
+          "provider_unavailable",
+          "model_output_invalid",
+        ],
       },
     });
     expect(() =>
@@ -113,6 +142,31 @@ describe("ModelsConfigSchema", () => {
         pricing: { "sample/model-a": { inputMicrosPerMTok: -1, outputMicrosPerMTok: 2 } },
       }),
     ).toThrow();
+    for (const tokenLimit of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        ModelsConfigSchema.parse({
+          pricing: {
+            "sample/model-a": {
+              inputMicrosPerMTok: 1,
+              outputMicrosPerMTok: 2,
+              maxInputTokens: tokenLimit,
+            },
+          },
+        }),
+      ).toThrow();
+      expect(() =>
+        ModelsConfigSchema.parse({
+          pricing: {
+            "sample/model-a": {
+              inputMicrosPerMTok: 1,
+              outputMicrosPerMTok: 2,
+              maxOutputTokens: tokenLimit,
+            },
+          },
+        }),
+      ).toThrow();
+    }
+    expect(() => ModelsConfigSchema.parse({ pricingRevision: "Invalid Revision!" })).toThrow();
   });
 
   it("validates ordered routing references and provider configuration", () => {
