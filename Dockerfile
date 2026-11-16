@@ -38,7 +38,7 @@ RUN if [ "$WITH_REDIS_RATE_LIMIT" = "1" ]; then \
        done \
     && cp -a packages/cli/dist /out/
 
-FROM node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS runtime-os-audit
+FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS runtime-os-audit
 
 # CVE-2026-76844 and CVE-2026-85091: the pinned node:26-slim digest still ships zlib1g 1.3.1-1+b1.
 # Remove this upgrade once the upstream base image includes zlib1g 1.3.1-1+deb13u1 or later.
