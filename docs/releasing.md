@@ -64,7 +64,7 @@ succeeds, it moves the image `latest` tags and creates a GitHub Release with pac
 and the Compose deployment files. Reruns skip npm versions and GitHub Releases that already exist.
 
 Before the first release, configure the GitHub Actions trusted publisher for each npm package (see
-the [npm trusted publishing guide](https://docs.npmjs.com/guides/trusted-publishers)), using
+the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/)), using
 repository `Rovinos-AI/rovinos-ai-harness` and workflow `.github/workflows/release.yml`.
 **Verified:** npm requires the package to exist before its trusted publisher can be configured.
 For a newly added package, maintainers must first publish a one-time `0.0.0` placeholder with a
