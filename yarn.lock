@@ -3216,7 +3216,7 @@ __metadata:
     "@rovinos/schemas": "workspace:^"
     "@rovinos/telemetry": "workspace:^"
     ajv: "npm:8.20.0"
-    google-auth-library: "npm:10.9.1"
+    google-auth-library: "npm:11.3.4"
     openai: "npm:7.53.0"
     undici: "npm:8.12.4"
     vitest: "npm:4.1.12"
@@ -6590,6 +6590,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"gaxios@npm:^8.3.1":
+  version: 8.3.2
+  resolution: "gaxios@npm:8.3.2"
+  dependencies:
+    extend: "npm:^3.0.2"
+    https-proxy-agent: "npm:^7.0.1"
+    node-fetch: "npm:^3.3.2"
+  checksum: 10c0/112ba770aed72a4fc794b869beb57f9a88d76ceb33329ad16c48224793600a8bd31b6dcafee9ab28272113dd384fd03a6991e9913a89b7bb90e0b6b56829e4bb
+  languageName: node
+  linkType: hard
+
 "gcp-metadata@npm:8.1.2":
   version: 8.1.2
   resolution: "gcp-metadata@npm:8.1.2"
@@ -6598,6 +6609,17 @@ __metadata:
     google-logging-utils: "npm:^1.0.0"
     json-bigint: "npm:^1.0.0"
   checksum: 10c0/15a61231a9410dc11c2828d2c9fdc8b0a939f1af746195c44edc6f2ffea0acab52cef3a7b9828069a36fd5d68bda730f7328a415fe42a01258f6e249dfba6908
+  languageName: node
+  linkType: hard
+
+"gcp-metadata@npm:^9.2.1":
+  version: 9.2.3
+  resolution: "gcp-metadata@npm:9.2.3"
+  dependencies:
+    gaxios: "npm:^8.3.1"
+    google-logging-utils: "npm:^2.1.0"
+    json-bigint: "npm:^1.0.0"
+  checksum: 10c0/86c4fc28edd923ddd7c3a05b986cda1f395a12a9c090bb8d5e094f8330fca48c3a2b34f40c69752effdb72f05f8cf28e52dcba05052d57472302abb0abdade84
   languageName: node
   linkType: hard
 
@@ -6746,7 +6768,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"google-auth-library@npm:10.9.1, google-auth-library@npm:^10.3.0":
+"google-auth-library@npm:11.3.4":
+  version: 11.3.4
+  resolution: "google-auth-library@npm:11.3.4"
+  dependencies:
+    base64-js: "npm:^1.3.0"
+    ecdsa-sig-formatter: "npm:^1.0.11"
+    gaxios: "npm:^8.3.1"
+    gcp-metadata: "npm:^9.2.1"
+    google-logging-utils: "npm:^2.1.0"
+    jws: "npm:^4.0.0"
+  checksum: 10c0/836b2aa66d1c7eb04a800c76df6e8702b0d66a614736183207d50633a300d52ad7ba8148acba684d77f33542bb88a1fe51cf04fa335a261b71d18a67f9e0c967
+  languageName: node
+  linkType: hard
+
+"google-auth-library@npm:^10.3.0":
   version: 10.9.1
   resolution: "google-auth-library@npm:10.9.1"
   dependencies:
@@ -6771,6 +6807,13 @@ __metadata:
   version: 1.2.0
   resolution: "google-logging-utils@npm:1.2.0"
   checksum: 10c0/a5bceaa13ef6ed7e84a4dd96d8acb5ca895c7777a35629921096c53b1740518d3a8aa35d808697488ecf0416f2e72d462148ecbbbec34a805b5eacc136171a53
+  languageName: node
+  linkType: hard
+
+"google-logging-utils@npm:^2.1.0":
+  version: 2.2.0
+  resolution: "google-logging-utils@npm:2.2.0"
+  checksum: 10c0/cc773d474dfcc5581f5bcd84faa00305996e2dabe3006d305ff3efb88641e3cdedbe47a4090d5bd417109aadd72a3875eb82ecbe25dd0e3c37bd4ac5af259f45
   languageName: node
   linkType: hard
 
