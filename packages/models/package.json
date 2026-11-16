@@ -23,14 +23,14 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "1.6.0",
-    "@aws-sdk/client-bedrock-runtime": "3.1163.0",
+    "@anthropic-ai/sdk": "1.8.0",
+    "@aws-sdk/client-bedrock-runtime": "3.1168.0",
     "@azure/identity": "4.14.1",
-    "@google/genai": "3.0.0",
+    "@google/genai": "3.3.0",
     "@opentelemetry/api": "1.10.0",
     "@rovinos/schemas": "workspace:^",
     "@rovinos/telemetry": "workspace:^",
-    "openai": "7.53.0",
+    "openai": "7.56.0",
     "zod": "4.6.7"
   },
   "peerDependencies": {
