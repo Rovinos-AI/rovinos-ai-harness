@@ -1,6 +1,6 @@
 # MCP Inspector
 
-The repository pins MCP Inspector **2.14.0**. Its web client, TUI, CLI, and experimental
+The repository pins MCP Inspector **2.15.0**. Its web client, TUI, CLI, and experimental
 `mcpdo` client can connect to the harness control-plane, a test MCP server, or a separately
 configured MCP server. Inspector is an MCP client: connecting directly to an outbound server does
 not exercise a model-selected call through the harness.
@@ -10,7 +10,7 @@ not exercise a model-selected call through the harness.
 | Surface or check | Current coverage |
 | --- | --- |
 | CLI gate | `test/inspector-conformance.int.test.ts` exercises `harness serve` over stdio and HTTP, modern and legacy initialization, schema portability, Apps metadata and HTML retrieval, synthetic tool calls, restricted read scope, unauthenticated HTTP rejection, and a credential-leak canary. |
-| Web Apps | `test/inspector-apps.int.test.ts` uses Inspector 2.14.0 against a synthetic loopback server and checks rendered approval content and privacy/network controls. Decision calls fail closed with `human_confirmation_unavailable`; this scenario does not verify a completed approval or denial. |
+| Web Apps | `test/inspector-apps.int.test.ts` uses Inspector 2.15.0 against a synthetic loopback server and checks rendered approval content and privacy/network controls. Decision calls fail closed with `human_confirmation_unavailable`; this scenario does not verify a completed approval or denial. |
 | TUI | Available for terminal-only inspection; no harness-specific TUI scenario is currently run by CI. |
 | `mcpdo` | Experimental persistent client sessions; use only for advisory exploration. There is no harness-specific `mcpdo` result in the blocking CI gate. |
 
