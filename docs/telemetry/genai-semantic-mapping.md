@@ -1,6 +1,6 @@
 # GenAI semantic-convention mapping
 
-This mapping pins `@opentelemetry/semantic-conventions` **1.44.0** and its
+This mapping pins `@opentelemetry/semantic-conventions` **1.45.0** and its
 incubating GenAI attribute definitions. The exact dependency pin and names are
 checked by `packages/telemetry/src/semconv.test.ts`. GenAI conventions remain
 opted out as a global stability mode; the harness emits only the explicitly
