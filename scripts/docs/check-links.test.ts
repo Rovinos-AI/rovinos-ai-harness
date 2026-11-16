@@ -1,9 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { checkLinks } from "./check-links.ts";
+import { checkLinks, collectMarkdownLinks } from "./check-links.ts";
 import type { MarkdownSource } from "./markdown.ts";
 
 describe("Markdown link checker", () => {
+  it("does not extend bare URLs across Markdown link brackets or punctuation", () => {
+    const markdown = [
+      "[https://example.test/faq](https://example.test/faq)",
+      "[https://example.test/reference][reference]",
+      "",
+      "[reference]: https://example.test/reference",
+      "",
+      "https://example.test/parenthesis) https://example.test/bracket]",
+    ].join("\n");
+    const destinations = collectMarkdownLinks(markdown).map(({ destination }) => destination);
+
+    expect([...new Set(destinations)].sort()).toEqual(
+      [
+        "https://example.test/bracket",
+        "https://example.test/faq",
+        "https://example.test/parenthesis",
+        "https://example.test/reference",
+      ].sort(),
+    );
+  });
+
   it("reports broken relative links and anchors", () => {
     const sources: MarkdownSource[] = [
       {

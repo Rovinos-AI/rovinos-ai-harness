@@ -166,7 +166,7 @@ function collectReferenceLinks(text: string): MarkdownLink[] {
 
 function collectAutoLinks(text: string): MarkdownLink[] {
   const links: MarkdownLink[] = [];
-  for (const match of text.matchAll(/https?:\/\/\S+/giu)) {
+  for (const match of text.matchAll(/https?:\/\/[^\s\]]+/giu)) {
     const destination = match[0].replaceAll(/[.,!?;:)>]+$/gu, "");
     if (destination.length > 0) {
       links.push({ destination, line: lineAt(text, match.index) });
