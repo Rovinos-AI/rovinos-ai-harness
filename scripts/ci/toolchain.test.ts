@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -15,19 +16,10 @@ const packageManifestSchema = z.looseObject({
 });
 
 function repositoryFiles(directory: string): string[] {
-  const ignoredDirectories = new Set([".git", ".yarn", "coverage", "dist", "node_modules"]);
-  const files: string[] = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (!ignoredDirectories.has(entry.name)) {
-        files.push(...repositoryFiles(path));
-      }
-    } else if (entry.isFile()) {
-      files.push(path);
-    }
-  }
-  return files;
+  return execFileSync("git", ["ls-files", "-z"], { cwd: directory, encoding: "utf8" })
+    .split("\0")
+    .filter((path) => path.length > 0)
+    .map((path) => join(directory, path));
 }
 
 function satisfiesNodeEngine(version: string, requirement: string): boolean {
@@ -137,6 +129,25 @@ it("satisfies workspace constraints and the dedupe check", () => {
   expect(() =>
     execFileSync("yarn", ["dedupe", "--check"], { cwd: root, stdio: "pipe" }),
   ).not.toThrow();
+});
+
+it("lists tracked files without including untracked or ignored local files", () => {
+  const directory = mkdtempSync(join(tmpdir(), "toolchain-files-"));
+  try {
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: directory, stdio: "pipe" });
+    writeFileSync(join(directory, ".gitignore"), "ignored.txt\n");
+    writeFileSync(join(directory, "tracked file.txt"), ["pn", "pm"].join(""));
+    execFileSync("git", ["add", ".gitignore", "tracked file.txt"], { cwd: directory });
+    writeFileSync(join(directory, "untracked.txt"), ["pn", "pm"].join(""));
+    writeFileSync(join(directory, "ignored.txt"), ["pn", "pm"].join(""));
+
+    expect(repositoryFiles(directory)).toEqual([
+      join(directory, ".gitignore"),
+      join(directory, "tracked file.txt"),
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 it("contains no legacy package-manager references outside historical notes", () => {
