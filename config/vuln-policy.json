@@ -5,6 +5,12 @@
       "reason": "Known gap documented in docs/guarantees.md; upgrade is tracked by #614 and is blocked until @azure/identity allows msal-node ^6.",
       "expires": "2027-01-31",
       "owner": "rovinoscr"
+    },
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "picomatch <=4.0.7 ReDoS has no patched release; reached only through dev tooling (vitest, vite, changesets, cspell) and private-package vitest peers, with repository-controlled globs. Removal tracked by #812.",
+      "expires": "2026-12-31",
+      "owner": "rovinoscr"
     }
   ]
 }
