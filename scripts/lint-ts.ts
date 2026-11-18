@@ -107,7 +107,7 @@ export function parsePeakRssKiB(stderr: string, platform: NodeJS.Platform): numb
   if (platform === "linux") {
     match = /^ESLINT_PEAK_RSS_KIB=(\d+)$/mu.exec(stderr);
   } else if (platform === "darwin") {
-    match = /maximum resident set size\s*\(kbytes\):\s*([\d,]+)/iu.exec(stderr);
+    match = /^\s*(\d+)\s+maximum resident set size$/mu.exec(stderr);
   } else {
     return undefined;
   }
@@ -115,7 +115,10 @@ export function parsePeakRssKiB(stderr: string, platform: NodeJS.Platform): numb
     return undefined;
   }
   const peakRssKiB = Number(match[1].replaceAll(",", ""));
-  return Number.isSafeInteger(peakRssKiB) ? peakRssKiB : undefined;
+  if (!Number.isSafeInteger(peakRssKiB)) {
+    return undefined;
+  }
+  return platform === "darwin" ? Math.ceil(peakRssKiB / 1024) : peakRssKiB;
 }
 
 /** Returns whether the measured peak RSS is within the repository's lint budget. */

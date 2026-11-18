@@ -99,9 +99,17 @@ it("runs every batch and fails when any batch fails", () => {
 
 it("parses Linux and macOS peak RSS measurements and enforces the memory budget", () => {
   expect(parsePeakRssKiB("ESLINT_PEAK_RSS_KIB=123456\n", "linux")).toBe(123456);
-  expect(parsePeakRssKiB("maximum resident set size (kbytes): 2,900,001\n", "darwin")).toBe(
-    2_900_001,
-  );
+  expect(
+    parsePeakRssKiB(
+      "        0.00 real         0.00 user         0.00 sys\n" +
+        "             1327104  maximum resident set size\n",
+      "darwin",
+    ),
+  ).toBe(1296);
+  expect(parsePeakRssKiB("             1327105  maximum resident set size\n", "darwin")).toBe(1297);
+  expect(
+    parsePeakRssKiB("maximum resident set size (kbytes): 2,900,001\n", "darwin"),
+  ).toBeUndefined();
   expect(parsePeakRssKiB("missing measurement\n", "linux")).toBeUndefined();
   expect(isWithinEslintMemoryBudget(MAX_ESLINT_RSS_KIB)).toBe(true);
   expect(isWithinEslintMemoryBudget(MAX_ESLINT_RSS_KIB + 1)).toBe(false);

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJson } from "@rovinos/schemas";
@@ -16,7 +15,9 @@ function createRepository(
   filePath: string,
   key = ["AK", "IA", "QWERTY9876543210"].join(""),
 ): string {
-  const directory = mkdtempSync(join(tmpdir(), "gitleaks-control-"));
+  const temporaryRoot = join(root, ".tmp");
+  mkdirSync(temporaryRoot, { recursive: true });
+  const directory = mkdtempSync(join(temporaryRoot, "gitleaks-control-"));
   temporaryDirectories.push(directory);
   const git = (args: string[]) => {
     const result = spawnSync("git", args, { cwd: directory, encoding: "utf8" });
