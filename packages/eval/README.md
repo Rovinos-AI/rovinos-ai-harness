@@ -53,6 +53,8 @@ diagram is generated from the repository's layer allowlist.
 relative to the suite file. `runEval` plans each task/variant/trial combination with a derived
 seed, then runs the plan with bounded concurrency. Each executor prepares separate trial
 resources. Results are returned in plan order and appended to `trials.jsonl` as trials finish.
+`runEval` itself collects trial results; the CLI wraps its executor with `gradingExecutor` to
+apply configured graders while trial resources are available and then builds the report.
 
 ```mermaid
 flowchart TD
@@ -66,30 +68,34 @@ flowchart TD
     G --> I["Run harness; resolve scripted human requests"]
     H --> I
     I --> J["Collect trial result and tokenized events"]
-    J --> K["Run configured graders and default invariants"]
-    K --> L["Return results in plan order"]
-    K --> M["Append metadata record to trials.jsonl"]
+    J --> K["CLI gradingExecutor applies configured graders"]
+    K --> L["Return result to runEval"]
+    L --> M["Return trial results in plan order"]
+    L --> N["Append metadata record to trials.jsonl"]
+    K --> O["Build report from results and grade records"]
+    M --> O
 ```
 
-Each task can define graders and an optional simulated-human script. Approval-integrity and
-no-denied-execution invariants are added by default when suite invariants are enabled. A
-simulated human resolves pending approvals and inputs through the runtime's normal resolution
-APIs; its default approval decision is deny. Default auto-approval requires the explicit
-`unsafeAutoApprove: true` setting.
+Each task can define graders and an optional simulated-human script. The CLI's grading adapter
+applies the task's graders; approval-integrity and no-denied-execution graders are added by
+default when suite invariants are enabled. A simulated human resolves pending approvals and
+inputs through the runtime's normal resolution APIs; its default approval decision is deny.
+Default auto-approval requires the explicit `unsafeAutoApprove: true` setting.
 
 ```mermaid
 flowchart LR
-    A["Task: human script and grader specs"] --> B["Executor runs trial"]
-    B --> C["Runtime records tokenized events"]
-    C --> D{"Pending approval or input?"}
-    D -->|yes| E["SimulatedHuman matches rules"]
-    E --> F["Resolve through runtime API"]
-    F --> B
-    D -->|no| G["Build bounded GradeContext"]
-    G --> H["Deterministic graders"]
-    G --> I["Optional LLM judge"]
-    H --> J["Metadata-only grade results"]
-    I --> J
+    A["Task: human script and grader specs"] --> B["CLI gradingExecutor wraps executor"]
+    B --> C["Executor runs trial with context"]
+    C --> D["Runtime records tokenized events"]
+    D --> E{"Pending approval or input?"}
+    E -->|yes| F["SimulatedHuman matches rules"]
+    F --> G["Resolve through runtime API"]
+    G --> C
+    E -->|no| H["Build bounded GradeContext"]
+    H --> I["Deterministic graders"]
+    H --> J["Optional LLM judge"]
+    I --> K["Metadata-only grade results"]
+    J --> K
 ```
 
 Grader implementations include file-diff, test-command, schema-valid, trajectory, canary-leak,
@@ -139,8 +145,10 @@ const results = await runEval(
 ```
 
 `executor` is an `InProcessExecutor` or `DockerExecutor` configured for the caller's model and
-tool ports. Suite and variant shapes are defined by the exported Zod schemas; the complete
-configuration options are documented in [Evaluation suites](../../docs/evals.md).
+tool ports. `runEval` returns trial outcomes and does not apply graders or build a report; callers
+can use the exported graders and report helpers, or follow the CLI's `gradingExecutor` flow.
+Suite and variant shapes are defined by the exported Zod schemas; the complete configuration
+options are documented in [Evaluation suites](../../docs/evals.md).
 
 ## Inputs and outputs
 
