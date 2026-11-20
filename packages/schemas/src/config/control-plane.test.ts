@@ -7,6 +7,7 @@ describe("ControlPlaneConfigSchema", () => {
     expect(ControlPlaneConfigSchema.parse({})).toEqual({
       allowReveal: false,
       allowAgentStartedRuns: false,
+      reportDirs: [],
       auth: { tokens: [] },
       listen: { host: "127.0.0.1", port: 3_000 },
       allowedHosts: ["127.0.0.1", "localhost", "::1"],
@@ -19,6 +20,7 @@ describe("ControlPlaneConfigSchema", () => {
       ControlPlaneConfigSchema.parse({
         allowReveal: true,
         allowAgentStartedRuns: true,
+        reportDirs: ["/var/lib/harness/reports"],
         auth: {
           tokens: [
             {
@@ -37,6 +39,7 @@ describe("ControlPlaneConfigSchema", () => {
     ).toEqual({
       allowReveal: true,
       allowAgentStartedRuns: true,
+      reportDirs: ["/var/lib/harness/reports"],
       auth: {
         tokens: [
           {

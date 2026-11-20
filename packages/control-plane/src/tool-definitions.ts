@@ -13,6 +13,7 @@ import type { Tool } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { APPROVAL_RESOURCE_URI } from "./resources/approval.js";
 import { INPUT_RESOURCE_URI } from "./resources/input.js";
+import { REPORTS_RESOURCE_URI } from "./resources/reports.js";
 import { RUNS_CONSOLE_RESOURCE_URI } from "./resources/runs-console.js";
 import {
   approveInputSchema,
@@ -37,10 +38,12 @@ import {
   answerInputInputSchema,
   resolveUncertainSpendInputSchema,
 } from "./schemas.js";
+import { openReportInputSchema, openReportOutputSchema } from "./tools/open-report.js";
 
 const readScopeTools: ReadonlySet<string> = new Set([
   "list_runs",
   "get_run",
+  "open_report",
   "list_pending_inputs",
   "harness.runs.list",
   "harness.runs.get",
@@ -61,10 +64,25 @@ const approvalScopeTools: ReadonlySet<string> = new Set([
 export function toolDefinitions(): Tool[] {
   return [
     ...runToolDefinitions(),
+    ...reportToolDefinitions(),
     ...inputToolDefinitions(),
     ...approvalToolDefinitions(),
     ...lifecycleToolDefinitions(),
     ...spendReservationToolDefinitions(),
+  ];
+}
+
+function reportToolDefinitions(): Tool[] {
+  return [
+    {
+      name: "open_report",
+      description:
+        "Open a validated eval, comparison, or replay report from a configured directory.",
+      inputSchema: objectInputSchema(openReportInputSchema),
+      outputSchema: z.toJSONSchema(openReportOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: REPORTS_RESOURCE_URI } },
+    },
   ];
 }
 

@@ -194,3 +194,18 @@ points for pass rate). Results with fewer than 10 trials on either side are labe
 Reports retain each trial's seed when available. Matching task/trial indexes with
 equal seeds are counted as matched, but all significance tests and bootstrap intervals
 treat the two samples as independent; no paired test is assumed.
+
+## Viewing reports
+
+The control plane exposes `open_report` for `eval`, `compare`, and `replay` JSON
+reports. Configure `controlPlane.reportDirs` with the absolute directories that
+contain reports; the setting defaults to an empty list. A report path may be absolute
+or relative to one of those directories, but its resolved file must remain inside a
+configured directory. The tool validates the file against the report's Zod schema
+before returning its metadata-only result.
+
+MCP Apps hosts render the returned data through `ui://harness/reports/v1`. The viewer
+shows evaluation pass rates, confidence intervals, pass@k, metric distributions and
+failing codes; comparison verdicts and adjusted p-values; and behavioral and noise
+replay differences. Pass-rate charts have matching data tables, and replay differences
+are shown in separate accessible tables.

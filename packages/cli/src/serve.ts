@@ -7,7 +7,7 @@ import {
   type Id,
   type RunStatus,
 } from "@rovinos/schemas";
-import type { ControlPlaneOperations } from "@rovinos/control-plane";
+import type { ControlPlaneOperations, ControlPlaneReportSchemas } from "@rovinos/control-plane";
 import type { Runtime, ToolPort } from "@rovinos/core";
 import type { HarnessConfig } from "@rovinos/config";
 import { createHash } from "node:crypto";
@@ -76,11 +76,21 @@ export const serveCommand: CommandModule = {
           }
           let closeServer: (() => Promise<void>) | undefined;
           try {
-            const { startControlPlaneHttp, startControlPlaneStdio } =
-              await import("@rovinos/control-plane");
+            const [controlPlaneApi, evalApi, replayApi] = await Promise.all([
+              import("@rovinos/control-plane"),
+              import("@rovinos/eval"),
+              import("@rovinos/replay"),
+            ]);
+            const { startControlPlaneHttp, startControlPlaneStdio } = controlPlaneApi;
+            const reportSchemas: ControlPlaneReportSchemas = {
+              eval: evalApi.EvalReportSchema,
+              compare: evalApi.EvalComparisonReportSchema,
+              replay: replayApi.ReplayReportSchema,
+            };
             const operations = createControlPlaneOperations(runtime);
             const controlPlaneOptions = {
               ...(config.controlPlane === undefined ? {} : { controlPlane: config.controlPlane }),
+              reportSchemas,
               runQueue: queue,
               ...(context.secretResolver === undefined
                 ? {}

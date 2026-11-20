@@ -94,6 +94,7 @@ describe("single-file approval app", () => {
     expect(views.map(({ name }) => name)).toEqual([
       "approval",
       "input",
+      "reports",
       "runs-console",
       "configured",
     ]);
