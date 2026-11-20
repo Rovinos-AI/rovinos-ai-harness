@@ -1,5 +1,35 @@
 # @rovinos/cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 6a9f07f: # Shared rate-limit store
+
+  Add a `RateLimitStore` port with in-process and Postgres backends, so rate limits can be shared across replicas.
+- f1a7793: # Represent incomplete and unknown cost explicitly
+
+  Costs and run totals now carry a versioned completeness state: known, estimated, partial or unknown. Unknown cost is never counted as zero. With a cost cap set, unknown or partial cost stops the run with `budget_cost_unknown` unless `unknownCostPolicy: allow` is configured.
+
+### Patch Changes
+
+- 3765be6: # Add Redis/Valkey request-rate limiting
+
+  The optional Redis adapter provides shared atomic token buckets. SDK and CLI deployments without
+  the adapter continue to use memory or Postgres without installing a Redis client.
+- f4a9843: # Update @google/genai to 3.0.0
+- 77a2e82: # Update minor and patch runtime dependencies
+- 83be569: # Update minor and patch runtime dependencies
+- e11201a: # Version MCP server check reports
+
+  Extend `harness servers check` with a versioned safe probe report and per-phase status.
+- 402651d: # Bound telemetry metric cardinality
+
+  Add a per-metric series cap and drop excess datapoints, and use bounded telemetry attribute names
+  that avoid identifiers being treated as high-cardinality data.
+- Updated dependencies [3765be6]
+  - @rovinos/rate-limit-redis@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
