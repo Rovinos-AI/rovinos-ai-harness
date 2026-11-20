@@ -22,31 +22,26 @@ function protocolErrorCode(protocolCode: number): string {
   }
 }
 
+const CONNECTION_ERROR_CODES: Record<McpConnectionError["code"], string> = {
+  mcp_connect_failed: "mcp_error",
+  mcp_connect_timeout: "mcp_timeout",
+  mcp_auth_required: "mcp_auth_required",
+  mcp_connection_lost: "mcp_connection_lost",
+  mcp_list_tools_failed: "mcp_error",
+  mcp_too_many_tools: "mcp_error",
+  mcp_discovery_page_limit: "mcp_error",
+  mcp_discovery_schema_limit: "mcp_error",
+  mcp_discovery_data_limit: "mcp_error",
+  mcp_discovery_timeout: "mcp_timeout",
+  mcp_discovery_cancelled: "mcp_timeout",
+  mcp_response_too_large: "mcp_error",
+  mcp_apps_unsupported: "mcp_apps_unsupported",
+  mcp_tool_arguments_invalid: "args_invalid",
+  mcp_tool_call_failed: "mcp_error",
+};
+
 function connectionErrorCode(code: McpConnectionError["code"]): string {
-  switch (code) {
-    case "mcp_auth_required":
-      return "mcp_auth_required";
-    case "mcp_tool_arguments_invalid":
-      return "args_invalid";
-    case "mcp_connect_timeout":
-    case "mcp_discovery_timeout":
-    case "mcp_discovery_cancelled":
-      return "mcp_timeout";
-    case "mcp_connection_lost":
-      return "mcp_connection_lost";
-    case "mcp_apps_unsupported":
-      return "mcp_apps_unsupported";
-    case "mcp_connect_failed":
-    case "mcp_list_tools_failed":
-    case "mcp_too_many_tools":
-    case "mcp_discovery_data_limit":
-    case "mcp_discovery_page_limit":
-    case "mcp_discovery_schema_limit":
-    case "mcp_tool_call_failed":
-      return "mcp_error";
-    default:
-      return "mcp_error";
-  }
+  return CONNECTION_ERROR_CODES[code];
 }
 
 /** Maps an untrusted MCP failure to a stable, closed error code. */

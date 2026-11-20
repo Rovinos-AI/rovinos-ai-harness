@@ -2,7 +2,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  type CallToolResult,
+} from "@modelcontextprotocol/client";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { ServerConfigSchema } from "@rovinos/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
@@ -113,6 +117,7 @@ describe("MCP transports", () => {
       protocol: "2025-11-25",
       timeouts: { connectMs: 1_000, callMs: 1_000 },
     });
+
     const externalConfig = ServerConfigSchema.parse({
       id: "http_external",
       trust: "external",
@@ -195,6 +200,77 @@ describe("MCP transports", () => {
     } finally {
       await trustedConnection.close();
       await externalConnection.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("fails closed on an oversized streamed HTTP response before consuming the full body", async () => {
+    let pulledChunks = 0;
+    const chunkCount = 12;
+    const fetch: typeof globalThis.fetch = (_input, init) => {
+      const requestText = typeof init?.body === "string" ? init.body : "";
+      const parsed: unknown = JSON.parse(requestText);
+      if (typeof parsed !== "object" || parsed === null || !("method" in parsed)) {
+        throw new Error("invalid synthetic request");
+      }
+      const requestId =
+        "id" in parsed && (typeof parsed.id === "string" || typeof parsed.id === "number")
+          ? parsed.id
+          : undefined;
+      const requestMethod =
+        "method" in parsed && typeof parsed.method === "string" ? parsed.method : undefined;
+      if (requestMethod === "initialize") {
+        return Promise.resolve(
+          Response.json({
+            jsonrpc: "2.0",
+            id: requestId ?? 0,
+            result: {
+              protocolVersion: "2025-11-25",
+              capabilities: { resources: {} },
+              serverInfo: { name: "http-test", version: "1.0.0" },
+            },
+          }),
+        );
+      }
+      if (requestMethod !== "resources/read") {
+        return Promise.resolve(new Response(null, { status: 202 }));
+      }
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulledChunks++;
+          if (pulledChunks <= chunkCount) {
+            controller.enqueue(new Uint8Array(256));
+          } else {
+            controller.close();
+          }
+        },
+      });
+      return Promise.resolve(
+        new Response(body, {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    vi.stubGlobal("fetch", fetch);
+    const config = ServerConfigSchema.parse({
+      id: "http_limited",
+      transport: { kind: "http", url: "https://mcp.example.test/rpc" },
+      protocol: "2025-11-25",
+      maxResultBytes: 512,
+    });
+    const transport = await createMcpTransport(config, {
+      resolveSecret: () => Promise.reject(new Error("no secret expected")),
+    });
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    try {
+      await client.connect(transport);
+      await expect(client.readResource({ uri: "test://resource" })).rejects.toMatchObject({
+        code: "mcp_response_too_large",
+      });
+      expect(pulledChunks).toBeLessThan(chunkCount);
+    } finally {
+      await client.close().catch(() => undefined);
       vi.unstubAllGlobals();
     }
   });
