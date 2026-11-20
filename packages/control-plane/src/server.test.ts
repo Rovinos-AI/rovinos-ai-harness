@@ -32,6 +32,7 @@ import {
   RUN_RESOURCE_URI_TEMPLATE,
   RUNS_RESOURCE_URI,
 } from "./index.js";
+import { RUN_INSPECTOR_RESOURCE_URI } from "./resources/run-inspector.js";
 import { createControlPlaneServer, startControlPlaneHttp } from "./server.js";
 
 const CONTENT_CANARY = "PRIVATE_EVENT_CONTENT_CANARY";
@@ -237,6 +238,7 @@ describe("control-plane inspection tools", () => {
       "continue_run",
       "get_input",
       "get_run",
+      "get_run_timeline",
       "list_pending_inputs",
       "list_runs",
       "resolve_uncertain_spend",
@@ -253,6 +255,9 @@ describe("control-plane inspection tools", () => {
     });
     expect(tools.find(({ name }) => name === "get_input")?._meta).toEqual({
       ui: { resourceUri: "ui://harness/input/v1" },
+    });
+    expect(tools.find(({ name }) => name === "get_run")?._meta).toEqual({
+      ui: { resourceUri: RUN_INSPECTOR_RESOURCE_URI },
     });
     expect(
       tools
@@ -294,11 +299,17 @@ describe("control-plane inspection tools", () => {
     expect(tools.find(({ name }) => name === "harness.runs.get")?._meta).toEqual({
       ui: { visibility: ["app"], resourceUri: "ui://harness/runs/v1" },
     });
+    expect(tools.find(({ name }) => name === "harness.runs.content")?._meta).toEqual({
+      ui: { visibility: ["app"], resourceUri: RUN_INSPECTOR_RESOURCE_URI },
+    });
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
       ui: { resourceUri: "ui://harness/runs/v1" },
     });
     expect(tools.find(({ name }) => name === "harness.inputs.answer")?._meta).toEqual({
       ui: { visibility: ["app"], resourceUri: "ui://harness/input/v1" },
+    });
+    expect(tools.find(({ name }) => name === "harness.runs.content")?._meta).toEqual({
+      ui: { visibility: ["app"], resourceUri: RUN_INSPECTOR_RESOURCE_URI },
     });
   });
 
@@ -592,6 +603,7 @@ describe("control-plane inspection tools", () => {
     });
 
     const runsResource = await client.readResource({ uri: RUNS_RESOURCE_URI });
+    const inspectorResource = await client.readResource({ uri: RUN_INSPECTOR_RESOURCE_URI });
     const runUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", runId);
     const runResource = await client.readResource({ uri: runUri });
     await expect(
@@ -603,6 +615,8 @@ describe("control-plane inspection tools", () => {
     });
 
     expect(JSON.stringify(runsResource)).not.toContain(CONTENT_CANARY);
+    expect(JSON.stringify(inspectorResource)).toContain("Run inspector");
+    expect(JSON.stringify(inspectorResource)).not.toContain(CONTENT_CANARY);
     expect(JSON.stringify(runResource)).not.toContain(CONTENT_CANARY);
     const runUpdateIndex = updates.indexOf(runUri);
     expect(runUpdateIndex).toBeGreaterThan(0);

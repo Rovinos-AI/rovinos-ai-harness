@@ -9,9 +9,23 @@ import {
   InputRequestSchema,
   JsonValue,
   RunStatus,
+  RunContentInputSchema as getRunContentInputSchema,
+  RunContentSchema as getRunContentOutputSchema,
+  RunTimelineInputSchema as getRunTimelineInputSchema,
+  RunTimelineSchema as getRunTimelineOutputSchema,
+  type RunContent as GetRunContentOutput,
+  type RunTimeline as GetRunTimelineOutput,
 } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
+
+export {
+  getRunContentInputSchema,
+  getRunContentOutputSchema,
+  getRunTimelineInputSchema,
+  getRunTimelineOutputSchema,
+};
+export type { GetRunContentOutput, GetRunTimelineOutput };
 
 /** Validated input for the `list_runs` tool. */
 export const listRunsInputSchema = z
@@ -222,6 +236,10 @@ export type ListRunsOutput = z.infer<typeof listRunsOutputSchema>;
 export type GetRunInput = z.input<typeof getRunInputSchema>;
 /** Inferred structured output for `get_run`. */
 export type GetRunOutput = z.infer<typeof getRunOutputSchema>;
+/** Inferred input for `get_run_timeline`. */
+export type GetRunTimelineInput = z.input<typeof getRunTimelineInputSchema>;
+/** Inferred input for app-only `harness.runs.content`. */
+export type GetRunContentInput = z.infer<typeof getRunContentInputSchema>;
 /** Inferred input for `approve`. */
 export type ApproveInput = z.input<typeof approveInputSchema>;
 /** Inferred input for `deny`. */

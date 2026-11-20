@@ -18,6 +18,8 @@ import { registerReviewApprovalTool } from "./tools/review-approval.js";
 import { registerCancelRunTool } from "./tools/cancel-run.js";
 import { registerDenyTool } from "./tools/deny.js";
 import { registerGetRunTool } from "./tools/get-run.js";
+import { registerGetRunTimelineTool } from "./tools/get-run-timeline.js";
+import { registerRunContentTool } from "./tools/run-content.js";
 import { registerListRunsTool } from "./tools/list-runs.js";
 import { registerResumeRunTool } from "./tools/resume-run.js";
 import { registerStartRunTool } from "./tools/start-run.js";
@@ -30,6 +32,7 @@ import { registerResolveUncertainSpendTool } from "./tools/resolve-uncertain-spe
 import { registerApprovalAppTools, ApprovalAppRevealRateLimiter } from "./tools/approvals-app.js";
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
+import { loadRunInspectorHtml, registerRunInspectorResource } from "./resources/run-inspector.js";
 import { loadInputHtml, registerInputResource } from "./resources/input.js";
 import { registerRunResources } from "./resources/runs.js";
 import { configureRunResourceUpdates } from "./resources/server-updates.js";
@@ -160,6 +163,8 @@ function registerRunInspection(
 ): void {
   registerListRunsTool(server, store, options.onAudit);
   registerGetRunTool(server, store, options.onAudit);
+  registerGetRunTimelineTool(server, store, options.onAudit);
+  registerRunContentTool(server, store, options.onAudit);
   const now = (): number => options.clock?.now() ?? Date.now();
   registerListPendingInputsTool(server, store, now, options.onAudit);
   registerGetInputTool(server, store, now, options.onAudit);
@@ -173,6 +178,7 @@ function registerRunInspection(
   });
   registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
   registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
+  registerRunInspectorResource(server, options.runInspectorHtml ?? loadRunInspectorHtml());
   registerInputResource(server, options.inputHtml ?? loadInputHtml());
 }
 
