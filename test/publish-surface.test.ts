@@ -155,11 +155,11 @@ describe("published package smoke test", () => {
 
   it("rejects private workspace imports in public documentation examples", async () => {
     const privatePackages = await privateWorkspacePackages();
-    const docs = await Promise.all(
-      ["sdk.md", "quickstart.md"].map((file) =>
-        readFile(join(repositoryRoot, "docs", file), "utf8"),
-      ),
-    );
+    const docs = await Promise.all([
+      readFile(join(repositoryRoot, "docs", "sdk.md"), "utf8"),
+      readFile(join(repositoryRoot, "docs", "quickstart.md"), "utf8"),
+      readFile(join(repositoryRoot, "packages", "mcp", "README.md"), "utf8"),
+    ]);
     expect(docs.flatMap((markdown) => privateImportsInExamples(markdown, privatePackages))).toEqual(
       [],
     );
@@ -314,11 +314,13 @@ describe("published package smoke test", () => {
     );
 
     const sdkDocs = await readFile(join(repositoryRoot, "docs", "sdk.md"), "utf8");
+    const mcpReadme = await readFile(join(repositoryRoot, "packages", "mcp", "README.md"), "utf8");
     const examples = [
       ...typescriptExamplesInSection(sdkDocs, "Approvals and human input"),
       ...typescriptExamplesInSection(sdkDocs, "MCP server onboarding"),
+      ...typescriptExamplesInSection(mcpReadme, "Public API"),
     ];
-    expect(examples).toHaveLength(3);
+    expect(examples).toHaveLength(4);
     const compiledDirectory = join(projectDirectory, "compiled");
     await mkdir(compiledDirectory);
     const exampleFiles = await Promise.all(
