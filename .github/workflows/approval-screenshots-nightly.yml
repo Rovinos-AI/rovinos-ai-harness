@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Nightly approval screenshots
+
+on:
+  schedule:
+    - cron: "53 4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: approval-screenshots-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  approval-screenshots:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - name: Install Chromium
+        run: yarn workspace @rovinos/host exec playwright install --with-deps chromium
+      - name: Build reference host
+        run: yarn build:host
+      - name: Build approval app
+        run: yarn workspace @rovinos/approval-app build
+      - name: Regenerate approval screenshots
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/docs/screenshots.ts
+      - name: Upload screenshots for manual comparison
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: approval-screenshots
+          path: docs/images/approval-*.png
+          if-no-files-found: error
+          retention-days: 14
