@@ -1,3 +1,5 @@
+# @rovinos/store-sqlite
+
 <!-- package-readme: v1 -->
 
 <!-- BEGIN GENERATED: readme-deps (yarn gen:readmes) -->
@@ -16,8 +18,6 @@ flowchart LR
   used_by_sdk --> current
 ```
 <!-- END GENERATED: readme-deps -->
-
-# @rovinos/store-sqlite
 
 ## Purpose
 
