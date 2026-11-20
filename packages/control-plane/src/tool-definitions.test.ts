@@ -9,6 +9,8 @@ describe("control-plane tool definitions", () => {
     expect(scopes).toEqual({
       list_runs: "read",
       get_run: "read",
+      get_run_timeline: "read",
+      "harness.runs.content": "read_content",
       list_pending_inputs: "read",
       get_input: "approve",
       review_input: "approve",
@@ -40,6 +42,15 @@ describe("control-plane tool definitions", () => {
     }
     expect(tools.find((tool) => tool.name === "harness.inputs.answer")?._meta).toMatchObject({
       ui: { visibility: ["app"] },
+    });
+    expect(tools.find((tool) => tool.name === "get_run")?._meta).toMatchObject({
+      ui: { resourceUri: "ui://harness/run/v1" },
+    });
+    expect(tools.find((tool) => tool.name === "get_run_timeline")?._meta).toMatchObject({
+      ui: { resourceUri: "ui://harness/run/v1" },
+    });
+    expect(tools.find((tool) => tool.name === "harness.runs.content")?._meta).toMatchObject({
+      ui: { visibility: ["app"], resourceUri: "ui://harness/run/v1" },
     });
   });
 });

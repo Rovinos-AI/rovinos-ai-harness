@@ -23,3 +23,11 @@ Run `yarn workspace @rovinos/approval-app build` to produce the view resources. 
 The `ui://harness/runs/v1` view lists run status, age, step counts, and pending approval counts. It refreshes on run-resource subscription updates when the host bridge supports them, and otherwise polls the app-visible `harness.runs.list` and `harness.runs.get` tools every five seconds. It pauses while hidden, backs off after tool errors, and provides cursor-based loading for older runs. The `list_runs` model-facing tool remains available to clients without MCP Apps support and links the resource through `_meta.ui.resourceUri`.
 
 The console requests and displays metadata only until a person selects an approval. That action loads the validated approval payload through the app-only, approval-authorized `harness.approvals.get` tool and transitions to the approval view within the current iframe. Run details use the metadata projection; event content is never requested by the console.
+
+## Run inspector
+
+The `ui://harness/run/v1` view is linked from `get_run` and follows one run's event history as a timeline of model calls, tool calls and policy decisions, approval and input waits, checkpoints, compaction, subagent activity, budget events, and status changes. It shows aggregate step, token, and cost usage, plus limits and meters only where the event history records them. A subagent link opens the child run in the same view; pending approval and input actions open their existing review views.
+
+Run metadata and the timeline contain no event content. The inspector requests recent tokenized content only after a person selects **Show tokenized content**; this app-only operation requires a token with `read_content` scope and does not resolve vault tokens. Raw-value reveal remains a separate audited operation. The content response is limited to the latest 100 content-bearing events and indicates when older entries are omitted.
+
+The view refreshes on run-resource notifications and falls back to polling when the host subscription is unavailable. Polling pauses while the document is hidden and resumes when it becomes visible. A run's configured root budget limits are not persisted in the event log, so the inspector reports usage and only displays meters for limits recorded by budget events or subagent spawn events.

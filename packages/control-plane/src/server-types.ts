@@ -94,6 +94,8 @@ export interface ControlPlaneServerOptions {
   readonly inputHtml?: string;
   /** Built runs-console MCP App HTML; injectable for in-memory server tests. */
   readonly runsConsoleHtml?: string;
+  /** Built run-inspector MCP App HTML; injectable for in-memory server tests. */
+  readonly runInspectorHtml?: string;
   /** Optional URL shown to text-only clients as an approval fallback. */
   readonly consoleUrl?: string;
   /** Publishes resource changes through the serving entry's subscription bus. */

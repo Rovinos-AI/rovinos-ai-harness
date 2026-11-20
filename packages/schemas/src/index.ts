@@ -139,6 +139,15 @@ export {
   type RunConsoleRun,
 } from "./run-console.js";
 export {
+  RunInspectorRunIdSchema, RunContentInputSchema, RunContentSchema,
+  RunTimelineInputSchema, RunTimelineSchema, RunTimelineStepSchema,
+  type RunContent,
+  type RunContentInput,
+  type RunTimeline,
+  type RunTimelineStep,
+  type RunTimelineInput,
+} from "./run-inspector.js";
+export {
   InputSummarySchema,
   InputListResultSchema,
   InputShowResultSchema,
