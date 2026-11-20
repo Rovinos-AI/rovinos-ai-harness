@@ -29,38 +29,6 @@ export APPROVAL_DEMO_CONTROL_TOKEN
 mkdir -p "$HARNESS_DATA_DIR"
 chmod 700 "$HARNESS_DATA_DIR"
 
-approval_demo_port="${APPROVAL_DEMO_PORT:-3190}"
-control_plane_log="$HARNESS_DATA_DIR/control-plane.log"
-node packages/cli/dist/bin.js serve --http --port "$approval_demo_port" >"$control_plane_log" 2>&1 &
-control_plane_pid=$!
-
-cleanup() {
-  if kill -0 "$control_plane_pid" 2>/dev/null; then
-    kill "$control_plane_pid" 2>/dev/null || true
-    wait "$control_plane_pid" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-for _ in {1..80}; do
-  if grep -q '^http://' "$control_plane_log"; then
-    break
-  fi
-  if ! kill -0 "$control_plane_pid" 2>/dev/null; then
-    printf 'approval_demo_control_plane_failed\n' >&2
-    exit 1
-  fi
-  sleep 0.25
-done
-
-control_plane_url="$(grep -Eo 'http://127\.0\.0\.1:[0-9]+[^[:space:]]*' "$control_plane_log" | head -n 1 || true)"
-if [ -z "$control_plane_url" ]; then
-  printf 'approval_demo_control_plane_timeout\n' >&2
-  exit 1
-fi
-
 set +e
 run_output="$(node packages/cli/dist/bin.js --json run --input examples/quickstart/task.json --fake-model examples/quickstart/fake-model.script.json 2>/dev/null)"
 run_status=$?
@@ -74,7 +42,7 @@ run_id="$(printf '%s' "$run_output" | node --input-type=module -e '
   for await (const chunk of process.stdin) input += chunk;
   process.stdout.write(JSON.parse(input).runId);
 ')"
-approval_list="$(node packages/cli/dist/bin.js --json approvals list)"
+approval_list="$(node packages/cli/dist/bin.js --json approvals list 2>/dev/null)"
 approval_id="$(printf '%s' "$approval_list" | APPROVAL_DEMO_RUN_ID="$run_id" node --input-type=module -e '
   let input = "";
   for await (const chunk of process.stdin) input += chunk;
@@ -84,8 +52,9 @@ approval_id="$(printf '%s' "$approval_list" | APPROVAL_DEMO_RUN_ID="$run_id" nod
   else process.stdout.write(approval.approvalId);
 ')"
 
-printf 'Control plane: %s\n' "$control_plane_url"
+printf 'Control plane: embedded in the local CLI runtime (no network endpoint)\n'
 printf 'Suspended run: %s\n' "$run_id"
 printf 'Pending approval: %s\n' "$approval_id"
 printf 'Local data directory: %s\n' "$HARNESS_DATA_DIR"
+printf 'Reference host URL:\n'
 node packages/cli/dist/bin.js approvals show "$approval_id" --view

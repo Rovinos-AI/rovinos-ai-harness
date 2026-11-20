@@ -15,15 +15,18 @@ the run to continue, and policy is evaluated again before the tool executes.
 
 ## Use the reference host
 
-From the repository root, run `examples/approval-demo/run.sh`. It builds the harness, starts a
-loopback-only control-plane listener, and creates a suspended run with the fake model and the sample
-`ask` rule. The script prints the control-plane URL, run ID, and approval ID, then starts the local
-reference-host app and prints its URL. Open that URL in a browser. Use `Ctrl+C` to stop the local
-servers. Demo state is written under `.tmp/`; remove that directory when you are finished.
+From the repository root, run `examples/approval-demo/run.sh`. It builds the harness, creates a
+suspended run with the fake model and the sample `ask` rule, then starts the local reference-host
+app with the CLI's in-process control-plane runtime. It prints the run ID, approval ID, and
+reference-host URL. The local demo does not expose a network control-plane endpoint: SQLite
+single-instance mode does not allow the CLI approval host and a separate `serve` process to open
+the same data directory. Open the reference-host URL in a browser and use `Ctrl+C` to stop it. Demo
+state is written under `.tmp/`; remove that directory when you are finished. If the browser does
+not open automatically, paste the printed reference-host URL into it.
 
-The approval screen shows tokenized arguments by default. If the demo does not open automatically,
-use the printed command `harness approvals show <approval-id> --view` with the same demo
-configuration and data directory.
+The approval screen shows tokenized arguments by default. The script starts
+`harness approvals show <approval-id> --view` for you; the demo's generated encryption key is
+process-local and is not retained for later CLI commands.
 
 ## Use an MCP Apps-capable client
 
@@ -47,15 +50,17 @@ not proof that an automated client represents a person.
 
 ## Use the CLI fallback
 
-Use the printed approval ID with `harness approvals show <approval-id>` to inspect the request,
+With your own configuration, data directory, and credentials, use the approval ID with
+`harness approvals show <approval-id>` to inspect the request,
 `harness approvals approve <approval-id> --yes` to approve it, or
 `harness approvals deny <approval-id> --yes` to deny it. For policy-approved edits, provide a JSON
 file with `harness approvals approve <approval-id> --edit <json-file> --yes`. After resolving the
 approval, resume the run with `harness resume <run-id> --fake-model
 examples/quickstart/resume-model.script.json`.
 
-The CLI operations require the same demo configuration and data directory as the script. The CLI
-is also the documented fallback when the MCP client cannot open an app or request elicitation.
+The CLI operations require the same configuration, data directory, and credentials used to create
+the pending approval. The CLI is also the documented fallback when the MCP client cannot open an
+app or request elicitation.
 
 ## Reveal tokenized values
 

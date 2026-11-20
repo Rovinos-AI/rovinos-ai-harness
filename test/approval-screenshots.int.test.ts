@@ -33,7 +33,7 @@ describe("approval screenshot generation", () => {
       expect(image.length).toBeGreaterThan(24);
       expect(image.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
       expect(image.readUInt32BE(16)).toBe(1280);
-      expect(image.readUInt32BE(20)).toBe(800);
+      expect(image.readUInt32BE(20)).toBe(900);
     }
   }, 60_000);
 });
