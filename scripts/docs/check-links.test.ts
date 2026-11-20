@@ -44,6 +44,20 @@ describe("Markdown link checker", () => {
     ]);
   });
 
+  it("reports missing relative image files", () => {
+    const sources: MarkdownSource[] = [
+      { path: "docs/approval-app.md", contents: "![Pending approval](images/missing.png)" },
+    ];
+
+    expect(checkLinks(sources, new Set(["docs", "docs/approval-app.md", "docs/images"]))).toEqual([
+      {
+        path: "docs/approval-app.md",
+        line: 1,
+        reason: "unresolved relative link to docs/images/missing.png",
+      },
+    ]);
+  });
+
   it("resolves GitHub anchors when headings are duplicated", () => {
     const sources: MarkdownSource[] = [
       {
