@@ -18,6 +18,7 @@ import { registerReviewApprovalTool } from "./tools/review-approval.js";
 import { registerCancelRunTool } from "./tools/cancel-run.js";
 import { registerDenyTool } from "./tools/deny.js";
 import { registerGetRunTool } from "./tools/get-run.js";
+import { registerOpenReportTool } from "./tools/open-report.js";
 import { registerListRunsTool } from "./tools/list-runs.js";
 import { registerResumeRunTool } from "./tools/resume-run.js";
 import { registerStartRunTool } from "./tools/start-run.js";
@@ -31,6 +32,7 @@ import { registerApprovalAppTools, ApprovalAppRevealRateLimiter } from "./tools/
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
 import { loadInputHtml, registerInputResource } from "./resources/input.js";
+import { loadReportsHtml, registerReportsResource } from "./resources/reports.js";
 import { registerRunResources } from "./resources/runs.js";
 import { configureRunResourceUpdates } from "./resources/server-updates.js";
 import { controlPlanePrincipal, hasControlPlaneScope } from "./auth.js";
@@ -38,7 +40,11 @@ import { startControlPlaneHttpTransport, type ControlPlaneHttpHandle } from "./h
 import { toolDefinitions, toolScope } from "./tool-definitions.js";
 import type { ControlPlaneServerOptions } from "./server-types.js";
 
-export type { ControlPlaneOperations, ControlPlaneServerOptions } from "./server-types.js";
+export type {
+  ControlPlaneOperations,
+  ControlPlaneReportSchemas,
+  ControlPlaneServerOptions,
+} from "./server-types.js";
 
 export type { ControlPlaneHttpHandle };
 
@@ -160,6 +166,12 @@ function registerRunInspection(
 ): void {
   registerListRunsTool(server, store, options.onAudit);
   registerGetRunTool(server, store, options.onAudit);
+  registerOpenReportTool(
+    server,
+    options.controlPlane?.reportDirs ?? [],
+    options.reportSchemas,
+    options.onAudit,
+  );
   const now = (): number => options.clock?.now() ?? Date.now();
   registerListPendingInputsTool(server, store, now, options.onAudit);
   registerGetInputTool(server, store, now, options.onAudit);
@@ -174,6 +186,7 @@ function registerRunInspection(
   registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
   registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
   registerInputResource(server, options.inputHtml ?? loadInputHtml());
+  registerReportsResource(server, options.reportsHtml ?? loadReportsHtml());
 }
 
 function registerInputTools(input: {

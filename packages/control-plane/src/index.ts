@@ -5,6 +5,7 @@ export {
   startControlPlaneStdio,
   type ControlPlaneHttpHandle,
   type ControlPlaneOperations,
+  type ControlPlaneReportSchemas,
   type ControlPlaneServerOptions,
 } from "./server.js";
 export {
@@ -70,9 +71,22 @@ export {
   registerRunsConsoleResource,
 } from "./resources/runs-console.js";
 export { INPUT_RESOURCE_URI, loadInputHtml, registerInputResource } from "./resources/input.js";
+export {
+  REPORTS_RESOURCE_URI,
+  loadReportsHtml,
+  registerReportsResource,
+} from "./resources/reports.js";
 export { RUN_RESOURCE_URI_TEMPLATE, RUNS_RESOURCE_URI } from "./resources/runs.js";
 export { getRun, getRunText, registerGetRunTool } from "./tools/get-run.js";
 export { listRuns, registerListRunsTool } from "./tools/list-runs.js";
+export {
+  openReport,
+  openReportInputSchema,
+  openReportOutputSchema,
+  registerOpenReportTool,
+  type OpenReportInput,
+  type OpenReportOutput,
+} from "./tools/open-report.js";
 export {
   getRunInputSchema,
   getRunOutputSchema,
