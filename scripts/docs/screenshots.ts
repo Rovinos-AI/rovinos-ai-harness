@@ -49,7 +49,6 @@ function createPayload(overrides: Partial<ApprovalPayload> = {}): ApprovalPayloa
 }
 
 function inlineAppContent(document: string): string {
-  // The reference host supplies the document shell, so only the built app's inline assets belong here.
   const styleStart = document.indexOf("<style>");
   const styleEnd = document.indexOf("</style>", styleStart);
   const scriptStart = document.indexOf("<script>", styleEnd);
@@ -57,21 +56,13 @@ function inlineAppContent(document: string): string {
   if (styleStart < 0 || styleEnd < 0 || scriptStart < 0 || scriptEnd < 0) {
     throw new Error("approval_screenshots_app_invalid");
   }
-  return `${document.slice(styleStart, styleEnd + "</style>".length)}${document.slice(
-    scriptStart,
-    scriptEnd + "</script>".length,
-  )}`;
+  const styles = document.slice(styleStart + "<style>".length, styleEnd);
+  const script = document.slice(scriptStart + "<script>".length, scriptEnd);
+  return `<script>const style=document.createElement("style");style.textContent=${JSON.stringify(styles)};document.head.append(style);</script><script>${script}</script>`;
 }
 
-async function openApprovalPage(browser: Browser, payload: ApprovalPayload): Promise<ApprovalPage> {
-  const approvalDocument = await readFile(
-    resolve(
-      fileURLToPath(new URL("../../packages/approval-app/dist/approval.html", import.meta.url)),
-    ),
-    "utf8",
-  );
-  const approvalHtml = inlineAppContent(approvalDocument);
-  const host = await createReferenceHost(
+function createScreenshotHost(approvalHtml: string, payload: ApprovalPayload) {
+  return createReferenceHost(
     {
       apps: [
         {
@@ -105,17 +96,31 @@ async function openApprovalPage(browser: Browser, payload: ApprovalPayload): Pro
         }),
     },
   );
+}
+
+async function openApprovalPage(browser: Browser, payload: ApprovalPayload): Promise<ApprovalPage> {
+  const approvalDocument = await readFile(
+    resolve(
+      fileURLToPath(new URL("../../packages/approval-app/dist/approval.html", import.meta.url)),
+    ),
+    "utf8",
+  );
+  const approvalHtml = inlineAppContent(approvalDocument);
+  const host = await createScreenshotHost(approvalHtml, payload);
   const context = await browser.newContext({
     colorScheme: "light",
     deviceScaleFactor: 1,
     locale: "en-US",
     reducedMotion: "reduce",
     timezoneId: "UTC",
-    viewport: { width: 1280, height: 800 },
+    viewport: { width: 1280, height: 900 },
   });
   const page = await context.newPage();
   await page.clock.install({ time: new Date(fixedTime) });
   await page.goto(host.url, { waitUntil: "domcontentloaded" });
+  await page.locator("iframe").evaluate((frame) => {
+    frame.style.setProperty("height", "768px");
+  });
   const frame = page.frameLocator("iframe");
   await frame.locator('nav[aria-label="Approval actions"] button').first().waitFor();
 
