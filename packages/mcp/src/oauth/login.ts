@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import type { SecretRef, ServerConfig } from "@rovinos/schemas";
 import { McpAuthRequiredError, McpOAuthProvider, withOAuthWarningsRedacted } from "./provider.js";
 import type { OAuthTokenStore } from "./token-store.js";
+import { createResponseLimitedFetch } from "../transports.js";
 
 /** Active explicit-login flow with a loopback callback and no implicit browser launch. */
 export interface McpOAuthLoginSession {
@@ -150,6 +151,7 @@ export async function startMcpOAuthLogin(
     });
     transport = new StreamableHTTPClientTransport(new URL(transportConfig.url), {
       authProvider: provider,
+      fetch: createResponseLimitedFetch(options.server.maxResultBytes),
     });
   } catch {
     await closeCallbackServer(callbackServer);
