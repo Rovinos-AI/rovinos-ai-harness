@@ -1,5 +1,37 @@
 # @rovinos/store-postgres
 
+## 0.3.0
+
+### Minor Changes
+
+- 6a9f07f: # Shared rate-limit store
+
+  Add a `RateLimitStore` port with in-process and Postgres backends, so rate limits can be shared across replicas.
+- cbbe0fa: # Spend reservation recovery
+
+  Strict spend reservations now recover after an expired worker lease. Reserved attempts that never dispatched are released, and dispatching attempts become uncertain and keep blocking their quota period. Operators can record an audited waiver for an uncertain attempt. Adds migration `0015_spend_reservation_operator_resolution`.
+- f1a7793: # Represent incomplete and unknown cost explicitly
+
+  Costs and run totals now carry a versioned completeness state: known, estimated, partial or unknown. Unknown cost is never counted as zero. With a cost cap set, unknown or partial cost stops the run with `budget_cost_unknown` unless `unknownCostPolicy: allow` is configured.
+
+### Patch Changes
+
+- ad3648a: # Add PostgreSQL spend reservations
+
+  Implement durable, transactional spend reservations with shared quota locking.
+- Updated dependencies [122052e]
+- Updated dependencies [a5b55f8]
+- Updated dependencies [3765be6]
+- Updated dependencies [dacb3da]
+- Updated dependencies [f4a9843]
+- Updated dependencies [83be569]
+- Updated dependencies [6a9f07f]
+- Updated dependencies [402651d]
+- Updated dependencies [80a3fe1]
+- Updated dependencies [5aefb96]
+- Updated dependencies [f1a7793]
+  - @rovinos/sdk@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

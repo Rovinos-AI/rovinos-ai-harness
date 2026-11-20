@@ -2,12 +2,13 @@
 
 ## npm publish surface
 
-The npm scope is `@rovinos`. The SDK, optional extensions authoring package, CLI, two store adapters, and optional Redis rate-limit adapter are publishable:
+The npm scope is `@rovinos`. The SDK, optional extensions authoring package, optional bounded reference retrieval extension, CLI, two store adapters, and optional Redis rate-limit adapter are publishable:
 
 | Package | Purpose |
 | --- | --- |
 | `@rovinos/sdk` | Stable programmatic API with internal workspace code bundled |
 | `@rovinos/extensions` | Optional authoring helpers over SDK-owned contracts; the SDK is a required peer |
+| `@rovinos/extension-retrieval` | Optional bounded reference retrieval extension; the SDK and extensions packages are required peers |
 | `@rovinos/cli` | Bundled `harness` executable |
 | `@rovinos/store-sqlite` | Optional SQLite adapter; installs `better-sqlite3` |
 | `@rovinos/store-postgres` | Optional Postgres adapter; installs `pg` |
@@ -24,7 +25,7 @@ their own driver and declare the SDK as an optional peer dependency.
 Every published package requires Node.js 26 or later. The publish-surface check uses
 `yarn pack --dry-run` and rejects internal package dependencies, test or `testing` files (except the
 intentional extensions testing subpath), and tarballs above the committed uncompressed size budgets:
-30 MB for the SDK, 1 MB for extensions, 40 MB for the CLI, and 10 MB for each adapter.
+30 MB for the SDK, 1 MB for each extension package, 40 MB for the CLI, and 10 MB for each adapter.
 
 Verify the publish surface after building with:
 
@@ -41,13 +42,13 @@ in the following section.
 ## Versioning and GitHub releases
 
 Create a Changeset for user-visible changes to a published package with `yarn changeset add`. The
-SDK, extensions, CLI, SQLite adapter, Postgres adapter, and Redis adapter form one fixed Changesets
+SDK, extensions, retrieval extension, CLI, SQLite adapter, Postgres adapter, and Redis adapter form one fixed Changesets
 group, so every published package uses the same version. All other workspace packages remain private
 and ignored. Changesets generates package changelogs when maintainers apply a release plan with
 `yarn changeset version`.
 
 Pull requests that change package files outside Markdown documentation must include a Changeset.
-The CI release dry run checks all six package archives and validates package version consistency.
+The CI release dry run checks all seven package archives and validates package version consistency.
 The integration job builds the harness and sandbox images without pushing them.
 Release packing confirms that the SDK and CLI include their generated migration trees, that the CLI
 includes approval and web assets, and that each store adapter includes its own migrations. The
@@ -56,7 +57,7 @@ runtime image.
 
 To publish, create and push a `vX.Y.Z` tag for the matching package versions, with no unapplied
 Changesets. The tag-triggered workflow runs the full CI workflow on the tagged tree, then verifies
-release metadata and community files. It publishes the six packages from packed tarballs with npm
+release metadata and community files. It publishes the seven packages from packed tarballs with npm
 provenance through trusted publishing, builds and pushes
 `ghcr.io/rovinos-ai/harness` and `ghcr.io/rovinos-ai/harness-sandbox` with version tags, signs each
 image with cosign keyless signing, and attaches a BuildKit SBOM attestation. Once package publishing
@@ -71,8 +72,8 @@ For a newly added package, maintainers must first publish a one-time `0.0.0` pla
 short-lived npm token, then configure the trusted publisher for that package and remove the token.
 Do this manually; the release workflow never accepts or stores an npm token. Ensure the first
 release uses a version newer than the placeholder.
-The repository owner must configure the trusted publisher for `@rovinos/extensions` before its
-first release; this remains a release-setup follow-up, not a workflow-managed secret.
+All seven published packages have a `0.0.0` placeholder and a trusted publisher for this repository
+and workflow; a package added to the publish surface later needs the same one-time setup.
 
 Releases are blocked if any CI gate fails, release metadata is inconsistent, a packed package
 contains an unresolved `workspace:` dependency, the community-file check with `RELEASE=1` fails, or
