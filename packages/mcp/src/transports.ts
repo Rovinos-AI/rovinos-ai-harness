@@ -10,6 +10,7 @@ import {
   type SecretRef,
   type ServerConfig,
 } from "@rovinos/schemas";
+import { McpConnectionError } from "./errors.js";
 import { McpAuthRequiredError, McpOAuthProvider } from "./oauth/provider.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
 
@@ -98,12 +99,14 @@ async function createStdioTransport(
   return transport;
 }
 
-async function createHttpTransport(
-  config: Extract<ServerConfig["transport"], { kind: "http" }>,
-  serverId: HarnessCode,
-  dependencies: McpTransportDependencies,
-  signal?: AbortSignal,
-): Promise<StreamableHTTPClientTransport> {
+async function createHttpTransport(options: {
+  readonly config: Extract<ServerConfig["transport"], { kind: "http" }>;
+  readonly serverId: HarnessCode;
+  readonly maxResultBytes: number;
+  readonly dependencies: McpTransportDependencies;
+  readonly signal?: AbortSignal;
+}): Promise<StreamableHTTPClientTransport> {
+  const { config, serverId, maxResultBytes, dependencies, signal } = options;
   const headers: Record<string, string> = {};
   for (const [key, ref] of Object.entries(config.headers ?? {})) {
     if (["traceparent", "tracestate", "baggage"].includes(key.toLowerCase())) {
@@ -132,8 +135,47 @@ async function createHttpTransport(
   }
   return new StreamableHTTPClientTransport(new URL(config.url), {
     requestInit: { headers },
+    fetch: createResponseLimitedFetch(maxResultBytes),
     ...(authProvider === undefined ? {} : { authProvider }),
   });
+}
+
+/** Bounds the response bytes exposed by Fetch before the SDK parses its response. */
+export function createResponseLimitedFetch(maxBytes: number): typeof globalThis.fetch {
+  return async (input, init) => {
+    const response = await globalThis.fetch(input, init);
+    if (response.body === null) {
+      return response;
+    }
+
+    const reader = response.body.getReader();
+    let bytesRead = 0;
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        if (value.byteLength > maxBytes - bytesRead) {
+          void reader.cancel().catch(() => undefined);
+          controller.error(new McpConnectionError("mcp_response_too_large"));
+          return;
+        }
+        bytesRead += value.byteLength;
+        controller.enqueue(value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    });
+
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  };
 }
 
 /**
@@ -154,5 +196,11 @@ export function createMcpTransport(
 ): Promise<Transport> {
   return config.transport.kind === "stdio"
     ? createStdioTransport(config.transport, config.id, dependencies, signal)
-    : createHttpTransport(config.transport, config.id, dependencies, signal);
+    : createHttpTransport({
+        config: config.transport,
+        serverId: config.id,
+        maxResultBytes: config.maxResultBytes,
+        dependencies,
+        ...(signal === undefined ? {} : { signal }),
+      });
 }
