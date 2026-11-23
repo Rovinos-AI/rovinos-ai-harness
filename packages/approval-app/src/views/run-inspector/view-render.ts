@@ -243,8 +243,7 @@ function renderBudgetMeters(
   strings: InspectorStrings,
   timeline: RunTimeline,
 ): void {
-  const section = element(document, "section");
-  section.setAttribute("aria-label", strings.runInspectorUsage);
+  const section = element(document, "div");
   for (const step of timeline.steps) {
     exceededBudgetMeter(document, strings, section, step);
     if (step.type === "subagent_spawn") {
