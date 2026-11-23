@@ -29,9 +29,41 @@ export type McpConnectionErrorCode =
   | "mcp_discovery_timeout"
   | "mcp_discovery_cancelled"
   | "mcp_response_too_large"
+  | "mcp_resource_grant_invalid"
+  | "mcp_resource_access_denied"
+  | "mcp_resources_unavailable"
+  | "mcp_list_resources_failed"
+  | "mcp_too_many_resources"
+  | "mcp_resource_uri_invalid"
+  | "mcp_resource_content_unsupported"
+  | "mcp_resource_tokenization_failed"
+  | "mcp_resource_request_too_large"
+  | "mcp_resource_timeout"
+  | "mcp_resources_changed"
+  | "mcp_resource_subscription_unavailable"
+  | "mcp_read_resource_failed"
   | "mcp_apps_unsupported"
   | "mcp_tool_arguments_invalid"
   | "mcp_tool_call_failed";
+
+/** Closed prompt-retrieval failures that never include server-provided text. */
+export type McpPromptErrorCode =
+  | "mcp_prompt_not_granted"
+  | "mcp_prompt_unavailable"
+  | "mcp_prompt_arguments_invalid"
+  | "mcp_prompt_result_too_large"
+  | "mcp_prompt_failed";
+
+/** Safe prompt retrieval error with one of the public closed prompt codes. */
+export class McpPromptError extends HarnessError {
+  override readonly code: McpPromptErrorCode;
+
+  /** Creates a safe prompt error without remote details. */
+  constructor(code: McpPromptErrorCode) {
+    super(code);
+    this.code = code;
+  }
+}
 
 /** Safe connection error with a closed code and no remote-provided message. */
 export class McpConnectionError extends HarnessError {

@@ -40,6 +40,7 @@ import type {
 import { validateDeploymentTopology } from "./runtime-deployment.js";
 import { openRuntimeInstanceHeartbeat } from "./runtime-instance-heartbeat.js";
 import { closeSetupResources } from "./runtime-setup-cleanup.js";
+import { createMcpPromptTokenizer } from "./prompt-tokenization.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
@@ -252,7 +253,7 @@ function getOwnedRateLimitResource(
   return rateLimit.ownedStore === undefined ? {} : { rateLimitStore: rateLimit.ownedStore };
 }
 
-async function composeRuntimeSetup(options: {
+async function createRuntimeSetupFoundation(options: {
   readonly config: RuntimeConfig;
   readonly piiConfig: PiiConfig;
   readonly overrides: RuntimeOverrides;
@@ -260,13 +261,11 @@ async function composeRuntimeSetup(options: {
   readonly ids: RuntimeComposition["ids"];
   readonly keys: RuntimeComposition["keys"];
   readonly dataDir: string;
-  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
   readonly resources: RuntimeSetupResources;
-}): Promise<RuntimeSetup> {
-  const { config, piiConfig, overrides, clock, ids, keys, dataDir, instanceHeartbeat, resources } =
-    options;
-  const runtimeVault = await createRuntimeVault({ dataDir, config, overrides, keys, clock });
-  resources.vault = runtimeVault;
+}) {
+  const { config, piiConfig, overrides, clock, ids, keys, dataDir, resources } = options;
+  const vault = await createRuntimeVault({ dataDir, config, overrides, keys, clock });
+  resources.vault = vault;
   const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
   const policy = await createRuntimePolicy(config, overrides);
   const tools = await createRuntimeTools(config, overrides, keys, dataDir);
@@ -289,6 +288,45 @@ async function composeRuntimeSetup(options: {
   resources.eventStore = rawStore;
   const rateLimit = await createRuntimeRateLimitStore(config, overrides, clock);
   Object.assign(resources, getOwnedRateLimitResource(rateLimit));
+  return {
+    vault,
+    scopes,
+    policy,
+    tools,
+    tool,
+    sandboxBackend,
+    workspaceSnapshotter,
+    roles,
+    rawStore,
+    rateLimit,
+  };
+}
+
+async function composeRuntimeSetup(options: {
+  readonly config: RuntimeConfig;
+  readonly piiConfig: PiiConfig;
+  readonly overrides: RuntimeOverrides;
+  readonly clock: RuntimeComposition["clock"];
+  readonly ids: RuntimeComposition["ids"];
+  readonly keys: RuntimeComposition["keys"];
+  readonly dataDir: string;
+  readonly instanceHeartbeat: RuntimeComposition["instanceHeartbeat"];
+  readonly resources: RuntimeSetupResources;
+}): Promise<RuntimeSetup> {
+  const { config, piiConfig, overrides, clock, ids, keys, instanceHeartbeat } = options;
+  const foundation = await createRuntimeSetupFoundation(options);
+  const {
+    vault: runtimeVault,
+    scopes,
+    policy,
+    tools,
+    tool,
+    sandboxBackend,
+    workspaceSnapshotter,
+    roles,
+    rawStore,
+    rateLimit,
+  } = foundation;
   const { piiRuntime, model, store } = await createRuntimeModelAndStore({
     config,
     piiConfig,
@@ -302,6 +340,7 @@ async function composeRuntimeSetup(options: {
     rateLimitStore: rateLimit.store,
   });
   const managedMcpToolPort = tools.mcpToolPort;
+  const tokenizeMcpPromptContent = createMcpPromptTokenizer(piiRuntime.tokenizer);
   return {
     config,
     overrides: { ...overrides, rateLimitStore: rateLimit.store },
@@ -321,6 +360,8 @@ async function composeRuntimeSetup(options: {
       ? { closeRateLimitStore: () => rateLimit.store.close?.() ?? Promise.resolve() }
       : {}),
     tool,
+    ...(managedMcpToolPort === undefined ? {} : { promptPort: managedMcpToolPort }),
+    tokenizeMcpPromptContent,
     ...(managedMcpToolPort === undefined
       ? {}
       : { closeToolPort: () => managedMcpToolPort.close() }),

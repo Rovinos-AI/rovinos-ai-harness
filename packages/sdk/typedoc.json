@@ -14,7 +14,7 @@
     "src/types.ts:RunStartResultSchema",
     "src/types.ts:RunSummarySchema",
     "src/types.ts:RunViewSchema",
-    "src/types.ts:StartRunOptionsSchema",
+    "src/start-run-options.ts:StartRunOptionsSchema",
     "src/types.ts:WatchOptionsSchema"
   ]
 }

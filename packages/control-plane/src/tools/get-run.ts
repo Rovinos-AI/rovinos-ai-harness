@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { withControlPlaneAuthorization } from "../auth.js";
 import { RUNS_CONSOLE_RESOURCE_URI } from "../resources/runs-console.js";
+import { RUN_INSPECTOR_RESOURCE_URI } from "../resources/run-inspector.js";
 import {
   getRunInputSchema,
   getRunOutputSchema,
@@ -78,9 +79,16 @@ export function registerGetRunTool(
   server: McpServer,
   store: EventStore,
   audit?: ControlPlaneAuditHandler,
-  options: { readonly name?: string; readonly appOnly?: boolean } = {},
+  options: {
+    readonly name?: string;
+    readonly appOnly?: boolean;
+    readonly resourceUri?: string;
+  } = {},
 ): void {
   const name = options.name ?? "get_run";
+  const resourceUri =
+    options.resourceUri ??
+    (options.appOnly === true ? RUNS_CONSOLE_RESOURCE_URI : RUN_INSPECTOR_RESOURCE_URI);
   server.registerTool(
     name,
     {
@@ -91,7 +99,7 @@ export function registerGetRunTool(
       ...(options.appOnly === true
         ? {
             _meta: {
-              ui: { visibility: ["app" as const], resourceUri: RUNS_CONSOLE_RESOURCE_URI },
+              ui: { resourceUri },
             },
           }
         : {}),

@@ -13,7 +13,7 @@ import { ServerConfigSchema } from "@rovinos/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
-import { createMcpTransport, type McpLogEvent } from "./transports.js";
+import { createMcpTransport, createResponseLimitedFetch, type McpLogEvent } from "./transports.js";
 
 const tracerProvider = createTestTracerProvider();
 
@@ -60,6 +60,71 @@ function stdioConfig(inheritEnv: boolean) {
 }
 
 describe("MCP transports", () => {
+  it("refuses HTTP redirects instead of following them to another destination", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("redirect refused"));
+    try {
+      await expect(
+        createResponseLimitedFetch(1_024)("https://mcp.example.test/mcp", {
+          redirect: "follow",
+        }),
+      ).rejects.toThrow("redirect refused");
+      expect(fetch).toHaveBeenCalledWith(
+        new URL("https://mcp.example.test/mcp"),
+        expect.objectContaining({ redirect: "manual" }),
+      );
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it("follows bounded same-origin MCP endpoint redirects", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 308, headers: { location: "/mcp/" } }))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    try {
+      const response = await createResponseLimitedFetch(1_024)("https://mcp.example.test/mcp", {
+        method: "POST",
+        body: "{}",
+      });
+
+      expect(await response.json()).toEqual({ ok: true });
+      expect(fetch).toHaveBeenNthCalledWith(
+        1,
+        new URL("https://mcp.example.test/mcp"),
+        expect.objectContaining({ redirect: "manual" }),
+      );
+      expect(fetch).toHaveBeenNthCalledWith(
+        2,
+        new URL("https://mcp.example.test/mcp/"),
+        expect.objectContaining({ redirect: "manual" }),
+      );
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it("refuses cross-origin MCP endpoint redirects", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(null, { status: 308, headers: { location: "https://other.example/mcp" } }),
+      );
+    try {
+      await expect(
+        createResponseLimitedFetch(1_024)("https://mcp.example.test/mcp", {
+          method: "POST",
+          body: "{}",
+        }),
+      ).rejects.toThrow("MCP redirect refused");
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   it("sends HTTP trace metadata only in _meta and strips configured reserved headers", async () => {
     interface CapturedRequest {
       readonly headers: Headers;

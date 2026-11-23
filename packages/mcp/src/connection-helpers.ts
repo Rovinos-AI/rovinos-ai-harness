@@ -25,6 +25,15 @@ export { OAUTH_CLIENT_CREDENTIALS_EXTENSION } from "./oauth/protected-resource.j
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 export const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
 
+/** Indicates whether a connection attempt was superseded or closed. */
+export function isConnectionStale(
+  closed: boolean,
+  activeGeneration: number,
+  generation: number,
+): boolean {
+  return closed || activeGeneration !== generation;
+}
+
 /** Normalizes discovery failures while invalidating a connection that requires authorization. */
 export function discoveryConnectionError(
   error: unknown,
@@ -48,6 +57,45 @@ export function connectionCallError(error: unknown): McpConnectionError | undefi
     return error;
   }
   return undefined;
+}
+
+/** Attaches connection state cleanup to transport close without retaining stale callbacks. */
+export function watchConnectionTransport(
+  transport: Transport,
+  onCurrentTransportClosed: () => void,
+): void {
+  const monitoredTransport = transport;
+  const onclose = monitoredTransport.onclose;
+  monitoredTransport.onclose = () => {
+    onclose?.();
+    onCurrentTransportClosed();
+  };
+  const onerror = monitoredTransport.onerror;
+  monitoredTransport.onerror = (error) => {
+    onerror?.(error);
+  };
+}
+
+/** Applies tool-list change notifications and logs refresh failures without server messages. */
+export function handleConnectionToolsChanged(options: {
+  readonly error: Error | null;
+  readonly serverId: ServerConfig["id"];
+  readonly logger: McpConnectionDependencies["logger"];
+  readonly onChange: () => void;
+  readonly isReady: () => boolean;
+  readonly refresh: () => Promise<unknown>;
+}): void {
+  options.onChange();
+  const logRefreshFailure = () => {
+    options.logger?.log({ code: "mcp_tools_refresh_failed", serverId: options.serverId });
+  };
+  if (options.error !== null) {
+    logRefreshFailure();
+    return;
+  }
+  if (options.isReady()) {
+    void options.refresh().catch(logRefreshFailure);
+  }
 }
 
 /** Discovers validated pages with one shared signal and metadata-only exclusion logging. */

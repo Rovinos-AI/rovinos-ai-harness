@@ -10,6 +10,7 @@ import type {
   ModelRequest as SharedModelRequest,
   ModelResponse,
   ModelUsage as SharedModelUsage,
+  McpPromptSelection,
   Part,
   PiiActionSummary,
   Principal,
@@ -197,6 +198,22 @@ export interface ToolPort {
    * @returns The tool outcome and JSON result.
    */
   execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult>;
+}
+
+/** Retrieved prompt text and its configured-server provenance. */
+export interface RetrievedPromptContent {
+  readonly serverId: Code;
+  readonly name: string;
+  readonly content: string;
+}
+
+/** Run-scoped retrieval port for explicitly granted outbound MCP prompts. */
+export interface PromptPort {
+  /** Retrieves only the requested, exactly granted prompts; returned content is untrusted. */
+  retrievePrompts(
+    selections: readonly McpPromptSelection[],
+    signal: AbortSignal,
+  ): Promise<readonly RetrievedPromptContent[]>;
 }
 
 /** Context that policy is allowed to use when matching a prepared tool call. */

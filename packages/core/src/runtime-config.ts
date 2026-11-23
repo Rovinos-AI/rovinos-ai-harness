@@ -28,6 +28,7 @@ import {
   type ToolProfilesConfig,
   type RateLimitsConfig,
   type RateLimitStore,
+  type McpPromptSelection,
 } from "@rovinos/schemas";
 import { z } from "zod";
 import type { Context } from "@opentelemetry/api";
@@ -51,6 +52,7 @@ import type {
   PolicyPort,
   RunContext,
   ToolPort,
+  PromptPort,
 } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { HumanInputChannel } from "./human-input/channels.js";
@@ -176,6 +178,7 @@ export interface Runtime {
     options?: {
       readonly role?: Code;
       readonly toolProfile?: Code;
+      readonly promptSelections?: readonly McpPromptSelection[];
       readonly requestedBy?: Principal;
       readonly replayOf?: Id;
       readonly parentRunId?: Id;
@@ -195,6 +198,7 @@ export interface Runtime {
       readonly rootSpanParent?: Context;
       readonly requestedBy?: Principal;
       readonly toolProfile?: Code;
+      readonly promptSelections?: readonly McpPromptSelection[];
       readonly onProgress?: NonNullable<RunContext["onProgress"]>;
       readonly evalMetadata?: EvalRunMetadata;
       readonly signal?: AbortSignal;
@@ -270,6 +274,12 @@ export interface RuntimeComposition {
   readonly rateLimitStore: RateLimitStore;
   readonly closeRateLimitStore?: () => Promise<void>;
   readonly tool: ToolPort;
+  readonly promptPort?: PromptPort;
+  readonly tokenizeMcpPromptContent?: (
+    runId: Id,
+    content: string,
+    signal: AbortSignal,
+  ) => Promise<string>;
   readonly closeToolPort?: () => Promise<void>;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];

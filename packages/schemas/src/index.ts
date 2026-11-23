@@ -138,6 +138,12 @@ export {
   type RunConsoleList,
   type RunConsoleRun,
 } from "./run-console.js";
+export { RunInspectorRunIdSchema, RunContentInputSchema } from "./run-inspector.js";
+export { RunContentSchema, RunTimelineInputSchema } from "./run-inspector.js";
+export { RunTimelineSchema, RunTimelineStepSchema } from "./run-inspector.js";
+export type { RunContent, RunContentInput } from "./run-inspector.js";
+export type { RunTimeline, RunTimelineStep } from "./run-inspector.js";
+export type { RunTimelineInput } from "./run-inspector.js";
 export {
   InputSummarySchema,
   InputListResultSchema,
@@ -323,6 +329,7 @@ export {
   type RunInput,
   type RunResult,
 } from "./cli/run.js";
+export { McpPromptSelectionsSchema, type McpPromptSelection } from "./mcp-prompts.js";
 export {
   PolicyLintResultSchema,
   PolicyTestCallSchema,
