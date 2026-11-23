@@ -157,6 +157,7 @@ describe("control-plane HTTP transport", () => {
       const { tools } = await client.listTools();
       expect(tools.map(({ name }) => name).sort()).toEqual([
         "get_run",
+        "get_run_timeline",
         "list_pending_inputs",
         "list_runs",
       ]);
@@ -237,6 +238,7 @@ describe("control-plane HTTP transport", () => {
       const { tools } = await client.listTools();
       expect(tools.map(({ name }) => name).sort()).toEqual([
         "get_run",
+        "get_run_timeline",
         "list_pending_inputs",
         "list_runs",
       ]);
@@ -485,6 +487,7 @@ describe("control-plane HTTP transport", () => {
         "continue_run",
         "get_input",
         "get_run",
+        "get_run_timeline",
         "list_pending_inputs",
         "list_runs",
         "resolve_uncertain_spend",

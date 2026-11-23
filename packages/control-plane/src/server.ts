@@ -61,9 +61,16 @@ export function createControlPlaneServer(
       name: "rovinos-ai-harness-control-plane",
       version: "0.0.0",
     },
-    { requestState: { verify: confirmationGate.verifyRequestState } },
+    {
+      requestState: { verify: confirmationGate.verifyRequestState },
+      supportedProtocolVersions: ["2026-07-28", "2025-11-25"],
+    },
   );
-  server.server.registerCapabilities({ tools: {}, resources: { subscribe: true } });
+  server.server.registerCapabilities({
+    tools: {},
+    resources: { subscribe: true },
+    extensions: { "io.modelcontextprotocol/ui": {} },
+  });
   configureRunResourceUpdates(server, store, options);
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);

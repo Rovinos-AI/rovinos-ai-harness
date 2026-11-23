@@ -2629,6 +2629,7 @@ describe("control plane", () => {
       const { tools } = await client.listTools();
       expect(tools.map(({ name }) => name).sort()).toEqual([
         "get_run",
+        "get_run_timeline",
         "list_pending_inputs",
         "list_runs",
       ]);
