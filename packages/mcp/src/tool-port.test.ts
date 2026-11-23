@@ -294,7 +294,7 @@ afterAll(() => {
 });
 
 describe("McpToolPort", () => {
-  it("denies ungranted prompt names before prompt discovery", async () => {
+  it("denies prompt names without a grant before prompt discovery", async () => {
     const current = await fixture({
       prompts: [{ name: "summarize" }],
       promptGrants: [],
