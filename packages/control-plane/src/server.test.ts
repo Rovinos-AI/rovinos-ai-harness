@@ -274,9 +274,7 @@ describe("control-plane inspection tools", () => {
       idempotentHint: true,
     });
     expect(client.getServerCapabilities()?.tools).toBeDefined();
-    expect(client.getServerCapabilities()).toHaveProperty("extensions", {
-      "io.modelcontextprotocol/ui": {},
-    });
+    expect(client.getServerCapabilities()).not.toHaveProperty("extensions");
     expect(listRunsInputSchema.parse({})).toEqual({ limit: 20 });
     expect(listRunsInputSchema.safeParse({ limit: 51 }).success).toBe(false);
     expect(getRunInputSchema.safeParse({ runId: "invalid" }).success).toBe(false);

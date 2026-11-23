@@ -45,14 +45,6 @@ export type { ControlPlaneOperations, ControlPlaneServerOptions } from "./server
 
 export type { ControlPlaneHttpHandle };
 
-function configureControlPlaneCapabilities(server: McpServer): void {
-  server.server.registerCapabilities({
-    tools: {},
-    resources: { subscribe: true },
-    extensions: { "io.modelcontextprotocol/ui": {} },
-  });
-}
-
 /** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
 export function createControlPlaneServer(
   store: EventStore,
@@ -69,12 +61,9 @@ export function createControlPlaneServer(
       name: "rovinos-ai-harness-control-plane",
       version: "0.0.0",
     },
-    {
-      requestState: { verify: confirmationGate.verifyRequestState },
-      supportedProtocolVersions: ["2026-07-28", "2025-11-25"],
-    },
+    { requestState: { verify: confirmationGate.verifyRequestState } },
   );
-  configureControlPlaneCapabilities(server);
+  server.server.registerCapabilities({ tools: {}, resources: { subscribe: true } });
   configureRunResourceUpdates(server, store, options);
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);

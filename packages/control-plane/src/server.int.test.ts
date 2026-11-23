@@ -292,11 +292,6 @@ describe("control-plane HTTP transport", () => {
     let subscription: Awaited<ReturnType<typeof client.listen>> | undefined;
     try {
       await client.connect(createHttpTransport(server.endpoint));
-      expect(client.getServerCapabilities()).toMatchObject({
-        tools: {},
-        resources: { subscribe: true },
-        extensions: { "io.modelcontextprotocol/ui": {} },
-      });
       subscription = await client.listen({
         resourceSubscriptions: [RUNS_RESOURCE_URI, runUri],
       });
