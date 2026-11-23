@@ -138,19 +138,12 @@ export {
   type RunConsoleList,
   type RunConsoleRun,
 } from "./run-console.js";
-export {
-  RunInspectorRunIdSchema,
-  RunContentInputSchema,
-  RunContentSchema,
-  RunTimelineInputSchema,
-  RunTimelineSchema,
-  RunTimelineStepSchema,
-  type RunContent,
-  type RunContentInput,
-  type RunTimeline,
-  type RunTimelineStep,
-  type RunTimelineInput,
-} from "./run-inspector.js";
+export { RunInspectorRunIdSchema, RunContentInputSchema } from "./run-inspector.js";
+export { RunContentSchema, RunTimelineInputSchema } from "./run-inspector.js";
+export { RunTimelineSchema, RunTimelineStepSchema } from "./run-inspector.js";
+export type { RunContent, RunContentInput } from "./run-inspector.js";
+export type { RunTimeline, RunTimelineStep } from "./run-inspector.js";
+export type { RunTimelineInput } from "./run-inspector.js";
 export {
   InputSummarySchema,
   InputListResultSchema,
