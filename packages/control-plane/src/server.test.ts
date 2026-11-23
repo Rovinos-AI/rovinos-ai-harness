@@ -32,6 +32,7 @@ import {
   RUN_RESOURCE_URI_TEMPLATE,
   RUNS_RESOURCE_URI,
 } from "./index.js";
+import { RUN_INSPECTOR_RESOURCE_URI } from "./resources/run-inspector.js";
 import { createControlPlaneServer, startControlPlaneHttp } from "./server.js";
 
 const CONTENT_CANARY = "PRIVATE_EVENT_CONTENT_CANARY";
@@ -237,6 +238,7 @@ describe("control-plane inspection tools", () => {
       "continue_run",
       "get_input",
       "get_run",
+      "get_run_timeline",
       "list_pending_inputs",
       "list_runs",
       "open_report",
@@ -254,6 +256,9 @@ describe("control-plane inspection tools", () => {
     });
     expect(tools.find(({ name }) => name === "get_input")?._meta).toEqual({
       ui: { resourceUri: "ui://harness/input/v1" },
+    });
+    expect(tools.find(({ name }) => name === "get_run")?._meta).toEqual({
+      ui: { resourceUri: RUN_INSPECTOR_RESOURCE_URI },
     });
     expect(
       tools
@@ -295,11 +300,33 @@ describe("control-plane inspection tools", () => {
     expect(tools.find(({ name }) => name === "harness.runs.get")?._meta).toEqual({
       ui: { visibility: ["app"], resourceUri: "ui://harness/runs/v1" },
     });
+    expect(tools.find(({ name }) => name === "harness.runs.content")?._meta).toEqual({
+      ui: { visibility: ["app"], resourceUri: RUN_INSPECTOR_RESOURCE_URI },
+    });
     expect(tools.find(({ name }) => name === "list_runs")?._meta).toEqual({
       ui: { resourceUri: "ui://harness/runs/v1" },
     });
     expect(tools.find(({ name }) => name === "harness.inputs.answer")?._meta).toEqual({
       ui: { visibility: ["app"], resourceUri: "ui://harness/input/v1" },
+    });
+    expect(tools.find(({ name }) => name === "harness.runs.content")?._meta).toEqual({
+      ui: { visibility: ["app"], resourceUri: RUN_INSPECTOR_RESOURCE_URI },
+    });
+  });
+
+  it("rejects tokenized content requests without an authenticated principal", async () => {
+    const store = new InMemoryEventStore();
+    const runId = await addRun(store, createEventBuilders());
+    const { client } = await connect(store, true);
+
+    const result = await client.callTool({
+      name: "harness.runs.content",
+      arguments: { runId },
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "control_plane_scope_required" }],
     });
   });
 
@@ -396,6 +423,29 @@ describe("control-plane inspection tools", () => {
     expect(names).toContain("list_runs");
     expect(names).toContain("harness.runs.list");
     expect(names).toContain("harness.runs.get");
+  });
+
+  it("serves the run timeline for known runs and reports missing runs", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = await addRun(store, builders);
+    const missingRunId = builders.nextRunId();
+    const { client } = await connect(store);
+
+    const result = await client.callTool({
+      name: "get_run_timeline",
+      arguments: { runId, sinceSeq: 1 },
+    });
+    const missing = await client.callTool({
+      name: "get_run_timeline",
+      arguments: { runId: missingRunId },
+    });
+
+    expect(result.structuredContent).toMatchObject({ runId, status: "running" });
+    expect(missing).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "run_not_found" }],
+    });
   });
 
   it("filters a run allowlist before pagination and skips missing IDs", async () => {
@@ -593,6 +643,7 @@ describe("control-plane inspection tools", () => {
     });
 
     const runsResource = await client.readResource({ uri: RUNS_RESOURCE_URI });
+    const inspectorResource = await client.readResource({ uri: RUN_INSPECTOR_RESOURCE_URI });
     const runUri = RUN_RESOURCE_URI_TEMPLATE.replace("{runId}", runId);
     const runResource = await client.readResource({ uri: runUri });
     await expect(
@@ -604,6 +655,8 @@ describe("control-plane inspection tools", () => {
     });
 
     expect(JSON.stringify(runsResource)).not.toContain(CONTENT_CANARY);
+    expect(JSON.stringify(inspectorResource)).toContain("Run inspector");
+    expect(JSON.stringify(inspectorResource)).not.toContain(CONTENT_CANARY);
     expect(JSON.stringify(runResource)).not.toContain(CONTENT_CANARY);
     const runUpdateIndex = updates.indexOf(runUri);
     expect(runUpdateIndex).toBeGreaterThan(0);
