@@ -39,6 +39,17 @@ export function discoveryConnectionError(
     : new McpConnectionError("mcp_list_tools_failed");
 }
 
+/** Preserves only expected closed connection failures from a remote call. */
+export function connectionCallError(error: unknown): McpConnectionError | undefined {
+  if (error instanceof McpAuthRequiredError) {
+    return new McpConnectionError("mcp_auth_required");
+  }
+  if (error instanceof McpConnectionError && error.code === "mcp_response_too_large") {
+    return error;
+  }
+  return undefined;
+}
+
 /** Discovers validated pages with one shared signal and metadata-only exclusion logging. */
 export function discoverConnectionTools(
   client: Client,

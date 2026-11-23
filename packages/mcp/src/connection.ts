@@ -37,6 +37,7 @@ import {
   invokeConnectionTool,
   reconnectWithBackoff,
   runWithSafeAuthLogging,
+  connectionCallError,
 } from "./connection-helpers.js";
 
 export type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
@@ -359,9 +360,10 @@ export class McpConnection {
     try {
       return await this.#invoke(params, options, toolDefinition, inputRetry);
     } catch (error) {
-      if (error instanceof McpAuthRequiredError) {
+      const connectionError = connectionCallError(error);
+      if (connectionError !== undefined) {
         this.#markUnavailable();
-        throw new McpConnectionError("mcp_auth_required");
+        throw connectionError;
       }
       if (error instanceof McpProtocolError) {
         this.#legacyElicitation.trackError(error, request.legacyElicitation);

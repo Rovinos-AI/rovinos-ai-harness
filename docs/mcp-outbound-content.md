@@ -75,6 +75,19 @@ or public APIs.
   not bound bytes already buffered or parsed by the SDK; transport framing,
   streamed body, and decompression limits must be addressed before claiming a
   wire- or memory-size guarantee.
+
+  **SDK buffering finding (6.23):** The pinned TypeScript SDK v2.4.0
+  `StreamableHTTPClientTransport` calls `response.json()` for JSON-RPC HTTP
+  responses before delivering the parsed message to `Client.readResource()`.
+  Consequently, a decoded-size check after `readResource()` returns is too late
+  to bound HTTP response buffering or decompression. The transport must enforce
+  those limits while consuming the response body.
+- **Stdio framing finding (6.23):** SDK v2.4.0 does not buffer a newline-
+  delimited frame without a limit. Its `ReadBuffer` rejects an append that
+  would exceed `maxBufferSize` before concatenating the chunk, then the stdio
+  transport reports the error and closes. The default is 10 MiB; the harness
+  configures it to the server's `maxResultBytes` so the frame cap matches the
+  response envelope bound.
 - **Redirects stay at the transport boundary.** Reading an MCP resource or
   prompt must not follow a URI as an HTTP URL. For the configured HTTP MCP
   endpoint, deny redirects by default; any future redirect support must be
