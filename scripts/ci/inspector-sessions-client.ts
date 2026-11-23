@@ -25,7 +25,9 @@ interface CommandResult {
 }
 
 function failure(message: string): never {
-  throw new Error(`${message}\n${JSON.stringify({ error: { code: "inspector_sessions_failed" } })}`);
+  throw new Error(
+    `${message}\n${JSON.stringify({ error: { code: "inspector_sessions_failed" } })}`,
+  );
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -211,9 +213,7 @@ interface ElicitationResponse {
   readonly signal: AbortSignal;
 }
 
-async function respondToElicitation(
-  input: ElicitationResponse,
-): Promise<Record<string, unknown>> {
+async function respondToElicitation(input: ElicitationResponse): Promise<Record<string, unknown>> {
   return mcpdoCommand(
     [
       ...connectionArgs(input.connection),
@@ -248,10 +248,7 @@ export async function runConfirmedMcpdoFlow(
     signal,
   });
   assertResolved(response, true, "confirmed mcpdo decision");
-  const resolutions = await readApprovalResolutions(
-    fixture.dbPath,
-    fixture.approvals.confirmed,
-  );
+  const resolutions = await readApprovalResolutions(fixture.dbPath, fixture.approvals.confirmed);
   if (resolutions.count !== 1 || resolutions.decisions[0] !== "approve") {
     failure("The confirmed mcpdo decision was not recorded exactly once.");
   }

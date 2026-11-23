@@ -17,7 +17,9 @@ const objectSchema = z.record(z.string(), z.unknown());
 const toolResultSchema = z.looseObject({});
 
 function failure(message: string): never {
-  throw new Error(`${message}\n${JSON.stringify({ error: { code: "inspector_sessions_failed" } })}`);
+  throw new Error(
+    `${message}\n${JSON.stringify({ error: { code: "inspector_sessions_failed" } })}`,
+  );
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -41,11 +43,11 @@ async function manualToolCall(
   params: ReturnType<typeof makeRequestParams> & Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<unknown> {
-  return client.request(
-    { method: "tools/call", params },
-    withInputRequired(toolResultSchema),
-    { allowInputRequired: true, maxTotalTimeout: requestTimeoutMs, signal },
-  );
+  return client.request({ method: "tools/call", params }, withInputRequired(toolResultSchema), {
+    allowInputRequired: true,
+    maxTotalTimeout: requestTimeoutMs,
+    signal,
+  });
 }
 
 function stateFromInputRequired(value: unknown): string {
@@ -86,10 +88,7 @@ function assertReplay(value: unknown): void {
 }
 
 /** Exercises single-use confirmation state through manual input-required requests. */
-export async function runReplayFlow(
-  fixture: SessionFixture,
-  signal: AbortSignal,
-): Promise<void> {
+export async function runReplayFlow(fixture: SessionFixture, signal: AbortSignal): Promise<void> {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [harness, "serve", "--stdio"],
