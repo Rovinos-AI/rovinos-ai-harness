@@ -34,16 +34,6 @@ export function isConnectionStale(
   return closed || activeGeneration !== generation;
 }
 
-/** Preserves the transport close handler before notifying its connection owner. */
-export function observeTransportClose(transport: Transport, onClose: () => void): void {
-  const monitoredTransport = transport;
-  const previousOnClose = monitoredTransport.onclose;
-  monitoredTransport.onclose = () => {
-    previousOnClose?.();
-    onClose();
-  };
-}
-
 /** Normalizes discovery failures while invalidating a connection that requires authorization. */
 export function discoveryConnectionError(
   error: unknown,
@@ -67,26 +57,6 @@ export function connectionCallError(error: unknown): McpConnectionError | undefi
     return error;
   }
   return undefined;
-}
-
-/** Closes a failed connection attempt and maps only its stable failure code. */
-export async function handleConnectionConnectFailure(options: {
-  readonly error: unknown;
-  readonly signal: AbortSignal;
-  readonly client: Client | undefined;
-  readonly transport: Transport | undefined;
-  readonly markUnavailable: () => void;
-}): Promise<never> {
-  options.markUnavailable();
-  await (options.client ?? options.transport)?.close().catch(() => undefined);
-  let code: "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_auth_required" =
-    "mcp_connect_failed";
-  if (options.error instanceof McpAuthRequiredError) {
-    code = "mcp_auth_required";
-  } else if (options.signal.aborted) {
-    code = "mcp_connect_timeout";
-  }
-  throw new McpConnectionError(code);
 }
 
 /** Attaches connection state cleanup to transport close without retaining stale callbacks. */
