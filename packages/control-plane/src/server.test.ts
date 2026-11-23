@@ -313,6 +313,22 @@ describe("control-plane inspection tools", () => {
     });
   });
 
+  it("rejects tokenized content requests without an authenticated principal", async () => {
+    const store = new InMemoryEventStore();
+    const runId = await addRun(store, createEventBuilders());
+    const { client } = await connect(store, true);
+
+    const result = await client.callTool({
+      name: "harness.runs.content",
+      arguments: { runId },
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "control_plane_scope_required" }],
+    });
+  });
+
   it("omits app-only tools from modern HTTP clients without UI capabilities", async () => {
     const store = new InMemoryEventStore();
     const server = await startControlPlaneHttp(store, 0, {
@@ -406,6 +422,29 @@ describe("control-plane inspection tools", () => {
     expect(names).toContain("list_runs");
     expect(names).toContain("harness.runs.list");
     expect(names).toContain("harness.runs.get");
+  });
+
+  it("serves the run timeline for known runs and reports missing runs", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = await addRun(store, builders);
+    const missingRunId = builders.nextRunId();
+    const { client } = await connect(store);
+
+    const result = await client.callTool({
+      name: "get_run_timeline",
+      arguments: { runId, sinceSeq: 1 },
+    });
+    const missing = await client.callTool({
+      name: "get_run_timeline",
+      arguments: { runId: missingRunId },
+    });
+
+    expect(result.structuredContent).toMatchObject({ runId, status: "running" });
+    expect(missing).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "run_not_found" }],
+    });
   });
 
   it("filters a run allowlist before pagination and skips missing IDs", async () => {

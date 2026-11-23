@@ -90,4 +90,17 @@ describe("run content authorization", () => {
     });
     expect(JSON.stringify(result)).not.toContain("person@example.test");
   });
+
+  it("reports an unknown run to a read_content token", async () => {
+    const { client } = await connectWithScope("read_content");
+    const result = await client.callTool({
+      name: "harness.runs.content",
+      arguments: { runId: Id.parse("D".repeat(26)) },
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "run_not_found" }],
+    });
+  });
 });

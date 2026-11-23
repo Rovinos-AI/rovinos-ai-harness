@@ -122,6 +122,10 @@ function setup(
   input: {
     readonly subscribe?: boolean;
     readonly timelineByRun?: (id: string) => RunTimeline;
+    readonly contentResponse?: {
+      readonly isError?: boolean;
+      readonly structuredContent?: unknown;
+    };
   } = {},
 ) {
   document.title = "Run inspector";
@@ -170,7 +174,9 @@ function setup(
           },
         });
       }
-      return Promise.resolve({ structuredContent: content(String(args.runId)) });
+      return Promise.resolve(
+        input.contentResponse ?? { structuredContent: content(String(args.runId)) },
+      );
     },
     ...(input.subscribe === false
       ? {}
@@ -243,6 +249,39 @@ describe("run inspector view", () => {
     expect(document.querySelector("pre")?.textContent).toContain("<img");
     expect(document.querySelector("pre img")).toBeNull();
     expect(calls.map(({ name }) => name)).toContain("harness.runs.content");
+    view.dispose();
+  });
+
+  it("hides and restores already-loaded content without requesting it again", async () => {
+    const { view, calls } = setup();
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    buttonWithText("Show tokenized content").click();
+    await vi.waitFor(() => {
+      expect(document.querySelector("pre")).not.toBeNull();
+    });
+
+    buttonWithText("Hide tokenized content").click();
+    expect(document.querySelector("pre")).toBeNull();
+    buttonWithText("Show tokenized content").click();
+    expect(document.querySelector("pre")?.textContent).toContain("<img");
+    expect(calls.filter(({ name }) => name === "harness.runs.content")).toHaveLength(1);
+    view.dispose();
+  });
+
+  it("shows a safe unavailable message when the content tool returns an error", async () => {
+    const { view, calls } = setup({
+      contentResponse: { isError: true },
+    });
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    buttonWithText("Show tokenized content").click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Tokenized content is unavailable");
+    });
+    expect(document.querySelector("pre")).toBeNull();
     view.dispose();
   });
 
