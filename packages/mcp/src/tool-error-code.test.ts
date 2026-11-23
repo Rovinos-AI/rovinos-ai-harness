@@ -35,6 +35,10 @@ describe("MCP tool error codes", () => {
     ["mcp_discovery_page_limit", "mcp_error"],
     ["mcp_discovery_schema_limit", "mcp_error"],
     ["mcp_response_too_large", "mcp_response_too_large"],
+    ["mcp_resource_request_too_large", "mcp_response_too_large"],
+    ["mcp_resource_timeout", "mcp_timeout"],
+    ["mcp_resource_access_denied", "mcp_error"],
+    ["mcp_resources_changed", "mcp_error"],
     ["mcp_tool_call_failed", "mcp_error"],
   ])("maps connection failure %s", (code, expected) => {
     expect(errorCode(new McpConnectionError(code), new AbortController().signal)).toBe(expected);

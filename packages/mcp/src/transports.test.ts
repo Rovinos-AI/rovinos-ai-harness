@@ -13,7 +13,7 @@ import { ServerConfigSchema } from "@rovinos/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@rovinos/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
-import { createMcpTransport, type McpLogEvent } from "./transports.js";
+import { createMcpTransport, createResponseLimitedFetch, type McpLogEvent } from "./transports.js";
 
 const tracerProvider = createTestTracerProvider();
 
@@ -60,6 +60,25 @@ function stdioConfig(inheritEnv: boolean) {
 }
 
 describe("MCP transports", () => {
+  it("refuses HTTP redirects instead of following them to another destination", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("redirect refused"));
+    try {
+      await expect(
+        createResponseLimitedFetch(1_024)("https://mcp.example.test/mcp", {
+          redirect: "follow",
+        }),
+      ).rejects.toThrow("redirect refused");
+      expect(fetch).toHaveBeenCalledWith(
+        "https://mcp.example.test/mcp",
+        expect.objectContaining({ redirect: "error" }),
+      );
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   it("sends HTTP trace metadata only in _meta and strips configured reserved headers", async () => {
     interface CapturedRequest {
       readonly headers: Headers;

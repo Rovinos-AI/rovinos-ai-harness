@@ -146,7 +146,7 @@ async function createHttpTransport(options: {
 /** Bounds the response bytes exposed by Fetch before the SDK parses its response. */
 export function createResponseLimitedFetch(maxBytes: number): typeof globalThis.fetch {
   return async (input, init) => {
-    const response = await globalThis.fetch(input, init);
+    const response = await globalThis.fetch(input, { ...init, redirect: "error" });
     if (response.body === null) {
       return response;
     }
