@@ -1,50 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
-import { specTypeSchemas } from "@modelcontextprotocol/client";
 import { McpPromptError, McpConnectionError } from "./errors.js";
 import { abortable, decodedBytes } from "./discovery-budget.js";
 import { z } from "zod";
 
-const PromptArgumentSchema = z
-  .object({
-    name: z.string(),
-    description: z.string().optional(),
-    required: z.boolean().optional(),
-  })
-  .passthrough();
+const PromptArgumentSchema = z.looseObject({
+  name: z.string(),
+  description: z.string().optional(),
+  required: z.boolean().optional(),
+});
 
-const PromptSchema = z
-  .object({
-    name: z.string(),
-    description: z.string().optional(),
-    arguments: z.array(PromptArgumentSchema).optional(),
-  })
-  .passthrough();
+const PromptSchema = z.looseObject({
+  name: z.string(),
+  description: z.string().optional(),
+  arguments: z.array(PromptArgumentSchema).optional(),
+});
 
-const PromptListEnvelopeSchema = z
-  .object({
-    prompts: z.array(PromptSchema),
-    nextCursor: z.string().optional(),
-  })
-  .passthrough();
+const PromptListEnvelopeSchema = z.looseObject({
+  prompts: z.array(PromptSchema),
+  nextCursor: z.string().optional(),
+});
 
-const PromptMessageSchema = z
-  .object({
-    role: z.enum(["user", "assistant"]),
-    content: z.unknown(),
-  })
-  .passthrough();
+const PromptMessageSchema = z.looseObject({
+  role: z.enum(["user", "assistant"]),
+  content: z.unknown(),
+});
 
-const PromptResultEnvelopeSchema = z
-  .object({
-    description: z.string().optional(),
-    messages: z.array(PromptMessageSchema),
-  })
-  .passthrough();
+const PromptResultEnvelopeSchema = z.looseObject({
+  description: z.string().optional(),
+  messages: z.array(PromptMessageSchema),
+});
 
 export const ListPromptsResultSchema = PromptListEnvelopeSchema;
 export const GetPromptResultSchema = PromptResultEnvelopeSchema;
+/** Validated prompt-list response. */
 export type ListPromptsResult = z.infer<typeof ListPromptsResultSchema>;
+/** One server-advertised MCP prompt. */
 export type McpPrompt = ListPromptsResult["prompts"][number];
+/** Validated prompt-get response. */
 export type GetPromptResult = z.infer<typeof GetPromptResultSchema>;
 
 const MAX_PROMPTS = 1_000;
@@ -55,6 +47,7 @@ const MAX_CONCURRENT_DISCOVERIES = 4;
 let activeDiscoveries = 0;
 const waitingDiscoveries = new Set<() => void>();
 
+/** Options for a bounded prompt-list traversal. */
 export interface ListAllPromptsOptions {
   readonly requestPage: (
     cursor: string | undefined,
@@ -97,9 +90,7 @@ function promptFailure(error: unknown): McpPromptError {
 }
 
 /** Pages through a bounded prompt catalog without caching server-controlled metadata. */
-export async function listAllPrompts(
-  options: ListAllPromptsOptions,
-): Promise<McpPrompt[]> {
+export async function listAllPrompts(options: ListAllPromptsOptions): Promise<McpPrompt[]> {
   await acquireDiscovery(options.signal);
   try {
     return await runDiscovery(options);
@@ -116,7 +107,9 @@ export async function listAllPrompts(
 
 async function runDiscovery(options: ListAllPromptsOptions): Promise<McpPrompt[]> {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), DISCOVERY_TIMEOUT_MS);
+  const timer = setTimeout(() => {
+    deadline.abort();
+  }, DISCOVERY_TIMEOUT_MS);
   const signal = AbortSignal.any([
     deadline.signal,
     ...(options.signal === undefined ? [] : [options.signal]),
@@ -148,12 +141,7 @@ async function runDiscovery(options: ListAllPromptsOptions): Promise<McpPrompt[]
       if (page.prompts.length > MAX_PROMPTS - prompts.length) {
         throw new McpPromptError("mcp_prompt_result_too_large");
       }
-      bytes += decodedBytes(
-        page,
-        MAX_DECODED_BYTES - bytes,
-        "mcp_response_too_large",
-        signal,
-      );
+      bytes += decodedBytes(page, MAX_DECODED_BYTES - bytes, "mcp_response_too_large", signal);
       for (const prompt of page.prompts) {
         if (names.has(prompt.name)) {
           throw new McpPromptError("mcp_prompt_failed");

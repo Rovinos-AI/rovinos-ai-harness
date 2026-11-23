@@ -25,7 +25,6 @@ import { lookupSpanDefinition } from "@rovinos/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError } from "./connection.js";
 import { McpProtocolError } from "./errors.js";
-import { McpPromptError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
@@ -123,7 +122,7 @@ async function fixture(
       options.onPromptList?.();
       return { prompts: options.prompts ?? [] };
     });
-    server.server.setRequestHandler("prompts/get", async (request) => {
+    server.server.setRequestHandler("prompts/get", (request) => {
       promptGetCalls++;
       return {
         messages: [
@@ -394,7 +393,7 @@ describe("McpToolPort", () => {
   });
 
   it("fails closed when cumulative prompt content exceeds four MiB", async () => {
-    const prompts = Array.from({ length: 5 }, (_, index) => ({ name: `prompt-${index}` }));
+    const prompts = Array.from({ length: 5 }, (_, index) => ({ name: `prompt-${String(index)}` }));
     const current = await fixture({
       prompts,
       promptGrants: prompts.map(({ name }) => name),

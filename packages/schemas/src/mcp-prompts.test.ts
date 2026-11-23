@@ -14,7 +14,7 @@ describe("MCP prompt contracts", () => {
   it("rejects more than sixteen selections", () => {
     const selections = Array.from({ length: 17 }, (_, index) => ({
       serverId: "docs",
-      name: `prompt-${index}`,
+      name: `prompt-${String(index)}`,
     }));
 
     expect(McpPromptSelectionsSchema.safeParse(selections).success).toBe(false);
@@ -41,7 +41,7 @@ describe("MCP prompt contracts", () => {
           serverId: "docs",
           name: "summarize",
           arguments: Object.fromEntries(
-            Array.from({ length: 33 }, (_, index) => [`a${index}`, "x"]),
+            Array.from({ length: 33 }, (_, index) => [`a${String(index)}`, "x"]),
           ),
         },
       ]).success,
@@ -64,7 +64,10 @@ describe("MCP prompt contracts", () => {
           serverId: "docs",
           name: "summarize",
           arguments: Object.fromEntries(
-            Array.from({ length: 32 }, (_, index) => [`argument${index}`, "x".repeat(1_024)]),
+            Array.from({ length: 32 }, (_, index) => [
+              `argument${String(index)}`,
+              "x".repeat(1_024),
+            ]),
           ),
         },
       ]).success,

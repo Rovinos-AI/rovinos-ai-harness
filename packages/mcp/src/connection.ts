@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  specTypeSchemas,
-  SdkError,
-  SdkErrorCode,
   type Client,
   type CallToolRequest,
   type CallToolRequestOptions,
@@ -10,31 +7,20 @@ import {
   type Transport,
 } from "@modelcontextprotocol/client";
 import type { ServerConfig } from "@rovinos/schemas";
-import {
-  McpConnectionError,
-  McpProtocolError,
-  McpPromptError,
-  isConnectionLossError,
-  type McpConnectionErrorCode,
-} from "./errors.js";
-import { McpAuthRequiredError } from "./oauth/provider.js";
+import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
-import {
-  LegacyConnectionElicitation,
-  type LegacyElicitationCallbacks,
-} from "./legacy-connection.js";
+import { LegacyConnectionElicitation } from "./legacy-connection.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import type { McpTool } from "./tool-list.js";
-import {
-  GetPromptResultSchema,
-  ListPromptsResultSchema,
-  listAllPrompts,
-  type GetPromptResult,
-  type McpPrompt,
-} from "./prompts.js";
+import type { GetPromptResult, McpPrompt } from "./prompts.js";
+import { PromptConnection } from "./prompt-connection.js";
 import { DiscoveryTask } from "./discovery-budget.js";
-import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
+import type {
+  ConnectionToolCall,
+  McpConnectionDependencies,
+  McpConnectionState,
+} from "./connection-types.js";
 import {
   type CachedToolList,
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
@@ -49,20 +35,14 @@ import {
   reconnectWithBackoff,
   runWithSafeAuthLogging,
   connectionCallError,
+  handleConnectionToolsChanged,
+  handleConnectionConnectFailure,
+  watchConnectionTransport,
 } from "./connection-helpers.js";
 
 export type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
 export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
 export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
-
-interface ConnectionToolCall {
-  readonly params: CallToolRequest["params"];
-  readonly inputSchema: unknown;
-  readonly options?: CallToolRequestOptions;
-  readonly toolDefinition?: McpTool;
-  readonly inputRetry?: ElicitationRetry;
-  readonly legacyElicitation?: LegacyElicitationCallbacks;
-}
 
 /**
  * Manages one MCP SDK client, its transport, tool discovery, and reconnection.
@@ -82,6 +62,7 @@ export class McpConnection {
   #toolsGeneration = 0;
   readonly #clientCredentialsExtension = new ClientCredentialsExtensionSupport();
   readonly #legacyElicitation = new LegacyConnectionElicitation();
+  readonly #prompts: PromptConnection;
   #oauthProvider: McpOAuthProvider | undefined;
   #closed = false;
   #connectGeneration = 0;
@@ -99,6 +80,13 @@ export class McpConnection {
     }
     this.#config = config;
     this.#dependencies = dependencies;
+    this.#prompts = new PromptConnection({
+      config,
+      client: () => this.#client,
+      protocolEra: () => this.#protocolEra,
+      now: this.#now,
+      ensureReady: (signal) => this.#ensureReady(signal),
+    });
   }
 
   /** Current lifecycle state. */
@@ -158,21 +146,14 @@ export class McpConnection {
     }
   }
 
-  /** Whether a connect attempt was superseded by `close()` or a newer attempt. */
-  #isStale(generation: number): boolean {
-    return this.#closed || this.#connectGeneration !== generation;
-  }
-
   async #performConnect(generation: number, signal: AbortSignal): Promise<void> {
-    const combinedSignal = AbortSignal.any([
-      AbortSignal.timeout(this.#config.timeouts.connectMs),
-      signal,
-    ]);
-    let transport: Transport | undefined;
-    let client: Client | undefined;
+    const connectTimeout = AbortSignal.timeout(this.#config.timeouts.connectMs);
+    const combinedSignal = AbortSignal.any([connectTimeout, signal]);
+    const isStale = () => this.#closed || this.#connectGeneration !== generation;
+    let transport: Transport | undefined, client: Client | undefined;
     try {
       await this.#closeCurrentClient();
-      if (this.#isStale(generation)) {
+      if (isStale()) {
         this.#state = "unavailable";
         return;
       }
@@ -185,7 +166,7 @@ export class McpConnection {
         signal: combinedSignal,
       });
       transport = activeTransport;
-      if (this.#isStale(generation)) {
+      if (isStale()) {
         this.#state = "unavailable";
         await activeTransport.close().catch(() => undefined);
         return;
@@ -194,7 +175,17 @@ export class McpConnection {
         this.#config,
         this.#clientCredentialsExtension.supported,
         (error) => {
-          this.#onToolsChanged(error);
+          handleConnectionToolsChanged({
+            error,
+            serverId: this.#config.id,
+            logger: this.#dependencies.logger,
+            onChange: () => {
+              this.#toolsGeneration++;
+              this.#cachedTools = undefined;
+            },
+            isReady: () => this.#state === "ready",
+            refresh: () => this.#fetchTools(),
+          });
         },
       );
       client = activeClient;
@@ -214,7 +205,7 @@ export class McpConnection {
       this.#oauthProvider?.setClientCredentialsExtensionEnabled(
         this.#clientCredentialsExtension.supported,
       );
-      if (this.#isStale(generation)) {
+      if (isStale()) {
         this.#state = "unavailable";
         await activeClient.close().catch(() => undefined);
         return;
@@ -222,18 +213,32 @@ export class McpConnection {
       this.#client = activeClient;
       this.#protocolEra = activeClient.getProtocolEra();
       this.#state = "ready";
-      this.#watchTransport(activeTransport);
+      this.#currentTransport = activeTransport;
+      watchConnectionTransport(activeTransport, () => {
+        if (this.#currentTransport === activeTransport) {
+          this.#state = "unavailable";
+          this.#protocolEra = undefined;
+          this.#cachedTools = undefined;
+        }
+      });
     } catch (error) {
-      this.#markUnavailable();
-      await (client ?? transport)?.close().catch(() => undefined);
-      let code: McpConnectionErrorCode = "mcp_connect_failed";
-      if (error instanceof McpAuthRequiredError) {
-        code = "mcp_auth_required";
-      } else if (combinedSignal.aborted) {
-        code = "mcp_connect_timeout";
-      }
-      throw new McpConnectionError(code);
+      await this.#handleConnectFailure(error, combinedSignal, client, transport);
     }
+  }
+
+  #handleConnectFailure(
+    error: unknown,
+    signal: AbortSignal,
+    client: Client | undefined,
+    transport: Transport | undefined,
+  ): Promise<never> {
+    return handleConnectionConnectFailure({
+      error,
+      signal,
+      client,
+      transport,
+      markUnavailable: this.#markUnavailable.bind(this),
+    });
   }
 
   async #probeClientCredentialsExtension(signal: AbortSignal): Promise<void> {
@@ -259,42 +264,6 @@ export class McpConnection {
     this.#cachedTools = undefined;
   }
 
-  #onToolsChanged(error: Error | null): void {
-    this.#toolsGeneration++;
-    this.#cachedTools = undefined;
-    const logRefreshFailure = () => {
-      this.#dependencies.logger?.log({
-        code: "mcp_tools_refresh_failed",
-        serverId: this.#config.id,
-      });
-    };
-    if (error !== null) {
-      logRefreshFailure();
-      return;
-    }
-    if (this.#state === "ready") {
-      void this.#fetchTools().catch(logRefreshFailure);
-    }
-  }
-
-  #watchTransport(transport: Transport): void {
-    this.#currentTransport = transport;
-    const monitoredTransport = transport;
-    const onclose = monitoredTransport.onclose;
-    monitoredTransport.onclose = () => {
-      onclose?.();
-      if (this.#currentTransport === transport) {
-        this.#state = "unavailable";
-        this.#protocolEra = undefined;
-        this.#cachedTools = undefined;
-      }
-    };
-    const onerror = monitoredTransport.onerror;
-    monitoredTransport.onerror = (error) => {
-      onerror?.(error);
-    };
-  }
-
   /**
    * Lists tools under finite discovery budgets, caching only complete results.
    * Concurrent refreshes share work; cancellation by any caller cancels that shared refresh.
@@ -313,47 +282,7 @@ export class McpConnection {
 
   /** Lists prompts under finite discovery budgets without declaring client prompt capabilities. */
   async listPrompts(signal?: AbortSignal): Promise<McpPrompt[]> {
-    try {
-      await this.#ensureReady(signal);
-      const client = this.#client;
-      if (client?.getServerCapabilities()?.prompts === undefined) {
-        throw new McpPromptError("mcp_prompt_unavailable");
-      }
-      return await runWithSafeAuthLogging(
-        this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
-        () =>
-          listAllPrompts({
-            now: this.#now,
-            ...(signal === undefined ? {} : { signal }),
-            requestPage: async (cursor, requestSignal) => {
-              const onAbort = () => {
-                if (this.#protocolEra === "legacy") {
-                  void client.close().catch(() => undefined);
-                }
-              };
-              requestSignal.addEventListener("abort", onAbort, { once: true });
-              try {
-                const result = await client.request(
-                  {
-                    method: "prompts/list",
-                    ...(cursor === undefined ? {} : { params: { cursor } }),
-                  },
-                  specTypeSchemas.ListPromptsResult,
-                  { timeout: this.#config.timeouts.callMs, signal: requestSignal },
-                );
-                return ListPromptsResultSchema.parse(result);
-              } catch (error) {
-                onAbort();
-                throw error;
-              } finally {
-                requestSignal.removeEventListener("abort", onAbort);
-              }
-            },
-          }),
-      );
-    } catch (error) {
-      throw this.#promptConnectionError(error);
-    }
+    return this.#prompts.list(signal);
   }
 
   /** Retrieves one prompt on this server connection using its current advertised arguments. */
@@ -362,72 +291,13 @@ export class McpConnection {
     arguments_: Readonly<Record<string, string>> | undefined,
     signal?: AbortSignal,
   ): Promise<GetPromptResult> {
-    try {
-      await this.#ensureReady(signal);
-      const client = this.#client;
-      if (client?.getServerCapabilities()?.prompts === undefined) {
-        throw new McpPromptError("mcp_prompt_unavailable");
-      }
-      const params = {
-        name,
-        ...(arguments_ === undefined ? {} : { arguments: arguments_ }),
-      };
-      const onAbort = () => {
-        if (this.#protocolEra === "legacy") {
-          void client.close().catch(() => undefined);
-        }
-      };
-      signal?.addEventListener("abort", onAbort, { once: true });
-      const result = await runWithSafeAuthLogging(
-        this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
-        async () => {
-          try {
-            return await client.request(
-              { method: "prompts/get", params },
-              specTypeSchemas.GetPromptResult,
-              {
-                timeout: this.#config.timeouts.callMs,
-                ...(signal === undefined ? {} : { signal }),
-              },
-            );
-          } catch (error) {
-            onAbort();
-            throw error;
-          } finally {
-            signal?.removeEventListener("abort", onAbort);
-          }
-        },
-      );
-      return GetPromptResultSchema.parse(result);
-    } catch (error) {
-      throw this.#promptConnectionError(error);
-    }
+    return this.#prompts.get(name, arguments_, signal);
   }
 
   async #fetchTools(signal?: AbortSignal): Promise<McpTool[]> {
     return [
       ...(await this.#discovery.run((activeSignal) => this.#discoverTools(activeSignal), signal)),
     ];
-  }
-
-  #promptConnectionError(error: unknown): McpPromptError {
-    if (error instanceof McpPromptError) {
-      return error;
-    }
-    if (error instanceof McpConnectionError && error.code === "mcp_response_too_large") {
-      return new McpPromptError("mcp_prompt_result_too_large");
-    }
-    if (
-      error instanceof SdkError &&
-      (error.code === SdkErrorCode.CapabilityNotSupported ||
-        error.code === SdkErrorCode.MethodNotSupportedByProtocolVersion)
-    ) {
-      return new McpPromptError("mcp_prompt_unavailable");
-    }
-    if (error instanceof McpProtocolError && error.protocolCode === -32601) {
-      return new McpPromptError("mcp_prompt_unavailable");
-    }
-    return new McpPromptError("mcp_prompt_failed");
   }
 
   async #discoverTools(signal: AbortSignal): Promise<McpTool[]> {

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   HarnessError,
-  McpPromptSelectionsSchema,
   type Code,
   type Event,
   type Id,
@@ -43,10 +42,10 @@ import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-outp
 import type { ValueTransform } from "@rovinos/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
-import { McpPromptError } from "@rovinos/mcp";
 import { modelQuotaHooks } from "./model-quota-hooks.js";
 import { runToolCalls } from "./steps/tool-call-runner.js";
 import { prepareLoopIteration } from "./steps/loop-preparation.js";
+import { addMcpPromptsToGoal } from "./prompt-selection.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
@@ -189,41 +188,6 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     approvalIds: Array.from(state.pendingApprovals.keys()),
     state,
     events,
-  };
-}
-
-async function addMcpPromptsToGoal(options: RunLoopOptions): Promise<RunLoopOptions> {
-  if (options.promptSelections === undefined || options.promptSelections.length === 0) {
-    return options;
-  }
-  let selections: McpPromptSelection[];
-  try {
-    selections = McpPromptSelectionsSchema.parse(options.promptSelections);
-  } catch {
-    throw new McpPromptError("mcp_prompt_arguments_invalid");
-  }
-  if (options.promptPort === undefined) {
-    throw new McpPromptError("mcp_prompt_not_granted");
-  }
-  const runId = options.runId;
-  const tokenize = options.tokenizeMcpPromptContent;
-  if (runId === undefined || tokenize === undefined) {
-    throw new McpPromptError("mcp_prompt_failed");
-  }
-  const retrieved = await options.promptPort.retrievePrompts(selections, options.signal);
-  const tokenized = await Promise.all(
-    retrieved.map(async ({ serverId, name, content }) => ({
-      serverId,
-      name,
-      content: await tokenize(runId, content, options.signal),
-    })),
-  );
-  return {
-    ...options,
-    goal: {
-      initialInput: options.goal,
-      retrievedPrompts: tokenized,
-    },
   };
 }
 

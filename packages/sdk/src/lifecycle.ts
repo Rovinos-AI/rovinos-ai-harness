@@ -3,6 +3,7 @@ import type { Runtime } from "@rovinos/core";
 import type { Event, Id } from "@rovinos/schemas";
 import type { SafeEvent } from "@rovinos/telemetry";
 import { SdkError, type WatchOptionsSchema } from "./types.js";
+import { projectSafeEvents } from "./event-views.js";
 
 interface ManagedExecution {
   readonly controller: AbortController;
@@ -183,15 +184,15 @@ export async function* watchRunEvents({
   tracker,
   runId,
   options,
-  projectSafeEvents,
+  correlationEnabled,
 }: {
   readonly runtime: Runtime;
   readonly tracker: LifecycleTracker;
   readonly runId: Id;
   readonly options: ReturnType<typeof WatchOptionsSchema.parse>;
-  readonly projectSafeEvents: (events: readonly Event[]) => Promise<readonly SafeEvent[]>;
+  readonly correlationEnabled: boolean;
 }): AsyncGenerator<SafeEvent> {
   for await (const event of watchRunStoredEvents({ runtime, tracker, runId, options })) {
-    yield* await projectSafeEvents([event]);
+    yield* await projectSafeEvents(runtime, [event], correlationEnabled);
   }
 }

@@ -37,6 +37,7 @@ import {
   type AnswerInputOptions,
   type RunStartResult,
 } from "./types.js";
+import { promptSelectionOption } from "./prompt-selection-options.js";
 
 const IDEMPOTENCY_ORPHAN_GRACE_MS = 30_000;
 const IDEMPOTENCY_START_WAIT_MS = 5_000;
@@ -128,9 +129,7 @@ class HarnessClient extends ExtensionHarnessAccess implements Harness {
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
       ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
-      ...(input.promptSelections === undefined
-        ? {}
-        : { promptSelections: input.promptSelections }),
+      ...promptSelectionOption(input.promptSelections),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
       ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
       signal: managed.controller.signal,
@@ -414,8 +413,7 @@ class HarnessClient extends ExtensionHarnessAccess implements Harness {
       tracker: this.lifecycle,
       runId,
       options,
-      projectSafeEvents: (events) =>
-        projectSafeEvents(this.runtime, events, this.correlationEnabled),
+      correlationEnabled: this.correlationEnabled,
     });
   }
 }

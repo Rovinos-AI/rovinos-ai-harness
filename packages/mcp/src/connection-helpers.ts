@@ -50,6 +50,65 @@ export function connectionCallError(error: unknown): McpConnectionError | undefi
   return undefined;
 }
 
+/** Closes a failed connection attempt and maps only its stable failure code. */
+export async function handleConnectionConnectFailure(options: {
+  readonly error: unknown;
+  readonly signal: AbortSignal;
+  readonly client: Client | undefined;
+  readonly transport: Transport | undefined;
+  readonly markUnavailable: () => void;
+}): Promise<never> {
+  options.markUnavailable();
+  await (options.client ?? options.transport)?.close().catch(() => undefined);
+  let code: "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_auth_required" =
+    "mcp_connect_failed";
+  if (options.error instanceof McpAuthRequiredError) {
+    code = "mcp_auth_required";
+  } else if (options.signal.aborted) {
+    code = "mcp_connect_timeout";
+  }
+  throw new McpConnectionError(code);
+}
+
+/** Attaches connection state cleanup to transport close without retaining stale callbacks. */
+export function watchConnectionTransport(
+  transport: Transport,
+  onCurrentTransportClosed: () => void,
+): void {
+  const monitoredTransport = transport;
+  const onclose = monitoredTransport.onclose;
+  monitoredTransport.onclose = () => {
+    onclose?.();
+    onCurrentTransportClosed();
+  };
+  const onerror = monitoredTransport.onerror;
+  monitoredTransport.onerror = (error) => {
+    onerror?.(error);
+  };
+}
+
+/** Applies tool-list change notifications and logs refresh failures without server messages. */
+export function handleConnectionToolsChanged(options: {
+  readonly error: Error | null;
+  readonly serverId: ServerConfig["id"];
+  readonly logger: McpConnectionDependencies["logger"];
+  readonly onChange: () => void;
+  readonly isReady: () => boolean;
+  readonly refresh: () => Promise<unknown>;
+}): void {
+  options.onChange();
+  const logRefreshFailure = () => {
+    options.logger?.log({ code: "mcp_tools_refresh_failed", serverId: options.serverId });
+  };
+  if (options.error !== null) {
+    logRefreshFailure();
+    return;
+  }
+  if (options.isReady()) {
+    void options.refresh().catch(logRefreshFailure);
+  }
+}
+
 /** Discovers validated pages with one shared signal and metadata-only exclusion logging. */
 export function discoverConnectionTools(
   client: Client,

@@ -15,7 +15,7 @@ import type { Context } from "@opentelemetry/api";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation, loadContinuationChain } from "./continue.js";
-import { runLoop, type RunLoopResult } from "./loop.js";
+import { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
 import type {
   EvalRunMetadata,
@@ -125,6 +125,51 @@ export interface StartRunExecutionOptions extends RuntimeRunOptions {
   readonly runWithControl: RunControl;
 }
 
+function optionalLoopOptions(
+  composition: RuntimeComposition,
+  options: StartRunExecutionOptions,
+  evalMetadata: EvalRunMetadata | undefined,
+): Partial<RunLoopOptions> {
+  return {
+    ...(options.replayOf === undefined ? {} : { replayOf: options.replayOf }),
+    ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
+    ...(options.rootSpanParent === undefined ? {} : { rootSpanParent: options.rootSpanParent }),
+    ...(options.role === undefined ? {} : { role: options.role }),
+    ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
+    ...(composition.config.store?.snapshotKeep === undefined
+      ? {}
+      : { snapshotKeep: composition.config.store.snapshotKeep }),
+    ...(composition.overrides.inputChannels === undefined
+      ? {}
+      : { inputChannels: composition.overrides.inputChannels }),
+    ...(composition.pii === undefined
+      ? {}
+      : {
+          inputTokenizer: composition.pii.tokenizer,
+          inputResolver: composition.pii.resolver,
+        }),
+    ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
+    ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+    ...(evalMetadata === undefined ? {} : { evalMetadata }),
+    ...promptLoopOptions(composition, options),
+  };
+}
+
+function promptLoopOptions(
+  composition: RuntimeComposition,
+  options: StartRunExecutionOptions,
+): Partial<RunLoopOptions> {
+  return {
+    ...(options.promptSelections === undefined
+      ? {}
+      : { promptSelections: options.promptSelections }),
+    ...(composition.promptPort === undefined ? {} : { promptPort: composition.promptPort }),
+    ...(composition.tokenizeMcpPromptContent === undefined
+      ? {}
+      : { tokenizeMcpPromptContent: composition.tokenizeMcpPromptContent }),
+  };
+}
+
 /** Starts a root run through the runtime's cancellation-control boundary. */
 export function startRun(
   composition: RuntimeComposition,
@@ -162,43 +207,17 @@ export function startRun(
       context,
       ids,
       goal,
-      ...(options.replayOf === undefined ? {} : { replayOf: options.replayOf }),
-      ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
-      ...(options.rootSpanParent === undefined ? {} : { rootSpanParent: options.rootSpanParent }),
       signal: executionSignal,
-      ...(options.role === undefined ? {} : { role: options.role }),
       runId,
-      ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
-      ...(options.promptSelections === undefined
-        ? {}
-        : { promptSelections: options.promptSelections }),
       scopeId: runId,
       budgets: config.run.budgets,
       checkpointEveryEvents: config.run.checkpointEveryEvents,
-      ...(config.store?.snapshotKeep === undefined
-        ? {}
-        : { snapshotKeep: config.store.snapshotKeep }),
       workspaceSnapshotter: composition.workspaceSnapshotter,
       configHash: configHash(config),
       policyVersion,
       quotaService,
       quotaIdentity,
-      ...(composition.overrides.inputChannels === undefined
-        ? {}
-        : { inputChannels: composition.overrides.inputChannels }),
-      ...(composition.pii === undefined
-        ? {}
-        : {
-            inputTokenizer: composition.pii.tokenizer,
-            inputResolver: composition.pii.resolver,
-          }),
-      ...(composition.promptPort === undefined ? {} : { promptPort: composition.promptPort }),
-      ...(composition.tokenizeMcpPromptContent === undefined
-          ? {}
-          : { tokenizeMcpPromptContent: composition.tokenizeMcpPromptContent }),
-      ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
-      ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
-      ...(evalMetadata === undefined ? {} : { evalMetadata }),
+      ...optionalLoopOptions(composition, options, evalMetadata),
     });
   });
 }
