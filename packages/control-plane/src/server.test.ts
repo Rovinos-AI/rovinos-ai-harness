@@ -239,6 +239,7 @@ describe("control-plane inspection tools", () => {
       "get_run",
       "list_pending_inputs",
       "list_runs",
+      "open_report",
       "resolve_uncertain_spend",
       "resume_run",
       "review_approval",

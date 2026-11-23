@@ -9,6 +9,7 @@ describe("control-plane tool definitions", () => {
     expect(scopes).toEqual({
       list_runs: "read",
       get_run: "read",
+      open_report: "read",
       list_pending_inputs: "read",
       get_input: "approve",
       review_input: "approve",
@@ -28,7 +29,14 @@ describe("control-plane tool definitions", () => {
       cancel_run: "run",
       resolve_uncertain_spend: "admin",
     });
+
     expect(toolScope("future_tool")).toBe("run");
+  });
+
+  it("links report opening to the report viewer MCP App resource", () => {
+    expect(toolDefinitions().find((tool) => tool.name === "open_report")?._meta).toEqual({
+      ui: { resourceUri: "ui://harness/reports/v1" },
+    });
   });
 
   it("links all input tools to the input MCP App resource", () => {

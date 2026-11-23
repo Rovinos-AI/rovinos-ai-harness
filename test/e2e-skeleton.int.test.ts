@@ -2631,6 +2631,7 @@ describe("control plane", () => {
         "get_run",
         "list_pending_inputs",
         "list_runs",
+        "open_report",
       ]);
     } finally {
       await client.close();

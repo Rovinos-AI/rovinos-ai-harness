@@ -217,6 +217,11 @@ export async function checkRestrictedHttp(input: {
     });
   const beforeRunIds = assertSuccessfulToolCall(await readRuns(), "restricted list_runs");
   assertToolError(
+    await call("open_report", '{"kind":"eval","path":"missing-report.json"}'),
+    "restricted open_report",
+    "report_path_not_allowed",
+  );
+  assertToolError(
     await call("harness.approvals.get", '{"approvalId":"00000000000000000000000001"}'),
     "restricted guessed App tool",
     "tool_not_found",
