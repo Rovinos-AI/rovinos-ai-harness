@@ -45,6 +45,14 @@ export type { ControlPlaneOperations, ControlPlaneServerOptions } from "./server
 
 export type { ControlPlaneHttpHandle };
 
+function configureControlPlaneCapabilities(server: McpServer): void {
+  server.server.registerCapabilities({
+    tools: {},
+    resources: { subscribe: true },
+    extensions: { "io.modelcontextprotocol/ui": {} },
+  });
+}
+
 /** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
 export function createControlPlaneServer(
   store: EventStore,
@@ -66,11 +74,7 @@ export function createControlPlaneServer(
       supportedProtocolVersions: ["2026-07-28", "2025-11-25"],
     },
   );
-  server.server.registerCapabilities({
-    tools: {},
-    resources: { subscribe: true },
-    extensions: { "io.modelcontextprotocol/ui": {} },
-  });
+  configureControlPlaneCapabilities(server);
   configureRunResourceUpdates(server, store, options);
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);
