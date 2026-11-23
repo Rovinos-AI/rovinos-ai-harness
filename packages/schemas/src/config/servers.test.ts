@@ -83,6 +83,22 @@ describe("ServerConfigSchema", () => {
     });
   });
 
+  it("keeps prompt grants separate from tool grants and defaults them to deny", () => {
+    const base = {
+      id: "mcp",
+      transport: { kind: "stdio", command: "node" },
+    };
+
+    expect(ServerConfigSchema.parse(base).promptGrants).toBeUndefined();
+    expect(ServerConfigSchema.parse({ ...base, promptGrants: [] }).promptGrants).toEqual([]);
+    expect(
+      ServerConfigSchema.parse({ ...base, promptGrants: ["summarize"] }).promptGrants,
+    ).toEqual(["summarize"]);
+    expect(
+      ServerConfigSchema.safeParse({ ...base, promptGrants: ["summarize", "summarize"] }).success,
+    ).toBe(false);
+  });
+
   it("rejects trace propagation for external servers with its stable error code", () => {
     const result = ServerConfigSchema.safeParse({
       id: "external",

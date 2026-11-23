@@ -2,6 +2,7 @@
 // MCP server configuration is owned by task 6.1.
 import { z } from "zod";
 import { Code } from "../primitives.js";
+import { McpPromptGrantsSchema } from "../mcp-prompts.js";
 import { SecretRefSchema } from "../secret-ref.js";
 import { isSecretKeyName } from "../secret-key-name.js";
 import { ServerElicitationConfigSchema } from "./elicitation.js";
@@ -149,6 +150,7 @@ const ServerConfigObjectSchema = z
     trust: z.enum(["internal", "external"]).default("external"),
     propagateTrace: z.boolean().default(false),
     toolAllowlist: ToolNamesSchema.optional(),
+    promptGrants: McpPromptGrantsSchema.optional(),
     toolPrefix: Code.optional(),
     idempotentTools: ToolNamesSchema.optional(),
     useAnnotations: z.boolean().default(false),
