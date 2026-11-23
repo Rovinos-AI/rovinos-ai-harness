@@ -93,7 +93,7 @@ This is local file coordination, not a distributed lock. The implementation is i
 Writable opens apply ordered, checksummed SQL migrations transactionally. Read-only opens do not
 modify the database and fail if migrations are pending. `migrateSqliteFile` can apply migrations
 explicitly or list pending versions in dry-run mode. The migration runner is in
-[`src/migrate-file.ts`](src/migrate-file.ts), and SQL files live in [`migrations/sqlite/`](migrations/sqlite/).
+[`src/migrate-file.ts`](src/migrate-file.ts), and SQL files live in `migrations/sqlite/`.
 
 ## Public API
 
