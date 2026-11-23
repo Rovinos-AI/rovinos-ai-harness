@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { RunContent, RunTimeline, RunTimelineStep } from "@rovinos/schemas/browser";
 import { createMeter, createStatusBadge } from "../../kit/components.js";
-import { formatMessage, formatNumber, getStrings } from "../../kit/strings.js";
+import { formatMessage, formatNumber } from "../../kit/strings.js";
+import type { getStrings } from "../../kit/strings.js";
 
 type InspectorStrings = ReturnType<typeof getStrings>;
 
@@ -10,6 +11,37 @@ interface TimelineActions {
   readonly onApproval: (approvalId: string) => void;
   readonly onInput: (requestId: string) => void;
   readonly onSubagent: (step: RunTimelineStep) => void;
+}
+
+interface TimelineRenderContext {
+  readonly strings: InspectorStrings;
+  readonly selectedStep: RunTimelineStep | undefined;
+  readonly actions: TimelineActions;
+}
+
+interface BudgetMeterContext {
+  readonly document: Document;
+  readonly strings: InspectorStrings;
+  readonly section: HTMLElement;
+}
+
+interface InspectorRenderOptions {
+  readonly document: Document;
+  readonly detailHost: HTMLElement;
+  readonly timelineHost: HTMLElement;
+  readonly strings: InspectorStrings;
+  readonly timeline: RunTimeline;
+  readonly selectedStep: RunTimelineStep | undefined;
+  readonly actions: TimelineActions;
+}
+
+interface TokenizedContentOptions {
+  readonly document: Document;
+  readonly button: HTMLButtonElement;
+  readonly host: HTMLElement;
+  readonly strings: InspectorStrings;
+  readonly visible: boolean;
+  readonly content: RunContent | undefined;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -57,7 +89,10 @@ function renderUsage(
     timeline.usage.cost.estimatedMicros +
     timeline.usage.cost.partialMicros;
   addUsage(strings.runDetailStatus, timeline.status);
-  addUsage(strings.runDetailSteps, formatNumber(timeline.usage.steps, document.documentElement.lang));
+  addUsage(
+    strings.runDetailSteps,
+    formatNumber(timeline.usage.steps, document.documentElement.lang),
+  );
   addUsage(
     strings.runDetailInputTokens,
     formatNumber(timeline.usage.inputTokens, document.documentElement.lang),
@@ -67,7 +102,10 @@ function renderUsage(
     formatNumber(timeline.usage.outputTokens, document.documentElement.lang),
   );
   addUsage(strings.runDetailCost, formatNumber(totalCost, document.documentElement.lang));
-  host.replaceChildren(createStatusBadge(document, statusKind(timeline.status), timeline.status), usage);
+  host.replaceChildren(
+    createStatusBadge(document, statusKind(timeline.status), timeline.status),
+    usage,
+  );
 }
 
 function pendingActionButton(
@@ -84,7 +122,9 @@ function pendingActionButton(
       formatMessage(strings.runInspectorOpenApproval, { id: approvalId }),
     );
     button.type = "button";
-    button.addEventListener("click", () => actions.onApproval(approvalId));
+    button.addEventListener("click", () => {
+      actions.onApproval(approvalId);
+    });
     return button;
   }
   if (step.type === "input_wait" && step.status === "pending" && step.requestId !== undefined) {
@@ -95,7 +135,9 @@ function pendingActionButton(
       formatMessage(strings.runInspectorOpenInput, { id: requestId }),
     );
     button.type = "button";
-    button.addEventListener("click", () => actions.onInput(requestId));
+    button.addEventListener("click", () => {
+      actions.onInput(requestId);
+    });
     return button;
   }
   return undefined;
@@ -103,11 +145,10 @@ function pendingActionButton(
 
 function timelineStepItem(
   document: Document,
-  strings: InspectorStrings,
   step: RunTimelineStep,
-  selectedStep: RunTimelineStep | undefined,
-  actions: TimelineActions,
+  context: TimelineRenderContext,
 ): HTMLLIElement {
+  const { actions, selectedStep, strings } = context;
   const item = element(document, "li");
   const select = element(
     document,
@@ -116,7 +157,9 @@ function timelineStepItem(
   );
   select.type = "button";
   select.setAttribute("aria-pressed", String(selectedStep?.seq === step.seq));
-  select.addEventListener("click", () => actions.onSelect(step));
+  select.addEventListener("click", () => {
+    actions.onSelect(step);
+  });
   item.append(select);
   const action = pendingActionButton(document, strings, step, actions);
   if (action !== undefined) {
@@ -129,7 +172,9 @@ function timelineStepItem(
       formatMessage(strings.runInspectorOpenSubagent, { id: step.childRunId }),
     );
     child.type = "button";
-    child.addEventListener("click", () => actions.onSubagent(step));
+    child.addEventListener("click", () => {
+      actions.onSubagent(step);
+    });
     item.append(child);
   }
   return item;
@@ -138,16 +183,14 @@ function timelineStepItem(
 function renderTimeline(
   document: Document,
   host: HTMLElement,
-  strings: InspectorStrings,
   timeline: RunTimeline,
-  selectedStep: RunTimelineStep | undefined,
-  actions: TimelineActions,
+  context: TimelineRenderContext,
 ): void {
   const list = element(document, "ol");
   list.className = "timeline";
-  list.setAttribute("aria-label", strings.runInspectorTimeline);
+  list.setAttribute("aria-label", context.strings.runInspectorTimeline);
   for (const step of timeline.steps) {
-    list.append(timelineStepItem(document, strings, step, selectedStep, actions));
+    list.append(timelineStepItem(document, step, context));
   }
   host.replaceChildren(list);
 }
@@ -192,25 +235,18 @@ function renderSelectedStep(
   host.append(panel);
 }
 
-function exceededBudgetMeter(
-  document: Document,
-  strings: InspectorStrings,
-  section: HTMLElement,
-  step: RunTimelineStep,
-): void {
+function exceededBudgetMeter(context: BudgetMeterContext, step: RunTimelineStep): void {
   if (step.type !== "budget_exceeded" || step.budget === undefined) {
     return;
   }
   const limit = step.limit ?? 1;
   const observed = step.observed ?? limit;
-  const label = formatMessage(strings.runInspectorBudgetExceeded, { budget: step.budget });
-  section.append(createMeter(document, label, observed, Math.max(limit, observed)));
+  const label = formatMessage(context.strings.runInspectorBudgetExceeded, { budget: step.budget });
+  context.section.append(createMeter(context.document, label, observed, Math.max(limit, observed)));
 }
 
 function completedChildMeters(
-  document: Document,
-  strings: InspectorStrings,
-  section: HTMLElement,
+  context: BudgetMeterContext,
   child: RunTimelineStep,
   completion: RunTimelineStep | undefined,
 ): void {
@@ -222,11 +258,11 @@ function completedChildMeters(
     if (value === undefined || limit === undefined) {
       return;
     }
-    const label = formatMessage(strings.runInspectorSubagentBudget, {
+    const label = formatMessage(context.strings.runInspectorSubagentBudget, {
       id: childRunId,
       budget,
     });
-    section.append(createMeter(document, label, value, limit));
+    context.section.append(createMeter(context.document, label, value, limit));
   };
   addMeter("steps", completion.stepsUsed, child.maxSteps);
   addMeter(
@@ -244,14 +280,15 @@ function renderBudgetMeters(
   timeline: RunTimeline,
 ): void {
   const section = element(document, "div");
+  const context = { document, strings, section };
   for (const step of timeline.steps) {
-    exceededBudgetMeter(document, strings, section, step);
+    exceededBudgetMeter(context, step);
     if (step.type === "subagent_spawn") {
       const completion = timeline.steps.find(
         (candidate) =>
           candidate.type === "subagent_completion" && candidate.childRunId === step.childRunId,
       );
-      completedChildMeters(document, strings, section, step, completion);
+      completedChildMeters(context, step, completion);
     }
   }
   if (section.childElementCount > 0) {
@@ -260,31 +297,20 @@ function renderBudgetMeters(
 }
 
 /** Renders the safe usage, timeline, selected-step, and budget projections. */
-export function renderInspector(
-  document: Document,
-  detailHost: HTMLElement,
-  timelineHost: HTMLElement,
-  strings: InspectorStrings,
-  timeline: RunTimeline,
-  selectedStep: RunTimelineStep | undefined,
-  actions: TimelineActions,
-): void {
+export function renderInspector(options: InspectorRenderOptions): void {
+  const { actions, detailHost, document, selectedStep, strings, timeline, timelineHost } = options;
+  const context = { actions, selectedStep, strings };
   detailHost.replaceChildren();
   renderUsage(document, detailHost, strings, timeline);
   renderSelectedStep(document, detailHost, strings, selectedStep);
   renderBudgetMeters(document, detailHost, strings, timeline);
-  renderTimeline(document, timelineHost, strings, timeline, selectedStep, actions);
+  renderTimeline(document, timelineHost, timeline, context);
 }
 
 /** Renders explicitly requested tokenized event content as inert text. */
-export function renderTokenizedContent(
-  document: Document,
-  button: HTMLButtonElement,
-  host: HTMLElement,
-  strings: InspectorStrings,
-  visible: boolean,
-  content: RunContent | undefined,
-): void {
+export function renderTokenizedContent(options: TokenizedContentOptions): void {
+  const { button, content, host, strings, visible } = options;
+  const { document } = options;
   button.textContent = visible ? strings.runInspectorHideContent : strings.runInspectorShowContent;
   if (!visible || content === undefined) {
     host.replaceChildren();

@@ -19,34 +19,21 @@ import { readRunState } from "./run-state.js";
 const TOOL_NAME = "harness.runs.content";
 const MAX_CONTENT_EVENTS = 100;
 type ContentEvent = GetRunContentOutput["events"][number];
+type InputContentEvent = Extract<
+  Event,
+  { readonly type: "run_input" | "input_requested" | "input_resolved" }
+>;
+type ModelContentEvent = Extract<Event, { readonly type: "model_request" | "model_response" }>;
+type ToolContentEvent = Extract<Event, { readonly type: "tool_intent" | "tool_result" }>;
 
 function toJsonValue(value: unknown): JsonValue {
   return parseJson(JsonValue, JSON.stringify(value));
 }
 
-function contentEvent(event: Event): ContentEvent | undefined {
+function inputContentEvent(event: InputContentEvent): ContentEvent | undefined {
   switch (event.type) {
     case "run_input":
       return { seq: event.seq, type: event.type, value: toJsonValue(event.input) };
-    case "model_request":
-      return { seq: event.seq, type: event.type, value: toJsonValue(event.messages) };
-    case "model_response":
-      return {
-        seq: event.seq,
-        type: event.type,
-        value: toJsonValue({
-          content: event.content,
-          ...(event.structuredValue === undefined
-            ? {}
-            : { structuredValue: event.structuredValue }),
-        }),
-      };
-    case "tool_intent":
-      return { seq: event.seq, type: event.type, value: toJsonValue(event.args) };
-    case "tool_result":
-      return { seq: event.seq, type: event.type, value: toJsonValue(event.result) };
-    case "approval_requested":
-      return { seq: event.seq, type: event.type, value: toJsonValue(event.payload) };
     case "input_requested":
       return {
         seq: event.seq,
@@ -61,20 +48,54 @@ function contentEvent(event: Event): ContentEvent | undefined {
       return event.answer === undefined
         ? undefined
         : { seq: event.seq, type: event.type, value: toJsonValue(event.answer) };
-    case "app_content":
-    case "approval_resolved":
-    case "budget_exceeded":
-    case "checkpoint_written":
-    case "context_compacted":
-    case "pii_action":
-    case "run_created":
-    case "run_status_changed":
-    case "spend_reservation_resolved":
-    case "subagent_completed":
-    case "subagent_spawned":
-    case "tool_execution_started":
-      return undefined;
   }
+}
+
+function modelContentEvent(event: ModelContentEvent): ContentEvent {
+  switch (event.type) {
+    case "model_request":
+      return { seq: event.seq, type: event.type, value: toJsonValue(event.messages) };
+    case "model_response":
+      return {
+        seq: event.seq,
+        type: event.type,
+        value: toJsonValue({
+          content: event.content,
+          ...(event.structuredValue === undefined
+            ? {}
+            : { structuredValue: event.structuredValue }),
+        }),
+      };
+  }
+}
+
+function toolContentEvent(event: ToolContentEvent): ContentEvent {
+  switch (event.type) {
+    case "tool_intent":
+      return { seq: event.seq, type: event.type, value: toJsonValue(event.args) };
+    case "tool_result":
+      return { seq: event.seq, type: event.type, value: toJsonValue(event.result) };
+  }
+}
+
+function contentEvent(event: Event): ContentEvent | undefined {
+  if (
+    event.type === "run_input" ||
+    event.type === "input_requested" ||
+    event.type === "input_resolved"
+  ) {
+    return inputContentEvent(event);
+  }
+  if (event.type === "model_request" || event.type === "model_response") {
+    return modelContentEvent(event);
+  }
+  if (event.type === "tool_intent" || event.type === "tool_result") {
+    return toolContentEvent(event);
+  }
+  if (event.type === "approval_requested") {
+    return { seq: event.seq, type: event.type, value: toJsonValue(event.payload) };
+  }
+  return undefined;
 }
 
 /** Returns the most recent content fields from the tokenized event log. */

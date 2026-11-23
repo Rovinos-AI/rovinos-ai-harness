@@ -34,13 +34,18 @@ function addStep(state: TimelineState, step: TimelineStep): number {
   return state.steps.length - 1;
 }
 
-function updateStep(index: number | undefined, state: TimelineState, update: Partial<TimelineStep>): void {
+function updateStep(
+  index: number | undefined,
+  state: TimelineState,
+  update: Partial<TimelineStep>,
+): void {
   if (index === undefined) {
     return;
   }
-  const current = state.steps[index];
+  const steps = state.steps;
+  const current = steps[index];
   if (current !== undefined) {
-    state.steps[index] = { ...current, ...update };
+    steps[index] = { ...current, ...update };
   }
 }
 
@@ -98,7 +103,9 @@ function toolIntentStatus(decision: "allow" | "ask" | "deny"): "denied" | "pendi
   return decision === "ask" ? "pending" : "running";
 }
 
-function toolResultStatus(outcome: "ok" | "error" | "denied" | "timeout"): "failed" | "denied" | "completed" {
+function toolResultStatus(
+  outcome: "ok" | "error" | "denied" | "timeout",
+): "failed" | "denied" | "completed" {
   if (outcome === "error" || outcome === "timeout") {
     return "failed";
   }
@@ -211,7 +218,9 @@ function handleInputEvent(event: Event, state: TimelineState): boolean {
   return true;
 }
 
-function inputResolutionStatus(action: "accept" | "decline" | "cancel"): "accepted" | "declined" | "cancelled" {
+function inputResolutionStatus(
+  action: "accept" | "decline" | "cancel",
+): "accepted" | "declined" | "cancelled" {
   switch (action) {
     case "accept":
       return "accepted";

@@ -28,7 +28,7 @@ export interface RunInspectorBridge {
     readonly structuredContent?: unknown;
   }>;
   /** Registers an optional app-host run update listener. */
-  subscribeRuns?(onUpdate: () => void, onError: () => void): () => void;
+  readonly subscribeRuns?: (onUpdate: () => void, onError: () => void) => () => void;
   openApproval(approvalId: string): Promise<void>;
   openInput(requestId: string): Promise<void>;
 }
@@ -144,16 +144,18 @@ class RunInspectorController implements RunInspectorView {
     this.contentHost = element(this.document, "section");
     this.contentHost.setAttribute("aria-label", this.strings.runInspectorShowContent);
     this.contentHost.hidden = true;
-    this.content = new RunInspectorContent(
-      this.document,
-      this.contentButton,
-      this.contentHost,
-      this.strings,
-      this.options.bridge,
-      () => this.runId,
-      () => !this.disposed,
-      () => this.recordInteraction(),
-    );
+    this.content = new RunInspectorContent({
+      document: this.document,
+      button: this.contentButton,
+      host: this.contentHost,
+      strings: this.strings,
+      bridge: this.options.bridge,
+      currentRunId: () => this.runId,
+      isActive: () => !this.disposed,
+      onInteraction: () => {
+        this.recordInteraction();
+      },
+    });
     this.main.append(this.contentButton, this.contentHost);
     container.replaceChildren(this.main);
     heading.focus();
@@ -174,8 +176,7 @@ class RunInspectorController implements RunInspectorView {
       this.schedule(this.pollDelay);
       return;
     }
-    let ready = false;
-    let failed = false;
+    const state = { ready: false, failed: false };
     try {
       this.unsubscribeRuns = subscribeRuns.call(
         this.options.bridge,
@@ -183,15 +184,15 @@ class RunInspectorController implements RunInspectorView {
           void this.refresh();
         },
         () => {
-          if (ready) {
+          if (state.ready) {
             this.subscriptionFailed();
           } else {
-            failed = true;
+            state.failed = true;
           }
         },
       );
-      ready = true;
-      if (failed) {
+      state.ready = true;
+      if (state.failed) {
         this.subscriptionFailed();
       }
     } catch {
@@ -259,8 +260,7 @@ class RunInspectorController implements RunInspectorView {
     }
     this.timeline = timeline;
     this.selectedStep =
-      timeline.steps.find(({ seq }) => seq === this.selectedStep?.seq) ??
-      timeline.steps.at(-1);
+      timeline.steps.find(({ seq }) => seq === this.selectedStep?.seq) ?? timeline.steps.at(-1);
     this.render();
   }
 
@@ -300,19 +300,29 @@ class RunInspectorController implements RunInspectorView {
     }
     this.runIdLabel.textContent = timeline.runId;
     this.backButton.hidden = this.runStack.length === 0;
-    renderInspector(this.document, this.detailHost, this.timelineHost, this.strings, timeline, this.selectedStep, {
-      onSelect: (step) => {
-        this.recordInteraction();
-        this.selectedStep = step;
-        this.render();
+    renderInspector({
+      document: this.document,
+      detailHost: this.detailHost,
+      timelineHost: this.timelineHost,
+      strings: this.strings,
+      timeline,
+      selectedStep: this.selectedStep,
+      actions: {
+        onSelect: (step) => {
+          this.recordInteraction();
+          this.selectedStep = step;
+          this.render();
+        },
+        onApproval: (approvalId) => {
+          void this.options.bridge.openApproval(approvalId);
+        },
+        onInput: (requestId) => {
+          void this.options.bridge.openInput(requestId);
+        },
+        onSubagent: (step) => {
+          this.openSubagent(step);
+        },
       },
-      onApproval: (approvalId) => {
-        void this.options.bridge.openApproval(approvalId);
-      },
-      onInput: (requestId) => {
-        void this.options.bridge.openInput(requestId);
-      },
-      onSubagent: (step) => this.openSubagent(step),
     });
   }
 
