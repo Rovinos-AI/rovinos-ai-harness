@@ -19,6 +19,7 @@ export { HarnessConfigSchema, type HarnessConfig } from "@rovinos/config";
 export { Principal as PrincipalSchema } from "@rovinos/schemas";
 export type { Principal } from "@rovinos/schemas";
 export { SdkError, CreateHarnessOptionsSchema, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, ContentAccessRequestSchema, type ContentAccessRequest, type ContentAuthorizer, type ContinueRunOptions, type CreateHarnessOptions, type CreateHarnessOptionsInput, type GetRunContentOptions, type Harness, type HarnessOverrides, InputResolutionResultSchema, type InputResolutionResult, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, RunContentStreamEntrySchema, type RunContentStreamEntry, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type SdkMcpConnectionErrorCode, type StartRunOptions, StreamRunContentOptionsSchema, type StreamRunContentOptions, type WatchOptions, type WithExtensionRegistrations, } from "./types.js";
+export type { SdkMcpResourceOperationErrorCode } from "./mcp-resource-error-codes.js";
 export type { SafeEvent } from "@rovinos/telemetry";
 /** Defines a typed extension tool contribution using its input and output schemas. */
 export { defineTool } from "./extensions.js";
