@@ -43,6 +43,7 @@ const appMetadataTools = [
   { name: "harness.inputs.answer", resourceUri: "ui://harness/input/v1" },
   { name: "harness.runs.list", resourceUri: "ui://harness/runs/v1" },
   { name: "harness.runs.get", resourceUri: "ui://harness/runs/v1" },
+  { name: "open_report", resourceUri: "ui://harness/reports/v1" },
 ] as const;
 
 function failure(message: string, code = "inspector_conformance_failed"): never {
@@ -291,6 +292,33 @@ async function checkTransport(
     .find((entry) => entry.mimeType === "text/html;profile=mcp-app");
   if (html === undefined || typeof html.text !== "string" || !html.text.includes("<html")) {
     failure("The approval resource did not return the built MCP Apps HTML.");
+  }
+  const reportsResource = jsonObject(
+    (
+      await invoke({
+        transport,
+        endpoint,
+        env,
+        protocolEra: "modern",
+        method: "resources/read",
+        flags: [...flags, "--uri", "ui://harness/reports/v1"],
+      })
+    ).stdout,
+    "reports resources/read",
+  );
+  const reportsContents = record(reportsResource.result, "reports resources/read result").contents;
+  if (!Array.isArray(reportsContents)) {
+    failure("The reports resource did not return content.");
+  }
+  const reportsHtml = reportsContents
+    .map((entry) => record(entry, "reports resource content"))
+    .find((entry) => entry.mimeType === "text/html;profile=mcp-app");
+  if (
+    reportsHtml === undefined ||
+    typeof reportsHtml.text !== "string" ||
+    !reportsHtml.text.includes("<html")
+  ) {
+    failure("The reports resource did not return the built MCP Apps HTML.");
   }
 }
 

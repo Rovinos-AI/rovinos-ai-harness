@@ -159,6 +159,7 @@ describe("control-plane HTTP transport", () => {
         "get_run",
         "list_pending_inputs",
         "list_runs",
+        "open_report",
       ]);
 
       const listed = await client.callTool({ name: "list_runs", arguments: {} });
@@ -239,6 +240,7 @@ describe("control-plane HTTP transport", () => {
         "get_run",
         "list_pending_inputs",
         "list_runs",
+        "open_report",
       ]);
       await expect(
         client.callTool({ name: "start_run", arguments: { goal: "synthetic" } }),
@@ -487,6 +489,7 @@ describe("control-plane HTTP transport", () => {
         "get_run",
         "list_pending_inputs",
         "list_runs",
+        "open_report",
         "resolve_uncertain_spend",
         "resume_run",
         "review_approval",
