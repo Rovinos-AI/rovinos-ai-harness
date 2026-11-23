@@ -161,6 +161,15 @@ describe("control-plane HTTP transport", () => {
         "list_runs",
         "open_report",
       ]);
+      expect(tools.find(({ name }) => name === "open_report")?._meta).toEqual({
+        ui: { resourceUri: "ui://harness/reports/v1" },
+      });
+      await expect(
+        client.callTool({ name: "open_report", arguments: { kind: "eval", path: "report.json" } }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "report_schema_unavailable" }],
+      });
 
       const listed = await client.callTool({ name: "list_runs", arguments: {} });
       expect(listed.structuredContent).toMatchObject({

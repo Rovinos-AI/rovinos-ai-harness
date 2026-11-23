@@ -233,6 +233,40 @@ function assertAppVisibility(rows: readonly Record<string, unknown>[], advertise
   }
 }
 
+async function assertAppResource(input: {
+  readonly transport: "stdio" | "http";
+  readonly endpoint: string | undefined;
+  readonly env: NodeJS.ProcessEnv;
+  readonly flags: readonly string[];
+  readonly invoke: (request: InspectorRequest) => Promise<ProcessResult>;
+  readonly uri: string;
+}): Promise<void> {
+  const label = input.uri.includes("reports") ? "reports" : "approval";
+  const response = jsonObject(
+    (
+      await input.invoke({
+        transport: input.transport,
+        endpoint: input.endpoint,
+        env: input.env,
+        protocolEra: "modern",
+        method: "resources/read",
+        flags: [...input.flags, "--uri", input.uri],
+      })
+    ).stdout,
+    `${label} resources/read`,
+  );
+  const contents = record(response.result, `${label} resources/read result`).contents;
+  if (!Array.isArray(contents)) {
+    failure(`The ${label} resource did not return content.`);
+  }
+  const html = contents
+    .map((entry) => record(entry, `${label} resource content`))
+    .find((entry) => entry.mimeType === "text/html;profile=mcp-app");
+  if (html === undefined || typeof html.text !== "string" || !html.text.includes("<html")) {
+    failure(`The ${label} resource did not return the built MCP Apps HTML.`);
+  }
+}
+
 async function checkTransport(
   transport: "stdio" | "http",
   endpoint: string | undefined,
@@ -270,56 +304,22 @@ async function checkTransport(
     runProcess,
     argsForTransport,
   });
-  const resource = jsonObject(
-    (
-      await invoke({
-        transport,
-        endpoint,
-        env,
-        protocolEra: "modern",
-        method: "resources/read",
-        flags: [...flags, "--uri", "ui://harness/approval/v1"],
-      })
-    ).stdout,
-    "approval resources/read",
-  );
-  const contents = record(resource.result, "resources/read result").contents;
-  if (!Array.isArray(contents)) {
-    failure("The approval resource did not return content.");
-  }
-  const html = contents
-    .map((entry) => record(entry, "approval resource content"))
-    .find((entry) => entry.mimeType === "text/html;profile=mcp-app");
-  if (html === undefined || typeof html.text !== "string" || !html.text.includes("<html")) {
-    failure("The approval resource did not return the built MCP Apps HTML.");
-  }
-  const reportsResource = jsonObject(
-    (
-      await invoke({
-        transport,
-        endpoint,
-        env,
-        protocolEra: "modern",
-        method: "resources/read",
-        flags: [...flags, "--uri", "ui://harness/reports/v1"],
-      })
-    ).stdout,
-    "reports resources/read",
-  );
-  const reportsContents = record(reportsResource.result, "reports resources/read result").contents;
-  if (!Array.isArray(reportsContents)) {
-    failure("The reports resource did not return content.");
-  }
-  const reportsHtml = reportsContents
-    .map((entry) => record(entry, "reports resource content"))
-    .find((entry) => entry.mimeType === "text/html;profile=mcp-app");
-  if (
-    reportsHtml === undefined ||
-    typeof reportsHtml.text !== "string" ||
-    !reportsHtml.text.includes("<html")
-  ) {
-    failure("The reports resource did not return the built MCP Apps HTML.");
-  }
+  await assertAppResource({
+    transport,
+    endpoint,
+    env,
+    flags,
+    invoke,
+    uri: "ui://harness/approval/v1",
+  });
+  await assertAppResource({
+    transport,
+    endpoint,
+    env,
+    flags,
+    invoke,
+    uri: "ui://harness/reports/v1",
+  });
 }
 
 async function checkUnauthenticatedHttp(endpoint: string, env: NodeJS.ProcessEnv): Promise<void> {
