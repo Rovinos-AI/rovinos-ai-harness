@@ -77,6 +77,13 @@ function readNightlyDocsLinksWorkflow(): z.infer<typeof workflowSchema> {
   );
 }
 
+function readNightlyApprovalScreenshotsWorkflow(): z.infer<typeof workflowSchema> {
+  return parseYaml(
+    workflowSchema,
+    readFileSync(resolve(root, ".github/workflows/approval-screenshots-nightly.yml"), "utf8"),
+  );
+}
+
 function readSetupAction(): z.infer<typeof actionSchema> {
   return parseYaml(
     actionSchema,
@@ -358,6 +365,38 @@ describe("GitHub workflows", () => {
     ).toBe(true);
   });
 
+  it("regenerates and uploads approval screenshots nightly on main", () => {
+    const workflow = readNightlyApprovalScreenshotsWorkflow();
+    const job = workflow.jobs["approval-screenshots"];
+    const steps = job?.steps ?? [];
+
+    expect(workflow.on.schedule).toEqual([{ cron: "53 4 * * *" }]);
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(job?.if).toBe("github.ref == 'refs/heads/main'");
+    expect(steps.some((step) => step.uses === "./.github/actions/node-setup")).toBe(true);
+    expect(
+      steps.some((step) => step.run?.includes("playwright install --with-deps chromium") === true),
+    ).toBe(true);
+    expect(steps.some((step) => step.run?.includes("scripts/docs/screenshots.ts") === true)).toBe(
+      true,
+    );
+    expect(
+      steps.some(
+        (step) =>
+          step.uses?.startsWith("actions/checkout@") === true &&
+          step.with?.["persist-credentials"] === false,
+      ),
+    ).toBe(true);
+    expect(
+      steps.find((step) => step.name === "Upload screenshots for manual comparison")?.with,
+    ).toEqual({
+      name: "approval-screenshots",
+      path: "docs/images/approval-*.png",
+      "if-no-files-found": "error",
+      "retention-days": 14,
+    });
+  });
+
   it("exposes the gates job result to reusable workflow callers", () => {
     const workflow = readWorkflow();
     const workflowCall = workflowCallSchema.parse(workflow.on.workflow_call);
@@ -376,6 +415,7 @@ describe("GitHub workflows", () => {
     const steps = [
       ...Object.values(readWorkflow().jobs).flatMap((job) => job.steps),
       ...Object.values(readNightlyVulnerabilityWorkflow().jobs).flatMap((job) => job.steps),
+      ...Object.values(readNightlyApprovalScreenshotsWorkflow().jobs).flatMap((job) => job.steps),
       ...readSetupAction().runs.steps,
     ];
     const remote = steps

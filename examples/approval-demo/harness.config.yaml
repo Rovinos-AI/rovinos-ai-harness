@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic local demo only; contains_real_data: false.
+keys:
+  currentKeyId: approval_demo
+  keys:
+    - id: approval_demo
+      secret: env:HARNESS_KEY
+policy:
+  file: ../quickstart/approval-policy.yaml
+controlPlane:
+  auth:
+    tokens:
+      - id: approval_demo
+        secret: env:APPROVAL_DEMO_CONTROL_TOKEN
+        scopes: [admin]
+  listen:
+    host: 127.0.0.1
+    port: 3190
