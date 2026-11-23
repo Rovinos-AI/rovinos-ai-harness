@@ -681,7 +681,7 @@ describe("outbound MCP resource access", () => {
 
   it.each([
     ["invalid URI", { uri: "" }, "mcp_resource_uri_invalid"],
-    ["ungranted URI", { uri: "weather://private/secret" }, "mcp_resource_access_denied"],
+    ["URI without a grant", { uri: "weather://private/secret" }, "mcp_resource_access_denied"],
   ] as const)("denies %s before connecting", async (_name, uri, code) => {
     const peer = await resourcePeer({ protocol: "2025-11-25", grants: [grantedTemplate] });
 
