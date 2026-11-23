@@ -96,6 +96,40 @@ describe("openReport", () => {
     ).rejects.toMatchObject({ code: "report_path_not_allowed" });
   });
 
+  it("skips relative and non-directory configured report paths", async () => {
+    const { allowed } = await setupDirectories();
+    const notDirectory = join(allowed, "not-a-directory");
+    await writeFile(notDirectory, "file");
+    await expect(
+      openReport(["relative-report-dir", notDirectory], reportSchemas, {
+        kind: "eval",
+        path: "report.json",
+      }),
+    ).rejects.toMatchObject({ code: "report_path_not_allowed" });
+  });
+
+  it("rejects a directory as the report file", async () => {
+    const { allowed } = await setupDirectories();
+    await expect(
+      openReport([allowed], reportSchemas, { kind: "eval", path: "." }),
+    ).rejects.toMatchObject({ code: "report_path_not_allowed" });
+  });
+
+  it("rejects reports larger than the size limit", async () => {
+    const { allowed } = await setupDirectories();
+    const path = join(allowed, "large.json");
+    await writeFile(path, Buffer.alloc(1_048_577));
+    await expect(
+      openReport([allowed], reportSchemas, { kind: "eval", path }),
+    ).rejects.toMatchObject({ code: "report_too_large" });
+  });
+
+  it("fails closed when report schemas are unavailable", async () => {
+    await expect(
+      openReport([], undefined, { kind: "eval", path: "report.json" }),
+    ).rejects.toMatchObject({ code: "report_schema_unavailable" });
+  });
+
   it("rejects absolute paths and symlinks that resolve outside configured directories", async () => {
     const { allowed, outside } = await setupDirectories();
     const outsidePath = join(outside, "report.json");

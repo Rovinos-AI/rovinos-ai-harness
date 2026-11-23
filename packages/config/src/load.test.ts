@@ -493,6 +493,7 @@ store: {}`,
       controlPlane: {
         allowAgentStartedRuns: false,
         allowReveal: false,
+        reportDirs: [],
         auth: { tokens: [] },
         listen: { host: "127.0.0.1", port: 3_000 },
         allowedHosts: ["127.0.0.1", "localhost", "::1"],

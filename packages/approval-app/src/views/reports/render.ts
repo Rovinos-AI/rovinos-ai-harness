@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createDataTable } from "../../kit/components.js";
+import { formatMessage, getStrings, type UiStrings } from "../../kit/strings.js";
 import type { ReportsViewResult } from "./schema.js";
 
 const svgNamespace = ["http:", "", "www.w3.org", "2000", "svg"].join("/");
@@ -55,6 +56,7 @@ function createPassChart(
 function evalPassSection(
   document: Document,
   report: Extract<ReportsViewResult, { kind: "eval" }>,
+  strings: UiStrings,
 ): HTMLElement {
   const chartRows = report.report.aggregates.map((aggregate) => ({
     label: `${aggregate.taskId} / ${aggregate.variantId}`,
@@ -66,23 +68,30 @@ function evalPassSection(
       task: aggregate.taskId,
       variant: aggregate.variantId,
       passRate: numberText(aggregate.passRate),
-      confidenceInterval: `${numberText(Math.max(0, aggregate.passRate - margin))}–${numberText(Math.min(1, aggregate.passRate + margin))}`,
-      passAtK: aggregate.passAtK.map(({ k, rate }) => `${String(k)}=${numberText(rate)}`).join(", "),
+      confidenceInterval: formatMessage(strings.reportsConfidenceRange, {
+        low: numberText(Math.max(0, aggregate.passRate - margin)),
+        high: numberText(Math.min(1, aggregate.passRate + margin)),
+      }),
+      passAtK: aggregate.passAtK
+        .map(({ k, rate }) =>
+          formatMessage(strings.reportsPassAtKValue, { k, rate: numberText(rate) }),
+        )
+        .join(strings.reportsListSeparator),
     };
   });
   const section = element(document, "section");
-  section.append(element(document, "h2", "Pass rates"));
+  section.append(element(document, "h2", strings.reportsPassRates));
   section.append(createPassChart(document, chartRows));
   section.append(
     createDataTable(
       document,
-      "Pass rates with 95% confidence intervals and pass@k",
+      strings.reportsPassRatesTable,
       [
-        { key: "task", label: "Task" },
-        { key: "variant", label: "Variant" },
-        { key: "passRate", label: "Pass rate" },
-        { key: "confidenceInterval", label: "95% confidence interval" },
-        { key: "passAtK", label: "Pass@k" },
+        { key: "task", label: strings.reportsTask },
+        { key: "variant", label: strings.reportsVariant },
+        { key: "passRate", label: strings.reportsPassRate },
+        { key: "confidenceInterval", label: strings.reportsConfidenceInterval },
+        { key: "passAtK", label: strings.reportsPassAtK },
       ],
       passRows,
     ),
@@ -90,12 +99,15 @@ function evalPassSection(
   return section;
 }
 
-function evalDistributionRows(report: Extract<ReportsViewResult, { kind: "eval" }>) {
+function evalDistributionRows(
+  report: Extract<ReportsViewResult, { kind: "eval" }>,
+  strings: UiStrings,
+) {
   return report.report.aggregates.flatMap((aggregate) =>
     [
-      { metric: "cost (micros)", summary: aggregate.costMicros },
-      { metric: "steps", summary: aggregate.steps },
-      { metric: "latency (ms)", summary: aggregate.latencyMs },
+      { metric: strings.reportsCostMicros, summary: aggregate.costMicros },
+      { metric: strings.reportsSteps, summary: aggregate.steps },
+      { metric: strings.reportsLatencyMs, summary: aggregate.latencyMs },
     ].map(({ metric, summary }) => ({
       task: aggregate.taskId,
       variant: aggregate.variantId,
@@ -107,7 +119,7 @@ function evalDistributionRows(report: Extract<ReportsViewResult, { kind: "eval" 
   );
 }
 
-function evalFailureRows(report: Extract<ReportsViewResult, { kind: "eval" }>) {
+function evalFailureRows(report: Extract<ReportsViewResult, { kind: "eval" }>, strings: UiStrings) {
   const failures = report.report.trials.flatMap((trial) =>
     trial.graders
       .filter(({ pass }) => !pass)
@@ -115,43 +127,51 @@ function evalFailureRows(report: Extract<ReportsViewResult, { kind: "eval" }>) {
         task: trial.taskId,
         variant: trial.variantId,
         grader: grader.graderId,
-        codes: grader.codes.join(", "),
+        codes: grader.codes.join(strings.reportsListSeparator),
       })),
   );
   return failures.length > 0
     ? failures
-    : [{ task: "—", variant: "—", grader: "—", codes: "No failures" }];
+    : [
+        {
+          task: strings.reportsNotAvailable,
+          variant: strings.reportsNotAvailable,
+          grader: strings.reportsNotAvailable,
+          codes: strings.reportsNoFailures,
+        },
+      ];
 }
 
 function renderEval(
   document: Document,
   report: Extract<ReportsViewResult, { kind: "eval" }>,
+  strings: UiStrings,
 ): HTMLElement[] {
   return [
-    evalPassSection(document, report),
+    evalPassSection(document, report, strings),
     reportSection(
       document,
-      "Cost, steps, and latency distributions",
+      strings.reportsDistributions,
       [
-        { key: "task", label: "Task" },
-        { key: "variant", label: "Variant" },
-        { key: "metric", label: "Metric" },
-        { key: "mean", label: "Mean" },
-        { key: "median", label: "Median" },
-        { key: "p95", label: "P95" },
+        { key: "task", label: strings.reportsTask },
+        { key: "variant", label: strings.reportsVariant },
+        { key: "metric", label: strings.reportsMetric },
+        { key: "mean", label: strings.reportsMean },
+        { key: "median", label: strings.reportsMedian },
+        { key: "p95", label: strings.reportsP95 },
       ],
-      evalDistributionRows(report),
+      evalDistributionRows(report, strings),
     ),
     reportSection(
       document,
-      `Failing grader and invariant codes${report.report.invariantsEnabled ? "" : " (invariants disabled)"}`,
+      `${strings.reportsFailures}${report.report.invariantsEnabled ? "" : strings.reportsInvariantsDisabled}`,
       [
-        { key: "task", label: "Task" },
-        { key: "variant", label: "Variant" },
-        { key: "grader", label: "Grader" },
-        { key: "codes", label: "Codes" },
+        { key: "task", label: strings.reportsTask },
+        { key: "variant", label: strings.reportsVariant },
+        { key: "grader", label: strings.reportsGrader },
+        { key: "codes", label: strings.reportsCodes },
       ],
-      evalFailureRows(report),
+      evalFailureRows(report, strings),
     ),
   ];
 }
@@ -159,37 +179,48 @@ function renderEval(
 function renderComparison(
   document: Document,
   report: Extract<ReportsViewResult, { kind: "compare" }>,
+  strings: UiStrings,
 ): HTMLElement[] {
   const rows = report.report.comparisons.flatMap((comparison) =>
     comparison.metrics.map((metric) => ({
       scope:
-        comparison.scope === "task" ? `Task: ${comparison.taskId ?? ""}` : "Overall",
-      variants: `${comparison.variantA} vs ${comparison.variantB}`,
+        comparison.scope === "task"
+          ? formatMessage(strings.reportsTaskScope, { task: comparison.taskId ?? "" })
+          : strings.reportsOverall,
+      variants: formatMessage(strings.reportsComparedVariants, {
+        a: comparison.variantA,
+        b: comparison.variantB,
+      }),
       metric: metric.metric,
       a: numberText(metric.a),
       b: numberText(metric.b),
       verdict: metric.verdict,
       adjustedPValue:
-        metric.adjustedPValue === null ? "—" : numberText(metric.adjustedPValue),
+        metric.adjustedPValue === null
+          ? strings.reportsNotAvailable
+          : numberText(metric.adjustedPValue),
       confidenceInterval:
         metric.confidenceInterval === null
-          ? "—"
-          : `${numberText(metric.confidenceInterval.low)}–${numberText(metric.confidenceInterval.high)}`,
+          ? strings.reportsNotAvailable
+          : formatMessage(strings.reportsConfidenceRange, {
+              low: numberText(metric.confidenceInterval.low),
+              high: numberText(metric.confidenceInterval.high),
+            }),
     })),
   );
   return [
     reportSection(
       document,
-      "A/B comparisons",
+      strings.reportsComparisons,
       [
-        { key: "scope", label: "Scope" },
-        { key: "variants", label: "Variants" },
-        { key: "metric", label: "Metric" },
-        { key: "a", label: "A" },
-        { key: "b", label: "B" },
-        { key: "verdict", label: "Verdict" },
-        { key: "adjustedPValue", label: "Adjusted p-value" },
-        { key: "confidenceInterval", label: "Confidence interval" },
+        { key: "scope", label: strings.reportsScope },
+        { key: "variants", label: strings.reportsVariants },
+        { key: "metric", label: strings.reportsMetric },
+        { key: "a", label: strings.reportsA },
+        { key: "b", label: strings.reportsB },
+        { key: "verdict", label: strings.reportsVerdict },
+        { key: "adjustedPValue", label: strings.reportsAdjustedPValue },
+        { key: "confidenceInterval", label: strings.reportsConfidenceInterval },
       ],
       rows,
     ),
@@ -199,6 +230,7 @@ function renderComparison(
 function renderReplay(
   document: Document,
   report: Extract<ReportsViewResult, { kind: "replay" }>,
+  strings: UiStrings,
 ): HTMLElement[] {
   const replayRows = (entryClass: "behavioral" | "noise") =>
     report.report.entries
@@ -208,21 +240,29 @@ function renderReplay(
         event: entry.eventKind,
         change: entry.kind,
         fields:
-          entry.fields
-            ?.map(({ field, a, b }) => `${field}: ${String(a)} → ${String(b)}`)
-            .join("; ") ?? "—",
+          entry.fields === undefined
+            ? strings.reportsNotAvailable
+            : entry.fields
+                .map(({ field, a, b }) =>
+                  formatMessage(strings.reportsFieldValue, {
+                    field,
+                    a: String(a),
+                    b: String(b),
+                  }),
+                )
+                .join(strings.reportsFieldSeparator),
       }));
   const summary = report.report.summary;
   return [
     reportSection(
       document,
-      "Replay diff summary",
+      strings.reportsReplaySummary,
       [
-        { key: "behavioral", label: "Behavioral" },
-        { key: "noise", label: "Noise" },
-        { key: "added", label: "Added" },
-        { key: "removed", label: "Removed" },
-        { key: "changed", label: "Changed" },
+        { key: "behavioral", label: strings.reportsBehavioral },
+        { key: "noise", label: strings.reportsNoise },
+        { key: "added", label: strings.reportsAdded },
+        { key: "removed", label: strings.reportsRemoved },
+        { key: "changed", label: strings.reportsChanged },
       ],
       [
         {
@@ -236,23 +276,23 @@ function renderReplay(
     ),
     reportSection(
       document,
-      "Behavioral differences",
+      strings.reportsBehavioralDifferences,
       [
-        { key: "index", label: "Index" },
-        { key: "event", label: "Event" },
-        { key: "change", label: "Change" },
-        { key: "fields", label: "Fields (original → replay)" },
+        { key: "index", label: strings.reportsIndex },
+        { key: "event", label: strings.reportsEvent },
+        { key: "change", label: strings.reportsChange },
+        { key: "fields", label: strings.reportsFields },
       ],
       replayRows("behavioral"),
     ),
     reportSection(
       document,
-      "Noise differences",
+      strings.reportsNoiseDifferences,
       [
-        { key: "index", label: "Index" },
-        { key: "event", label: "Event" },
-        { key: "change", label: "Change" },
-        { key: "fields", label: "Fields (original → replay)" },
+        { key: "index", label: strings.reportsIndex },
+        { key: "event", label: strings.reportsEvent },
+        { key: "change", label: strings.reportsChange },
+        { key: "fields", label: strings.reportsFields },
       ],
       replayRows("noise"),
     ),
@@ -260,21 +300,31 @@ function renderReplay(
 }
 
 /** Renders a validated report with text-only DOM APIs and semantic table alternatives. */
-export function renderReport(container: HTMLElement, value: ReportsViewResult): void {
+export function renderReport(
+  container: HTMLElement,
+  value: ReportsViewResult,
+  strings = getStrings(container.ownerDocument.documentElement.lang),
+): void {
   const document = container.ownerDocument;
   const main = element(document, "main");
   switch (value.kind) {
     case "eval":
-      main.append(element(document, "h1", "Evaluation report"), ...renderEval(document, value));
+      main.append(
+        element(document, "h1", strings.reportsEvalTitle),
+        ...renderEval(document, value, strings),
+      );
       break;
     case "compare":
       main.append(
-        element(document, "h1", "A/B comparison report"),
-        ...renderComparison(document, value),
+        element(document, "h1", strings.reportsCompareTitle),
+        ...renderComparison(document, value, strings),
       );
       break;
     case "replay":
-      main.append(element(document, "h1", "Replay report"), ...renderReplay(document, value));
+      main.append(
+        element(document, "h1", strings.reportsReplayTitle),
+        ...renderReplay(document, value, strings),
+      );
       break;
   }
   container.replaceChildren(main);

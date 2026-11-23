@@ -2,12 +2,13 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 import { parseJson } from "@rovinos/schemas/browser";
 import { applyHostContext } from "../../kit/theme.js";
+import { getStrings } from "../../kit/strings.js";
 import { reportsViewResultSchema } from "./schema.js";
 import { createReportsView } from "./view.js";
 
 const app = new App({ name: "harness-reports", version: "0.0.0" }, {}, { autoResize: false });
 let hostContext = applyHostContext(document.documentElement, app.getHostContext());
-document.title = "Harness reports";
+document.title = getStrings(document.documentElement.lang).reportsTitle;
 const view = createReportsView(document.body);
 app.addEventListener("hostcontextchanged", updateHostContext);
 app.addEventListener("toolinput", ({ arguments: input }) => {
