@@ -31,6 +31,36 @@ const ToolNamesSchema = z.array(z.string().min(1)).superRefine((names, context) 
   }
 });
 
+const ResourceUriGrantSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("uri"), uri: z.string().min(1).max(2_048) }).strict(),
+  z
+    .object({
+      kind: z.literal("template"),
+      uriTemplate: z.string().min(1).max(2_048),
+    })
+    .strict(),
+]);
+
+const ResourceUriGrantsSchema = z
+  .array(ResourceUriGrantSchema)
+  .max(100)
+  .superRefine((grants, context) => {
+    const seen = new Set<string>();
+    for (const [index, grant] of grants.entries()) {
+      const key =
+        grant.kind === "uri" ? `uri\u0000${grant.uri}` : `template\u0000${grant.uriTemplate}`;
+      if (seen.has(key)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message: "Resource URI grants must be unique within a list.",
+          params: { errorCode: "server_resource_grant_duplicate" },
+        });
+      }
+      seen.add(key);
+    }
+  });
+
 /** Network profile and optional exact destination allowlist for OAuth discovery. */
 export const OAuthDiscoveryConfigSchema = z
   .object({
@@ -151,6 +181,7 @@ const ServerConfigObjectSchema = z
     propagateTrace: z.boolean().default(false),
     toolAllowlist: ToolNamesSchema.optional(),
     promptGrants: McpPromptGrantsSchema.optional(),
+    resourceUriGrants: ResourceUriGrantsSchema.optional(),
     toolPrefix: Code.optional(),
     idempotentTools: ToolNamesSchema.optional(),
     useAnnotations: z.boolean().default(false),

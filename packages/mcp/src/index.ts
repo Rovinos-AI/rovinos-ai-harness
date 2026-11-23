@@ -10,6 +10,12 @@ export {
 export { McpPromptError, McpProtocolError, type McpPromptErrorCode } from "./errors.js";
 export type { GetPromptResult, McpPrompt } from "./prompts.js";
 export {
+  type McpResource,
+  type McpResourceProvenance,
+  type McpResourceRead,
+  type ResourceTextTokenizer,
+} from "./resource-access.js";
+export {
   McpToolPort,
   McpCatalogChangedError,
   McpToolProfileError,

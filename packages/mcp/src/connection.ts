@@ -7,38 +7,49 @@ import {
   type Transport,
 } from "@modelcontextprotocol/client";
 import type { ServerConfig } from "@rovinos/schemas";
-import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
+import {
+  McpConnectionError,
+  McpProtocolError,
+  isConnectionLossError,
+  type McpConnectionErrorCode,
+} from "./errors.js";
+import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
-import { LegacyConnectionElicitation } from "./legacy-connection.js";
+import {
+  LegacyConnectionElicitation,
+} from "./legacy-connection.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import type { McpTool } from "./tool-list.js";
-import type { GetPromptResult, McpPrompt } from "./prompts.js";
-import { PromptConnection } from "./prompt-connection.js";
-import { DiscoveryTask } from "./discovery-budget.js";
 import type {
   ConnectionToolCall,
   McpConnectionDependencies,
   McpConnectionState,
 } from "./connection-types.js";
+import { PromptConnection } from "./prompt-connection.js";
+import type { GetPromptResult, McpPrompt } from "./prompts.js";
+import { ResourceConnection } from "./resource-connection.js";
 import {
-  type CachedToolList,
+  type McpResource,
+  type McpResourceRead,
+  type ResourceTextTokenizer,
+} from "./resource-access.js";
+import {
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
   ClientCredentialsExtensionSupport,
   createConfiguredTransport,
   createMcpClient,
-  discoverConnectionTools,
-  discoveryConnectionError,
   defaultSleep,
+  handleConnectionToolsChanged,
   getOrCreateValidator,
+  isConnectionStale,
   invokeConnectionTool,
   reconnectWithBackoff,
   runWithSafeAuthLogging,
   connectionCallError,
-  handleConnectionToolsChanged,
-  handleConnectionConnectFailure,
   watchConnectionTransport,
 } from "./connection-helpers.js";
+import { ConnectionToolDiscovery } from "./tool-discovery.js";
 
 export type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
 export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
@@ -50,19 +61,17 @@ export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
 export class McpConnection {
   readonly #config: ServerConfig;
   readonly #dependencies: McpConnectionDependencies;
-  readonly #now = (): number => this.#dependencies.now?.() ?? Date.now();
+  readonly #resourceConnection: ResourceConnection;
+  readonly #toolDiscovery: ConnectionToolDiscovery;
+  readonly #prompts: PromptConnection;
   #client: Client | undefined;
   #currentTransport: Transport | undefined;
   #connectPromise: Promise<void> | undefined;
   #activeConnectAbortController: AbortController | undefined;
   #state: McpConnectionState = "unavailable";
   #protocolEra: "legacy" | "modern" | undefined;
-  #cachedTools: CachedToolList | undefined;
-  readonly #discovery = new DiscoveryTask<McpTool[]>();
-  #toolsGeneration = 0;
   readonly #clientCredentialsExtension = new ClientCredentialsExtensionSupport();
   readonly #legacyElicitation = new LegacyConnectionElicitation();
-  readonly #prompts: PromptConnection;
   #oauthProvider: McpOAuthProvider | undefined;
   #closed = false;
   #connectGeneration = 0;
@@ -80,11 +89,19 @@ export class McpConnection {
     }
     this.#config = config;
     this.#dependencies = dependencies;
+    this.#resourceConnection = new ResourceConnection(config);
+    this.#toolDiscovery = new ConnectionToolDiscovery(config, dependencies, {
+      ensureReady: (signal) => this.#ensureReady(signal),
+      getClient: () => this.#client,
+      getProtocolEra: () => this.#protocolEra,
+      getState: () => this.#state,
+      markUnavailable: this.#markUnavailable.bind(this),
+    });
     this.#prompts = new PromptConnection({
       config,
       client: () => this.#client,
       protocolEra: () => this.#protocolEra,
-      now: this.#now,
+      now: dependencies.now ?? Date.now,
       ensureReady: (signal) => this.#ensureReady(signal),
     });
   }
@@ -147,17 +164,23 @@ export class McpConnection {
   }
 
   async #performConnect(generation: number, signal: AbortSignal): Promise<void> {
-    const connectTimeout = AbortSignal.timeout(this.#config.timeouts.connectMs);
-    const combinedSignal = AbortSignal.any([connectTimeout, signal]);
-    const isStale = () => this.#closed || this.#connectGeneration !== generation;
-    let transport: Transport | undefined, client: Client | undefined;
+    const combinedSignal = AbortSignal.any([
+      AbortSignal.timeout(this.#config.timeouts.connectMs),
+      signal,
+    ]);
+    let transport: Transport | undefined;
+    let client: Client | undefined;
     try {
       await this.#closeCurrentClient();
-      if (isStale()) {
+      if (isConnectionStale(this.#closed, this.#connectGeneration, generation)) {
         this.#state = "unavailable";
         return;
       }
-      await this.#probeClientCredentialsExtension(combinedSignal);
+      await this.#clientCredentialsExtension.probe(
+        this.#config,
+        combinedSignal,
+        this.#dependencies.createTransport !== undefined,
+      );
       const activeTransport = await createConfiguredTransport(this.#config, this.#dependencies, {
         clientCredentialsExtensionEnabled: this.#clientCredentialsExtension.supported,
         onOAuthProvider: (provider) => {
@@ -166,7 +189,7 @@ export class McpConnection {
         signal: combinedSignal,
       });
       transport = activeTransport;
-      if (isStale()) {
+      if (isConnectionStale(this.#closed, this.#connectGeneration, generation)) {
         this.#state = "unavailable";
         await activeTransport.close().catch(() => undefined);
         return;
@@ -175,17 +198,7 @@ export class McpConnection {
         this.#config,
         this.#clientCredentialsExtension.supported,
         (error) => {
-          handleConnectionToolsChanged({
-            error,
-            serverId: this.#config.id,
-            logger: this.#dependencies.logger,
-            onChange: () => {
-              this.#toolsGeneration++;
-              this.#cachedTools = undefined;
-            },
-            isReady: () => this.#state === "ready",
-            refresh: () => this.#fetchTools(),
-          });
+          this.#onToolsChanged(error);
         },
       );
       client = activeClient;
@@ -205,52 +218,28 @@ export class McpConnection {
       this.#oauthProvider?.setClientCredentialsExtensionEnabled(
         this.#clientCredentialsExtension.supported,
       );
-      if (isStale()) {
+      if (isConnectionStale(this.#closed, this.#connectGeneration, generation)) {
         this.#state = "unavailable";
         await activeClient.close().catch(() => undefined);
         return;
       }
-      this.#client = activeClient;
-      this.#protocolEra = activeClient.getProtocolEra();
-      this.#state = "ready";
-      this.#currentTransport = activeTransport;
-      watchConnectionTransport(activeTransport, () => {
-        if (this.#currentTransport === activeTransport) {
-          this.#state = "unavailable";
-          this.#protocolEra = undefined;
-          this.#cachedTools = undefined;
-        }
-      });
+      this.#markReady(activeClient, activeTransport);
     } catch (error) {
-      await this.#handleConnectFailure(error, combinedSignal, client, transport);
+      this.#markUnavailable();
+      await (client ?? transport)?.close().catch(() => undefined);
+      let code: McpConnectionErrorCode = "mcp_connect_failed";
+      if (error instanceof McpAuthRequiredError) {
+        code = "mcp_auth_required";
+      } else if (combinedSignal.aborted) {
+        code = "mcp_connect_timeout";
+      }
+      throw new McpConnectionError(code);
     }
   }
 
-  #handleConnectFailure(
-    error: unknown,
-    signal: AbortSignal,
-    client: Client | undefined,
-    transport: Transport | undefined,
-  ): Promise<never> {
-    return handleConnectionConnectFailure({
-      error,
-      signal,
-      client,
-      transport,
-      markUnavailable: this.#markUnavailable.bind(this),
-    });
-  }
-
-  async #probeClientCredentialsExtension(signal: AbortSignal): Promise<void> {
-    await this.#clientCredentialsExtension.probe(
-      this.#config,
-      signal,
-      this.#dependencies.createTransport !== undefined,
-    );
-  }
-
   async #closeCurrentClient(): Promise<void> {
-    this.#discovery.cancel();
+    this.#toolDiscovery.cancel();
+    await this.#resourceConnection.close();
     const previousClient = this.#client;
     this.#client = undefined;
     this.#currentTransport = undefined;
@@ -261,32 +250,49 @@ export class McpConnection {
   #markUnavailable(): void {
     this.#state = "unavailable";
     this.#protocolEra = undefined;
-    this.#cachedTools = undefined;
+    this.#toolDiscovery.invalidate();
+    this.#resourceConnection.invalidate();
+  }
+
+  #onToolsChanged(error: Error | null): void {
+    handleConnectionToolsChanged({
+      error,
+      serverId: this.#config.id,
+      logger: this.#dependencies.logger,
+      onChange: this.#toolDiscovery.invalidate.bind(this.#toolDiscovery),
+      isReady: () => this.#state === "ready",
+      refresh: () => this.#toolDiscovery.list(),
+    });
+  }
+
+  #markReady(client: Client, transport: Transport): void {
+    this.#client = client;
+    this.#protocolEra = client.getProtocolEra();
+    this.#resourceConnection.attach(client, this.#protocolEra);
+    this.#state = "ready";
+    this.#currentTransport = transport;
+    watchConnectionTransport(transport, () => {
+      if (this.#currentTransport === transport) {
+        this.#markUnavailable();
+      }
+    });
   }
 
   /**
    * Lists tools under finite discovery budgets, caching only complete results.
    * Concurrent refreshes share work; cancellation by any caller cancels that shared refresh.
    */
-  async listTools(signal?: AbortSignal): Promise<McpTool[]> {
-    if (signal?.aborted === true) {
-      throw new McpConnectionError("mcp_discovery_cancelled");
-    }
-    await this.#ensureReady(signal);
-    const now = this.#now();
-    if (this.#cachedTools !== undefined && this.#cachedTools.expiresAt > now) {
-      return [...this.#cachedTools.tools];
-    }
-    return this.#fetchTools(signal);
+  listTools(signal?: AbortSignal): Promise<McpTool[]> {
+    return this.#toolDiscovery.list(signal);
   }
 
   /** Lists prompts under finite discovery budgets without declaring client prompt capabilities. */
-  async listPrompts(signal?: AbortSignal): Promise<McpPrompt[]> {
+  listPrompts(signal?: AbortSignal): Promise<McpPrompt[]> {
     return this.#prompts.list(signal);
   }
 
   /** Retrieves one prompt on this server connection using its current advertised arguments. */
-  async getPrompt(
+  getPrompt(
     name: string,
     arguments_: Readonly<Record<string, string>> | undefined,
     signal?: AbortSignal,
@@ -294,38 +300,62 @@ export class McpConnection {
     return this.#prompts.get(name, arguments_, signal);
   }
 
-  async #fetchTools(signal?: AbortSignal): Promise<McpTool[]> {
-    return [
-      ...(await this.#discovery.run((activeSignal) => this.#discoverTools(activeSignal), signal)),
-    ];
+  /**
+   * Lists only resources covered by this server's grants and tokenizes returned strings.
+   * @param options - Model-input tokenizer and optional cancellation signal.
+   * @returns Granted resource metadata with opaque grant provenance.
+   */
+  listResources(options: {
+    readonly signal?: AbortSignal;
+    readonly tokenizeText: ResourceTextTokenizer;
+  }): Promise<McpResource[]> {
+    return this.#resourceConnection.list(options, (signal) => this.#ensureReady(signal));
   }
 
-  async #discoverTools(signal: AbortSignal): Promise<McpTool[]> {
-    const client = this.#client;
-    const generation = this.#toolsGeneration;
-    if (client === undefined || this.#state !== "ready") {
-      throw new McpConnectionError("mcp_list_tools_failed");
-    }
-    let listed: Awaited<ReturnType<typeof discoverConnectionTools>>;
+  /**
+   * Reads a trusted code-selected resource batch without exposing partial results.
+   * @param uris - Resource URIs on this server; model/user input must not select these directly.
+   * @param options - Model-input tokenizer and optional cancellation signal.
+   * @returns Tokenized text contents with server and grant provenance.
+   */
+  async readResources(
+    uris: readonly string[],
+    options: {
+      readonly signal?: AbortSignal;
+      readonly tokenizeText: ResourceTextTokenizer;
+    },
+  ): Promise<McpResourceRead[]> {
     try {
-      listed = await discoverConnectionTools(client, this.#config, this.#dependencies, {
-        era: this.#protocolEra,
-        signal,
-      });
+      return await this.#resourceConnection.read(uris, options, (signal) =>
+        this.#ensureReady(signal),
+      );
     } catch (error) {
-      throw discoveryConnectionError(error, () => {
+      if (
+        this.#protocolEra === "legacy" &&
+        error instanceof McpConnectionError &&
+        (error.code === "mcp_discovery_cancelled" || error.code === "mcp_resource_timeout")
+      ) {
         this.#markUnavailable();
-      });
+        await this.#closeCurrentClient();
+      }
+      throw error;
     }
-    if (signal.aborted || this.#client !== client) {
-      throw new McpConnectionError("mcp_discovery_cancelled");
-    }
-    if (generation !== this.#toolsGeneration) {
-      throw new McpConnectionError("mcp_list_tools_failed");
-    }
-    const ttlMs = listed.ttlMs !== undefined && listed.ttlMs > 0 ? listed.ttlMs : 0;
-    this.#cachedTools = { tools: listed.tools, expiresAt: this.#now() + ttlMs };
-    return [...listed.tools];
+  }
+
+  /**
+   * Subscribes only when this server advertises resource subscriptions.
+   * @param uri - Trusted code-selected resource URI on this server.
+   * @param signal - Optional cancellation signal.
+   */
+  subscribeResource(uri: string, signal?: AbortSignal): Promise<void> {
+    return this.#resourceConnection.subscribe(uri, signal, (activeSignal) =>
+      this.#ensureReady(activeSignal),
+    );
+  }
+
+  /** Stops a previously enabled resource subscription. */
+  unsubscribeResource(uri: string, signal?: AbortSignal): Promise<void> {
+    return this.#resourceConnection.unsubscribe(uri, signal);
   }
 
   /**
@@ -367,9 +397,7 @@ export class McpConnection {
       if (!isLoss) {
         throw new McpConnectionError("mcp_tool_call_failed");
       }
-      this.#state = "unavailable";
-      this.#protocolEra = undefined;
-      this.#cachedTools = undefined;
+      this.#markUnavailable();
       if (this.#config.idempotentTools?.includes(params.name) !== true) {
         throw new McpConnectionError("mcp_connection_lost");
       }
@@ -405,14 +433,11 @@ export class McpConnection {
     });
   }
 
-  async #ensureReady(signal?: AbortSignal): Promise<void> {
+  #ensureReady(signal?: AbortSignal): Promise<void> {
     if (this.#closed) {
-      throw new McpConnectionError("mcp_connection_lost");
+      return Promise.reject(new McpConnectionError("mcp_connection_lost"));
     }
-    if (this.#state === "ready") {
-      return;
-    }
-    await this.#reconnect(signal);
+    return this.#state === "ready" ? Promise.resolve() : this.#reconnect(signal);
   }
 
   #reconnect(signal?: AbortSignal): Promise<void> {
@@ -429,18 +454,17 @@ export class McpConnection {
     this.#closed = true;
     this.#connectGeneration++;
     this.#activeConnectAbortController?.abort();
-    this.#discovery.cancel();
+    this.#toolDiscovery.cancel();
     const connectPromise = this.#connectPromise;
     const client = this.#client;
     this.#client = undefined;
     this.#currentTransport = undefined;
-    this.#protocolEra = undefined;
-    this.#state = "unavailable";
-    this.#cachedTools = undefined;
+    this.#markUnavailable();
 
     if (connectPromise !== undefined) {
       await connectPromise.catch(() => undefined);
     }
+    await this.#resourceConnection.close();
     if (client !== undefined) {
       await client.close().catch(() => undefined);
     }

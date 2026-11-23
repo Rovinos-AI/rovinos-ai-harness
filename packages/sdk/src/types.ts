@@ -23,21 +23,24 @@ import type {
 import type { StartRunOptions } from "./start-run-options.js";
 export { StartRunOptionsSchema } from "./start-run-options.js";
 export type { StartRunOptions } from "./start-run-options.js";
+import type { SdkMcpResourceOperationErrorCode } from "./mcp-resource-error-codes.js";
 
 /** Closed MCP connection, tool, and prompt failure codes surfaced by {@link SdkError}. */
 export type SdkMcpConnectionErrorCode =
+  | "mcp_apps_unsupported"
+  | "mcp_auth_required"
   | "mcp_connect_failed"
   | "mcp_connect_timeout"
-  | "mcp_auth_required"
   | "mcp_connection_lost"
-  | "mcp_list_tools_failed"
-  | "mcp_too_many_tools"
+  | "mcp_discovery_cancelled"
+  | "mcp_discovery_data_limit"
   | "mcp_discovery_page_limit"
   | "mcp_discovery_schema_limit"
-  | "mcp_discovery_data_limit"
   | "mcp_discovery_timeout"
-  | "mcp_discovery_cancelled"
-  | "mcp_apps_unsupported"
+  | "mcp_list_resources_failed"
+  | "mcp_list_tools_failed"
+  | SdkMcpResourceOperationErrorCode
+  | "mcp_too_many_tools"
   | "mcp_tool_arguments_invalid"
   | "mcp_tool_call_failed"
   | "mcp_prompt_not_granted"

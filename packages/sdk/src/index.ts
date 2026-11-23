@@ -100,6 +100,7 @@ export {
   type WatchOptions,
   type WithExtensionRegistrations,
 } from "./types.js";
+export type { SdkMcpResourceOperationErrorCode } from "./mcp-resource-error-codes.js";
 export type { SafeEvent } from "@rovinos/telemetry";
 
 /** Defines a typed extension tool contribution using its input and output schemas. */

@@ -1,13 +1,12 @@
 # Governed outbound MCP resources and prompts (6.18)
 
-This document records the design and implementation status for outbound
-resources and prompts. Standalone outbound resource discovery and reads remain
-unsupported. Prompt listing and retrieval are implemented by task 6.22 under
-the approved public contract below. Resource blocks embedded in `tools/call`
-results continue through the existing tool-result handling path; this design
-does not change that behavior. The inventory was checked against current
-`origin/main`, the pinned MCP TypeScript SDK v2.4.0 declarations, and protocol
-baselines in
+This document records the design and implementation status for outbound MCP
+resource and prompt content. Resource discovery and reads are implemented in
+task 6.21; prompt listing and retrieval are implemented in task 6.22 under the
+approved public contract below. Resource blocks embedded in `tools/call`
+results continue through the existing tool-result handling path. The inventory
+was checked against the pinned MCP TypeScript SDK v2.4.0 declarations and
+protocol baselines in
 [engineering conventions](engineering/CONVENTIONS.md#10-external-protocol-and-sdk-baseline).
 
 ## Capability matrix
@@ -19,15 +18,16 @@ revision negotiated by the existing SDK client and server transports.
 | Capability | Outbound client, modern | Outbound client, legacy | Inbound control-plane server, modern | Inbound control-plane server, legacy |
 | --- | --- | --- | --- | --- |
 | Tools list/call | Implemented | Implemented | Implemented | Implemented |
-| Resources list/read | Unsupported now; planned follow-up | Unsupported now; planned follow-up | Implemented; run resources are permission-checked | Implemented; run resources are permission-checked |
-| Resource subscriptions/updates | Unsupported | Unsupported | Implemented for subscribed run-resource updates | Implemented for subscribed run-resource updates |
+| Resources list/read | Implemented; explicit per-server grants | Implemented; explicit per-server grants | Implemented; run resources are permission-checked | Implemented; run resources are permission-checked |
+| Resource subscriptions/updates | Implemented when the server declares support | Implemented when the server declares support | Implemented for subscribed run-resource updates | Implemented for subscribed run-resource updates |
 | Prompts list/get | Implemented with explicit grants and per-run selections | Implemented with explicit grants and per-run selections | Unsupported | Unsupported |
 | Completions | Unsupported | Unsupported | Unsupported | Unsupported |
 
-The client uses tool discovery and configured elicitation capabilities; it does
-not declare resource or prompt support during initialization. Prompt methods
-are invoked only after the server advertises the prompts capability and the
-operator grants and selects the exact prompt. The control-plane server
+The outbound client uses tool discovery and configured elicitation capabilities.
+It does not declare client `resources` or `prompts` capabilities. Resource
+operations require explicit grants and server resource capabilities; prompt
+operations require an exact grant and server prompt capability. Prompt methods
+are invoked only for operator-selected prompts. The control-plane server
 registers resources with per-request authorization and supports resource
 subscriptions; it does not register prompts. Although SDK v2.4.0 exposes
 `listResources`, `readResource`, `listPrompts`, `getPrompt`, and `complete`,
@@ -42,8 +42,7 @@ result-normalization and content-processing path.
 
 ## Proposed access and data contract
 
-These are the governing decisions for implementation follow-ups and the
-implemented prompt API.
+These are the governing decisions for the implemented resource and prompt APIs.
 
 - **Select one server first.** A resource or prompt request must be routed only
   through the configured server connection selected by code. A URI supplied by
@@ -185,24 +184,21 @@ logs, and captured diagnostics.
 
 ## Bounded implementation follow-ups
 
-1. **Outbound resource discovery and reads.** Add only after maintainer review of
-   the public grant/config shape and capability declarations. Implement
-   per-server URI grants, bounded list/read, subscription invalidation,
-   cancellation, PII-boundary integration, provenance, and the resource cases
-   above. Do not add direct URL fetching or advertise capability before the
-   tests pass on both protocol revisions.
-2. **Outbound prompt retrieval.** Implemented as task 6.22 after the consuming
-   workflow and public prompt-selection/argument contract were reviewed.
-   Completion remains unsupported because the workflow has no bounded
-   completion requirement.
-3. **Transport response limits (prerequisite if needed).** If SDK v2.4.0
-   buffers responses before the proposed decoded-data check, implement and test
-   streamed HTTP, decompression, and stdio framing limits before describing the
-   limits as wire- or memory-bounded. This is separate from the resource/prompt
-   content-access grant.
+1. **Outbound resource discovery and reads (implemented in task 6.21).** The
+   maintainer-approved per-server URI grant shape gates bounded list/read,
+   subscription invalidation, cancellation, PII-boundary integration, and
+   provenance. Both supported protocol revisions are covered. The client does
+   not declare a `resources` capability or fetch URLs from resource content.
+2. **Outbound prompt retrieval (implemented in task 6.22).** The operator-
+   selected workflow uses explicit per-server prompt grants, bounded list/get,
+   argument validation, PII-boundary integration, provenance, and
+   prompt-injection, changed-prompt, and oversized-result tests. Completion
+   remains unsupported because the workflow has no bounded completion
+   requirement.
+3. **Transport response limits (implemented in task 6.23).** Streamed HTTP,
+   decompression, and stdio framing limits complement the decoded-data checks.
+   This is separate from the resource/prompt content-access grant.
 
 The Azure-stage wording in the source issue maps to the same-named GitHub
 Actions CI jobs (`static`, `unit`, `integration`, `gates`); there is no Azure
-stage in the current workflow. In this docs-only design task, the requested
-tests are specified above rather than implemented as runtime tests. This task
-does not change production capability declarations, schemas, or package APIs.
+stage in the current workflow.
