@@ -185,8 +185,16 @@ async function createMemoryPeer(
     }
     return { content: [{ type: "text", text: "called" }] };
   });
-  if (options.prompts !== undefined) {
-    server.server.setRequestHandler("prompts/list", () => ({ prompts: options.prompts }));
+  const prompts = options.prompts;
+  if (prompts !== undefined) {
+    server.server.setRequestHandler("prompts/list", () => ({
+      prompts: prompts.map((prompt) => ({
+        ...prompt,
+        ...(prompt.arguments === undefined
+          ? {}
+          : { arguments: prompt.arguments.map((argument) => ({ ...argument })) }),
+      })),
+    }));
     server.server.setRequestHandler("prompts/get", (request) => {
       if (options.failPromptGet === true) {
         return Promise.reject(new Error("synthetic prompt failure"));
