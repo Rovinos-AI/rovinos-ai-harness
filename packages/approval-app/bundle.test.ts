@@ -95,6 +95,7 @@ describe("single-file approval app", () => {
       "approval",
       "input",
       "reports",
+      "run-inspector",
       "runs-console",
       "configured",
     ]);

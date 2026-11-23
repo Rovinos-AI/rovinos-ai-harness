@@ -83,6 +83,104 @@ describe("ServerConfigSchema", () => {
     });
   });
 
+  it("keeps prompt grants separate from tool grants and defaults them to deny", () => {
+    const base = {
+      id: "mcp",
+      transport: { kind: "stdio", command: "node" },
+    };
+
+    expect(ServerConfigSchema.parse(base).promptGrants).toBeUndefined();
+    expect(ServerConfigSchema.parse({ ...base, promptGrants: [] }).promptGrants).toEqual([]);
+    expect(ServerConfigSchema.parse({ ...base, promptGrants: ["summarize"] }).promptGrants).toEqual(
+      ["summarize"],
+    );
+    expect(
+      ServerConfigSchema.safeParse({ ...base, promptGrants: ["summarize", "summarize"] }).success,
+    ).toBe(false);
+  });
+
+  it("requires the transport response limit to enforce prompt result bounds before buffering", () => {
+    const config = {
+      id: "mcp",
+      transport: { kind: "stdio", command: "node" },
+      promptGrants: ["summarize"],
+      maxResultBytes: 1_048_577,
+    };
+
+    expect(ServerConfigSchema.safeParse(config).success).toBe(false);
+    expect(ServerConfigSchema.safeParse({ ...config, maxResultBytes: 1_048_576 }).success).toBe(
+      true,
+    );
+  });
+
+  it("accepts exact and RFC 6570 resource grants independently of the tool allowlist", () => {
+    const parsed = ServerConfigSchema.parse({
+      id: "mcp.weather",
+      transport: { kind: "stdio", command: "node" },
+      toolAllowlist: ["forecast-current"],
+      resourceUriGrants: [
+        { kind: "uri", uri: "weather://forecast/current" },
+        { kind: "template", uriTemplate: "weather://forecast/{city}" },
+      ],
+    });
+
+    expect(parsed.resourceUriGrants).toEqual([
+      { kind: "uri", uri: "weather://forecast/current" },
+      { kind: "template", uriTemplate: "weather://forecast/{city}" },
+    ]);
+    expect(parsed.toolAllowlist).toEqual(["forecast-current"]);
+  });
+
+  it("allows resource access to be absent or explicitly denied with an empty grant list", () => {
+    const base = {
+      id: "server",
+      transport: { kind: "stdio", command: "node" },
+    };
+
+    expect(ServerConfigSchema.parse(base)).not.toHaveProperty("resourceUriGrants");
+    expect(ServerConfigSchema.parse({ ...base, resourceUriGrants: [] }).resourceUriGrants).toEqual(
+      [],
+    );
+  });
+
+  it("rejects malformed, duplicate, oversized, or unknown resource grants", () => {
+    const base = {
+      id: "server",
+      transport: { kind: "stdio", command: "node" },
+    };
+
+    expect(
+      ServerConfigSchema.safeParse({
+        ...base,
+        resourceUriGrants: [{ kind: "uri", uri: "" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({
+        ...base,
+        resourceUriGrants: [
+          { kind: "uri", uri: "weather://x" },
+          { kind: "uri", uri: "weather://x" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({
+        ...base,
+        resourceUriGrants: Array.from({ length: 101 }, (_, index) => ({
+          kind: "uri",
+          uri: `weather://resource/${String(index)}`,
+        })),
+      }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({
+        ...base,
+        resourceUriGrants: [{ kind: "uri", uri: "weather://x", extra: true }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects trace propagation for external servers with its stable error code", () => {
     const result = ServerConfigSchema.safeParse({
       id: "external",

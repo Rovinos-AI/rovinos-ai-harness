@@ -20,23 +20,34 @@ import type {
   ExtensionRegistration,
   ExtensionRegistrationStatus,
 } from "./extensions.js";
+import type { StartRunOptions } from "./start-run-options.js";
+export { StartRunOptionsSchema } from "./start-run-options.js";
+export type { StartRunOptions } from "./start-run-options.js";
+import type { SdkMcpResourceOperationErrorCode } from "./mcp-resource-error-codes.js";
 
-/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
+/** Closed MCP connection, tool, and prompt failure codes surfaced by {@link SdkError}. */
 export type SdkMcpConnectionErrorCode =
+  | "mcp_apps_unsupported"
+  | "mcp_auth_required"
   | "mcp_connect_failed"
   | "mcp_connect_timeout"
-  | "mcp_auth_required"
   | "mcp_connection_lost"
-  | "mcp_list_tools_failed"
-  | "mcp_too_many_tools"
+  | "mcp_discovery_cancelled"
+  | "mcp_discovery_data_limit"
   | "mcp_discovery_page_limit"
   | "mcp_discovery_schema_limit"
-  | "mcp_discovery_data_limit"
   | "mcp_discovery_timeout"
-  | "mcp_discovery_cancelled"
-  | "mcp_apps_unsupported"
+  | "mcp_list_resources_failed"
+  | "mcp_list_tools_failed"
+  | SdkMcpResourceOperationErrorCode
+  | "mcp_too_many_tools"
   | "mcp_tool_arguments_invalid"
-  | "mcp_tool_call_failed";
+  | "mcp_tool_call_failed"
+  | "mcp_prompt_not_granted"
+  | "mcp_prompt_unavailable"
+  | "mcp_prompt_arguments_invalid"
+  | "mcp_prompt_result_too_large"
+  | "mcp_prompt_failed";
 
 function hasMethod(value: unknown, name: string): boolean {
   return (
@@ -196,22 +207,6 @@ export type RunId = z.infer<typeof Id>;
 
 const runMetadataSchema = z.record(Code, z.union([Code, z.number(), z.boolean()])).optional();
 const goalSchema = z.string().min(1).max(8_000);
-
-/** Input for starting a run. */
-export const StartRunOptionsSchema = z
-  .object({
-    goal: goalSchema,
-    metadata: runMetadataSchema,
-    role: Code.optional(),
-    /** Named MCP tool subset configured by the operator. */
-    toolProfile: Code.optional(),
-    idempotencyKey: z.string().min(1).max(256).optional(),
-    requestedBy: Principal.optional(),
-  })
-  .strict();
-
-/** Inferred input for {@link Harness.startRun}. */
-export type StartRunOptions = z.infer<typeof StartRunOptionsSchema>;
 
 /** Input for continuing a terminal run. */
 export const ContinueRunOptionsSchema = z

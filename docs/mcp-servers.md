@@ -15,6 +15,8 @@ transports reject unknown fields.
 | `trust` | `internal` or `external` | `external` | Trust level used to gate trace propagation and annotations. |
 | `propagateTrace` | boolean | `false` | Send trace context only to an `internal` server. |
 | `toolAllowlist` | string array | omitted | Server-native tool names permitted for registration. |
+| `promptGrants` | string array | omitted | Exact prompt names the run may retrieve from this server; retrieval is otherwise denied. |
+| `resourceUriGrants` | URI or URI-template array | omitted | Resource URIs permitted for this server; omitted or empty denies resource access. |
 | `toolPrefix` | `Code` | the server `id` | Prefix used when registering this server's tools. |
 | `idempotentTools` | string array | omitted | Server-native tool names treated as idempotent. |
 | `useAnnotations` | boolean | `false` | Whether to use server annotations; requires `trust: internal`. |
@@ -46,11 +48,55 @@ The outbound client does not host MCP Apps. App-only tools are excluded from
 tool discovery, and setting `apps: true` is rejected rather than advertising
 unsupported capabilities.
 
-Standalone outbound MCP resource discovery/read and prompt list/get are not
-implemented. Resource blocks embedded in `tools/call` results use the existing
-tool-result handling path. See the
-[governed resource and prompt design](mcp-outbound-content.md) for the current
-client/server capability matrix and proposed security boundaries.
+`resourceUriGrants` is separate from `toolAllowlist` and accepts entries in
+either form:
+
+```yaml
+servers:
+  - id: weather
+    resourceUriGrants:
+      - kind: uri
+        uri: weather://forecast/today
+      - kind: template
+        uriTemplate: weather://forecast/{city}
+```
+
+Grants match exact URIs or RFC 6570 URI templates. The list is limited to 100
+unique entries, each at most 2,048 characters. Resource discovery returns only
+matching resources; `McpConnection.readResources` rejects any URI without a grant
+before network I/O. Select the configured server in code rather than allowing
+model or user input to choose a server or resource URI.
+
+`McpConnection.listResources` and `readResources` require a host-provided
+`tokenizeText` callback. Resource URIs, metadata, text, and MIME types are
+untrusted server content and are passed through that callback before returning.
+Results include the configured server id and an opaque grant id as provenance.
+Read requests use only that server's configured connection and credentials;
+URLs in resource content are never fetched. HTTP redirects are refused by the
+MCP transport.
+
+Resource operations are available only when the server advertises resource
+support. Subscriptions are additionally gated on its `resources.subscribe`
+capability. No client `resources` capability is advertised. Resource results
+are not cached; change notifications invalidate in-flight work, and later
+requests read the resource again. A server that changes content without a
+notification cannot be detected or read atomically.
+Discovery reuses the bounded list traversal: 100 pages, 1,000 entries, 8 MiB
+of decoded data, a 30-second deadline, and four concurrent traversals. Each
+read response must fit `maxResultBytes`; a batch must fit 4 MiB of cumulative
+decoded and tokenized content. At most four reads run concurrently, with
+cancellable FIFO admission. Any limit or tokenization failure rejects the
+whole operation without returning partial content.
+
+Prompt list/get is available only for exact names in `promptGrants`, selected
+per run through the SDK `startRun({ promptSelections })` option; prompt
+arguments are validated against the server's advertised prompt arguments.
+Prompt content is tokenized, untrusted, and carries server and prompt
+provenance. Prompt support is gated on the server capability and is not
+advertised by the client. Resource blocks embedded in `tools/call` results use
+the existing tool-result handling path. See the
+[governed resource and prompt design](mcp-outbound-content.md) for the
+capability matrix, prompt limits, and security boundaries.
 
 ## Stdio transport
 
@@ -233,6 +279,36 @@ The deadline aborts outstanding HTTP body reads, but JavaScript timers and
 cancellation cannot preempt synchronous SDK parsing. A wire-byte guarantee
 requires transport-layer limits on streamed HTTP bodies (including SSE),
 decompression, and stdio framing before buffering and JSON decoding.
+
+### Prompt retrieval
+
+Each configured server can grant exact prompt names with `promptGrants`.
+Selecting a granted prompt does not confer authority; the operator supplies
+run-level selections through `startRun({ promptSelections })`. Each selection
+may include string arguments. At most 16 prompts can be selected per run;
+argument maps allow at most 32 entries, 128 UTF-8 bytes per name, 8 KiB per
+value, and 32 KiB total. Names and values must satisfy these bounds before
+retrieval.
+
+The client requires the remote server's advertised prompts capability and
+validates required and declared arguments from `prompts/list` before issuing
+`prompts/get`. Lists are fetched without a content cache and are bounded to 100
+pages, 1,000 prompts, 8 MiB decoded catalog data, and a 30-second shared
+deadline. A single retrieved result may be at most 1 MiB and total selected
+content at most 4 MiB. To keep the stdio frame cap aligned with the result
+bound, a server with nonempty `promptGrants` must configure `maxResultBytes` no
+higher than 1 MiB. HTTP result limits are decoded-data limits and do not bound
+the SDK's buffering before parsing.
+
+Returned descriptions and messages are server-controlled, untrusted content.
+They are serialized and tokenized at the model-input boundary, persisted only
+in the existing tokenized run input, and framed as untrusted data with server
+id and prompt name provenance. They cannot change policy, tool grants,
+approval requirements, or user input. The prompt is fetched for each run; MCP
+does not provide an atomic version guarantee between listing and retrieval.
+Closed retrieval errors are `mcp_prompt_not_granted`, `mcp_prompt_unavailable`,
+`mcp_prompt_arguments_invalid`, `mcp_prompt_result_too_large`, and
+`mcp_prompt_failed`. Prompt completion is unsupported.
 
 Registered MCP tool ids use the harness `Code` format and are filtered by
 `toolAllowlist`. Native tool names may use any casing, but normalization must

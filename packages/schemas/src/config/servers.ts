@@ -2,6 +2,7 @@
 // MCP server configuration is owned by task 6.1.
 import { z } from "zod";
 import { Code } from "../primitives.js";
+import { McpPromptGrantsSchema } from "../mcp-prompts.js";
 import { SecretRefSchema } from "../secret-ref.js";
 import { isSecretKeyName } from "../secret-key-name.js";
 import { ServerElicitationConfigSchema } from "./elicitation.js";
@@ -29,6 +30,36 @@ const ToolNamesSchema = z.array(z.string().min(1)).superRefine((names, context) 
     seen.add(name);
   }
 });
+
+const ResourceUriGrantSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("uri"), uri: z.string().min(1).max(2_048) }).strict(),
+  z
+    .object({
+      kind: z.literal("template"),
+      uriTemplate: z.string().min(1).max(2_048),
+    })
+    .strict(),
+]);
+
+const ResourceUriGrantsSchema = z
+  .array(ResourceUriGrantSchema)
+  .max(100)
+  .superRefine((grants, context) => {
+    const seen = new Set<string>();
+    for (const [index, grant] of grants.entries()) {
+      const key =
+        grant.kind === "uri" ? `uri\u0000${grant.uri}` : `template\u0000${grant.uriTemplate}`;
+      if (seen.has(key)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message: "Resource URI grants must be unique within a list.",
+          params: { errorCode: "server_resource_grant_duplicate" },
+        });
+      }
+      seen.add(key);
+    }
+  });
 
 /** Network profile and optional exact destination allowlist for OAuth discovery. */
 export const OAuthDiscoveryConfigSchema = z
@@ -149,6 +180,8 @@ const ServerConfigObjectSchema = z
     trust: z.enum(["internal", "external"]).default("external"),
     propagateTrace: z.boolean().default(false),
     toolAllowlist: ToolNamesSchema.optional(),
+    promptGrants: McpPromptGrantsSchema.optional(),
+    resourceUriGrants: ResourceUriGrantsSchema.optional(),
     toolPrefix: Code.optional(),
     idempotentTools: ToolNamesSchema.optional(),
     useAnnotations: z.boolean().default(false),
@@ -160,6 +193,8 @@ const ServerConfigObjectSchema = z
     binaryResults: z.enum(["block", "allow"]).default("block"),
   })
   .strict();
+
+const MAX_PROMPT_RESULT_BYTES = 1_048_576;
 
 /** MCP server connection, trust, and tool-registration configuration. */
 export const ServerConfigSchema = ServerConfigObjectSchema.superRefine((server, context) => {
@@ -177,6 +212,14 @@ export const ServerConfigSchema = ServerConfigObjectSchema.superRefine((server, 
       path: ["useAnnotations"],
       message: "Annotations require an internal server.",
       params: { errorCode: "annotations_require_internal" },
+    });
+  }
+  if ((server.promptGrants?.length ?? 0) > 0 && server.maxResultBytes > MAX_PROMPT_RESULT_BYTES) {
+    context.addIssue({
+      code: "custom",
+      path: ["maxResultBytes"],
+      message: "Prompt-granted servers must use a response limit no larger than 1 MiB.",
+      params: { errorCode: "server_prompt_result_limit" },
     });
   }
   if (server.toolAllowlist !== undefined) {

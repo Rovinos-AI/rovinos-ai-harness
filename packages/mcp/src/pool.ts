@@ -13,6 +13,7 @@ import {
   type McpConnectionState,
   type McpTool,
 } from "./connection.js";
+import type { GetPromptResult, McpPrompt } from "./prompts.js";
 import type { McpLogger } from "./transports.js";
 
 /** Context needed by one configured-server doctor diagnostic. */
@@ -94,6 +95,21 @@ export class McpPool {
   /** Returns the discovered tools for one server. */
   listTools(serverId: HarnessCode): Promise<McpTool[]> {
     return this.#getConnection(serverId).listTools();
+  }
+
+  /** Lists prompts for one configured server connection. */
+  listPrompts(serverId: HarnessCode, signal?: AbortSignal): Promise<McpPrompt[]> {
+    return this.#getConnection(serverId).listPrompts(signal);
+  }
+
+  /** Retrieves a prompt on one configured server connection. */
+  getPrompt(
+    serverId: HarnessCode,
+    name: string,
+    arguments_: Readonly<Record<string, string>> | undefined,
+    signal?: AbortSignal,
+  ): Promise<GetPromptResult> {
+    return this.#getConnection(serverId).getPrompt(name, arguments_, signal);
   }
 
   /**

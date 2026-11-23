@@ -6,7 +6,14 @@ import { fileURLToPath } from "node:url";
 import { parentPort } from "node:worker_threads";
 import * as ts from "typescript";
 
-const sourceFiles = ["index.ts", "harness.ts", "mcp-onboarding.ts", "types.ts"];
+const sourceFiles = [
+  "index.ts",
+  "harness.ts",
+  "mcp-onboarding.ts",
+  "start-run-options.ts",
+  "mcp-resource-error-codes.ts",
+  "types.ts",
+];
 const configPath = fileURLToPath(new URL("./tsconfig.json", import.meta.url));
 const configFile = ts.readConfigFile(configPath, (path) => ts.sys.readFile(path));
 if (configFile.error !== undefined) {

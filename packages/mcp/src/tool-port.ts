@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/client";
 import { Code, compileJsonSchema, HarnessError, JsonValue } from "@rovinos/schemas";
 import type {
   JsonValue as JsonValueType,
+  McpPromptSelection,
   ServerConfig,
   Sha256Hex,
   ToolProfilesConfig,
@@ -18,6 +19,9 @@ import type { ElicitationUrlOptions } from "./elicitation/url.js";
 import { callToolWithInputRounds } from "./tool-input-rounds.js";
 import { errorCode } from "./tool-error-code.js";
 import { McpPool } from "./pool.js";
+import { retrieveGrantedPrompts } from "./prompt-port.js";
+import type { McpRetrievedPrompt } from "./prompt-port.js";
+export type { McpRetrievedPrompt } from "./prompt-port.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
 import {
   McpToolResultError,
@@ -35,7 +39,6 @@ const MCP_CALL_SPAN = telemetry.defineSemconvSpan(
   },
   { taskId: "6.5", packageName: "@rovinos/mcp" },
 );
-
 /** An MCP tool invocation structurally compatible with the core tool port. */
 export interface McpToolCall {
   readonly callId: string;
@@ -296,6 +299,17 @@ export class McpToolPort {
   /** Per-tool fingerprints for the catalog view exposed by this port. */
   catalogFingerprints(): Readonly<Record<string, Sha256Hex>> {
     return this.lifecycle.pinnedFingerprints ?? this.catalog.registry.catalogFingerprints();
+  }
+
+  /**
+   * Retrieves only exact prompt grants after bounded discovery and advertised-argument validation.
+   * The returned content is not cached and remains untrusted until tokenized by the runtime.
+   */
+  async retrievePrompts(
+    selections: readonly McpPromptSelection[],
+    signal: AbortSignal,
+  ): Promise<McpRetrievedPrompt[]> {
+    return retrieveGrantedPrompts(this.catalog.pool, this.catalog.servers, selections, signal);
   }
 
   /**
