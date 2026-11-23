@@ -329,13 +329,7 @@ export {
   type RunInput,
   type RunResult,
 } from "./cli/run.js";
-export {
-  McpPromptGrantsSchema,
-  McpPromptNameSchema,
-  McpPromptSelectionSchema,
-  McpPromptSelectionsSchema,
-  type McpPromptSelection,
-} from "./mcp-prompts.js";
+export { McpPromptSelectionsSchema, type McpPromptSelection } from "./mcp-prompts.js";
 export {
   PolicyLintResultSchema,
   PolicyTestCallSchema,

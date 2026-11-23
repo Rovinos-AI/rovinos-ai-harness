@@ -188,11 +188,11 @@ async function createMemoryPeer(
   const prompts = options.prompts;
   if (prompts !== undefined) {
     server.server.setRequestHandler("prompts/list", () => ({
-      prompts: prompts.map((prompt) => ({
+      prompts: prompts.map(({ arguments: promptArguments, ...prompt }) => ({
         ...prompt,
-        ...(prompt.arguments === undefined
+        ...(promptArguments === undefined
           ? {}
-          : { arguments: prompt.arguments.map((argument) => ({ ...argument })) }),
+          : { arguments: promptArguments.map((argument) => ({ ...argument })) }),
       })),
     }));
     server.server.setRequestHandler("prompts/get", (request) => {
