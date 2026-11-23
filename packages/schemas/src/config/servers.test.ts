@@ -139,7 +139,7 @@ describe("ServerConfigSchema", () => {
         ...base,
         resourceUriGrants: Array.from({ length: 101 }, (_, index) => ({
           kind: "uri",
-          uri: `weather://resource/${index}`,
+          uri: `weather://resource/${String(index)}`,
         })),
       }).success,
     ).toBe(false);
