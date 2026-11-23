@@ -15,9 +15,7 @@ import {
 } from "./errors.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
-import {
-  LegacyConnectionElicitation,
-} from "./legacy-connection.js";
+import { LegacyConnectionElicitation } from "./legacy-connection.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import type { McpTool } from "./tool-list.js";
