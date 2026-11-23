@@ -199,7 +199,11 @@ async function callRound(options: {
         ? { kind: "failure", errorCode: "mcp_input_request_invalid" }
         : { result, source: "mcp_legacy" };
     }
-    return { kind: "failure", errorCode: options.errorCode(error, options.signal) };
+    const errorCode = options.errorCode(error, options.signal);
+    return {
+      kind: "failure",
+      errorCode: errorCode === "mcp_response_too_large" ? "result_too_large" : errorCode,
+    };
   }
 }
 

@@ -564,11 +564,11 @@ describe("McpToolPort", () => {
       const before = spanCollector.getFinishedSpans().length;
       await expect(current.port.execute(call, context())).resolves.toEqual({
         outcome: "error",
-        errorCode: "mcp_response_too_large",
+        errorCode: "result_too_large",
         result: null,
       });
       const span = spanCollector.getFinishedSpans().slice(before).at(-1);
-      expect(span?.attributes["harness.error.code"]).toBe("mcp_response_too_large");
+      expect(span?.attributes["harness.error.code"]).toBe("result_too_large");
       const telemetry = JSON.stringify(
         span === undefined
           ? []
