@@ -690,6 +690,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         controlPlane: z.ZodOptional<z.ZodDefault<z.ZodObject<{
             allowReveal: z.ZodDefault<z.ZodBoolean>;
             allowAgentStartedRuns: z.ZodDefault<z.ZodBoolean>;
+            reportDirs: z.ZodDefault<z.ZodArray<z.ZodString>>;
             auth: z.ZodDefault<z.ZodObject<{
                 tokens: z.ZodDefault<z.ZodArray<z.ZodObject<{
                     id: z.ZodString;

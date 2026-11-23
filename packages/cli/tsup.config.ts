@@ -88,6 +88,10 @@ export default defineConfig({
         fileURLToPath(new URL("./dist/assets/run-inspector.html", import.meta.url)),
       ),
       cp(
+        fileURLToPath(new URL("../approval-app/dist/reports.html", import.meta.url)),
+        fileURLToPath(new URL("./dist/assets/reports.html", import.meta.url)),
+      ),
+      cp(
         fileURLToPath(new URL("../host/dist/web/index.html", import.meta.url)),
         fileURLToPath(new URL("./dist/assets/web/index.html", import.meta.url)),
       ),

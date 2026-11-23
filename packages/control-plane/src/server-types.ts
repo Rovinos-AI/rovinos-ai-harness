@@ -27,6 +27,14 @@ import type { RunSupervisor } from "./run-supervisor.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
 import type { ResolveInputOperation } from "./tools/answer-input.js";
 import type { ContinueRunInput, StartRunInput } from "./schemas.js";
+import type { ZodType } from "zod";
+
+/** Canonical report schemas supplied by the control-plane composition root. */
+export interface ControlPlaneReportSchemas {
+  readonly eval: ZodType;
+  readonly compare: ZodType;
+  readonly replay: ZodType;
+}
 
 /** Mutation operations supplied by the composed runtime. */
 export interface ControlPlaneOperations {
@@ -96,6 +104,10 @@ export interface ControlPlaneServerOptions {
   readonly runsConsoleHtml?: string;
   /** Built run-inspector MCP App HTML; injectable for in-memory server tests. */
   readonly runInspectorHtml?: string;
+  /** Built report viewer MCP App HTML, injectable for in-memory server tests. */
+  readonly reportsHtml?: string;
+  /** Report contracts provided by the embedding application. */
+  readonly reportSchemas?: ControlPlaneReportSchemas;
   /** Optional URL shown to text-only clients as an approval fallback. */
   readonly consoleUrl?: string;
   /** Publishes resource changes through the serving entry's subscription bus. */

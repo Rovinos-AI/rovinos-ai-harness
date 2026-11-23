@@ -20,6 +20,7 @@ import { registerDenyTool } from "./tools/deny.js";
 import { registerGetRunTool } from "./tools/get-run.js";
 import { registerGetRunTimelineTool } from "./tools/get-run-timeline.js";
 import { registerRunContentTool } from "./tools/run-content.js";
+import { registerOpenReportTool } from "./tools/open-report.js";
 import { registerListRunsTool } from "./tools/list-runs.js";
 import { registerResumeRunTool } from "./tools/resume-run.js";
 import { registerStartRunTool } from "./tools/start-run.js";
@@ -34,6 +35,7 @@ import { loadApprovalHtml, registerApprovalResource } from "./resources/approval
 import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
 import { loadRunInspectorHtml, registerRunInspectorResource } from "./resources/run-inspector.js";
 import { loadInputHtml, registerInputResource } from "./resources/input.js";
+import { loadReportsHtml, registerReportsResource } from "./resources/reports.js";
 import { registerRunResources } from "./resources/runs.js";
 import { configureRunResourceUpdates } from "./resources/server-updates.js";
 import { controlPlanePrincipal, hasControlPlaneScope } from "./auth.js";
@@ -41,7 +43,11 @@ import { startControlPlaneHttpTransport, type ControlPlaneHttpHandle } from "./h
 import { toolDefinitions, toolScope } from "./tool-definitions.js";
 import type { ControlPlaneServerOptions } from "./server-types.js";
 
-export type { ControlPlaneOperations, ControlPlaneServerOptions } from "./server-types.js";
+export type {
+  ControlPlaneOperations,
+  ControlPlaneReportSchemas,
+  ControlPlaneServerOptions,
+} from "./server-types.js";
 
 export type { ControlPlaneHttpHandle };
 
@@ -165,6 +171,12 @@ function registerRunInspection(
   registerGetRunTool(server, store, options.onAudit);
   registerGetRunTimelineTool(server, store, options.onAudit);
   registerRunContentTool(server, store, options.onAudit);
+  registerOpenReportTool(
+    server,
+    options.controlPlane?.reportDirs ?? [],
+    options.reportSchemas,
+    options.onAudit,
+  );
   const now = (): number => options.clock?.now() ?? Date.now();
   registerListPendingInputsTool(server, store, now, options.onAudit);
   registerGetInputTool(server, store, now, options.onAudit);
@@ -180,6 +192,7 @@ function registerRunInspection(
   registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
   registerRunInspectorResource(server, options.runInspectorHtml ?? loadRunInspectorHtml());
   registerInputResource(server, options.inputHtml ?? loadInputHtml());
+  registerReportsResource(server, options.reportsHtml ?? loadReportsHtml());
 }
 
 function registerInputTools(input: {
