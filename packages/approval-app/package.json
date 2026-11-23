@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@types/jsdom": "30.0.0",
-    "axe-core": "4.14.0",
+    "axe-core": "4.14.1",
     "esbuild": "0.28.2",
     "jsdom": "31.0.1",
     "typescript": "5.9.3",

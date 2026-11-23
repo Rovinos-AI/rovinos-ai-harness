@@ -41,7 +41,7 @@
   "devDependencies": {
     "@modelcontextprotocol/server": "2.4.0",
     "@rovinos/rate-limit-redis": "workspace:^",
-    "fast-check": "4.10.2",
+    "fast-check": "4.10.3",
     "vitest": "4.1.12"
   }
 }
