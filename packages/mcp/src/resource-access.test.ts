@@ -71,7 +71,7 @@ async function resourcePeer(options: ResourcePeerOptions) {
           description: "Contact alice@example.test",
           mimeType: "text/plain",
         },
-        { uri: "weather://private/secret", name: "ungranted" },
+        { uri: "weather://private/secret", name: "not-granted" },
       ],
       nextCursor: "next",
     };

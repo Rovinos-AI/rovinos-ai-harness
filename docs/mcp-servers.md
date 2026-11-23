@@ -62,7 +62,7 @@ servers:
 
 Grants match exact URIs or RFC 6570 URI templates. The list is limited to 100
 unique entries, each at most 2,048 characters. Resource discovery returns only
-matching resources; `McpConnection.readResources` rejects any ungranted URI
+matching resources; `McpConnection.readResources` rejects any URI without a grant
 before network I/O. Select the configured server in code rather than allowing
 model or user input to choose a server or resource URI.
 
