@@ -206,7 +206,9 @@ export async function inspectMcpServer(
     });
   } catch (error) {
     if (error instanceof McpConnectionError) {
-      throw new SdkError(error.code);
+      throw new SdkError(
+        error.code === "mcp_response_too_large" ? "sdk_mcp_inspection_failed" : error.code,
+      );
     }
     if (error instanceof McpAuthRequiredError) {
       throw new SdkError("mcp_auth_required");

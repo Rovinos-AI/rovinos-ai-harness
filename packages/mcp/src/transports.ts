@@ -63,12 +63,14 @@ async function resolveValue(
   return parsed.success ? dependencies.resolveSecret(parsed.data, signal) : value;
 }
 
-async function createStdioTransport(
-  config: Extract<ServerConfig["transport"], { kind: "stdio" }>,
-  serverId: HarnessCode,
-  dependencies: McpTransportDependencies,
-  signal?: AbortSignal,
-): Promise<StdioClientTransport> {
+async function createStdioTransport(options: {
+  readonly config: Extract<ServerConfig["transport"], { kind: "stdio" }>;
+  readonly serverId: HarnessCode;
+  readonly maxResultBytes: number;
+  readonly dependencies: McpTransportDependencies;
+  readonly signal?: AbortSignal;
+}): Promise<StdioClientTransport> {
+  const { config, serverId, maxResultBytes, dependencies, signal } = options;
   const environment: Record<string, string> = {};
   // The SDK spreads getDefaultEnvironment() under `env`; own keys set to undefined mask those
   // defaults (spawn drops undefined values), so nothing is inherited unless configured below.
@@ -87,6 +89,7 @@ async function createStdioTransport(
     command: config.command,
     args: config.args,
     env: environment,
+    maxBufferSize: maxResultBytes,
     ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
     stderr: "pipe",
   });
@@ -195,7 +198,13 @@ export function createMcpTransport(
   signal?: AbortSignal,
 ): Promise<Transport> {
   return config.transport.kind === "stdio"
-    ? createStdioTransport(config.transport, config.id, dependencies, signal)
+    ? createStdioTransport({
+        config: config.transport,
+        serverId: config.id,
+        maxResultBytes: config.maxResultBytes,
+        dependencies,
+        ...(signal === undefined ? {} : { signal }),
+      })
     : createHttpTransport({
         config: config.transport,
         serverId: config.id,

@@ -252,6 +252,15 @@ describe("SDK MCP onboarding", () => {
     expect(mcpMocks.close).toHaveBeenCalledOnce();
   });
 
+  it("maps oversized responses to the closed inspection error", async () => {
+    mcpMocks.connect.mockRejectedValueOnce(new McpConnectionError("mcp_response_too_large"));
+
+    await expect(
+      inspectMcpServer(server, { resolveSecret: () => Promise.resolve("synthetic-secret") }),
+    ).rejects.toMatchObject({ code: "sdk_mcp_inspection_failed" });
+    expect(mcpMocks.close).toHaveBeenCalledOnce();
+  });
+
   it("maps authentication failures and generic connection failures safely", async () => {
     mcpMocks.connect.mockRejectedValueOnce(new McpAuthRequiredError());
 

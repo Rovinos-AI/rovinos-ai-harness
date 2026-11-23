@@ -34,7 +34,7 @@ const CONNECTION_ERROR_CODES: Record<McpConnectionError["code"], string> = {
   mcp_discovery_data_limit: "mcp_error",
   mcp_discovery_timeout: "mcp_timeout",
   mcp_discovery_cancelled: "mcp_timeout",
-  mcp_response_too_large: "mcp_error",
+  mcp_response_too_large: "mcp_response_too_large",
   mcp_apps_unsupported: "mcp_apps_unsupported",
   mcp_tool_arguments_invalid: "args_invalid",
   mcp_tool_call_failed: "mcp_error",

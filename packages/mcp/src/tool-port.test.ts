@@ -23,7 +23,7 @@ import {
 import { createTestContextManager, createTestSpanCollector } from "@rovinos/telemetry/testing";
 import { lookupSpanDefinition } from "@rovinos/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { McpConnection } from "./connection.js";
+import { McpConnection, McpConnectionError } from "./connection.js";
 import { McpProtocolError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
@@ -66,6 +66,7 @@ async function fixture(
     readonly binaryResults?: "block" | "allow";
     readonly offloadBinaryResults?: boolean;
     readonly authRequiredMethod?: "tools/list" | "tools/call";
+    readonly responseTooLargeOnCall?: boolean;
     readonly tools?: Tool[];
     readonly toolProfiles?: ToolProfilesConfig;
     readonly elicitation?: ServerConfig["elicitation"];
@@ -115,7 +116,7 @@ async function fixture(
     ...(options.binaryResults === undefined ? {} : { binaryResults: options.binaryResults }),
   });
   const transport: Transport =
-    options.authRequiredMethod === undefined
+    options.authRequiredMethod === undefined && options.responseTooLargeOnCall !== true
       ? client
       : new Proxy(client, {
           get(target, property) {
@@ -126,6 +127,13 @@ async function fixture(
               ) => {
                 if ("method" in message && message.method === options.authRequiredMethod) {
                   throw new McpAuthRequiredError();
+                }
+                if (
+                  options.responseTooLargeOnCall === true &&
+                  "method" in message &&
+                  message.method === "tools/call"
+                ) {
+                  throw new McpConnectionError("mcp_response_too_large");
                 }
                 return target.send(message, sendOptions);
               };
@@ -545,6 +553,34 @@ describe("McpToolPort", () => {
         "tool_reported_error",
       );
       expect(spanCollector.getFinishedSpans().at(-1)?.status.code).toBe(SpanStatusCode.ERROR);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("records oversized responses in telemetry only as the closed error code", async () => {
+    const current = await fixture({ responseTooLargeOnCall: true });
+    try {
+      const before = spanCollector.getFinishedSpans().length;
+      await expect(current.port.execute(call, context())).resolves.toEqual({
+        outcome: "error",
+        errorCode: "mcp_response_too_large",
+        result: null,
+      });
+      const span = spanCollector.getFinishedSpans().slice(before).at(-1);
+      expect(span?.attributes["harness.error.code"]).toBe("mcp_response_too_large");
+      const telemetry = JSON.stringify(
+        span === undefined
+          ? []
+          : {
+              name: span.name,
+              attributes: span.attributes,
+              events: span.events,
+              status: span.status,
+            },
+      );
+      expect(telemetry).not.toContain("message");
+      expect(telemetry).not.toContain("https://");
     } finally {
       await current.close();
     }
