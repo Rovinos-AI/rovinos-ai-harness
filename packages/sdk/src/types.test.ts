@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { HarnessOverridesSchema, WatchOptionsSchema } from "./types.js";
+import {
+  HarnessOverridesSchema,
+  StartRunOptionsSchema,
+  WatchOptionsSchema,
+} from "./types.js";
 
 describe("SDK option boundary schemas", () => {
   it("accepts adapter-shaped overrides only when their required capabilities are present", () => {
@@ -54,5 +58,32 @@ describe("SDK option boundary schemas", () => {
     const controller = new AbortController();
     expect(WatchOptionsSchema.parse({ signal: controller.signal }).signal).toBe(controller.signal);
     expect(WatchOptionsSchema.safeParse({ signal: null }).success).toBe(false);
+  });
+
+  it("validates run prompt selections and their bounded string arguments", () => {
+    expect(
+      StartRunOptionsSchema.safeParse({
+        goal: "synthetic goal",
+        promptSelections: [
+          { serverId: "docs", name: "summarize", arguments: { topic: "synthetic topic" } },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      StartRunOptionsSchema.safeParse({
+        goal: "synthetic goal",
+        promptSelections: [
+          { serverId: "docs", name: "summarize", arguments: { topic: "x".repeat(8_193) } },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      StartRunOptionsSchema.safeParse({
+        goal: "synthetic goal",
+        promptSelections: [
+          { serverId: "docs", name: "summarize", extra: true },
+        ],
+      }).success,
+    ).toBe(false);
   });
 });

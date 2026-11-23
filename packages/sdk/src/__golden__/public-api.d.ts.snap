@@ -130,8 +130,8 @@ import { HarnessError, Id } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 import type { ExtensionGrantRevocation, ExtensionRegistration, ExtensionRegistrationStatus } from "./extensions.js";
-/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
-export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_tools_failed" | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
+/** Closed MCP connection, tool, and prompt failure codes surfaced by {@link SdkError}. */
+export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_tools_failed" | "mcp_prompt_arguments_invalid" | "mcp_prompt_failed" | "mcp_prompt_not_granted" | "mcp_prompt_result_too_large" | "mcp_prompt_unavailable" | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
 export declare const HarnessOverridesSchema: z.ZodObject<{
     store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
@@ -398,6 +398,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             }>>;
             propagateTrace: z.ZodDefault<z.ZodBoolean>;
             toolAllowlist: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            promptGrants: z.ZodOptional<z.ZodArray<z.ZodString>>;
             toolPrefix: z.ZodOptional<z.ZodString>;
             idempotentTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
             useAnnotations: z.ZodDefault<z.ZodBoolean>;
@@ -474,6 +475,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             maxArtifactBytes: number;
             binaryResults: "allow" | "block";
             toolAllowlist?: string[] | undefined;
+            promptGrants?: string[] | undefined;
             idempotentTools?: string[] | undefined;
         }, {
             id: string;
@@ -526,6 +528,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             maxArtifactBytes: number;
             binaryResults: "allow" | "block";
             toolAllowlist?: string[] | undefined;
+            promptGrants?: string[] | undefined;
             toolPrefix?: string | undefined;
             idempotentTools?: string[] | undefined;
         }>>>>;
@@ -1012,6 +1015,11 @@ export declare const StartRunOptionsSchema: z.ZodObject<{
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
     role: z.ZodOptional<z.ZodString>;
     toolProfile: z.ZodOptional<z.ZodString>;
+    promptSelections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        serverId: z.ZodString;
+        name: z.ZodString;
+        arguments: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strict>>>;
     idempotencyKey: z.ZodOptional<z.ZodString>;
     requestedBy: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;

@@ -3,8 +3,9 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@rovinos/schemas";
-import type { PiiConfig, RateLimitStore } from "@rovinos/schemas";
+import type { Id, PiiConfig, RateLimitStore } from "@rovinos/schemas";
 import { PiiToolPort } from "@rovinos/pii";
+import { McpPromptError } from "@rovinos/mcp";
 import type { McpToolPort } from "@rovinos/mcp";
 import type { LocalKeyProvider } from "@rovinos/vault";
 import type { EventStore } from "@rovinos/store";
@@ -302,6 +303,26 @@ async function composeRuntimeSetup(options: {
     rateLimitStore: rateLimit.store,
   });
   const managedMcpToolPort = tools.mcpToolPort;
+  const tokenizeMcpPromptContent = async (runId: Id, content: string, signal: AbortSignal) => {
+    if (signal.aborted) {
+      throw new McpPromptError("mcp_prompt_failed");
+    }
+    try {
+      const tokenized = await piiRuntime.tokenizer.tokenizeText(runId, content, {
+        boundary: "model_input",
+        destination: "hosted",
+      });
+      if (signal.aborted) {
+        throw new McpPromptError("mcp_prompt_failed");
+      }
+      return tokenized.text;
+    } catch (error) {
+      if (error instanceof McpPromptError) {
+        throw error;
+      }
+      throw new McpPromptError("mcp_prompt_failed");
+    }
+  };
   return {
     config,
     overrides: { ...overrides, rateLimitStore: rateLimit.store },
@@ -321,6 +342,8 @@ async function composeRuntimeSetup(options: {
       ? { closeRateLimitStore: () => rateLimit.store.close?.() ?? Promise.resolve() }
       : {}),
     tool,
+    ...(managedMcpToolPort === undefined ? {} : { promptPort: managedMcpToolPort }),
+    tokenizeMcpPromptContent,
     ...(managedMcpToolPort === undefined
       ? {}
       : { closeToolPort: () => managedMcpToolPort.close() }),

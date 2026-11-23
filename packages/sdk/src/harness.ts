@@ -128,6 +128,9 @@ class HarnessClient extends ExtensionHarnessAccess implements Harness {
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
       ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
+      ...(input.promptSelections === undefined
+        ? {}
+        : { promptSelections: input.promptSelections }),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
       ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
       signal: managed.controller.signal,

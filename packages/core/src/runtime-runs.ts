@@ -6,6 +6,7 @@ import {
   type JsonValue,
   type RunConfig,
   type RunInput,
+  type McpPromptSelection,
   type Principal,
 } from "@rovinos/schemas";
 import type { EventStore } from "@rovinos/store";
@@ -111,6 +112,7 @@ export interface RuntimeRunOptions {
   readonly role?: Code;
   /** Optional configured MCP tool profile selected for this run. */
   readonly toolProfile?: Code;
+  readonly promptSelections?: readonly McpPromptSelection[];
   readonly requestedBy?: Principal;
   readonly evalMetadata?: EvalRunMetadata;
   readonly onStarted?: () => void;
@@ -165,7 +167,11 @@ export function startRun(
       ...(options.rootSpanParent === undefined ? {} : { rootSpanParent: options.rootSpanParent }),
       signal: executionSignal,
       ...(options.role === undefined ? {} : { role: options.role }),
+      runId,
       ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
+      ...(options.promptSelections === undefined
+        ? {}
+        : { promptSelections: options.promptSelections }),
       scopeId: runId,
       budgets: config.run.budgets,
       checkpointEveryEvents: config.run.checkpointEveryEvents,
@@ -186,6 +192,10 @@ export function startRun(
             inputTokenizer: composition.pii.tokenizer,
             inputResolver: composition.pii.resolver,
           }),
+      ...(composition.promptPort === undefined ? {} : { promptPort: composition.promptPort }),
+      ...(composition.tokenizeMcpPromptContent === undefined
+          ? {}
+          : { tokenizeMcpPromptContent: composition.tokenizeMcpPromptContent }),
       ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
       ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
       ...(evalMetadata === undefined ? {} : { evalMetadata }),

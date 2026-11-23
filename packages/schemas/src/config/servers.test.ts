@@ -99,6 +99,20 @@ describe("ServerConfigSchema", () => {
     ).toBe(false);
   });
 
+  it("requires the transport response limit to enforce prompt result bounds before buffering", () => {
+    const config = {
+      id: "mcp",
+      transport: { kind: "stdio", command: "node" },
+      promptGrants: ["summarize"],
+      maxResultBytes: 1_048_577,
+    };
+
+    expect(ServerConfigSchema.safeParse(config).success).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({ ...config, maxResultBytes: 1_048_576 }).success,
+    ).toBe(true);
+  });
+
   it("rejects trace propagation for external servers with its stable error code", () => {
     const result = ServerConfigSchema.safeParse({
       id: "external",

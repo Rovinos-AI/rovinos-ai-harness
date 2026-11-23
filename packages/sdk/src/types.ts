@@ -6,6 +6,7 @@ import {
   Id,
   InputResponseSchema,
   JsonValue,
+  McpPromptSelectionsSchema,
   Principal,
   RunStatus,
 } from "@rovinos/schemas";
@@ -21,7 +22,7 @@ import type {
   ExtensionRegistrationStatus,
 } from "./extensions.js";
 
-/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
+/** Closed MCP connection, tool, and prompt failure codes surfaced by {@link SdkError}. */
 export type SdkMcpConnectionErrorCode =
   | "mcp_connect_failed"
   | "mcp_connect_timeout"
@@ -36,7 +37,12 @@ export type SdkMcpConnectionErrorCode =
   | "mcp_discovery_cancelled"
   | "mcp_apps_unsupported"
   | "mcp_tool_arguments_invalid"
-  | "mcp_tool_call_failed";
+  | "mcp_tool_call_failed"
+  | "mcp_prompt_not_granted"
+  | "mcp_prompt_unavailable"
+  | "mcp_prompt_arguments_invalid"
+  | "mcp_prompt_result_too_large"
+  | "mcp_prompt_failed";
 
 function hasMethod(value: unknown, name: string): boolean {
   return (
@@ -205,6 +211,8 @@ export const StartRunOptionsSchema = z
     role: Code.optional(),
     /** Named MCP tool subset configured by the operator. */
     toolProfile: Code.optional(),
+    /** Exact granted MCP prompts to retrieve as untrusted run input. */
+    promptSelections: McpPromptSelectionsSchema.optional(),
     idempotencyKey: z.string().min(1).max(256).optional(),
     requestedBy: Principal.optional(),
   })

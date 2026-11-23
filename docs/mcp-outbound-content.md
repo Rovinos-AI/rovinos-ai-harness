@@ -1,12 +1,13 @@
 # Governed outbound MCP resources and prompts (6.18)
 
-This is a design, not an implementation. Standalone outbound resource discovery
-and reads, and prompt listing and retrieval, must not be advertised or exposed
-until the follow-up work below is approved and implemented. Resource blocks
-embedded in `tools/call` results continue through the existing tool-result
-handling path; this design does not change that behavior. The inventory was
-checked against current `origin/main`, the pinned MCP TypeScript SDK v2.4.0
-declarations, and protocol baselines in
+This document records the design and implementation status for outbound
+resources and prompts. Standalone outbound resource discovery and reads remain
+unsupported. Prompt listing and retrieval are implemented by task 6.22 under
+the approved public contract below. Resource blocks embedded in `tools/call`
+results continue through the existing tool-result handling path; this design
+does not change that behavior. The inventory was checked against current
+`origin/main`, the pinned MCP TypeScript SDK v2.4.0 declarations, and protocol
+baselines in
 [engineering conventions](engineering/CONVENTIONS.md#10-external-protocol-and-sdk-baseline).
 
 ## Capability matrix
@@ -20,13 +21,15 @@ revision negotiated by the existing SDK client and server transports.
 | Tools list/call | Implemented | Implemented | Implemented | Implemented |
 | Resources list/read | Unsupported now; planned follow-up | Unsupported now; planned follow-up | Implemented; run resources are permission-checked | Implemented; run resources are permission-checked |
 | Resource subscriptions/updates | Unsupported | Unsupported | Implemented for subscribed run-resource updates | Implemented for subscribed run-resource updates |
-| Prompts list/get | Unsupported now; planned follow-up, subject to consumer review | Unsupported now; planned follow-up, subject to consumer review | Unsupported | Unsupported |
+| Prompts list/get | Implemented with explicit grants and per-run selections | Implemented with explicit grants and per-run selections | Unsupported | Unsupported |
 | Completions | Unsupported | Unsupported | Unsupported | Unsupported |
 
 The client uses tool discovery and configured elicitation capabilities; it does
-not declare resource or prompt support. The control-plane server registers
-resources with per-request authorization and supports resource subscriptions.
-Neither role registers or consumes prompts. Although SDK v2.4.0 exposes
+not declare resource or prompt support during initialization. Prompt methods
+are invoked only after the server advertises the prompts capability and the
+operator grants and selects the exact prompt. The control-plane server
+registers resources with per-request authorization and supports resource
+subscriptions; it does not register prompts. Although SDK v2.4.0 exposes
 `listResources`, `readResource`, `listPrompts`, `getPrompt`, and `complete`,
 their existence does not make those features implemented. Completions have no
 identified harness consumer, so they are unsupported and not planned. No
@@ -39,8 +42,8 @@ result-normalization and content-processing path.
 
 ## Proposed access and data contract
 
-These are decisions for implementation follow-ups, not current configuration
-or public APIs.
+These are the governing decisions for implementation follow-ups and the
+implemented prompt API.
 
 - **Select one server first.** A resource or prompt request must be routed only
   through the configured server connection selected by code. A URI supplied by
@@ -123,6 +126,37 @@ or public APIs.
   protocol/API behavior are approved; the current client handles tool-call
   elicitation, not prompt retrieval.
 
+## Outbound prompt retrieval (6.22)
+
+The public contract was reviewed before implementation. Server configuration
+uses `promptGrants`, an exact list of unique prompt names allowed for that
+server. A run can select at most 16 prompts through the SDK's
+`startRun({ promptSelections })` option; each selection contains the server id,
+exact prompt name, and optional string arguments. Selection is default-deny
+and grants are independent of tool allowlists and server trust.
+
+Argument records are limited to 32 entries, 128 UTF-8 bytes per name, 8 KiB
+per value, and 32 KiB in total. Arguments must match the selected prompt's
+advertised arguments, include all advertised required values, and contain no
+undeclared values. Listing follows at most 100 pages and 1,000 prompts, with an
+8 MiB decoded catalog limit and a 30-second shared deadline. One prompt result
+is limited to 1 MiB and all selected results together to 4 MiB. Servers with
+nonempty `promptGrants` must keep `maxResultBytes` at or below 1 MiB so the SDK
+stdio frame limit is consistent. These are decoded-data limits; they do not
+claim to cap HTTP response buffering before parsing.
+
+Retrieved descriptions and messages are serialized, passed through the
+model-input PII tokenization boundary, and stored only in the existing
+tokenized `run_input` content. The transcript frames each item as untrusted
+data, with server id and prompt name provenance, and explicitly denies it
+authority over policy, tools, approvals, or user input. Prompt content is
+retrieved for each run and is not cached; MCP does not provide an atomic
+version guarantee between listing and retrieval. The client does not advertise
+prompt support in its own initialization capabilities. Failures use the closed
+codes `mcp_prompt_not_granted`, `mcp_prompt_unavailable`,
+`mcp_prompt_arguments_invalid`, `mcp_prompt_result_too_large`, and
+`mcp_prompt_failed`. Completion remains unsupported.
+
 The resource API has change notifications but no atomic read/version guarantee.
 When an allowed resource changes, invalidate discovery/content caches and
 re-read before a later model request. Do not claim that a notification prevents
@@ -157,12 +191,10 @@ logs, and captured diagnostics.
    cancellation, PII-boundary integration, provenance, and the resource cases
    above. Do not add direct URL fetching or advertise capability before the
    tests pass on both protocol revisions.
-2. **Outbound prompt retrieval.** Add separately after identifying a concrete
-   workflow and reviewing the public prompt-selection/argument contract.
-   Implement explicit per-server prompt grants, bounded list/get, argument
-   validation, PII-boundary integration, provenance, and prompt-injection,
-   changed-prompt, and oversized-result tests. Do not add completion support
-   unless that workflow identifies a specific consumer and bounded requirement.
+2. **Outbound prompt retrieval.** Implemented as task 6.22 after the consuming
+   workflow and public prompt-selection/argument contract were reviewed.
+   Completion remains unsupported because the workflow has no bounded
+   completion requirement.
 3. **Transport response limits (prerequisite if needed).** If SDK v2.4.0
    buffers responses before the proposed decoded-data check, implement and test
    streamed HTTP, decompression, and stdio framing limits before describing the

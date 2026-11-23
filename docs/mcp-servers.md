@@ -15,6 +15,7 @@ transports reject unknown fields.
 | `trust` | `internal` or `external` | `external` | Trust level used to gate trace propagation and annotations. |
 | `propagateTrace` | boolean | `false` | Send trace context only to an `internal` server. |
 | `toolAllowlist` | string array | omitted | Server-native tool names permitted for registration. |
+| `promptGrants` | string array | omitted | Exact prompt names the run may retrieve from this server; retrieval is otherwise denied. |
 | `toolPrefix` | `Code` | the server `id` | Prefix used when registering this server's tools. |
 | `idempotentTools` | string array | omitted | Server-native tool names treated as idempotent. |
 | `useAnnotations` | boolean | `false` | Whether to use server annotations; requires `trust: internal`. |
@@ -46,11 +47,13 @@ The outbound client does not host MCP Apps. App-only tools are excluded from
 tool discovery, and setting `apps: true` is rejected rather than advertising
 unsupported capabilities.
 
-Standalone outbound MCP resource discovery/read and prompt list/get are not
-implemented. Resource blocks embedded in `tools/call` results use the existing
-tool-result handling path. See the
-[governed resource and prompt design](mcp-outbound-content.md) for the current
-client/server capability matrix and proposed security boundaries.
+Standalone outbound MCP resource discovery/read is not implemented. Prompt
+list/get is available only for exact names in `promptGrants`, selected per run
+through the SDK `startRun({ promptSelections })` option; it does not advertise
+prompt support in client initialization. Resource blocks embedded in
+`tools/call` results use the existing tool-result handling path. See the
+[governed resource and prompt design](mcp-outbound-content.md) for the
+capability matrix, prompt limits, and security boundaries.
 
 ## Stdio transport
 
@@ -233,6 +236,36 @@ The deadline aborts outstanding HTTP body reads, but JavaScript timers and
 cancellation cannot preempt synchronous SDK parsing. A wire-byte guarantee
 requires transport-layer limits on streamed HTTP bodies (including SSE),
 decompression, and stdio framing before buffering and JSON decoding.
+
+### Prompt retrieval
+
+Each configured server can grant exact prompt names with `promptGrants`.
+Selecting a granted prompt does not confer authority; the operator supplies
+run-level selections through `startRun({ promptSelections })`. Each selection
+may include string arguments. At most 16 prompts can be selected per run;
+argument maps allow at most 32 entries, 128 UTF-8 bytes per name, 8 KiB per
+value, and 32 KiB total. Names and values must satisfy these bounds before
+retrieval.
+
+The client requires the remote server's advertised prompts capability and
+validates required and declared arguments from `prompts/list` before issuing
+`prompts/get`. Lists are fetched without a content cache and are bounded to 100
+pages, 1,000 prompts, 8 MiB decoded catalog data, and a 30-second shared
+deadline. A single retrieved result may be at most 1 MiB and total selected
+content at most 4 MiB. To keep the stdio frame cap aligned with the result
+bound, a server with nonempty `promptGrants` must configure `maxResultBytes` no
+higher than 1 MiB. HTTP result limits are decoded-data limits and do not bound
+the SDK's buffering before parsing.
+
+Returned descriptions and messages are server-controlled, untrusted content.
+They are serialized and tokenized at the model-input boundary, persisted only
+in the existing tokenized run input, and framed as untrusted data with server
+id and prompt name provenance. They cannot change policy, tool grants,
+approval requirements, or user input. The prompt is fetched for each run; MCP
+does not provide an atomic version guarantee between listing and retrieval.
+Closed retrieval errors are `mcp_prompt_not_granted`, `mcp_prompt_unavailable`,
+`mcp_prompt_arguments_invalid`, `mcp_prompt_result_too_large`, and
+`mcp_prompt_failed`. Prompt completion is unsupported.
 
 Registered MCP tool ids use the harness `Code` format and are filtered by
 `toolAllowlist`. Native tool names may use any casing, but normalization must

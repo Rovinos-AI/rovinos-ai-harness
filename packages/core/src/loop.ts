@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   HarnessError,
+  McpPromptSelectionsSchema,
   type Code,
   type Event,
   type Id,
   type JsonValue,
   type RunConfig,
   type Sha256Hex,
+  type McpPromptSelection,
 } from "@rovinos/schemas";
 import type { Context, Link } from "@opentelemetry/api";
 import { activeRuns } from "@rovinos/telemetry";
@@ -30,6 +32,7 @@ import type {
   RunContinuationMetadata,
   RunContext,
   ToolPort,
+  PromptPort,
 } from "./ports.js";
 import type { WorkspaceSnapshotPort } from "@rovinos/sandbox";
 import type { Tokenizer } from "@rovinos/pii";
@@ -40,6 +43,7 @@ import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-outp
 import type { ValueTransform } from "@rovinos/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
+import { McpPromptError } from "@rovinos/mcp";
 import { modelQuotaHooks } from "./model-quota-hooks.js";
 import { runToolCalls } from "./steps/tool-call-runner.js";
 import { prepareLoopIteration } from "./steps/loop-preparation.js";
@@ -56,6 +60,14 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly toolCatalogFingerprints?: Readonly<Record<string, Sha256Hex>>;
   /** Optional configured MCP tool profile selected for this run. */
   readonly toolProfile?: Code;
+  readonly runId?: Id;
+  readonly promptSelections?: readonly McpPromptSelection[];
+  readonly promptPort?: PromptPort;
+  readonly tokenizeMcpPromptContent?: (
+    runId: Id,
+    content: string,
+    signal: AbortSignal,
+  ) => Promise<string>;
   readonly policy?: PolicyPort;
   readonly context: ContextPort;
   readonly ids: IdGenerator;
@@ -151,7 +163,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   );
   const toolCatalogVersion = tool?.catalogVersion?.();
   const toolCatalogFingerprints = tool?.catalogFingerprints?.();
-  const runOptions =
+  const toolOptions =
     tool === undefined
       ? options
       : {
@@ -160,6 +172,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
           ...(toolCatalogVersion === undefined ? {} : { toolCatalogVersion }),
           ...(toolCatalogFingerprints === undefined ? {} : { toolCatalogFingerprints }),
         };
+  const runOptions = await addMcpPromptsToGoal(toolOptions);
   const events: Event[] = [];
   const budgetTracker = new BudgetTracker(
     runOptions.budgets,
@@ -176,6 +189,41 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     approvalIds: Array.from(state.pendingApprovals.keys()),
     state,
     events,
+  };
+}
+
+async function addMcpPromptsToGoal(options: RunLoopOptions): Promise<RunLoopOptions> {
+  if (options.promptSelections === undefined || options.promptSelections.length === 0) {
+    return options;
+  }
+  let selections: McpPromptSelection[];
+  try {
+    selections = McpPromptSelectionsSchema.parse(options.promptSelections);
+  } catch {
+    throw new McpPromptError("mcp_prompt_arguments_invalid");
+  }
+  if (options.promptPort === undefined) {
+    throw new McpPromptError("mcp_prompt_not_granted");
+  }
+  const runId = options.runId;
+  const tokenize = options.tokenizeMcpPromptContent;
+  if (runId === undefined || tokenize === undefined) {
+    throw new McpPromptError("mcp_prompt_failed");
+  }
+  const retrieved = await options.promptPort.retrievePrompts(selections, options.signal);
+  const tokenized = await Promise.all(
+    retrieved.map(async ({ serverId, name, content }) => ({
+      serverId,
+      name,
+      content: await tokenize(runId, content, options.signal),
+    })),
+  );
+  return {
+    ...options,
+    goal: {
+      initialInput: options.goal,
+      retrievedPrompts: tokenized,
+    },
   };
 }
 

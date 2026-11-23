@@ -163,6 +163,8 @@ const ServerConfigObjectSchema = z
   })
   .strict();
 
+const MAX_PROMPT_RESULT_BYTES = 1_048_576;
+
 /** MCP server connection, trust, and tool-registration configuration. */
 export const ServerConfigSchema = ServerConfigObjectSchema.superRefine((server, context) => {
   if (server.propagateTrace && server.trust !== "internal") {
@@ -179,6 +181,14 @@ export const ServerConfigSchema = ServerConfigObjectSchema.superRefine((server, 
       path: ["useAnnotations"],
       message: "Annotations require an internal server.",
       params: { errorCode: "annotations_require_internal" },
+    });
+  }
+  if ((server.promptGrants?.length ?? 0) > 0 && server.maxResultBytes > MAX_PROMPT_RESULT_BYTES) {
+    context.addIssue({
+      code: "custom",
+      path: ["maxResultBytes"],
+      message: "Prompt-granted servers must use a response limit no larger than 1 MiB.",
+      params: { errorCode: "server_prompt_result_limit" },
     });
   }
   if (server.toolAllowlist !== undefined) {

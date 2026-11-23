@@ -25,9 +25,11 @@ import { lookupSpanDefinition } from "@rovinos/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError } from "./connection.js";
 import { McpProtocolError } from "./errors.js";
+import { McpPromptError } from "./errors.js";
 import { handleInputRequiredCall } from "./input-required-call.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
+import type { McpPrompt } from "./prompts.js";
 import type { ElicitationRetry, LegacyElicitationInput } from "./elicitation/mrtr.js";
 
 const spanCollector = createTestSpanCollector();
@@ -50,6 +52,8 @@ interface Fixture {
   readonly port: McpToolPort;
   readonly calls: CallToolRequest["params"][];
   readonly receivedMeta: (Record<string, unknown> | undefined)[];
+  readonly promptListCalls: () => number;
+  readonly promptGetCalls: () => number;
   setTools(tools: Tool[]): void;
   setToolsListFailure(fail: boolean): void;
   close(): Promise<void>;
@@ -70,6 +74,10 @@ async function fixture(
     readonly tools?: Tool[];
     readonly toolProfiles?: ToolProfilesConfig;
     readonly elicitation?: ServerConfig["elicitation"];
+    readonly promptGrants?: string[];
+    readonly prompts?: McpPrompt[];
+    readonly onPromptList?: () => void;
+    readonly getPromptText?: (name: string) => string;
     readonly urlOptions?: {
       readonly requireHttps?: boolean;
       readonly urlAllowHosts?: readonly string[];
@@ -82,7 +90,12 @@ async function fixture(
   const receivedMeta: (Record<string, unknown> | undefined)[] = [];
   let tools: Tool[] = options.tools ?? [{ name: "echo", inputSchema }];
   let failToolsList = false;
-  server.server.registerCapabilities({ tools: { listChanged: true } });
+  let promptListCalls = 0;
+  let promptGetCalls = 0;
+  server.server.registerCapabilities({
+    tools: { listChanged: true },
+    ...(options.prompts === undefined ? {} : { prompts: { listChanged: true } }),
+  });
   server.server.setRequestHandler("tools/list", () => {
     if (failToolsList) {
       throw new Error("synthetic tools/list failure");
@@ -104,12 +117,34 @@ async function fixture(
       }
     );
   });
+  if (options.prompts !== undefined) {
+    server.server.setRequestHandler("prompts/list", () => {
+      promptListCalls++;
+      options.onPromptList?.();
+      return { prompts: options.prompts ?? [] };
+    });
+    server.server.setRequestHandler("prompts/get", async (request) => {
+      promptGetCalls++;
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: options.getPromptText?.(request.params.name) ?? "synthetic prompt",
+            },
+          },
+        ],
+      };
+    });
+  }
   await server.connect(serverTransport);
   const peer = { client, serverTransport, server };
   const config = ServerConfigSchema.parse({
     id: "mcp_test",
     transport: { kind: "stdio", command: "not-spawned-by-test" },
     ...(options.elicitation === undefined ? {} : { elicitation: options.elicitation }),
+    ...(options.promptGrants === undefined ? {} : { promptGrants: options.promptGrants }),
     timeouts: { callMs: options.callMs ?? 1_000 },
     maxResultBytes: options.maxResultBytes ?? 1_048_576,
     maxArtifactBytes: options.maxArtifactBytes ?? 52_428_800,
@@ -167,6 +202,8 @@ async function fixture(
     port,
     calls,
     receivedMeta,
+    promptListCalls: () => promptListCalls,
+    promptGetCalls: () => promptGetCalls,
     setTools: (updated) => {
       tools = updated;
     },
@@ -257,6 +294,125 @@ afterAll(() => {
 });
 
 describe("McpToolPort", () => {
+  it("denies ungranted prompt names before prompt discovery", async () => {
+    const current = await fixture({
+      prompts: [{ name: "summarize" }],
+      promptGrants: [],
+    });
+    try {
+      await expect(
+        current.port.retrievePrompts(
+          [{ serverId: Code.parse("mcp_test"), name: "summarize" }],
+          new AbortController().signal,
+        ),
+      ).rejects.toMatchObject({ code: "mcp_prompt_not_granted" });
+      expect(current.promptListCalls()).toBe(0);
+      expect(current.promptGetCalls()).toBe(0);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("validates advertised required and declared arguments before prompts/get", async () => {
+    const current = await fixture({
+      prompts: [
+        {
+          name: "summarize",
+          arguments: [{ name: "topic", required: true }],
+        },
+      ],
+      promptGrants: ["summarize"],
+    });
+    try {
+      const signal = new AbortController().signal;
+      await expect(
+        current.port.retrievePrompts(
+          [{ serverId: Code.parse("mcp_test"), name: "summarize" }],
+          signal,
+        ),
+      ).rejects.toMatchObject({ code: "mcp_prompt_arguments_invalid" });
+      await expect(
+        current.port.retrievePrompts(
+          [
+            {
+              serverId: Code.parse("mcp_test"),
+              name: "summarize",
+              arguments: { topic: "synthetic topic", extra: "unexpected" },
+            },
+          ],
+          signal,
+        ),
+      ).rejects.toMatchObject({ code: "mcp_prompt_arguments_invalid" });
+      expect(current.promptGetCalls()).toBe(0);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("uses the current prompts/get content when the prompt changes after listing", async () => {
+    let promptText = "listed version";
+    const current = await fixture({
+      prompts: [{ name: "summarize" }],
+      promptGrants: ["summarize"],
+      onPromptList: () => {
+        promptText = "updated version";
+      },
+      getPromptText: () => promptText,
+    });
+    try {
+      const result = await current.port.retrievePrompts(
+        [{ serverId: Code.parse("mcp_test"), name: "summarize" }],
+        new AbortController().signal,
+      );
+
+      expect(result[0]?.content).toContain("updated version");
+      expect(result[0]?.content).not.toContain("listed version");
+      expect(result[0]).toMatchObject({ serverId: "mcp_test", name: "summarize" });
+      expect(current.promptListCalls()).toBe(1);
+      expect(current.promptGetCalls()).toBe(1);
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("fails closed when one prompt result exceeds one MiB", async () => {
+    const current = await fixture({
+      prompts: [{ name: "large" }],
+      promptGrants: ["large"],
+      getPromptText: () => "x".repeat(1_048_577),
+    });
+    try {
+      await expect(
+        current.port.retrievePrompts(
+          [{ serverId: Code.parse("mcp_test"), name: "large" }],
+          new AbortController().signal,
+        ),
+      ).rejects.toMatchObject({ code: "mcp_prompt_result_too_large" });
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("fails closed when cumulative prompt content exceeds four MiB", async () => {
+    const prompts = Array.from({ length: 5 }, (_, index) => ({ name: `prompt-${index}` }));
+    const current = await fixture({
+      prompts,
+      promptGrants: prompts.map(({ name }) => name),
+      getPromptText: () => "x".repeat(850_000),
+    });
+    try {
+      await expect(
+        current.port.retrievePrompts(
+          prompts.map(({ name }) => ({ serverId: Code.parse("mcp_test"), name })),
+          new AbortController().signal,
+        ),
+      ).rejects.toMatchObject({ code: "mcp_prompt_result_too_large" });
+      expect(current.promptGetCalls()).toBe(5);
+    } finally {
+      await current.close();
+    }
+  });
+
   it("exposes only the selected authorized profile and rejects hidden dispatch", async () => {
     const current = await fixture({
       tools: [

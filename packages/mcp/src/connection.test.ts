@@ -391,6 +391,7 @@ describe("McpConnection", () => {
       "McpOAuthProvider",
       "McpPool",
       "McpPoolError",
+      "McpPromptError",
       "McpProtocolError",
       "McpToolPort",
       "McpToolProfileError",
