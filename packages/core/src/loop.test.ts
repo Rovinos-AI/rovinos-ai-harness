@@ -1282,7 +1282,7 @@ describe("runLoop", () => {
         },
       ]),
     };
-    const tokenizeMcpPromptContent = vi.fn((_id: string, content: string) =>
+    const tokenizeMcpPromptContent = vi.fn((_id: string, content: string, _signal: AbortSignal) =>
       Promise.resolve(`tokenized:${content}`),
     );
     const model = new FakeModelPort([completion()]);
