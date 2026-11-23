@@ -15,6 +15,7 @@ import { APPROVAL_RESOURCE_URI } from "./resources/approval.js";
 import { INPUT_RESOURCE_URI } from "./resources/input.js";
 import { REPORTS_RESOURCE_URI } from "./resources/reports.js";
 import { RUNS_CONSOLE_RESOURCE_URI } from "./resources/runs-console.js";
+import { RUN_INSPECTOR_RESOURCE_URI } from "./resources/run-inspector.js";
 import {
   approveInputSchema,
   continueRunInputSchema,
@@ -22,6 +23,10 @@ import {
   denyInputSchema,
   getRunInputSchema,
   getRunOutputSchema,
+  getRunTimelineInputSchema,
+  getRunTimelineOutputSchema,
+  getRunContentInputSchema,
+  getRunContentOutputSchema,
   listRunsInputSchema,
   listRunsOutputSchema,
   listPendingInputsInputSchema,
@@ -43,11 +48,13 @@ import { openReportInputSchema, openReportOutputSchema } from "./tools/open-repo
 const readScopeTools: ReadonlySet<string> = new Set([
   "list_runs",
   "get_run",
+  "get_run_timeline",
   "open_report",
   "list_pending_inputs",
   "harness.runs.list",
   "harness.runs.get",
 ]);
+const readContentScopeTools: ReadonlySet<string> = new Set(["harness.runs.content"]);
 const approvalScopeTools: ReadonlySet<string> = new Set([
   "approve",
   "deny",
@@ -244,6 +251,15 @@ function runToolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(getRunInputSchema),
       outputSchema: z.toJSONSchema(getRunOutputSchema),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: RUN_INSPECTOR_RESOURCE_URI } },
+    },
+    {
+      name: "get_run_timeline",
+      description: "Get a run timeline grouped into safe steps and usage metadata.",
+      inputSchema: objectInputSchema(getRunTimelineInputSchema),
+      outputSchema: z.toJSONSchema(getRunTimelineOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: RUN_INSPECTOR_RESOURCE_URI } },
     },
     {
       name: "harness.runs.list",
@@ -261,11 +277,22 @@ function runToolDefinitions(): Tool[] {
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
     },
+    {
+      name: "harness.runs.content",
+      description: "Load recent tokenized run content after an explicit inspector action.",
+      inputSchema: objectInputSchema(getRunContentInputSchema),
+      outputSchema: z.toJSONSchema(getRunContentOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: RUN_INSPECTOR_RESOURCE_URI } },
+    },
   ];
 }
 
 /** Returns the authorization scope required by a control-plane tool. */
 export function toolScope(name: string): ControlPlaneAuthScope {
+  if (readContentScopeTools.has(name)) {
+    return "read_content";
+  }
   if (readScopeTools.has(name)) {
     return "read";
   }

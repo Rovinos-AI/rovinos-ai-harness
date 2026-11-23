@@ -102,6 +102,8 @@ export interface ControlPlaneServerOptions {
   readonly inputHtml?: string;
   /** Built runs-console MCP App HTML; injectable for in-memory server tests. */
   readonly runsConsoleHtml?: string;
+  /** Built run-inspector MCP App HTML; injectable for in-memory server tests. */
+  readonly runInspectorHtml?: string;
   /** Built report viewer MCP App HTML, injectable for in-memory server tests. */
   readonly reportsHtml?: string;
   /** Report contracts provided by the embedding application. */
