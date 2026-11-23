@@ -7,6 +7,12 @@ export {
   type McpConnectionState,
   type McpTool,
 } from "./connection.js";
+export {
+  type McpResource,
+  type McpResourceProvenance,
+  type McpResourceRead,
+  type ResourceTextTokenizer,
+} from "./resource-access.js";
 export { McpProtocolError } from "./errors.js";
 export {
   McpToolPort,

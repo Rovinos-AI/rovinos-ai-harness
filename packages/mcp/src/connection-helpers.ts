@@ -25,6 +25,25 @@ export { OAUTH_CLIENT_CREDENTIALS_EXTENSION } from "./oauth/protected-resource.j
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 export const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
 
+/** Indicates whether a connection attempt was superseded or closed. */
+export function isConnectionStale(
+  closed: boolean,
+  activeGeneration: number,
+  generation: number,
+): boolean {
+  return closed || activeGeneration !== generation;
+}
+
+/** Preserves the transport close handler before notifying its connection owner. */
+export function observeTransportClose(transport: Transport, onClose: () => void): void {
+  const monitoredTransport = transport;
+  const previousOnClose = monitoredTransport.onclose;
+  monitoredTransport.onclose = () => {
+    previousOnClose?.();
+    onClose();
+  };
+}
+
 /** Normalizes discovery failures while invalidating a connection that requires authorization. */
 export function discoveryConnectionError(
   error: unknown,
