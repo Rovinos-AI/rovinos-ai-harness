@@ -140,6 +140,12 @@ async function createMemoryPeer(
     readonly count?: number;
     readonly modern?: boolean;
     readonly supportsApps?: boolean;
+    readonly prompts?: readonly {
+      readonly name: string;
+      readonly description?: string;
+      readonly arguments?: readonly { readonly name: string; readonly required?: boolean }[];
+    }[];
+    readonly failPromptGet?: boolean;
     readonly onCall?: MemoryCallHandler;
     readonly tools?: Tool[];
   } = {},
@@ -148,6 +154,7 @@ async function createMemoryPeer(
   const server = new McpServer({ name: "memory-server", version: "1.0.0" });
   server.server.registerCapabilities({
     tools: { listChanged: true },
+    ...(options.prompts === undefined ? {} : { prompts: { listChanged: true } }),
     ...(options.supportsApps === true ? { extensions: { "io.modelcontextprotocol/ui": {} } } : {}),
   });
   if (options.modern === true) {
@@ -178,6 +185,17 @@ async function createMemoryPeer(
     }
     return { content: [{ type: "text", text: "called" }] };
   });
+  if (options.prompts !== undefined) {
+    server.server.setRequestHandler("prompts/list", () => ({ prompts: options.prompts }));
+    server.server.setRequestHandler("prompts/get", (request) => {
+      if (options.failPromptGet === true) {
+        return Promise.reject(new Error("synthetic prompt failure"));
+      }
+      return {
+        messages: [{ role: "user", content: { type: "text", text: request.params.name } }],
+      };
+    });
+  }
   await server.connect(serverTransport);
   return { client, serverTransport, server };
 }
@@ -282,6 +300,56 @@ function deferredTransport(transport: Transport) {
 }
 
 describe("McpConnection", () => {
+  it("lists and retrieves prompts on a server that advertises prompt support", async () => {
+    const peer = await createMemoryPeer({
+      prompts: [{ name: "welcome", arguments: [{ name: "who", required: true }] }],
+    });
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+    try {
+      await connection.connect();
+      await expect(connection.listPrompts()).resolves.toMatchObject([
+        { name: "welcome", arguments: [{ name: "who", required: true }] },
+      ]);
+      await expect(connection.getPrompt("welcome", { who: "Ada" })).resolves.toMatchObject({
+        messages: [{ role: "user", content: { type: "text", text: "welcome" } }],
+      });
+    } finally {
+      await connection.close();
+      await peer.serverTransport.close();
+    }
+  });
+
+  it("denies prompt listing when the server does not advertise prompt support", async () => {
+    const peer = await createMemoryPeer();
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+    try {
+      await connection.connect();
+      await expect(connection.listPrompts()).rejects.toMatchObject({
+        code: "mcp_prompt_unavailable",
+      });
+    } finally {
+      await connection.close();
+      await peer.serverTransport.close();
+    }
+  });
+
+  it("maps prompt-get protocol failures to a closed error code", async () => {
+    const peer = await createMemoryPeer({
+      prompts: [{ name: "welcome" }],
+      failPromptGet: true,
+    });
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+    try {
+      await connection.connect();
+      await expect(connection.getPrompt("welcome", undefined)).rejects.toMatchObject({
+        code: "mcp_prompt_failed",
+      });
+    } finally {
+      await connection.close();
+      await peer.serverTransport.close();
+    }
+  });
+
   it("rejects unsupported outbound MCP Apps configuration with a closed error code", () => {
     const createTransport = vi.fn<() => Promise<Transport>>();
     const error = (() => {

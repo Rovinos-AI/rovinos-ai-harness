@@ -51,6 +51,7 @@ import {
   SummarizingStrategy,
 } from "@rovinos/context";
 import { activeRuns, TripQueue } from "@rovinos/telemetry";
+import { McpPromptError } from "@rovinos/mcp";
 import { buildApprovalPayload, sweepApprovals, type ApprovalSweepStore } from "@rovinos/policy";
 import { emailDetector, PiiToolPort, Tokenizer } from "@rovinos/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@rovinos/vault";
@@ -60,6 +61,8 @@ import { NaiveContext } from "./context/naive-context.js";
 import { StrategyContextPort } from "./context/context-port.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";
 import { runLoop as runCoreLoop } from "./loop.js";
+import { addMcpPromptsToGoal } from "./prompt-selection.js";
+import type { RunLoopOptions } from "./loop.js";
 import type { ToolResumeDecision, ToolResumeStrategy } from "./resume-policy.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { Checkpointer } from "./checkpoint.js";
@@ -131,6 +134,31 @@ const modelCallId = "22222222222222222222222222";
 const approvalId = "33333333333333333333333333";
 const defaultBudgets = RunConfigSchema.parse({}).budgets;
 const goldenPath = fileURLToPath(new URL("./__golden__/one-step.json", import.meta.url));
+
+function promptSelectionOptions(overrides: Partial<RunLoopOptions> = {}): RunLoopOptions {
+  const clock = new FakeClock(100);
+  return {
+    recorder: new RunRecorder(
+      new InMemoryEventStore(),
+      Id.parse(runId),
+      Id.parse(segmentId),
+      0,
+      clock,
+    ),
+    clock,
+    model: new FakeModelPort([completion()]),
+    tool: new FakeToolPort(),
+    context: new NaiveContext(),
+    ids: new SequentialIdGenerator(),
+    goal: "Summarize the document",
+    signal: new AbortController().signal,
+    budgets: defaultBudgets,
+    configHash: Sha256Hex.parse(configHash),
+    policyVersion: "test.policy",
+    ...overrides,
+  };
+}
+
 let nextSpanId = 0;
 let invalidSpanContext = false;
 
@@ -1269,6 +1297,58 @@ describe("approval lifecycle", () => {
 });
 
 describe("runLoop", () => {
+  it("returns unchanged options when no prompts are selected", async () => {
+    const options = promptSelectionOptions();
+
+    await expect(addMcpPromptsToGoal(options)).resolves.toBe(options);
+  });
+
+  it("rejects invalid prompt selections with the closed arguments code", async () => {
+    await expect(
+      addMcpPromptsToGoal(
+        promptSelectionOptions({
+          promptSelections: [{ serverId: Code.parse("docs"), name: "" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "mcp_prompt_arguments_invalid" });
+  });
+
+  it("denies selected prompts when no prompt port is configured", async () => {
+    await expect(
+      addMcpPromptsToGoal(
+        promptSelectionOptions({
+          promptSelections: [{ serverId: Code.parse("docs"), name: "summarize" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "mcp_prompt_not_granted" });
+  });
+
+  it("fails closed when prompt selections cannot be tokenized", async () => {
+    await expect(
+      addMcpPromptsToGoal(
+        promptSelectionOptions({
+          promptSelections: [{ serverId: Code.parse("docs"), name: "summarize" }],
+          promptPort: { retrievePrompts: () => Promise.resolve([]) },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "mcp_prompt_failed" });
+  });
+
+  it("propagates a closed retrieval failure", async () => {
+    await expect(
+      addMcpPromptsToGoal(
+        promptSelectionOptions({
+          promptSelections: [{ serverId: Code.parse("docs"), name: "summarize" }],
+          promptPort: {
+            retrievePrompts: () => Promise.reject(new McpPromptError("mcp_prompt_failed")),
+          },
+          runId: Id.parse(runId),
+          tokenizeMcpPromptContent: () => Promise.resolve("tokenized"),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "mcp_prompt_failed" });
+  });
+
   it("tokenizes retrieved prompts and records provenance as explicitly untrusted input", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
