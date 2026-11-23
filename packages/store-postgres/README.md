@@ -153,7 +153,7 @@ hashes. Event content encryption depends on the caller-supplied codec; the defau
 content without encryption. This package does not detect or tokenize PII, sanitize caller-provided
 metadata, or encrypt the database connection itself. Apply tokenization upstream, use a protected
 connection and database, and configure an encrypted codec and key provider when at-rest content
-encryption is required. See [store content encryption](../store/README.md#event-store-content-encryption)
+encryption is required. See [store content encryption](../store/README.md#security-and-privacy)
 and [secret handling](../../docs/secrets.md).
 
 ## Testing
