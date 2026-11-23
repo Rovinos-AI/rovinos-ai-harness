@@ -24,6 +24,7 @@ const stepSchema = z.looseObject({
 const jobSchema = z.looseObject({
   needs: z.union([z.string(), z.array(z.string())]).optional(),
   if: z.string().optional(),
+  "continue-on-error": z.boolean().optional(),
   outputs: z.record(z.string(), z.string()).optional(),
   "runs-on": z.string(),
   "timeout-minutes": z.number().int().positive(),
@@ -196,6 +197,7 @@ describe("GitHub workflows", () => {
       "integration",
       "gates",
       "conformance-advisory",
+      "inspector-sessions-advisory",
     ]);
     expect(jobs.static?.if).toBe(
       "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
@@ -207,9 +209,19 @@ describe("GitHub workflows", () => {
     );
     expect(jobs.integration?.needs).toBe("unit");
     expect(jobs.gates?.needs).toEqual(["integration", "image-scan"]);
+    expect(jobs.gates?.needs).not.toContain("inspector-sessions-advisory");
     expect(jobs.gates?.if).toContain("always()");
     expect(jobs["conformance-advisory"]).toMatchObject({ "continue-on-error": true });
     expect(jobs["conformance-advisory"]?.needs).toBeUndefined();
+    expect(jobs["inspector-sessions-advisory"]).toMatchObject({
+      "continue-on-error": true,
+      if: "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
+    });
+    expect(jobs["inspector-sessions-advisory"]?.needs).toBeUndefined();
+    expect(jobSteps("gates").find((step) => step.name === "Require CI jobs")?.env).toEqual({
+      INTEGRATION_RESULT: "${{ needs.integration.result }}",
+      IMAGE_SCAN_RESULT: "${{ needs.image-scan.result }}",
+    });
     expect(jobSteps("gates").find((step) => step.name === "Require CI jobs")?.if).toBe("always()");
   });
 
