@@ -7,11 +7,7 @@ export {
   type McpConnectionState,
   type McpTool,
 } from "./connection.js";
-export {
-  McpPromptError,
-  McpProtocolError,
-  type McpPromptErrorCode,
-} from "./errors.js";
+export { McpPromptError, McpProtocolError, type McpPromptErrorCode } from "./errors.js";
 export type { GetPromptResult, McpPrompt } from "./prompts.js";
 export {
   McpToolPort,

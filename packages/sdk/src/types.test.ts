@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import {
-  HarnessOverridesSchema,
-  StartRunOptionsSchema,
-  WatchOptionsSchema,
-} from "./types.js";
+import { HarnessOverridesSchema, StartRunOptionsSchema, WatchOptionsSchema } from "./types.js";
 
 describe("SDK option boundary schemas", () => {
   it("accepts adapter-shaped overrides only when their required capabilities are present", () => {
@@ -80,9 +76,7 @@ describe("SDK option boundary schemas", () => {
     expect(
       StartRunOptionsSchema.safeParse({
         goal: "synthetic goal",
-        promptSelections: [
-          { serverId: "docs", name: "summarize", extra: true },
-        ],
+        promptSelections: [{ serverId: "docs", name: "summarize", extra: true }],
       }).success,
     ).toBe(false);
   });

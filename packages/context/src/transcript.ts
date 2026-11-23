@@ -39,9 +39,7 @@ function isRetrievedPrompt(value: JsonValue): value is RetrievedPromptInput {
   );
 }
 
-function isPromptInput(
-  value: JsonValue,
-): value is PromptInput {
+function isPromptInput(value: JsonValue): value is PromptInput {
   return (
     isRecord(value) &&
     "initialInput" in value &&

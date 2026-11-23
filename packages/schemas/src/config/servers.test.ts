@@ -91,9 +91,9 @@ describe("ServerConfigSchema", () => {
 
     expect(ServerConfigSchema.parse(base).promptGrants).toBeUndefined();
     expect(ServerConfigSchema.parse({ ...base, promptGrants: [] }).promptGrants).toEqual([]);
-    expect(
-      ServerConfigSchema.parse({ ...base, promptGrants: ["summarize"] }).promptGrants,
-    ).toEqual(["summarize"]);
+    expect(ServerConfigSchema.parse({ ...base, promptGrants: ["summarize"] }).promptGrants).toEqual(
+      ["summarize"],
+    );
     expect(
       ServerConfigSchema.safeParse({ ...base, promptGrants: ["summarize", "summarize"] }).success,
     ).toBe(false);
@@ -108,9 +108,9 @@ describe("ServerConfigSchema", () => {
     };
 
     expect(ServerConfigSchema.safeParse(config).success).toBe(false);
-    expect(
-      ServerConfigSchema.safeParse({ ...config, maxResultBytes: 1_048_576 }).success,
-    ).toBe(true);
+    expect(ServerConfigSchema.safeParse({ ...config, maxResultBytes: 1_048_576 }).success).toBe(
+      true,
+    );
   });
 
   it("rejects trace propagation for external servers with its stable error code", () => {
