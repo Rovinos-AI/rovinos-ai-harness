@@ -12,7 +12,7 @@ not exercise a model-selected call through the harness.
 | CLI gate | `test/inspector-conformance.int.test.ts` exercises `harness serve` over stdio and HTTP, modern and legacy initialization, schema portability, Apps metadata and HTML retrieval, synthetic tool calls, restricted read scope, unauthenticated HTTP rejection, and a credential-leak canary. |
 | Web Apps | `test/inspector-apps.int.test.ts` uses Inspector 2.15.0 against a synthetic loopback server and checks rendered approval content and privacy/network controls. Decision calls fail closed with `human_confirmation_unavailable`; this scenario does not verify a completed approval or denial. |
 | TUI | Available for terminal-only inspection; no harness-specific TUI scenario is currently run by CI. |
-| `mcpdo` | Experimental persistent client sessions; use only for advisory exploration. There is no harness-specific `mcpdo` result in the blocking CI gate. |
+| `mcpdo` | The `inspector-sessions-advisory` job runs the pinned client against synthetic `harness serve --stdio` fixtures using the modern protocol. It checks confirmed, declined, and replayed elicitation flows; failures remain advisory and do not satisfy upstream conformance. |
 
 These are harness-server checks, not upstream MCP certification or a test of model-selected outbound
 calls. The advisory conformance lane and its measured roles are described below.
@@ -84,20 +84,25 @@ unless a client advertises the `io.modelcontextprotocol/ui` capability. Without
 `--advertise-apps`, the metadata probe will not see those tools. `--strict` cannot be combined with
 `--app-info`; the gate runs the schema check separately.
 
-### `mcpdo` sessions (experimental)
+### `mcpdo` sessions (experimental, advisory)
 
-`mcpdo` connects once and reuses a named connection through its local daemon. For a local stdio
-session, a basic read-only sequence is:
+`mcpdo` connects once and reuses a named connection through its local daemon. The repository's
+advisory session probe uses a temporary home and synthetic fixtures. After `yarn build`, run it with:
 
-1. `mcpdo connect --connection harness-local --transport stdio --era modern -- node packages/cli/dist/bin.js serve --stdio`
-2. `mcpdo connections/show harness-local` and `mcpdo tools/list`
-3. `mcpdo tools/call --tool-name list_runs --tool-args-json '{}'`
-4. `mcpdo disconnect harness-local`, then `mcpdo daemon stop`
+`node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/ci/inspector-sessions.ts`
 
-Use a disposable home directory for experiments and stop the daemon even after a failed session.
-`mcpdo` is experimental and advisory; these commands are not a completed approval-flow test or a
-blocking harness CI check. In particular, do not infer successful human confirmation from an
-elicitation response alone.
+The probe connects to `harness serve --stdio` with protocol `2026-07-28`, confirms a synthetic
+approval and checks exactly one recorded decision, declines a second request and checks that no
+decision was recorded, then replays the same confirmation state and checks for
+`confirmation_state_replayed`. The replay probe uses the MCP client SDK's manual multi-round-trip
+interface because `mcpdo` automatically retries a pending tool call after its elicitation response.
+The JSON evidence report is written to `reports/inspector-sessions/result.json`; it records the
+pinned Inspector version, stdio transport, protocol era, tested client role, and per-scenario result.
+
+The `inspector-sessions-advisory` CI job is explicitly non-blocking while `mcpdo` is experimental.
+Its step/report must still show failed scenarios as failures; a successful required CI gate is not
+evidence that this advisory lane passed. Promote the job only after an owner approves a stability
+criterion for the pinned Inspector release and updates the lane policy.
 
 ## Protocol eras
 
@@ -150,4 +155,6 @@ the pinned runner. Scenario failures are retained in the uploaded report and emi
 Actions warnings; runner, setup, and report-validation errors still fail the job.
 
 Verification decision: the Azure pipeline is retired; repository CI uses GitHub Actions. The
-Inspector integration test maps to its `integration` job, and the conformance lane remains advisory.
+Inspector integration test maps to its `integration` job, and persistent `mcpdo` sessions map to
+the separate advisory `inspector-sessions-advisory` job. This test exercises the Inspector client
+role against the harness control-plane server; it does not test model-selected outbound MCP calls.
