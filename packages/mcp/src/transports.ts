@@ -146,7 +146,7 @@ async function createHttpTransport(options: {
 /** Bounds the response bytes exposed by Fetch before the SDK parses its response. */
 export function createResponseLimitedFetch(maxBytes: number): typeof globalThis.fetch {
   return async (input, init) => {
-    const response = await globalThis.fetch(input, { ...init, redirect: "error" });
+    const response = await fetchSameOriginRedirects(input, init);
     if (response.body === null) {
       return response;
     }
@@ -179,6 +179,85 @@ export function createResponseLimitedFetch(maxBytes: number): typeof globalThis.
       headers: response.headers,
     });
   };
+}
+
+function isRedirectStatus(status: number): boolean {
+  return [301, 302, 303, 307, 308].includes(status);
+}
+
+function isReplayableBody(body: BodyInit | null | undefined): boolean {
+  return (
+    body === undefined ||
+    body === null ||
+    typeof body === "string" ||
+    body instanceof URLSearchParams ||
+    body instanceof Blob ||
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body)
+  );
+}
+
+function canFollowRedirect(options: {
+  readonly redirects: number;
+  readonly inputIsRequest: boolean;
+  readonly target: URL;
+  readonly initialUrl: URL;
+  readonly method: string;
+  readonly status: number;
+  readonly replayableBody: boolean;
+}): boolean {
+  const canFollowMethod =
+    options.method === "GET" ||
+    options.method === "HEAD" ||
+    options.status === 307 ||
+    options.status === 308;
+  return (
+    options.redirects < 5 &&
+    !options.inputIsRequest &&
+    options.target.origin === options.initialUrl.origin &&
+    canFollowMethod &&
+    options.replayableBody
+  );
+}
+
+async function fetchSameOriginRedirects(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const initialUrl = new URL(input instanceof Request ? input.url : input.toString());
+  const method = init?.method?.toUpperCase() ?? (input instanceof Request ? input.method : "GET");
+  const replayableBody = isReplayableBody(init?.body);
+  let url = initialUrl;
+
+  for (let redirects = 0; ; redirects++) {
+    const response = await globalThis.fetch(url, { ...init, redirect: "manual" });
+    if (!isRedirectStatus(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.get("location");
+    if (location === null) {
+      return response;
+    }
+    const target = new URL(location, url);
+    if (
+      !canFollowRedirect({
+        redirects,
+        inputIsRequest: input instanceof Request,
+        target,
+        initialUrl,
+        method,
+        status: response.status,
+        replayableBody,
+      })
+    ) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new TypeError("MCP redirect refused");
+    }
+
+    await response.body?.cancel().catch(() => undefined);
+    url = target;
+  }
 }
 
 /**
