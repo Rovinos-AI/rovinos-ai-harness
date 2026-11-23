@@ -15,14 +15,17 @@ import {
 } from "./errors.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
-import {
-  LegacyConnectionElicitation,
-  type LegacyElicitationCallbacks,
-} from "./legacy-connection.js";
+import { LegacyConnectionElicitation } from "./legacy-connection.js";
 import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import type { McpTool } from "./tool-list.js";
-import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
+import type {
+  ConnectionToolCall,
+  McpConnectionDependencies,
+  McpConnectionState,
+} from "./connection-types.js";
+import { PromptConnection } from "./prompt-connection.js";
+import type { GetPromptResult, McpPrompt } from "./prompts.js";
 import { ResourceConnection } from "./resource-connection.js";
 import {
   type McpResource,
@@ -35,28 +38,20 @@ import {
   createConfiguredTransport,
   createMcpClient,
   defaultSleep,
+  handleConnectionToolsChanged,
   getOrCreateValidator,
   isConnectionStale,
   invokeConnectionTool,
-  observeTransportClose,
   reconnectWithBackoff,
   runWithSafeAuthLogging,
   connectionCallError,
+  watchConnectionTransport,
 } from "./connection-helpers.js";
 import { ConnectionToolDiscovery } from "./tool-discovery.js";
 
 export type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
 export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
 export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
-
-interface ConnectionToolCall {
-  readonly params: CallToolRequest["params"];
-  readonly inputSchema: unknown;
-  readonly options?: CallToolRequestOptions;
-  readonly toolDefinition?: McpTool;
-  readonly inputRetry?: ElicitationRetry;
-  readonly legacyElicitation?: LegacyElicitationCallbacks;
-}
 
 /**
  * Manages one MCP SDK client, its transport, tool discovery, and reconnection.
@@ -66,6 +61,7 @@ export class McpConnection {
   readonly #dependencies: McpConnectionDependencies;
   readonly #resourceConnection: ResourceConnection;
   readonly #toolDiscovery: ConnectionToolDiscovery;
+  readonly #prompts: PromptConnection;
   #client: Client | undefined;
   #currentTransport: Transport | undefined;
   #connectPromise: Promise<void> | undefined;
@@ -98,6 +94,13 @@ export class McpConnection {
       getProtocolEra: () => this.#protocolEra,
       getState: () => this.#state,
       markUnavailable: this.#markUnavailable.bind(this),
+    });
+    this.#prompts = new PromptConnection({
+      config,
+      client: () => this.#client,
+      protocolEra: () => this.#protocolEra,
+      now: dependencies.now ?? Date.now,
+      ensureReady: (signal) => this.#ensureReady(signal),
     });
   }
 
@@ -218,11 +221,7 @@ export class McpConnection {
         await activeClient.close().catch(() => undefined);
         return;
       }
-      this.#client = activeClient;
-      this.#protocolEra = activeClient.getProtocolEra();
-      this.#resourceConnection.attach(activeClient, this.#protocolEra);
-      this.#state = "ready";
-      this.#watchTransport(activeTransport);
+      this.#markReady(activeClient, activeTransport);
     } catch (error) {
       this.#markUnavailable();
       await (client ?? transport)?.close().catch(() => undefined);
@@ -254,25 +253,23 @@ export class McpConnection {
   }
 
   #onToolsChanged(error: Error | null): void {
-    this.#toolDiscovery.invalidate();
-    const logRefreshFailure = () => {
-      this.#dependencies.logger?.log({
-        code: "mcp_tools_refresh_failed",
-        serverId: this.#config.id,
-      });
-    };
-    if (error !== null) {
-      logRefreshFailure();
-      return;
-    }
-    if (this.#state === "ready") {
-      void this.#toolDiscovery.list().catch(logRefreshFailure);
-    }
+    handleConnectionToolsChanged({
+      error,
+      serverId: this.#config.id,
+      logger: this.#dependencies.logger,
+      onChange: this.#toolDiscovery.invalidate.bind(this.#toolDiscovery),
+      isReady: () => this.#state === "ready",
+      refresh: () => this.#toolDiscovery.list(),
+    });
   }
 
-  #watchTransport(transport: Transport): void {
+  #markReady(client: Client, transport: Transport): void {
+    this.#client = client;
+    this.#protocolEra = client.getProtocolEra();
+    this.#resourceConnection.attach(client, this.#protocolEra);
+    this.#state = "ready";
     this.#currentTransport = transport;
-    observeTransportClose(transport, () => {
+    watchConnectionTransport(transport, () => {
       if (this.#currentTransport === transport) {
         this.#markUnavailable();
       }
@@ -285,6 +282,20 @@ export class McpConnection {
    */
   listTools(signal?: AbortSignal): Promise<McpTool[]> {
     return this.#toolDiscovery.list(signal);
+  }
+
+  /** Lists prompts under finite discovery budgets without declaring client prompt capabilities. */
+  listPrompts(signal?: AbortSignal): Promise<McpPrompt[]> {
+    return this.#prompts.list(signal);
+  }
+
+  /** Retrieves one prompt on this server connection using its current advertised arguments. */
+  getPrompt(
+    name: string,
+    arguments_: Readonly<Record<string, string>> | undefined,
+    signal?: AbortSignal,
+  ): Promise<GetPromptResult> {
+    return this.#prompts.get(name, arguments_, signal);
   }
 
   /**
@@ -384,9 +395,7 @@ export class McpConnection {
       if (!isLoss) {
         throw new McpConnectionError("mcp_tool_call_failed");
       }
-      this.#state = "unavailable";
-      this.#protocolEra = undefined;
-      this.#toolDiscovery.invalidate();
+      this.#markUnavailable();
       if (this.#config.idempotentTools?.includes(params.name) !== true) {
         throw new McpConnectionError("mcp_connection_lost");
       }
@@ -426,10 +435,7 @@ export class McpConnection {
     if (this.#closed) {
       return Promise.reject(new McpConnectionError("mcp_connection_lost"));
     }
-    if (this.#state === "ready") {
-      return Promise.resolve();
-    }
-    return this.#reconnect(signal);
+    return this.#state === "ready" ? Promise.resolve() : this.#reconnect(signal);
   }
 
   #reconnect(signal?: AbortSignal): Promise<void> {
@@ -451,9 +457,7 @@ export class McpConnection {
     const client = this.#client;
     this.#client = undefined;
     this.#currentTransport = undefined;
-    this.#protocolEra = undefined;
-    this.#state = "unavailable";
-    this.#toolDiscovery.invalidate();
+    this.#markUnavailable();
 
     if (connectPromise !== undefined) {
       await connectPromise.catch(() => undefined);

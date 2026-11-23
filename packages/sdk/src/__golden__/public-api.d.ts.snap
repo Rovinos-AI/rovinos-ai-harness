@@ -127,6 +127,24 @@ export declare function inspectMcpServer(server: McpServerConfig, options: Inspe
  */
 export declare function selectMcpTools(config: z.input<typeof HarnessConfigSchema>, inspection: McpCatalogInspection, toolNames: readonly string[]): McpToolSelectionResult;
 
+import { z } from "zod";
+/** Input for starting a run. */
+export declare const StartRunOptionsSchema: z.ZodObject<{
+    goal: z.ZodString;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
+    role: z.ZodOptional<z.ZodString>;
+    toolProfile: z.ZodOptional<z.ZodString>;
+    promptSelections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        serverId: z.ZodString;
+        name: z.ZodString;
+        arguments: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strict>>>;
+    idempotencyKey: z.ZodOptional<z.ZodString>;
+    requestedBy: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+/** Inferred input for {@link Harness.startRun}. */
+export type StartRunOptions = z.infer<typeof StartRunOptionsSchema>;
+
 /** Closed MCP resource failure codes surfaced by the SDK. */
 export type SdkMcpResourceOperationErrorCode = "mcp_read_resource_failed" | "mcp_resource_access_denied" | "mcp_resource_content_unsupported" | "mcp_resource_grant_invalid" | "mcp_resource_request_too_large" | "mcp_resource_subscription_unavailable" | "mcp_resource_timeout" | "mcp_resource_tokenization_failed" | "mcp_resource_uri_invalid" | "mcp_resources_changed" | "mcp_resources_unavailable" | "mcp_too_many_resources";
 
@@ -134,9 +152,12 @@ import { HarnessError, Id } from "@rovinos/schemas";
 import { SafeEvent } from "@rovinos/telemetry";
 import { z } from "zod";
 import type { ExtensionGrantRevocation, ExtensionRegistration, ExtensionRegistrationStatus } from "./extensions.js";
+import type { StartRunOptions } from "./start-run-options.js";
+export { StartRunOptionsSchema } from "./start-run-options.js";
+export type { StartRunOptions } from "./start-run-options.js";
 import type { SdkMcpResourceOperationErrorCode } from "./mcp-resource-error-codes.js";
-/** Closed MCP connection and tool failure codes surfaced by {@link SdkError}. */
-export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_resources_failed" | "mcp_list_tools_failed" | SdkMcpResourceOperationErrorCode | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed";
+/** Closed MCP connection, tool, and prompt failure codes surfaced by {@link SdkError}. */
+export type SdkMcpConnectionErrorCode = "mcp_apps_unsupported" | "mcp_auth_required" | "mcp_connect_failed" | "mcp_connect_timeout" | "mcp_connection_lost" | "mcp_discovery_cancelled" | "mcp_discovery_data_limit" | "mcp_discovery_page_limit" | "mcp_discovery_schema_limit" | "mcp_discovery_timeout" | "mcp_list_resources_failed" | "mcp_list_tools_failed" | SdkMcpResourceOperationErrorCode | "mcp_too_many_tools" | "mcp_tool_arguments_invalid" | "mcp_tool_call_failed" | "mcp_prompt_not_granted" | "mcp_prompt_unavailable" | "mcp_prompt_arguments_invalid" | "mcp_prompt_result_too_large" | "mcp_prompt_failed";
 /** Runtime adapters and deterministic dependencies injectable by applications and tests. */
 export declare const HarnessOverridesSchema: z.ZodObject<{
     store: z.ZodOptional<z.ZodCustom<import("@rovinos/store").EventStore, import("@rovinos/store").EventStore>>;
@@ -403,6 +424,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             }>>;
             propagateTrace: z.ZodDefault<z.ZodBoolean>;
             toolAllowlist: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            promptGrants: z.ZodOptional<z.ZodArray<z.ZodString>>;
             resourceUriGrants: z.ZodOptional<z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 kind: z.ZodLiteral<"uri">;
                 uri: z.ZodString;
@@ -486,6 +508,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             maxArtifactBytes: number;
             binaryResults: "allow" | "block";
             toolAllowlist?: string[] | undefined;
+            promptGrants?: string[] | undefined;
             resourceUriGrants?: ({
                 kind: "uri";
                 uri: string;
@@ -545,6 +568,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             maxArtifactBytes: number;
             binaryResults: "allow" | "block";
             toolAllowlist?: string[] | undefined;
+            promptGrants?: string[] | undefined;
             resourceUriGrants?: ({
                 kind: "uri";
                 uri: string;
@@ -1032,17 +1056,6 @@ export type WithExtensionRegistrations<Options, Registrations extends readonly E
 export type CreateHarnessOptions<Registrations extends readonly ExtensionRegistration[] = readonly ExtensionRegistration[]> = WithExtensionRegistrations<CreateHarnessOptionsInput, Registrations>;
 /** Branded ULID accepted by public run and approval operations. */
 export type RunId = z.infer<typeof Id>;
-/** Input for starting a run. */
-export declare const StartRunOptionsSchema: z.ZodObject<{
-    goal: z.ZodString;
-    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
-    role: z.ZodOptional<z.ZodString>;
-    toolProfile: z.ZodOptional<z.ZodString>;
-    idempotencyKey: z.ZodOptional<z.ZodString>;
-    requestedBy: z.ZodOptional<z.ZodString>;
-}, z.core.$strict>;
-/** Inferred input for {@link Harness.startRun}. */
-export type StartRunOptions = z.infer<typeof StartRunOptionsSchema>;
 /** Input for continuing a terminal run. */
 export declare const ContinueRunOptionsSchema: z.ZodObject<{
     goal: z.ZodString;

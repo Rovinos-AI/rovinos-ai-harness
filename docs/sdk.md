@@ -45,6 +45,33 @@ approval. `continueRun` accepts the same option. Profiles apply to new runs only
 resumed runs keep the MCP tool fingerprints recorded at creation. See
 [configuration](configuration.md#mcp-tool-profiles) for limits and examples.
 
+## MCP prompt selections
+
+Grant exact outbound prompt names on a server with `promptGrants`, then select
+those prompts for a new run:
+
+```yaml
+servers:
+  - id: docs
+    transport:
+      kind: stdio
+      command: /absolute/path/to/docs-mcp
+    promptGrants: [summarize]
+```
+
+```ts
+const { runId } = await harness.startRun({
+  goal: "Summarize the synthetic project status.",
+  promptSelections: [{ serverId: "docs", name: "summarize", arguments: { format: "brief" } }],
+});
+```
+
+Selections must match exact server grants and the prompt's advertised
+arguments; omitting selections grants no prompt access. Retrieved descriptions
+and messages are untrusted, tokenized model input with server and prompt-name
+provenance. They cannot change policy, tool grants, or approval requirements.
+Prompt content is fetched for each run, is bounded, and is not cached.
+
 ## MCP server onboarding
 
 The SDK helpers support the configure, inspect, select, and start flow without importing internal

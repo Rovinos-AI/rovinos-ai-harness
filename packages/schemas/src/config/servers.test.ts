@@ -83,6 +83,36 @@ describe("ServerConfigSchema", () => {
     });
   });
 
+  it("keeps prompt grants separate from tool grants and defaults them to deny", () => {
+    const base = {
+      id: "mcp",
+      transport: { kind: "stdio", command: "node" },
+    };
+
+    expect(ServerConfigSchema.parse(base).promptGrants).toBeUndefined();
+    expect(ServerConfigSchema.parse({ ...base, promptGrants: [] }).promptGrants).toEqual([]);
+    expect(ServerConfigSchema.parse({ ...base, promptGrants: ["summarize"] }).promptGrants).toEqual(
+      ["summarize"],
+    );
+    expect(
+      ServerConfigSchema.safeParse({ ...base, promptGrants: ["summarize", "summarize"] }).success,
+    ).toBe(false);
+  });
+
+  it("requires the transport response limit to enforce prompt result bounds before buffering", () => {
+    const config = {
+      id: "mcp",
+      transport: { kind: "stdio", command: "node" },
+      promptGrants: ["summarize"],
+      maxResultBytes: 1_048_577,
+    };
+
+    expect(ServerConfigSchema.safeParse(config).success).toBe(false);
+    expect(ServerConfigSchema.safeParse({ ...config, maxResultBytes: 1_048_576 }).success).toBe(
+      true,
+    );
+  });
+
   it("accepts exact and RFC 6570 resource grants independently of the tool allowlist", () => {
     const parsed = ServerConfigSchema.parse({
       id: "mcp.weather",

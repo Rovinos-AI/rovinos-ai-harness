@@ -46,6 +46,25 @@ export type McpConnectionErrorCode =
   | "mcp_tool_arguments_invalid"
   | "mcp_tool_call_failed";
 
+/** Closed prompt-retrieval failures that never include server-provided text. */
+export type McpPromptErrorCode =
+  | "mcp_prompt_not_granted"
+  | "mcp_prompt_unavailable"
+  | "mcp_prompt_arguments_invalid"
+  | "mcp_prompt_result_too_large"
+  | "mcp_prompt_failed";
+
+/** Safe prompt retrieval error with one of the public closed prompt codes. */
+export class McpPromptError extends HarnessError {
+  override readonly code: McpPromptErrorCode;
+
+  /** Creates a safe prompt error without remote details. */
+  constructor(code: McpPromptErrorCode) {
+    super(code);
+    this.code = code;
+  }
+}
+
 /** Safe connection error with a closed code and no remote-provided message. */
 export class McpConnectionError extends HarnessError {
   override readonly code: McpConnectionErrorCode;

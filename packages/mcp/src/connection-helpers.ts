@@ -34,16 +34,6 @@ export function isConnectionStale(
   return closed || activeGeneration !== generation;
 }
 
-/** Preserves the transport close handler before notifying its connection owner. */
-export function observeTransportClose(transport: Transport, onClose: () => void): void {
-  const monitoredTransport = transport;
-  const previousOnClose = monitoredTransport.onclose;
-  monitoredTransport.onclose = () => {
-    previousOnClose?.();
-    onClose();
-  };
-}
-
 /** Normalizes discovery failures while invalidating a connection that requires authorization. */
 export function discoveryConnectionError(
   error: unknown,
@@ -67,6 +57,45 @@ export function connectionCallError(error: unknown): McpConnectionError | undefi
     return error;
   }
   return undefined;
+}
+
+/** Attaches connection state cleanup to transport close without retaining stale callbacks. */
+export function watchConnectionTransport(
+  transport: Transport,
+  onCurrentTransportClosed: () => void,
+): void {
+  const monitoredTransport = transport;
+  const onclose = monitoredTransport.onclose;
+  monitoredTransport.onclose = () => {
+    onclose?.();
+    onCurrentTransportClosed();
+  };
+  const onerror = monitoredTransport.onerror;
+  monitoredTransport.onerror = (error) => {
+    onerror?.(error);
+  };
+}
+
+/** Applies tool-list change notifications and logs refresh failures without server messages. */
+export function handleConnectionToolsChanged(options: {
+  readonly error: Error | null;
+  readonly serverId: ServerConfig["id"];
+  readonly logger: McpConnectionDependencies["logger"];
+  readonly onChange: () => void;
+  readonly isReady: () => boolean;
+  readonly refresh: () => Promise<unknown>;
+}): void {
+  options.onChange();
+  const logRefreshFailure = () => {
+    options.logger?.log({ code: "mcp_tools_refresh_failed", serverId: options.serverId });
+  };
+  if (options.error !== null) {
+    logRefreshFailure();
+    return;
+  }
+  if (options.isReady()) {
+    void options.refresh().catch(logRefreshFailure);
+  }
 }
 
 /** Discovers validated pages with one shared signal and metadata-only exclusion logging. */

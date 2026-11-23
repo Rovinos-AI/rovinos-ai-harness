@@ -10,6 +10,7 @@ const sourceFiles = [
   "index.ts",
   "harness.ts",
   "mcp-onboarding.ts",
+  "start-run-options.ts",
   "mcp-resource-error-codes.ts",
   "types.ts",
 ];
