@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   FunctionCallingConfigMode,
+  FunctionResponse,
   type Content,
   type GenerateContentConfig,
   type Part as VertexPart,
@@ -162,13 +163,13 @@ function toolResultPart(
   } else {
     response = { result };
   }
-  return {
-    functionResponse: {
-      name: functionCall.name,
-      response,
-      ...(functionCall.id === undefined ? {} : { id: functionCall.id }),
-    },
-  };
+  const functionResponse = new FunctionResponse();
+  functionResponse.name = functionCall.name;
+  functionResponse.response = response;
+  if (functionCall.id !== undefined) {
+    functionResponse.id = functionCall.id;
+  }
+  return { functionResponse };
 }
 
 function replayableContent(

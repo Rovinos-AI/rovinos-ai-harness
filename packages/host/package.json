@@ -25,13 +25,13 @@
     "@rovinos/core": "workspace:^",
     "@rovinos/schemas": "workspace:^",
     "@rovinos/telemetry": "workspace:^",
-    "tldts": "7.5.1",
+    "tldts": "7.5.5",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
     "esbuild": "0.28.2",
-    "playwright": "1.65.0",
+    "playwright": "1.65.1",
     "typescript": "5.9.3",
     "vitest": "4.1.12"
   }
