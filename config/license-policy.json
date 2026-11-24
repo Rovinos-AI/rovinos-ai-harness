@@ -21,6 +21,12 @@
       "expires": "2027-10-14"
     },
     {
+      "package": "axe-core",
+      "version": "4.14.1",
+      "reason": "Task 5.3 requires this MPL-2.0 accessibility scanner for development-only approval UI tests.",
+      "expires": "2027-10-14"
+    },
+    {
       "package": "@csstools/color-helpers",
       "version": "6.1.2",
       "reason": "MIT-0 transitive dependency of jsdom used only by task 5.3 browser rendering tests.",
@@ -103,6 +109,12 @@
     {
       "package": "@modelcontextprotocol/inspector",
       "version": "2.15.0",
+      "reason": "Apache-2.0 with MIT-licensed contributions during MCP relicensing; docs are CC-BY-4.0; dev-only conformance CLI.",
+      "expires": "2027-01-19"
+    },
+    {
+      "package": "@modelcontextprotocol/inspector",
+      "version": "2.16.0",
       "reason": "Apache-2.0 with MIT-licensed contributions during MCP relicensing; docs are CC-BY-4.0; dev-only conformance CLI.",
       "expires": "2027-01-19"
     },
