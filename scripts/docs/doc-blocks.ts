@@ -19,6 +19,7 @@ export interface DocTestBlock {
 export type DocTestDocumentPath =
   | "docs/quickstart.md"
   | "docs/evals-tutorial.md"
+  | "docs/evals-ci.md"
   | "examples/basic-agent/README.md"
   | "examples/approval/README.md"
   | "examples/crash-and-resume/README.md"
