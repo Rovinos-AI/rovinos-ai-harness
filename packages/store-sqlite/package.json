@@ -32,7 +32,7 @@
     "zod": "4.6.7"
   },
   "peerDependencies": {
-    "@rovinos/sdk": "*"
+    "@rovinos/sdk": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@rovinos/sdk": {
