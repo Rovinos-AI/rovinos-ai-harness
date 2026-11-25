@@ -3066,7 +3066,7 @@ __metadata:
     yaml: "npm:2.9.1"
     zod: "npm:4.6.7"
   peerDependencies:
-    "@rovinos/rate-limit-redis": "*"
+    "@rovinos/rate-limit-redis": "workspace:^"
   peerDependenciesMeta:
     "@rovinos/rate-limit-redis":
       optional: true
@@ -3321,7 +3321,7 @@ __metadata:
     vitest: "npm:4.1.12"
     zod: "npm:4.6.7"
   peerDependencies:
-    "@rovinos/sdk": "*"
+    "@rovinos/sdk": "workspace:^"
   peerDependenciesMeta:
     "@rovinos/sdk":
       optional: true
@@ -3422,7 +3422,7 @@ __metadata:
     yaml: "npm:2.9.1"
     zod: "npm:4.6.7"
   peerDependencies:
-    "@rovinos/rate-limit-redis": "*"
+    "@rovinos/rate-limit-redis": "workspace:^"
   dependenciesMeta:
     better-sqlite3:
       optional: true
@@ -3450,7 +3450,7 @@ __metadata:
     yaml: "npm:2.9.1"
     zod: "npm:4.6.7"
   peerDependencies:
-    "@rovinos/sdk": "*"
+    "@rovinos/sdk": "workspace:^"
   peerDependenciesMeta:
     "@rovinos/sdk":
       optional: true
@@ -3473,7 +3473,7 @@ __metadata:
     yaml: "npm:2.9.1"
     zod: "npm:4.6.7"
   peerDependencies:
-    "@rovinos/sdk": "*"
+    "@rovinos/sdk": "workspace:^"
   peerDependenciesMeta:
     "@rovinos/sdk":
       optional: true
