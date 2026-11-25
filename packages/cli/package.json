@@ -63,7 +63,7 @@
     "zod": "4.6.7"
   },
   "peerDependencies": {
-    "@rovinos/rate-limit-redis": "*"
+    "@rovinos/rate-limit-redis": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@rovinos/rate-limit-redis": {
