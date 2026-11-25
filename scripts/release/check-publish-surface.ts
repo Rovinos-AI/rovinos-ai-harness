@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -37,6 +38,7 @@ const adapterDrivers = new Map([
 
 const packageManifestSchema = z.looseObject({
   name: z.string(),
+  version: z.string().optional(),
   private: z.boolean().optional(),
   engines: z.looseObject({ node: z.string() }).optional(),
   repository: z.looseObject({ url: z.string() }).optional(),
@@ -57,25 +59,34 @@ export interface PackedFile {
   readonly size: number;
 }
 
-function inspectPeerDependencies(manifest: PackageManifest): string[] {
+/** Check internal peers against the fixed release group's version. */
+export function inspectPeerDependencies(
+  manifest: PackageManifest,
+  releaseVersion: string,
+  packed: boolean,
+): string[] {
   const violations: string[] = [];
   const peers = manifest.peerDependencies ?? {};
-  if (
-    manifest.name === "@rovinos/extensions" &&
-    !["workspace:^", "^0.2.0", ">=0.3.0 <0.4.0"].includes(peers["@rovinos/sdk"] ?? "")
-  ) {
+  const valid = (range: string | undefined): boolean =>
+    range === `^${releaseVersion}` || (!packed && range === "workspace:^");
+  if (manifest.name === "@rovinos/extensions" && !valid(peers["@rovinos/sdk"])) {
     violations.push("publish_extensions_sdk_peer_invalid");
   }
   if (
     manifest.name === "@rovinos/extension-retrieval" &&
-    (peers["@rovinos/sdk"] === undefined || peers["@rovinos/extensions"] === undefined)
+    (!valid(peers["@rovinos/sdk"]) || !valid(peers["@rovinos/extensions"]))
   ) {
     violations.push("publish_retrieval_peers_invalid");
+  }
+  if (
+    Object.entries(peers).some(([name, range]) => name.startsWith("@rovinos/") && !valid(range))
+  ) {
+    violations.push("publish_internal_peer_invalid");
   }
   return violations;
 }
 
-function inspectPackageManifest(manifest: PackageManifest): string[] {
+function inspectPackageManifest(manifest: PackageManifest, releaseVersion: string): string[] {
   const violations: string[] = [];
   if (manifest.private === true) {
     violations.push("publish_package_private");
@@ -94,7 +105,7 @@ function inspectPackageManifest(manifest: PackageManifest): string[] {
   ) {
     violations.push("publish_adapter_dependencies_invalid");
   }
-  violations.push(...inspectPeerDependencies(manifest));
+  violations.push(...inspectPeerDependencies(manifest, releaseVersion, true));
   return violations;
 }
 
@@ -195,6 +206,7 @@ function inspectPackageFiles(
 export function inspectPackedPackage(
   manifest: PackageManifest,
   files: readonly PackedFile[],
+  releaseVersion: string,
 ): string[] {
   const expectedName = manifest.name;
   const sizeBudget = sizeBudgets.get(expectedName);
@@ -203,11 +215,26 @@ export function inspectPackedPackage(
   }
   return [
     ...new Set([
-      ...inspectPackageManifest(manifest),
+      ...inspectPackageManifest(manifest, releaseVersion),
       ...inspectRuntimeDependencies(manifest),
       ...inspectPackageFiles(files, sizeBudget, expectedName),
     ]),
   ];
+}
+
+async function packedManifest(workspaceDirectory: string): Promise<PackageManifest> {
+  const directory = await mkdtemp(join(tmpdir(), "publish-surface-"));
+  try {
+    const archive = join(directory, "package.tgz");
+    await execFileAsync("corepack", ["yarn", "pack", "--out", archive], {
+      cwd: workspaceDirectory,
+      maxBuffer: 10_000_000,
+    });
+    const { stdout } = await execFileAsync("tar", ["-xOzf", archive, "package/package.json"]);
+    return parseJson(packageManifestSchema, stdout);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 async function workspaceManifests(repositoryRoot: string): Promise<PackageManifest[]> {
@@ -319,14 +346,27 @@ async function main(): Promise<void> {
   const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
   const manifests = await workspaceManifests(repositoryRoot);
   const violations = inspectWorkspaceManifests(manifests);
+  const releaseVersion = manifests.find((manifest) => manifest.name === "@rovinos/sdk")?.version;
+  if (releaseVersion === undefined || releaseVersion.length === 0) {
+    violations.push("publish_release_version_invalid");
+  }
   for (const name of publishedNames) {
     const packageDirectory = join(repositoryRoot, "packages", name.slice("@rovinos/".length));
     const manifest = manifests.find((candidate) => candidate.name === name);
     if (manifest === undefined) {
       continue;
     }
+    if (releaseVersion === undefined || manifest.version !== releaseVersion) {
+      violations.push("publish_release_version_invalid");
+      continue;
+    }
+    violations.push(...inspectPeerDependencies(manifest, releaseVersion, false));
     const files = await packFiles(packageDirectory);
-    violations.push(...inspectPackedPackage(manifest, files));
+    const packed = await packedManifest(packageDirectory);
+    if (packed.name !== name || packed.version !== releaseVersion) {
+      violations.push("publish_release_version_invalid");
+    }
+    violations.push(...inspectPackedPackage(packed, files, releaseVersion));
     if (await bundledImportViolation(packageDirectory, files, name)) {
       violations.push("publish_internal_import");
     }

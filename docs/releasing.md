@@ -16,11 +16,13 @@ The npm scope is `@rovinos`. The SDK, optional extensions authoring package, opt
 
 All other workspace packages stay private. The SDK and CLI have no internal workspace runtime
 dependencies. They ship ESM bundles, a single declaration entry, and source maps. The extensions
-package externalizes its required `@rovinos/sdk` peer (`>=0.3.0 <0.4.0`) and keeps testing helpers
+package externalizes its required `@rovinos/sdk` peer and keeps testing helpers
 behind an explicit `/testing` export. Third-party runtime dependencies remain external. The SDK and
 CLI keep their database drivers optional and declare the Redis adapter as an optional peer, so
 deployments that do not configure Redis do not install a Redis client. Adapter packages install only
 their own driver and declare the SDK as an optional peer dependency.
+Internal peers use `workspace:^` in source manifests and are packed as `^<release version>`;
+the publish-surface check verifies both forms against the fixed release group.
 
 Every published package requires Node.js 26 or later. The publish-surface check uses
 `yarn pack --dry-run` and rejects internal package dependencies, test or `testing` files (except the
