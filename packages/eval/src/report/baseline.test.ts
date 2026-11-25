@@ -86,6 +86,33 @@ describe("eval baseline", () => {
     ]);
   });
 
+  it("allows new variants absent from the baseline", () => {
+    const baseline = buildEvalBaseline(report());
+    const current = report();
+    const currentTrial = current.trials[0];
+    const currentAggregate = current.aggregates[0];
+    if (currentTrial === undefined || currentAggregate === undefined) {
+      throw new Error("Expected report fixture entries");
+    }
+
+    const withNewVariant = EvalReportSchema.parse({
+      ...current,
+      trials: [...current.trials, { ...currentTrial, variantId: "new_variant" }],
+      aggregates: [...current.aggregates, { ...currentAggregate, variantId: "new_variant" }],
+    });
+
+    expect(checkEvalBaseline(baseline, withNewVariant, 0.05).passed).toBe(true);
+  });
+
+  it("allows a pass-rate drop exactly at the configured threshold", () => {
+    const baseline = buildEvalBaseline(report({ passRate: 0.5 }));
+
+    expect(checkEvalBaseline(baseline, report({ passRate: 0.25 }), 0.25)).toEqual({
+      passed: true,
+      regressions: [],
+    });
+  });
+
   it("flags a previously passing privacy grader that fails or is missing", () => {
     const baseline = buildEvalBaseline(report());
     expect(checkEvalBaseline(baseline, report({ privacyPass: false }), 0.05).regressions).toEqual([
@@ -108,5 +135,55 @@ describe("eval baseline", () => {
     const baseline = buildEvalBaseline(report());
     expect(serializeEvalBaseline(baseline)).toBe(serializeEvalBaseline(baseline));
     expect(serializeEvalBaseline(baseline)).not.toContain('"trials"');
+  });
+
+  it("sorts aggregate and privacy entries by task, variant, trial, and grader", () => {
+    const baseline = buildEvalBaseline(report());
+    const firstAggregate = baseline.aggregates[0];
+    if (firstAggregate === undefined) {
+      throw new Error("Expected report aggregate fixture");
+    }
+    const serialized = serializeEvalBaseline({
+      ...baseline,
+      aggregates: [
+        { ...firstAggregate, taskId: "task_two", variantId: "variant_two" },
+        { ...firstAggregate, variantId: "variant_two" },
+        firstAggregate,
+      ],
+      passingPrivacyAssertions: [
+        { taskId: "task_two", variantId: "variant_two", trialIndex: 0, graderId: "trajectory" },
+        { taskId: "task_one", variantId: "variant_two", trialIndex: 1, graderId: "trajectory" },
+        { taskId: "task_one", variantId: "variant_two", trialIndex: 0, graderId: "trajectory" },
+        {
+          taskId: "task_one",
+          variantId: "variant_two",
+          trialIndex: 0,
+          graderId: "no_canary_leak",
+        },
+        { taskId: "task_one", variantId: "baseline", trialIndex: 0, graderId: "no_canary_leak" },
+      ],
+    });
+    const sorted = serializeEvalBaseline({
+      ...baseline,
+      aggregates: [
+        firstAggregate,
+        { ...firstAggregate, variantId: "variant_two" },
+        { ...firstAggregate, taskId: "task_two", variantId: "variant_two" },
+      ],
+      passingPrivacyAssertions: [
+        { taskId: "task_one", variantId: "baseline", trialIndex: 0, graderId: "no_canary_leak" },
+        {
+          taskId: "task_one",
+          variantId: "variant_two",
+          trialIndex: 0,
+          graderId: "no_canary_leak",
+        },
+        { taskId: "task_one", variantId: "variant_two", trialIndex: 0, graderId: "trajectory" },
+        { taskId: "task_one", variantId: "variant_two", trialIndex: 1, graderId: "trajectory" },
+        { taskId: "task_two", variantId: "variant_two", trialIndex: 0, graderId: "trajectory" },
+      ],
+    });
+
+    expect(serialized).toBe(sorted);
   });
 });
