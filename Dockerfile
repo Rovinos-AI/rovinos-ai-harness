@@ -42,12 +42,15 @@ FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d18
 
 # CVE-2026-76844 and CVE-2026-85091: the pinned node:26-slim digest still ships zlib1g 1.3.1-1+b1.
 # CVE-2026-124851: it also ships libzstd1 1.5.7+dfsg-1.
-# Remove each upgrade once the upstream base image includes zlib1g 1.3.1-1+deb13u1 and
-# libzstd1 1.5.7+dfsg-1+deb13u1 or later.
+# CVE-2026-135901: it also ships login.defs and passwd 1:4.17.4-2.
+# Remove each upgrade once the upstream base image includes zlib1g 1.3.1-1+deb13u1,
+# libzstd1 1.5.7+dfsg-1+deb13u1, and login.defs and passwd 1:4.17.4-2+deb13u1 or later.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade \
         zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
         libzstd1=1.5.7+dfsg-1+deb13u1 \
+        login.defs=1:4.17.4-2+deb13u1 \
+        passwd=1:4.17.4-2+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
