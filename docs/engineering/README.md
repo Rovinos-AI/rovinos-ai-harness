@@ -12,5 +12,5 @@ specs describe task IDs, inputs, outputs, implementation guidance, tests, and
 acceptance criteria.
 
 Work on one task ID per pull request. Follow the nearest `AGENTS.md` as well as
-the root instructions, and record completed tasks in `docs/progress.json` and
-with the required marker in `docs/progress/<task-id>`.
+the root instructions, and record completed tasks with the required marker in
+`docs/progress/<task-id>`.

@@ -4,10 +4,6 @@ All harness MCP App views (approval, human input, run console, run inspector, re
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-05-mcp-app.md](./epic-05-mcp-app.md): tasks 5.1-5.7
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/app-telemetry`. Nothing else from `@rovinos/*`.

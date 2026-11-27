@@ -4,10 +4,6 @@ Public programmatic API (`@rovinos/sdk`), the run queue and workers it drives, m
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-24-run-service-and-scaling.md](./epic-24-run-service-and-scaling.md): tasks 24.1-24.10, 24.23
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/store`, `@rovinos/store-postgres`, `@rovinos/store-sqlite`, `@rovinos/vault`, `@rovinos/pii`, `@rovinos/models`, `@rovinos/context`, `@rovinos/policy`, `@rovinos/mcp`, `@rovinos/sandbox`, `@rovinos/core`, `@rovinos/config`. Nothing else from `@rovinos/*`.

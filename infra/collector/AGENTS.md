@@ -4,10 +4,6 @@ OpenTelemetry Collector configs: base, generated allowlist, profiles per backend
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-10-otel-collector.md](./epic-10-otel-collector.md): tasks 10.1-10.6
-
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

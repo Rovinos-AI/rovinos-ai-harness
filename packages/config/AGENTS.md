@@ -4,10 +4,6 @@ Configuration loading, validation, env overrides, secret references. See also `p
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-20-config-and-cli-core.md](./epic-20-config-and-cli-core.md): tasks 20.1-20.5
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`. Nothing else from `@rovinos/*`.

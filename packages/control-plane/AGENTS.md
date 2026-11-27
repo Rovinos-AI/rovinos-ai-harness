@@ -4,10 +4,6 @@ Harness-as-MCP-server: list/get runs, approvals, resume/cancel, runs console app
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-18-control-plane-mcp-server.md](./epic-18-control-plane-mcp-server.md): tasks 18.1-18.8
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/store`, `@rovinos/vault`, `@rovinos/pii`, `@rovinos/models`, `@rovinos/context`, `@rovinos/policy`, `@rovinos/mcp`, `@rovinos/sandbox`, `@rovinos/core`. Nothing else from `@rovinos/*`.

@@ -4,10 +4,6 @@ Azure Data Explorer (Kusto) schema and queries.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 11.2, 11.4
-
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

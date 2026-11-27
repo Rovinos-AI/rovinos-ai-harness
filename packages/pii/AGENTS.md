@@ -4,10 +4,6 @@ Entity detection, policy evaluation, tokenization and detokenization, and bounda
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-13-pii-tokenizer.md](./epic-13-pii-tokenizer.md): tasks 13.1-13.11
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/vault`. Nothing else from `@rovinos/*`.

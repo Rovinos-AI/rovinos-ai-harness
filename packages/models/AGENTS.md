@@ -4,10 +4,6 @@ Model gateway: provider adapters, structured-output enforcement ladder, repair l
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-14-model-gateway.md](./epic-14-model-gateway.md): tasks 14.1-14.20
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`. Nothing else from `@rovinos/*`.

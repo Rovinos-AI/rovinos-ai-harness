@@ -4,10 +4,6 @@ User and contributor documentation.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-21-docs-examples-release.md](./epic-21-docs-examples-release.md): tasks 21.1-21.10
-
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

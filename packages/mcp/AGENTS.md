@@ -4,11 +4,6 @@ MCP client and tool bridge: connections, registry, trace propagation, result map
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-06-mcp-servers.md](./epic-06-mcp-servers.md): tasks 6.1-6.8
-- [epic-25-elicitation-and-human-input.md](./epic-25-elicitation-and-human-input.md): tasks 25.1-25.8
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`. Nothing else from `@rovinos/*`.

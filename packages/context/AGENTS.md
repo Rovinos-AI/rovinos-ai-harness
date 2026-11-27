@@ -4,10 +4,6 @@ Context strategies (naive, sliding window, summarizing), token counting, offload
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-15-context-strategy.md](./epic-15-context-strategy.md): tasks 15.1-15.8
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`. Nothing else from `@rovinos/*`.

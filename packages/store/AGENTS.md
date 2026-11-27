@@ -4,10 +4,6 @@ EventStore interface, in-memory store, conformance suites, snapshots, outbox, mi
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-07-event-store.md](./epic-07-event-store.md): tasks 7.1-7.15
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`. Nothing else from `@rovinos/*`.

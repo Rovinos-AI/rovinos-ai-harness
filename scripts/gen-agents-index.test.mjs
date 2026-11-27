@@ -5,16 +5,7 @@ import assert from "node:assert/strict";
 import { resolve, dirname } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { compressIds, validateLayers, replaceBlock, generate } from "./gen-agents-index.mjs";
-
-test("compressIds builds ranges and sorts numerically", () => {
-  assert.equal(
-    compressIds(["2.10", "2.1", "2.2", "2.3", "23.1", "4.7"]),
-    "2.1-2.3, 2.10, 4.7, 23.1",
-  );
-  assert.equal(compressIds(["1.9", "1.10"]), "1.9-1.10");
-  assert.equal(compressIds(["1.2", "1.1.1", "1.1", "1.3"]), "1.1, 1.1.1, 1.2-1.3");
-});
+import { validateLayers, replaceBlock, generate } from "./gen-agents-index.mjs";
 
 test("validateLayers rejects cycles and unknown packages", () => {
   assert.throws(() => validateLayers({ a: ["b"], b: ["a"] }), /cycle/);
@@ -34,5 +25,20 @@ test("repository index is up to date", () => {
       next,
       `${file} is stale; run yarn gen:agents`,
     );
+  }
+});
+
+test("generated agent blocks contain no spec or task-id lists", () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  for (const [file, contents] of generate(root)) {
+    if (!file.endsWith("AGENTS.md")) {
+      continue;
+    }
+
+    const block = contents
+      .split("<!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->")[1]
+      ?.split("<!-- END GENERATED: agents-index -->")[0];
+    assert.ok(block, `${file} has a generated block`);
+    assert.doesNotMatch(block, /Specs and task ids|TASKS\.md|epic-[^/]+\.md|tasks \d/);
   }
 });

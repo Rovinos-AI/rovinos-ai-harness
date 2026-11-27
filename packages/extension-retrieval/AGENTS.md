@@ -4,10 +4,6 @@ Reference retrieval extension built on the public SDK extension contracts.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- None. See `docs/engineering/tasks/README.md`.
-
 ## Allowed internal imports
 
 - `@rovinos/sdk`, `@rovinos/extensions`. Nothing else from `@rovinos/*`.
