@@ -381,7 +381,7 @@ These numeric values are stable for scripts and automation:
 | Code | Name | Meaning |
 | --- | --- | --- |
 | `0` | `ok` | Command completed successfully. |
-| `1` | `failure` | Unhandled or unmapped failure, a failed doctor check, or cancellation of an already-terminal run. |
+| `1` | `failure` | Unhandled or unmapped failure, an evaluation baseline regression, a failed doctor check, or cancellation of an already-terminal run. |
 | `2` | `usage` | Invalid arguments, unknown command or context strategy, missing non-interactive approval confirmation, or invalid approval edits. |
 | `3` | `config_invalid` | Configuration is invalid. |
 | `4` | `policy_denied` | Policy denied an operation, including separation-of-duties denial. |
@@ -402,7 +402,7 @@ never included in CLI error output.
 | `usage`, `confirmation_required`, `edit_not_allowed`, `edit_invalid` | `2` |
 | `serve_options_invalid`, `serve_port_invalid`, `stdio_json_unsupported`, `worker_concurrency_invalid` | `2` |
 | `doctor_failed`, `approval_sweep_partial`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
-| `approval_edit_unavailable`, `reveal_unavailable` | `1` |
+| `approval_edit_unavailable`, `eval_baseline_failed`, `reveal_unavailable` | `1` |
 | `migration_checksum_mismatch`, `schema_newer_than_code`, `migration_set_invalid`, `schema_migration_pending`, `retention_not_configured`, `retention_hook_failed` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |

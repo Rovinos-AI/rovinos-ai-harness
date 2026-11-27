@@ -195,6 +195,9 @@ Reports retain each trial's seed when available. Matching task/trial indexes wit
 equal seeds are counted as matched, but all significance tests and bootstrap intervals
 treat the two samples as independent; no paired test is assumed.
 
+For scheduled cassette replay and accepted performance baselines, see
+[Eval CI](evals-ci.md).
+
 ## Viewing reports
 
 The control plane exposes `open_report` for `eval`, `compare`, and `replay` JSON

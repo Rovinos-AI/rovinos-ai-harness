@@ -22,6 +22,7 @@ import {
   type EvalExecutorOptions,
 } from "./eval-executor.js";
 import { recordCassettes } from "./eval-cassettes.js";
+import { registerEvalBaselineCommands } from "./eval-baseline.js";
 import { writeReportFiles, writeSummaryTable } from "./eval-report-output.js";
 import type { EvalPackage } from "./eval-types.js";
 import { gradingExecutor } from "./eval-graders.js";
@@ -310,7 +311,7 @@ async function runEvalAction(
   }
 }
 
-/** Registers the `harness eval run` and `harness eval compare` commands. */
+/** Registers the `harness eval run`, baseline, and compare commands. */
 export function createEvalCommand(dependencies: EvalCommandDependencies = {}): CommandModule {
   return {
     name: "eval",
@@ -378,6 +379,7 @@ export function createEvalCommand(dependencies: EvalCommandDependencies = {}): C
             context.out.json(api.EvalComparisonReportSchema, comparison);
           },
         );
+      registerEvalBaselineCommands(evalCommand, context, dependencies);
     },
   };
 }

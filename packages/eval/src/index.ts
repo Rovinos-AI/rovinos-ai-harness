@@ -143,6 +143,17 @@ export {
 } from "./report/metrics.js";
 export { passAtK, summarize, aggregateEvalMetrics } from "./report/aggregate.js";
 export { buildEvalReport, serializeEvalReport } from "./report/json.js";
+export {
+  buildEvalBaseline,
+  checkEvalBaseline,
+  serializeEvalBaseline,
+  EvalBaselineSchema,
+  EvalBaselineCheckSchema,
+  EvalBaselineUpdateSchema,
+  type EvalBaseline,
+  type EvalBaselineCheck,
+  type EvalBaselineRegression,
+} from "./report/baseline.js";
 export { renderMarkdownReport } from "./report/markdown.js";
 export { renderJunitReport } from "./report/junit.js";
 export {
