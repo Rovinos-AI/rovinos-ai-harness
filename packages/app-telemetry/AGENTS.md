@@ -4,10 +4,6 @@ Tiny browser-safe telemetry shim used inside MCP Apps. Part of epic 5 (tasks 5.1
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 5.1, 5.2
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`. Nothing else from `@rovinos/*`.

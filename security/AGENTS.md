@@ -4,10 +4,6 @@ Security tooling configuration: Semgrep rules, cosign public key, scanner polici
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-22-security-hardening.md](./epic-22-security-hardening.md): tasks 22.1-22.6
-
 <!-- END GENERATED: agents-index -->
 
 ## Also touched by

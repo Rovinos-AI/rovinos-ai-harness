@@ -2,134 +2,115 @@
   {
     "id": "T-01",
     "title": "Runner cannot control the host container runtime",
-    "mitigationTask": "19.3",
     "testFile": "packages/sandbox/runner/src/server.int.test.ts",
-    "activeFromTask": "19.3"
+    "testName": "has no host runtime or secret mounts, privileged mode, or published ports"
   },
   {
     "id": "T-02",
     "title": "Runner has no excess capabilities or privileges",
-    "mitigationTask": "19.7",
     "testFile": "scripts/ci/image-hardening.int.test.ts",
-    "activeFromTask": "19.7"
+    "testName": "$dockerfile is non-root, capability-limited, and contains no setuid files"
   },
   {
     "id": "T-03",
     "title": "Child processes do not inherit parent secrets",
-    "mitigationTask": "19.2",
     "testFile": "packages/sandbox/src/inprocess.test.ts",
-    "activeFromTask": "19.2"
+    "testName": "does not pass parent environment variables to the child"
   },
   {
     "id": "T-04",
     "title": "Runner processes cannot read mounted host secrets",
-    "mitigationTask": "19.3",
     "testFile": "packages/sandbox/runner/src/server.int.test.ts",
-    "activeFromTask": "19.3"
+    "testName": "has no host runtime or secret mounts, privileged mode, or published ports"
   },
   {
     "id": "T-05",
     "title": "Unallowlisted network egress is denied",
-    "mitigationTask": "19.4",
     "testFile": "packages/sandbox/egress-proxy/src/proxy.test.ts",
-    "activeFromTask": "19.4"
+    "testName": "rejects an unallowlisted host without resolving or connecting it"
   },
   {
     "id": "T-06",
     "title": "Metadata and private-address SSRF is denied",
-    "mitigationTask": "19.4",
     "testFile": "packages/sandbox/egress-proxy/src/proxy.test.ts",
-    "activeFromTask": "19.4"
+    "testName": "rejects a DNS answer in a private or metadata range before connecting"
   },
   {
     "id": "T-07",
     "title": "Process spawning stays within the configured limit",
-    "mitigationTask": "19.3",
     "testFile": "packages/sandbox/runner/src/server.int.test.ts",
-    "activeFromTask": "19.3"
+    "testName": "contains a process-spawning workload within the per-exec process limit"
   },
   {
     "id": "T-08",
     "title": "Memory use stays within the configured limit",
-    "mitigationTask": "19.3",
     "testFile": "packages/sandbox/runner/src/server.int.test.ts",
-    "activeFromTask": "19.3"
+    "testName": "contains a memory-hogging process"
   },
   {
     "id": "T-09",
     "title": "Workspace disk quotas are enforced",
-    "mitigationTask": "19.5",
     "testFile": "packages/sandbox/src/workspace.test.ts",
-    "activeFromTask": "19.5"
+    "testName": "enforces the file and aggregate quota, recounts external changes, and serves ranges"
   },
   {
     "id": "T-10",
     "title": "Timed-out commands and process groups are terminated",
-    "mitigationTask": "19.2",
     "testFile": "packages/sandbox/src/inprocess.test.ts",
-    "activeFromTask": "19.2"
+    "testName": "kills the process group, including a grandchild, on timeout"
   },
   {
     "id": "T-11",
     "title": "Command output capture remains bounded",
-    "mitigationTask": "19.2",
     "testFile": "packages/sandbox/src/inprocess.test.ts",
-    "activeFromTask": "19.2"
+    "testName": "bounds captured output and records bytes produced"
   },
   {
     "id": "T-12",
     "title": "Workspace paths cannot escape through traversal or symlinks",
-    "mitigationTask": "19.5",
     "testFile": "packages/sandbox/src/workspace.test.ts",
-    "activeFromTask": "19.5"
+    "testName": "rejects traversal, absolute, NUL, long names, symlinks, and fuzzed escape paths"
   },
   {
     "id": "T-13",
     "title": "A runner lease prevents cross-run access",
-    "mitigationTask": "19.5",
     "testFile": "packages/sandbox/src/workspace.test.ts",
-    "activeFromTask": "19.5"
+    "testName": "rejects a second run until the owner releases or expires the lease and renews on exec"
   },
   {
     "id": "T-14",
     "title": "Run data is unavailable to subsequent runs",
-    "mitigationTask": "19.5",
     "testFile": "packages/sandbox/src/workspace.test.ts",
-    "activeFromTask": "19.5"
+    "testName": "locks old run directories and wipes run scratch before another run starts"
   },
   {
     "id": "T-15",
     "title": "Runner images contain no exploitable setuid binaries",
-    "mitigationTask": "19.7",
     "testFile": "scripts/ci/image-hardening.int.test.ts",
-    "activeFromTask": "19.7"
+    "testName": "$dockerfile is non-root, capability-limited, and contains no setuid files"
   },
   {
     "id": "T-16",
     "title": "The runner root filesystem is read-only",
-    "mitigationTask": "19.7",
     "testFile": "scripts/ci/image-hardening.int.test.ts",
-    "activeFromTask": "19.7"
+    "testName": "$dockerfile refuses root-filesystem writes and has no Docker CLI"
   },
   {
     "id": "T-17",
     "title": "Workspace restore rejects traversal archives",
-    "mitigationTask": "19.6",
     "testFile": "packages/sandbox/src/snapshot.test.ts",
-    "activeFromTask": "19.6"
+    "testName": "rejects %s archives without changing the existing workspace"
   },
   {
     "id": "T-18",
     "title": "Runner API rejects unauthenticated requests",
-    "mitigationTask": "19.3",
     "testFile": "packages/sandbox/runner/src/server.int.test.ts",
-    "activeFromTask": "19.3"
+    "testName": "rejects requests without a valid runner token"
   },
   {
     "id": "T-19",
     "title": "Runner API rejects Host and Origin abuse",
-    "mitigationTask": "19.3",
     "testFile": "packages/sandbox/runner/src/server.int.test.ts",
-    "activeFromTask": "19.3"
+    "testName": "rejects unapproved Host and Origin authorities"
   }
 ]

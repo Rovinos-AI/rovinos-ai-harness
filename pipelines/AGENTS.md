@@ -4,10 +4,6 @@ The Azure Pipelines configuration is retained only for the nightly Azure Key Vau
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.4, 1.8, 16.11, 21.6, 24.8
-
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

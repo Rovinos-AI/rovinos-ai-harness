@@ -4,13 +4,6 @@ Deployment and observability assets: compose, collector, dashboards, Kusto, aler
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-11-backends.md](./epic-11-backends.md): tasks 11.1-11.6
-- [alerts/TASKS.md](./alerts/TASKS.md) (specs in other folders): tasks 11.5
-- [dashboards/TASKS.md](./dashboards/TASKS.md) (specs in other folders): tasks 11.3
-- [k8s/TASKS.md](./k8s/TASKS.md) (specs in other folders): tasks 10.4, 24.6
-
 <!-- END GENERATED: agents-index -->
 
 ## Also touched by

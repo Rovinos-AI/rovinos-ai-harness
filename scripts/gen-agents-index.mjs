@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 // Regenerates the index blocks in every folder AGENTS.md and the dependency table in CONVENTIONS section 1.
-// Inputs: epic-*.md headings, TASKS.md "Task ids:" lines, docs/engineering/layers.json.
+// Input: docs/engineering/layers.json.
 // Usage: yarn gen:agents or yarn check:agents
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, relative, dirname, resolve, sep } from "node:path";
@@ -13,45 +13,6 @@ const BEGIN = "<!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index
 const END = "<!-- END GENERATED: agents-index -->";
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".claude"]);
 const layersSchema = z.record(z.string(), z.union([z.string(), z.array(z.string())]));
-
-function compareIds(a, b) {
-  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
-    const difference = (a[index] ?? -1) - (b[index] ?? -1);
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-  return 0;
-}
-
-/**
- * Compress task ids into ranges: ["2.1","2.2","2.3","4.1"] -> "2.1-2.3, 4.1".
- * Follow-up ids (`<epic>.<n>.<m>`, for example "1.1.1") sort after their parent and are never part of a range.
- */
-export function compressIds(ids) {
-  const parsed = ids.map((id) => id.split(".").map(Number)).sort(compareIds);
-  const out = [];
-  let start = null;
-  let prev = null;
-  const flush = () => {
-    if (start) {
-      out.push(start === prev ? start.join(".") : `${start.join(".")}-${prev.join(".")}`);
-    }
-  };
-  for (const p of parsed) {
-    const consecutive =
-      p.length === 2 && prev?.length === 2 && p[0] === prev[0] && p[1] === prev[1] + 1;
-    if (consecutive) {
-      prev = p;
-      continue;
-    }
-    flush();
-    start = p;
-    prev = p;
-  }
-  flush();
-  return out.join(", ");
-}
 
 /** Throws on unknown dependencies or cycles. */
 export function validateLayers(layers) {
@@ -127,36 +88,8 @@ function verifyPackageLayers(root, packages) {
   }
 }
 
-function findOwner(file, agentsDirs) {
-  let directory = dirname(file);
-  while (!agentsDirs.includes(directory)) {
-    directory = directory === "." ? null : dirname(directory);
-  }
-  return directory;
-}
-
-function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
-  const owned = files.filter((file) => findOwner(file, agentsDirs) === dir).sort();
-  const lines = ["", "## Specs and task ids", ""];
-  const taskListStart = lines.length;
-  for (const file of owned.filter((entry) => /(?:^|\/)epic-[^/]+\.md$/.test(entry))) {
-    const ids = [
-      ...readFileSync(join(root, file), "utf8").matchAll(/^## (\d+\.\d+(?:\.\d+)?)\s/gm),
-    ].map((match) => match[1]);
-    lines.push(`- [${relative(dir, file)}](./${relative(dir, file)}): tasks ${compressIds(ids)}`);
-  }
-  for (const file of owned.filter((entry) => entry.endsWith("/TASKS.md") || entry === "TASKS.md")) {
-    const match = readFileSync(join(root, file), "utf8").match(/^Task ids: (.+)$/m);
-    if (!match) {
-      throw new Error(`${file}: missing "Task ids:" line`);
-    }
-    lines.push(
-      `- [${relative(dir, file)}](./${relative(dir, file)}) (specs in other folders): tasks ${match[1]}`,
-    );
-  }
-  if (lines.length === taskListStart) {
-    lines.push("- None. See `docs/engineering/tasks/README.md`.");
-  }
+function buildAgentBlock({ root, dir, layers }) {
+  const lines = [];
   const pkg = dir.match(/^packages\/([^/]+)$/);
   if (pkg) {
     const deps = layers[pkg[1]];
@@ -194,7 +127,7 @@ export function generate(root) {
 
   for (const dir of agentsDirs) {
     if (dir !== ".") {
-      const [file, contents] = buildAgentBlock({ root, dir, files, agentsDirs, layers });
+      const [file, contents] = buildAgentBlock({ root, dir, layers });
       results.set(file, contents);
     }
   }

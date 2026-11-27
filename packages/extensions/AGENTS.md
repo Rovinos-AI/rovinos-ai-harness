@@ -4,10 +4,6 @@ Optional public authoring helpers for SDK extension definitions and explicit reg
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- None. See `docs/engineering/tasks/README.md`.
-
 ## Allowed internal imports
 
 - `@rovinos/sdk`. Nothing else from `@rovinos/*`.

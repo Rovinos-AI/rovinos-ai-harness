@@ -4,10 +4,6 @@ GitHub configuration: CODEOWNERS, PR and issue templates, Dependabot, and the CI
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.9, 1.10
-
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

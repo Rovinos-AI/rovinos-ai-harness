@@ -4,10 +4,6 @@ The `harness` CLI. Epic 20 defines the framework; commands are added by the epic
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.3, 2.10, 2.13, 6.6, 9.1, 9.5, 12.3, 12.5, 13.9, 15.7, 16.8, 17.5, 17.8, 18.1, 20.2, 20.4, 2.14, 6.8, 24.3, 25.6
-
 ## Allowed internal imports
 
 - `@rovinos/eval`, `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/store`, `@rovinos/store-postgres`, `@rovinos/store-sqlite`, `@rovinos/vault`, `@rovinos/pii`, `@rovinos/models`, `@rovinos/context`, `@rovinos/policy`, `@rovinos/mcp`, `@rovinos/sandbox`, `@rovinos/core`, `@rovinos/config`, `@rovinos/control-plane`, `@rovinos/host`, `@rovinos/replay`. Nothing else from `@rovinos/*`.

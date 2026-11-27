@@ -4,10 +4,6 @@ MCP Apps host: sandboxed iframe reference host, app call routing, telemetry inge
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-03-host-bridge.md](./epic-03-host-bridge.md): tasks 3.1-3.8
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/core`. Nothing else from `@rovinos/*`.

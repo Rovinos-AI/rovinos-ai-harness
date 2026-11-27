@@ -4,10 +4,6 @@ Custom ESLint rules enforcing project invariants.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.2, 4.5
-
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

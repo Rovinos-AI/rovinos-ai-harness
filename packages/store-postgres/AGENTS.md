@@ -5,10 +5,6 @@ Postgres `EventStore` implementation and Postgres-specific migrations and tests.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- None. See `docs/engineering/tasks/README.md`.
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/store`. Nothing else from `@rovinos/*`.

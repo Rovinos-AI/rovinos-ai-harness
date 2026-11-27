@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJson } from "@rovinos/schemas";
+import ts from "typescript";
 import { z } from "zod";
 
-const taskIdSchema = z.string().regex(/^\d+\.\d+(?:\.\d+)?$/);
-const sandboxTaskIdSchema = z.string().regex(/^19\.(?:[1-9]|10)$/);
 const testFileSchema = z
   .string()
   .regex(
@@ -18,20 +17,10 @@ export const ThreatCaseSchema = z
   .object({
     id: z.string().regex(/^T-\d{2}$/),
     title: z.string().min(1),
-    mitigationTask: sandboxTaskIdSchema,
     testFile: testFileSchema,
-    activeFromTask: sandboxTaskIdSchema,
+    testName: z.string().min(1),
   })
-  .strict()
-  .superRefine((threatCase, context) => {
-    if (threatCase.activeFromTask !== threatCase.mitigationTask) {
-      context.addIssue({
-        code: "custom",
-        message: "Threat cases activate when their mitigation task is complete.",
-        path: ["activeFromTask"],
-      });
-    }
-  });
+  .strict();
 
 /** A threat catalog with unique stable identifiers in required order. */
 export const ThreatCasesSchema = z.array(ThreatCaseSchema).superRefine((cases, context) => {
@@ -67,49 +56,86 @@ export const ThreatCasesSchema = z.array(ThreatCaseSchema).superRefine((cases, c
   }
 });
 
-/** Task ids recorded as complete by marker filenames in docs/progress/. */
-export const ProgressSchema = z.array(taskIdSchema);
-
 /** Validated sandbox threat case. */
 export type ThreatCase = z.infer<typeof ThreatCaseSchema>;
 
-/** Validated repository task progress. */
-export type Progress = z.infer<typeof ProgressSchema>;
-
 const threatComment = /^\s*\/\/\s*threat:\s*(T-\d{2})\b/gm;
 
+function isTestCallExpression(expression: ts.Expression): boolean {
+  if (ts.isIdentifier(expression)) {
+    return expression.text === "it" || expression.text === "test";
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return isTestCallExpression(expression.expression);
+  }
+  if (ts.isCallExpression(expression)) {
+    return isTestCallExpression(expression.expression);
+  }
+  return false;
+}
+
+function findTestDeclaration(
+  contents: string,
+  testFile: string,
+  testName: string,
+): string | undefined {
+  const sourceFile = ts.createSourceFile(testFile, contents, ts.ScriptTarget.Latest, true);
+  let declaration: string | undefined;
+
+  const visit = (node: ts.Node): void => {
+    if (
+      declaration === undefined &&
+      ts.isCallExpression(node) &&
+      isTestCallExpression(node.expression)
+    ) {
+      const name = node.arguments[0];
+      if (name !== undefined && ts.isStringLiteralLike(name) && name.text === testName) {
+        declaration = contents.slice(node.getFullStart(), node.end);
+      }
+    }
+
+    if (declaration === undefined) {
+      ts.forEachChild(node, visit);
+    }
+  };
+  visit(sourceFile);
+  return declaration;
+}
+
 /**
- * Finds active threat coverage problems in their declared test files.
+ * Finds threat coverage problems in their declared tests.
  *
  * @param cases - Validated threat catalog.
- * @param completedTasks - Tasks recorded as complete.
- * @param testFileContents - Contents for each active case's declared test file, or undefined if missing.
- * @returns Diagnostics for active cases with missing test files or references.
+ * @param testFileContents - Contents for each declared test file, or undefined if missing.
+ * @returns Diagnostics for cases with missing tests or threat markers.
  */
 export function findThreatCoverageIssues(
   cases: readonly ThreatCase[],
-  completedTasks: ReadonlySet<string>,
   testFileContents: ReadonlyMap<string, string | undefined>,
 ): string[] {
   const issues: string[] = [];
 
   for (const threatCase of cases) {
-    if (!completedTasks.has(threatCase.activeFromTask)) {
-      continue;
-    }
-
     const contents = testFileContents.get(threatCase.testFile);
     if (contents === undefined) {
-      issues.push(`Missing active threat test file '${threatCase.testFile}' for ${threatCase.id}.`);
+      issues.push(`Missing threat test file '${threatCase.testFile}' for ${threatCase.id}.`);
       continue;
     }
 
-    const referencesThreat = Array.from(contents.matchAll(threatComment)).some(
+    const declaration = findTestDeclaration(contents, threatCase.testFile, threatCase.testName);
+    if (declaration === undefined) {
+      issues.push(
+        `Missing threat test '${threatCase.testName}' in '${threatCase.testFile}' for ${threatCase.id}.`,
+      );
+      continue;
+    }
+
+    const referencesThreat = Array.from(declaration.matchAll(threatComment)).some(
       ([, id]) => id === threatCase.id,
     );
     if (!referencesThreat) {
       issues.push(
-        `Missing active threat test reference '${threatCase.id}' in '${threatCase.testFile}'.`,
+        `Missing threat test reference '${threatCase.id}' in '${threatCase.testFile}' for '${threatCase.testName}'.`,
       );
     }
   }
@@ -134,25 +160,15 @@ async function readTestFile(root: string, path: string): Promise<string | undefi
 
 /** Runs the threat coverage check against a repository root. */
 export async function checkThreatCases(root: string): Promise<string[]> {
-  const [catalogText, progressEntries] = await Promise.all([
-    readFile(join(root, "test/sandbox/cases.json"), "utf8"),
-    readdir(join(root, "docs/progress"), { withFileTypes: true }),
-  ]);
+  const catalogText = await readFile(join(root, "test/sandbox/cases.json"), "utf8");
   const cases = parseJson(ThreatCasesSchema, catalogText);
-  if (progressEntries.some((entry) => !entry.isFile())) {
-    throw new Error("Task progress entries must be files.");
-  }
-  const completedTasks = new Set(ProgressSchema.parse(progressEntries.map((entry) => entry.name)));
-  const activeTestFiles = new Set(
-    cases
-      .filter((threatCase) => completedTasks.has(threatCase.activeFromTask))
-      .map((threatCase) => threatCase.testFile),
-  );
   const testFileEntries = await Promise.all(
-    [...activeTestFiles].map(async (path) => [path, await readTestFile(root, path)] as const),
+    [...new Set(cases.map((threatCase) => threatCase.testFile))].map(
+      async (path) => [path, await readTestFile(root, path)] as const,
+    ),
   );
 
-  return findThreatCoverageIssues(cases, completedTasks, new Map(testFileEntries));
+  return findThreatCoverageIssues(cases, new Map(testFileEntries));
 }
 
 async function runCheck(): Promise<void> {

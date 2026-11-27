@@ -4,10 +4,6 @@ Run-scoped token vault: interfaces, encrypted SQLite implementation, key provide
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-12-token-vault.md](./epic-12-token-vault.md): tasks 12.1-12.9
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`. Nothing else from `@rovinos/*`.

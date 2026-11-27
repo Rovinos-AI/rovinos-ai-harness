@@ -4,11 +4,6 @@ Run loop, state machine, recorder, checkpoints, resume, approvals, budgets, canc
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-02-run-loop.md](./epic-02-run-loop.md): tasks 2.1-2.14
-- [epic-23-subagents-and-model-roles.md](./epic-23-subagents-and-model-roles.md): tasks 23.1-23.6
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/store`, `@rovinos/store-postgres`, `@rovinos/store-sqlite`, `@rovinos/rate-limit-redis`, `@rovinos/vault`, `@rovinos/pii`, `@rovinos/models`, `@rovinos/context`, `@rovinos/policy`, `@rovinos/mcp`, `@rovinos/sandbox`. Nothing else from `@rovinos/*`.

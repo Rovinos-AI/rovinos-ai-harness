@@ -10,12 +10,12 @@ The Yarn workspace and `@rovinos/schemas` package are scaffolded; later tasks ad
 
 ## How to work here
 
-1. Pick one task id (for example `7.3`). Index: `docs/engineering/tasks/README.md`. Specs sit next to the code (`packages/<name>/epic-*.md`); `epic-01` lives in `docs/engineering/tasks/`, `epic-21` in `docs/`. Each folder's `AGENTS.md` lists the specs and task ids that touch it.
+1. Pick one task id (for example `7.3`). Index: `docs/engineering/tasks/README.md`. Specs sit next to the code (`packages/<name>/epic-*.md`); `epic-01` lives in `docs/engineering/tasks/`, `epic-21` in `docs/`. Each folder's `AGENTS.md` lists its local rules and boundaries.
 2. Read `docs/engineering/CONVENTIONS.md`, the nearest folder `AGENTS.md`, and the task spec. The spec lists inputs, outputs, tests, and acceptance criteria. Meet all of them and do not add scope.
 3. One task per PR. Title: `[7.3] <task name>`. Commits signed off (`git commit -s`).
 4. Write the tests the task lists, in the CI job it names: `static`, `unit`, `integration`, `gates`.
 5. In the PR description list: task id, what changed, how it was tested, any "(verify)" decisions, follow-ups.
-6. Add an empty marker file at `docs/progress/<task-id>` (the threat-case checker reads it).
+6. Add an empty marker file at `docs/progress/<task-id>`.
 7. Before every push, merge current `origin/main`, then run the **full** repo-wide checks, not only the scoped ones: `yarn build`, `yarn lint`, `yarn typecheck`, and `yarn test:unit --coverage`. Push only when all four pass with zero errors and warnings, and report each command's result in the PR description. If your environment cannot run one (for example the Docker integration suites), say so explicitly; never call a failure "unrelated" without checking that `main` passes the same command.
 
 ## Repo map

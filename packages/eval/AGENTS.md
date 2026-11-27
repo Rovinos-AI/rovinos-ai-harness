@@ -4,10 +4,6 @@ Eval runner, graders, trajectory assertions, simulated human, reports, compariso
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-16-eval-runner.md](./epic-16-eval-runner.md): tasks 16.1-16.12
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/telemetry`, `@rovinos/crypto`, `@rovinos/store`, `@rovinos/vault`, `@rovinos/pii`, `@rovinos/models`, `@rovinos/context`, `@rovinos/policy`, `@rovinos/mcp`, `@rovinos/sandbox`, `@rovinos/core`. Nothing else from `@rovinos/*`.

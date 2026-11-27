@@ -4,10 +4,6 @@ Optional published Redis/Valkey adapter for shared request-rate limits.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- None. See `docs/engineering/tasks/README.md`.
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`, `@rovinos/store`. Nothing else from `@rovinos/*`.

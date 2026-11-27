@@ -4,11 +4,6 @@ Closed span/log registry, allowlist processors, safe-event projection, leak sent
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
-## Specs and task ids
-
-- [epic-04-span-allowlist.md](./epic-04-span-allowlist.md): tasks 4.1-4.7
-- [epic-08-leak-sentinel.md](./epic-08-leak-sentinel.md): tasks 8.1-8.6
-
 ## Allowed internal imports
 
 - `@rovinos/schemas`. Nothing else from `@rovinos/*`.

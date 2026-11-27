@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-// threat: T-02
-// threat: T-15
-// threat: T-16
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -46,6 +43,8 @@ describe("hardened container images", () => {
   it.each(images)(
     "$dockerfile is non-root, capability-limited, and contains no setuid files",
     async ({ image }) => {
+      // threat: T-02
+      // threat: T-15
       const uid = await runImage(
         image,
         ["--entrypoint", "node"],
@@ -75,6 +74,7 @@ describe("hardened container images", () => {
   it.each(images)(
     "$dockerfile refuses root-filesystem writes and has no Docker CLI",
     async ({ image }) => {
+      // threat: T-16
       const readonlyWrite = await runImage(
         image,
         ["--read-only", "--cap-drop", "ALL", "--user", "0:0", "--entrypoint", "node"],
